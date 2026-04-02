@@ -2,17 +2,18 @@
 """
 bisect_in_container.py — Runs INSIDE the Docker container.
 
-Multi-branch single-pass: for each unique queue, scans seeds and checks ALL
-target branches at once. Much faster than per-branch bisection when many
-branches share the same queue.
+Multi-branch 10-bucket bisection: for each queue, divides seeds into 10
+buckets, runs each bucket in batch (many seeds per fuzz_bin invocation),
+checks which branches are hit per bucket via one llvm-cov call, then
+recurses into hitting buckets until individual seeds are identified.
 
 Usage (inside container):
-    python3 /bisect.py \
+    python3 /seed_scanner.py \
         --jobs /work/jobs.json \
         --queues /queues \
         --fuzz-bin /fuzz/binary \
         --output /work/out/results.json \
-        [--parallel 8] [--max-seeds 50] [--timeout 3600]
+        [--max-seeds 50] [--batch-size 500] [--timeout 3600]
 
 jobs.json format:
     {
@@ -39,11 +40,10 @@ import subprocess
 import sys
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 # ---------------------------------------------------------------------------
-# Coverage checking — multi-branch
+# Coverage checking
 # ---------------------------------------------------------------------------
 
 def _parse_count(s):
@@ -51,6 +51,10 @@ def _parse_count(s):
     mult = {'k': 1_000, 'M': 1_000_000, 'G': 1_000_000_000}
     if s and s[-1] in mult:
         return int(float(s[:-1]) * mult[s[-1]])
+    # llvm-cov-18 sometimes emits truncated scientific notation like '18.4E'
+    s = s.rstrip('eE')
+    if not s:
+        return 0
     return int(float(s))
 
 
@@ -59,171 +63,234 @@ _BRANCH_RE = re.compile(
 )
 
 
+_FILE_HEADER_RE = re.compile(r'^(/\S+\.\w+):$')
+
+
 def check_branches_from_profdata(profdata_path, fuzz_bin, branch_specs):
     """
-    Run llvm-cov show ONCE and check multiple branches.
+    Run llvm-cov show ONCE (all files) and check multiple branches.
 
     branch_specs: list of (file, line, col, side, branch_id)
     Returns: set of branch_ids that are hit.
     """
-    # Group by source file to minimize llvm-cov calls
-    by_file = {}
+    # Build lookup: (file, line, col) -> [(side, bid), ...]
+    targets = {}
     for file, line, col, side, bid in branch_specs:
-        by_file.setdefault(file, []).append((line, col, side, bid))
+        targets.setdefault((file, line, col), []).append((side, bid))
+
+    # Also build a set of target files to skip irrelevant sections quickly
+    target_files = {file for file, _, _, _, _ in branch_specs}
+
+    try:
+        result = subprocess.run(
+            ['llvm-cov-18', 'show', fuzz_bin,
+             '-instr-profile=' + profdata_path,
+             '-show-branches=count', '-format=text'],
+            capture_output=True, text=True, timeout=60
+        )
+    except subprocess.TimeoutExpired:
+        return set()
 
     hit_bids = set()
+    current_file = None
+    skip_file = True
 
-    for source_file, branches in by_file.items():
-        try:
-            result = subprocess.run(
-                ['llvm-cov-18', 'show', fuzz_bin,
-                 '-instr-profile=' + profdata_path,
-                 '-show-branches=count', '-format=text', source_file],
-                capture_output=True, text=True, timeout=30
-            )
-        except subprocess.TimeoutExpired:
+    for text_line in result.stdout.splitlines():
+        # Track current source file from headers like "/src/bloaty/src/elf.cc:"
+        hm = _FILE_HEADER_RE.match(text_line)
+        if hm:
+            current_file = hm.group(1)
+            skip_file = current_file not in target_files
             continue
 
-        # Build lookup for what we're searching
-        targets = {}  # (line, col) -> [(side, bid), ...]
-        for line, col, side, bid in branches:
-            targets.setdefault((line, col), []).append((side, bid))
+        if skip_file:
+            continue
 
-        for text_line in result.stdout.splitlines():
-            m = _BRANCH_RE.search(text_line)
-            if m:
-                ln, col = int(m.group(1)), int(m.group(2))
-                key = (ln, col)
-                if key in targets:
-                    t_hits = _parse_count(m.group(3))
-                    f_hits = _parse_count(m.group(4))
-                    for side, bid in targets[key]:
-                        hits = t_hits if side == 'T' else f_hits
-                        if hits > 0:
-                            hit_bids.add(bid)
+        m = _BRANCH_RE.search(text_line)
+        if m:
+            ln, col = int(m.group(1)), int(m.group(2))
+            key = (current_file, ln, col)
+            if key in targets:
+                t_hits = _parse_count(m.group(3))
+                f_hits = _parse_count(m.group(4))
+                for side, bid in targets[key]:
+                    hits = t_hits if side == 'T' else f_hits
+                    if hits > 0:
+                        hit_bids.add(bid)
 
     return hit_bids
 
 
 # ---------------------------------------------------------------------------
-# Single-seed coverage run
+# Batch execution
 # ---------------------------------------------------------------------------
 
-def run_one_seed(seed_path, fuzz_bin, work_dir):
-    """Run one seed, return profdata path or None."""
-    profraw_path = os.path.join(work_dir, f'seed_{os.getpid()}_{id(seed_path)}.profraw')
-    profdata_path = profraw_path.replace('.profraw', '.profdata')
-
+def run_seeds_batch(seed_paths, fuzz_bin, profraw_path, batch_size=500):
+    """
+    Run fuzz_bin on seed_paths in sub-batches (to avoid ARG_MAX),
+    all writing to the same profraw via %m merge-pool.
+    """
     env = os.environ.copy()
     env['LLVM_PROFILE_FILE'] = profraw_path
 
-    try:
-        subprocess.run([fuzz_bin, seed_path], capture_output=True, timeout=10, env=env)
-    except subprocess.TimeoutExpired:
-        pass
+    for i in range(0, len(seed_paths), batch_size):
+        chunk = seed_paths[i:i + batch_size]
+        t = max(30, len(chunk) // 10)
+        try:
+            subprocess.run(
+                [fuzz_bin] + chunk,
+                capture_output=True, timeout=t, env=env
+            )
+        except subprocess.TimeoutExpired:
+            pass
 
+    return os.path.exists(profraw_path)
+
+
+def make_profdata(profraw_path, profdata_path):
+    """Merge a single profraw into profdata."""
     if not os.path.exists(profraw_path):
-        return None
-
+        return False
     try:
         subprocess.run(
-            ['llvm-profdata-18', 'merge', '-sparse', profraw_path, '-o', profdata_path],
-            capture_output=True, timeout=10
+            ['llvm-profdata-18', 'merge', '-sparse',
+             profraw_path, '-o', profdata_path],
+            capture_output=True, timeout=60
         )
     except subprocess.TimeoutExpired:
-        pass
-    finally:
-        if os.path.exists(profraw_path):
-            os.remove(profraw_path)
+        return False
+    return os.path.exists(profdata_path)
 
-    if os.path.exists(profdata_path):
-        return profdata_path
-    return None
+
+def run_and_check(seed_paths, fuzz_bin, branch_specs, work_dir, tag=''):
+    """
+    Run seeds in batch, produce coverage, check which branches are hit.
+    Returns set of hit branch_ids.
+    """
+    profraw = os.path.join(work_dir, f'{tag}.profraw')
+    profdata = os.path.join(work_dir, f'{tag}.profdata')
+
+    try:
+        if not run_seeds_batch(seed_paths, fuzz_bin, profraw):
+            return set()
+        if not make_profdata(profraw, profdata):
+            return set()
+        return check_branches_from_profdata(profdata, fuzz_bin, branch_specs)
+    finally:
+        for p in (profraw, profdata):
+            if os.path.exists(p):
+                os.remove(p)
 
 
 # ---------------------------------------------------------------------------
-# Multi-branch scan for one queue
+# 10-bucket recursive bisection
 # ---------------------------------------------------------------------------
 
 def scan_queue(queue_dir, fuzz_bin, branch_specs, work_dir, max_seeds=50,
-               parallel=8, deadline=None):
+               batch_size=500, deadline=None):
     """
-    Scan all seeds in queue_dir, checking all branch_specs for each seed.
+    10-bucket recursive bisection for one queue.
 
-    branch_specs: list of (file, line, col, side, branch_id)
-    max_seeds: stop collecting for a branch after this many hits
-    Returns: dict {branch_id: [seed_name, ...]}
+    Splits seeds into 10 buckets, runs each in batch, checks which branches
+    are hit, recurses into hitting buckets. Stops at individual seeds.
     """
     seeds = []
-    for name in os.listdir(queue_dir):
+    for name in sorted(os.listdir(queue_dir)):
         if name.startswith('.'):
             continue
         if os.path.isfile(os.path.join(queue_dir, name)):
             seeds.append(name)
-    seeds.sort()
 
     if not seeds:
         return {}
 
-    results = {bid: [] for _, _, _, _, bid in branch_specs}
-    # Track which branches still need seeds
-    active_specs = list(branch_specs)
-    completed = set()
+    results = {}  # branch_id -> [seed_name, ...]
+    completed = set()  # branch_ids with enough seeds
 
-    print(f"    Scanning {len(seeds)} seeds for {len(branch_specs)} branches...",
-          file=sys.stderr)
+    _bisect_recursive(
+        queue_dir, seeds, fuzz_bin, branch_specs, work_dir, results,
+        completed, max_seeds, batch_size, deadline, depth=0
+    )
 
-    processed = 0
-    found_total = 0
+    return {bid: slist for bid, slist in results.items() if slist}
 
-    def process_seed(seed_name):
-        seed_path = os.path.join(queue_dir, seed_name)
-        profdata = run_one_seed(seed_path, fuzz_bin, work_dir)
-        if profdata is None:
-            return seed_name, set()
-        try:
-            hit_bids = check_branches_from_profdata(profdata, fuzz_bin, active_specs)
-        finally:
-            if os.path.exists(profdata):
-                os.remove(profdata)
-        return seed_name, hit_bids
 
-    with ThreadPoolExecutor(max_workers=parallel) as pool:
-        futures = {}
-        for seed_name in seeds:
+def _bisect_recursive(queue_dir, seed_names, fuzz_bin, branch_specs, work_dir,
+                      results, completed, max_seeds, batch_size, deadline,
+                      depth):
+    """Recursive 10-bucket bisection."""
+    if deadline and time.time() > deadline:
+        return
+    if not seed_names or not branch_specs:
+        return
+
+    # Filter out already-completed branches
+    active_specs = [s for s in branch_specs if s[4] not in completed]
+    if not active_specs:
+        return
+
+    # Base case: small enough to test individually
+    if len(seed_names) <= 10:
+        for seed_name in seed_names:
             if deadline and time.time() > deadline:
                 break
+            active_specs = [s for s in branch_specs if s[4] not in completed]
             if not active_specs:
                 break
-            fut = pool.submit(process_seed, seed_name)
-            futures[fut] = seed_name
 
-        for fut in as_completed(futures):
-            seed_name, hit_bids = fut.result()
-            processed += 1
+            seed_path = os.path.join(queue_dir, seed_name)
+            tag = f'd{depth}_leaf_{hash(seed_name) % 100000}'
+            hits = run_and_check(
+                [seed_path], fuzz_bin, active_specs, work_dir, tag=tag
+            )
 
-            for bid in hit_bids:
+            for bid in hits:
                 if bid not in completed:
-                    results[bid].append(seed_name)
-                    found_total += 1
+                    results.setdefault(bid, []).append(seed_name)
                     if len(results[bid]) >= max_seeds:
                         completed.add(bid)
-                        # Remove from active specs
-                        active_specs = [s for s in active_specs if s[4] != bid]
+        return
 
-            if processed % 200 == 0:
-                n_done = len(completed)
-                print(f"    ... {processed}/{len(seeds)} seeds, "
-                      f"{found_total} hits, {n_done}/{len(branch_specs)} branches done",
-                      file=sys.stderr)
+    # Split into 10 buckets
+    n = len(seed_names)
+    bucket_size = (n + 9) // 10
+    buckets = []
+    for i in range(0, n, bucket_size):
+        buckets.append(seed_names[i:i + bucket_size])
 
-            if deadline and time.time() > deadline:
-                break
-            if not active_specs:
-                break
+    if depth == 0:
+        print(f"      Depth 0: {n} seeds -> {len(buckets)} buckets "
+              f"of ~{bucket_size}, {len(active_specs)} branches",
+              file=sys.stderr)
 
-    # Filter empty
-    return {bid: slist for bid, slist in results.items() if slist}
+    # Run each bucket in batch, check which branches are hit
+    for bi, bucket in enumerate(buckets):
+        if deadline and time.time() > deadline:
+            break
+        active_specs = [s for s in branch_specs if s[4] not in completed]
+        if not active_specs:
+            break
+
+        seed_paths = [os.path.join(queue_dir, s) for s in bucket]
+        tag = f'd{depth}_b{bi}'
+        hits = run_and_check(
+            seed_paths, fuzz_bin, active_specs, work_dir, tag=tag
+        )
+
+        if not hits:
+            continue
+
+        if depth == 0:
+            print(f"        bucket {bi}: {len(hits)} branches hit "
+                  f"({len(completed)} complete)", file=sys.stderr)
+
+        # Recurse into this bucket for the hit branches
+        hit_specs = [s for s in active_specs if s[4] in hits]
+        _bisect_recursive(
+            queue_dir, bucket, fuzz_bin, hit_specs, work_dir,
+            results, completed, max_seeds, batch_size, deadline,
+            depth=depth + 1
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -231,15 +298,17 @@ def scan_queue(queue_dir, fuzz_bin, branch_specs, work_dir, max_seeds=50,
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description='In-container multi-branch seed scan')
-    parser.add_argument('--jobs', required=True, help='JSON file with job specs')
-    parser.add_argument('--queues', required=True, help='Base dir containing queue subdirs')
+    parser = argparse.ArgumentParser(
+        description='In-container 10-bucket batch bisection seed scan')
+    parser.add_argument('--jobs', required=True)
+    parser.add_argument('--queues', required=True)
     parser.add_argument('--fuzz-bin', required=True)
     parser.add_argument('--output', required=True)
-    parser.add_argument('--parallel', type=int, default=8)
     parser.add_argument('--max-seeds', type=int, default=50)
-    parser.add_argument('--timeout', type=int, default=3600,
-                        help='Total timeout in seconds (default 3600)')
+    parser.add_argument('--batch-size', type=int, default=500,
+                        help='Max seeds per fuzz_bin invocation (default 500)')
+    parser.add_argument('--timeout', type=int, default=0,
+                        help='Total timeout in seconds (0 = no timeout)')
     args = parser.parse_args()
 
     with open(args.jobs) as f:
@@ -251,7 +320,7 @@ def main():
           file=sys.stderr)
 
     work_dir = tempfile.mkdtemp(prefix='scan_work_')
-    deadline = time.time() + args.timeout
+    deadline = (time.time() + args.timeout) if args.timeout > 0 else None
     all_results = []
 
     try:
@@ -268,13 +337,13 @@ def main():
                 for b in branches
             ]
 
-            print(f"  [{qi+1}/{len(queues)}] {queue_subdir}: {len(branches)} branches",
-                  file=sys.stderr)
+            print(f"  [{qi+1}/{len(queues)}] {queue_subdir}: "
+                  f"{len(branches)} branches", file=sys.stderr)
 
             t0 = time.time()
             hits = scan_queue(
                 queue_dir, args.fuzz_bin, branch_specs, work_dir,
-                max_seeds=args.max_seeds, parallel=args.parallel,
+                max_seeds=args.max_seeds, batch_size=args.batch_size,
                 deadline=deadline
             )
             elapsed = time.time() - t0
@@ -284,7 +353,6 @@ def main():
             print(f"    Done: {branches_hit}/{len(branches)} branches hit, "
                   f"{total_found} seeds, {elapsed:.1f}s", file=sys.stderr)
 
-            # Map results back to individual branch jobs
             branch_lookup = {b['branch_id']: b for b in branches}
             for bid, seed_list in hits.items():
                 b = branch_lookup[bid]
@@ -305,7 +373,8 @@ def main():
                 os.remove(os.path.join(root, f))
             for d in dirs:
                 os.rmdir(os.path.join(root, d))
-        os.rmdir(work_dir)
+        if os.path.exists(work_dir):
+            os.rmdir(work_dir)
 
     with open(args.output, 'w') as f:
         json.dump({'results': all_results}, f)

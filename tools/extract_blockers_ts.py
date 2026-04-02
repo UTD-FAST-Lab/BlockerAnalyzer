@@ -48,11 +48,15 @@ _BRANCH_RE = re.compile(
 
 
 def _parse_count(s):
-    """Parse '35.7M', '2.20k', '0', '1,234' into int."""
+    """Parse '35.7M', '2.20k', '0', '1,234', '18.4E' into int."""
     s = s.strip().replace(',', '')
     mult = {'k': 1_000, 'M': 1_000_000, 'G': 1_000_000_000}
     if s and s[-1] in mult:
         return int(float(s[:-1]) * mult[s[-1]])
+    # llvm-cov-18 sometimes emits truncated scientific notation like '18.4E'
+    s = s.rstrip('eE')
+    if not s:
+        return 0
     return int(float(s))
 
 

@@ -245,7 +245,7 @@ def build_jobs(branches, queue_base, target):
 
 
 def run_bisection(target, queue_base, branch_id=None, parallel=8,
-                  max_seeds=50, timeout=3600, db_path=None):
+                  max_seeds=50, batch_size=500, timeout=3600, db_path=None):
     db_path = db_path or str(DB_PATH)
     docker_image = DOCKER_TARGET_IMAGE_FMT.format(target=target)
 
@@ -283,6 +283,7 @@ def run_bisection(target, queue_base, branch_id=None, parallel=8,
     queue_target_dir = os.path.join(queue_base, target)
     results_file = os.path.join(outdir, 'results.json')
 
+    container_timeout_args = f' --timeout {timeout}' if timeout > 0 else ''
     cmd = [
         'docker', 'run', '--rm', '--entrypoint', '',
         '-v', f'{os.path.abspath(queue_target_dir)}:/queues:ro',
@@ -294,17 +295,18 @@ def run_bisection(target, queue_base, branch_id=None, parallel=8,
         f' --queues /queues'
         f' --fuzz-bin "$FUZZ_BIN"'
         f' --output /work/out/results.json'
-        f' --parallel {parallel}'
         f' --max-seeds {max_seeds}'
-        f' --timeout {timeout}'
+        f' --batch-size {batch_size}'
+        + container_timeout_args
     ]
 
     print(f"Starting container...", file=sys.stderr)
     t0 = time.time()
 
+    host_timeout = timeout + 60 if timeout > 0 else None
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout + 60
+            cmd, capture_output=True, text=True, timeout=host_timeout
         )
         if proc.stderr:
             for line in proc.stderr.strip().splitlines():
@@ -393,6 +395,8 @@ def main():
     p_run.add_argument('--branch-id', type=int)
     p_run.add_argument('--parallel', type=int, default=8)
     p_run.add_argument('--max-seeds', type=int, default=50)
+    p_run.add_argument('--batch-size', type=int, default=500,
+                       help='Seeds per fuzz_bin invocation (default: 500)')
     p_run.add_argument('--timeout', type=int, default=3600,
                        help='Total timeout in seconds (default: 3600)')
     p_run.add_argument('--db')
@@ -414,6 +418,7 @@ def main():
             branch_id=args.branch_id,
             parallel=args.parallel,
             max_seeds=args.max_seeds,
+            batch_size=args.batch_size,
             timeout=args.timeout,
             db_path=args.db,
         )
