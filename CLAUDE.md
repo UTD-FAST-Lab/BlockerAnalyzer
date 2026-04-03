@@ -23,17 +23,18 @@ BlockerAnalyzer/
 │   ├── blocker_3/      # Synthetic: compile-time gate
 │   └── blocker_4/      # Synthetic: magic value conjunction
 ├── blockers/           # Output from fuzzing-branch-analyzer (<target>_blockers.md)
-├── slices/             # Output from program-slice-builder (<target>_slices.md)
-├── reports/            # Output from fuzzing-root-cause-analyzer (<target>_report.md)
-├── analysis/           # Output from fuzzing-coverage-analyst (<target>_analysis.md)
-├── seeds/              # Output from seed-generator (<target>_seeds.md)
 ├── clusters/           # Output from branch-cluster (<target>_clusters.md)
+├── reports/            # Output from fuzzing-root-cause-analyzer (<target>_report.md)
 ├── db/                 # SQLite database (blockers.sqlite)
 ├── tables/             # Exported CSV tables from the database
 ├── tools/              # Reusable analysis scripts
 │   ├── extract_blockers_ts.py  # Time-series blocker extraction (chronological forward pass)
 │   ├── blocker_db.py           # CLI for managing the blockers SQLite database
-│   └── seed_bisect.py          # 10-bucket bisection to find seeds that hit blocking branches
+│   ├── seed_bisect.py          # 10-bucket bisection to find seeds that hit blocking branches
+│   ├── seed_diff.py            # MI-based seed diff: pre-computes byte-level mutual information
+│   ├── cluster_orchestrator.py # Orchestrates parallel T1 agents + T2 verification loop
+│   ├── cluster_t2.py           # Mechanical T2 cluster verification (no LLM, Docker-based)
+│   └── cluster_report.py       # Generate cluster report from DB or JSON (deterministic, no LLM)
 ├── docker/             # Docker infrastructure for coverage-instrumented builds
 │   ├── Dockerfile.coverage-base  # Base image (clang-18, llvm-18, COV_FLAGS)
 │   ├── run_bisect_entrypoint.sh  # Entrypoint: run seeds, produce llvm-cov show output
@@ -72,16 +73,14 @@ Reports are llvm-cov annotated source files. Branch data appears inline:
 
 ## Agents
 
-Six specialized agents are available in `.claude/agents/`:
+Four specialized agents are available in `.claude/agents/`:
 
 | Agent | Output folder | File naming | Purpose |
 |-------|--------------|-------------|---------|
 | **fuzzing-branch-analyzer** | `blockers/` | `<target>_blockers.md` | Parses coverage reports, identifies asymmetric branch pairs, cross-references across fuzzers to confirm input-dependency |
-| **program-slice-builder** | `slices/` | `<target>_slices.md` | Applies NEG pre-screening and traces execution paths (program slices) from the fuzzer entry point to each blocking branch; default batch size 10 |
-| **fuzzing-root-cause-analyzer** | `reports/` | `<target>_report.md` | Reads pre-built slices, clusters by slice similarity, classifies root causes, and writes findings with mitigations |
-| **fuzzing-coverage-analyst** | `analysis/` | `<target>_analysis.md` | Analyzes fuzzing campaigns (seed queues, mutation patterns) to diagnose why a fuzzer failed to penetrate input-dependent blockers |
-| **seed-generator** | `seeds/` | `<target>_seeds.md` | Reads blocker lists, traces constraints backward from blocked branches, constructs concrete seed byte sequences that hit blocked sides, and clusters blockers by seed similarity |
 | **branch-cluster** | `clusters/` | `<target>_clusters.md` | Identifies which input bytes control each blocking branch via seed diff + source tracing + Docker mutation verification, then clusters branches by shared controlling byte regions |
+| **fuzzing-root-cause-analyzer** | `reports/` | `<target>_report.md` | Reads cluster results, analyzes seed lineage and coverage divergence per cluster, diagnoses why specific fuzzers fail, writes findings |
+| **seed-generator** | `seeds/` | `<target>_seeds.md` | Reads blocker lists, traces constraints backward from blocked branches, constructs concrete seed byte sequences that hit blocked sides |
 
 ## Permissions
 
@@ -123,24 +122,28 @@ python3 tools/blocker_db.py init                          # Initialize schema
 python3 tools/blocker_db.py compute-derived --target <name>  # Recompute derived metrics
 python3 tools/blocker_db.py query --target <name> [--format md|csv|json]
 python3 tools/blocker_db.py export --target <name> [--format md|csv|json]
+python3 tools/blocker_db.py import-clusters --input clusters/<target>_state.json  # JSON → DB
 ```
 
-**Database schema (7 tables):**
+**Database schema (8 tables):**
 
 | Table | Purpose | Key fields |
 |-------|---------|------------|
 | `branches` | One row per confirmed blocker | `target`, `file`, `function`, `line`, `col`, `blocked_side`, `source_line`, `confirmation_level` (1/2/3) |
 | `trial_coverage` | Per-(fuzzer, trial) metrics | `hit_status` (-1=unreached/0=blocked/1=resolved), `duration_h` (-1=N/A, ≥0=time blocked), `hitcount`, `other_hitcount` |
-| `derived_metrics` | Per-branch summary | `fuzzer_block_probability` (JSON), `fuzzer_avg_hitcount` (JSON), `fuzzer_avg_duration_h` (JSON), `blocking_fuzzers`, `resolving_fuzzers`, `unreached_fuzzers`, `rank` |
+| `derived_metrics` | Per-branch summary | `fuzzer_block_probability` (JSON), `fuzzer_avg_hitcount` (JSON), `fuzzer_avg_duration_h` (JSON), `blocking_fuzzers`, `resolving_fuzzers`, `unreached_fuzzers`, `prob_div`, `dur_div`, `hit_div`, `selection_tags` (JSON) |
+| `cluster_assignments` | Branch-to-cluster mapping per clustering run | `branch_id`, `target`, `cluster_id`, `tier` (1=T1/2=T2), `controlling_bytes`, `semantic_label`, `run_date` |
 | `resolving_seeds` | Seeds hitting the **blocked** side (from resolving fuzzers) | `branch_id`, `fuzzer`, `trial`, `seed_id`, `parent_seed_id`, `mutation_op`, `discovery_time_s` |
 | `resolving_seed_lineage` | Parent chain for resolving seeds | `branch_id`, `fuzzer`, `trial`, `seed_id`, `depth`, `ancestor_id`, `mutation_op` |
 | `blocking_seeds` | Seeds hitting the **other** side (from blocking fuzzers) | Same schema as `resolving_seeds` |
 | `blocking_seed_lineage` | Parent chain for blocking seeds | Same schema as `resolving_seed_lineage` |
 
-**Ranking:** Blockers are ranked by **fuzzer divergence** (larger differences = more interesting):
-1. `probability_div` DESC — max(p) - min(p) across fuzzers (excluding unreached)
-2. `duration_div` DESC — max(avg_dur) - min(avg_dur) (null treated as 0 = never stuck)
-3. `hitcount_div` DESC — max(avg_hits) - min(avg_hits) (excluding unreached)
+**Selection tags:** Branches are tagged for analysis based on three divergence metrics:
+- `prob_div` — max(p) - min(p) across fuzzers (excluding unreached). Tagged when = 1.0
+- `dur_div` — max(avg_dur) - min(avg_dur), null/-1 treated as 0. Tagged when > 8.0h
+- `hit_div` — max(avg_hits) - min(avg_hits) (excluding unreached). Tagged when > 100
+
+`selection_tags` is a JSON array (e.g., `["prob_div", "dur_div"]`). Branches with any tag are candidates for clustering and root cause analysis. Branches with more tags are higher priority.
 
 ### `tools/seed_bisect.py`
 
@@ -148,9 +151,13 @@ Finds which seeds in each fuzzer's queue hit each confirmed blocker. Runs **one 
 
 ```bash
 python3 tools/seed_bisect.py build --target <name>      # Build Docker image (one-time)
-python3 tools/seed_bisect.py run --target <name> --queue-base ./out  # Run
-python3 tools/seed_bisect.py plan --target <name> --queue-base ./out  # Dry-run
+python3 tools/seed_bisect.py scan --target <name> --queue-base ./out   # Docker scan only → results.json
+python3 tools/seed_bisect.py insert --target <name> --results <path> --queue-base ./out  # Insert results into DB
+python3 tools/seed_bisect.py run --target <name> --queue-base ./out    # scan + insert in one step
+python3 tools/seed_bisect.py plan --target <name> --queue-base ./out   # Dry-run
 ```
+
+`scan` and `insert` are separated so multiple targets can scan in parallel (Docker containers) and insert sequentially (no DB contention). Results are saved to `db/bisect_results/<target>_results.json`.
 
 **End-to-end flow:**
 
@@ -171,7 +178,7 @@ python3 tools/seed_bisect.py plan --target <name> --queue-base ./out  # Dry-run
 
 **`max_seeds` semantics:** The limit is per **(branch, queue)**, where each queue is one `(fuzzer, trial)`. A branch with 3 resolving queues and `max_seeds=10` can accumulate up to 30 resolving seeds total (10 from each queue). For branch clustering, `--max-seeds 10` is sufficient.
 
-**Options:** `--max-seeds N` (default 50), `--batch-size N` (seeds per `FUZZ_BIN` invocation, default 500), `--timeout N` (total seconds, default 3600).
+**Options:** `--max-seeds N` (default 50), `--batch-size N` (seeds per `FUZZ_BIN` invocation, default 500).
 
 **Docker images:** Named `blocker-{target}-cov`, built from `docker/Dockerfile.coverage-base` + `docker/targets/Dockerfile.{target}.cov`.
 
@@ -179,46 +186,6 @@ python3 tools/seed_bisect.py plan --target <name> --queue-base ./out  # Dry-run
 - Parent info: `parent_id`, `parent_file` (hex hash of parent seed), `execs`, `elapsed_ms`
 - Coverage map: list of coverage index IDs
 - Mutation ops: list like `["ByteRandMutator", "BytesDeleteMutator"]`
-
-### Program Slices
-
-`program-slice-builder` constructs a **dynamic program slice** for each confirmed blocker: an ordered sequence of control and data flow nodes from the fuzzer entry point to the blocking branch, filtered to only nodes actually executed by at least one fuzzer. Each node carries the exact statement text, file:line, types, function signatures, and per-fuzzer execution counts `[cmplog: N | n4: N]`.
-
-Node types: `ENTRY` (fuzzer entry), `CALL` (function call on path), `CTRL` (control flow condition, annotated with required direction), `DATA` (variable binding that feeds the blocking condition), `BRANCH` (the blocking branch, always last).
-
-**Dynamic filtering:** nodes with 0 hits in all fuzzers are dropped — they are not on the actual runtime path. If dropping a node creates a gap in the path, the agent searches for an alternate caller with non-zero hits, catching wrong-path traces early.
-
-Each slice includes a one-line **Divergence point**: the earliest node where one fuzzer's count drops to 0 while the other remains non-zero. The slice carries no analysis or interpretation — all reasoning is deferred to `fuzzing-root-cause-analyzer`.
-
-Slices are written to `slices/<target>_slices.md` and consumed by `fuzzing-root-cause-analyzer`. The file is appended to across batches, so multiple runs accumulate into a single target file.
-
-### Branch Clustering
-
-Clustering is performed by `fuzzing-root-cause-analyzer` from pre-built slices, using **program slice similarity**.
-
-Two blockers are clustered when their slices share structural ancestry:
-
-| Relationship | Criterion | Cluster role |
-|--------------|-----------|-------------|
-| **Downstream** | Slice A ⊇ Slice B (A has all of B's nodes plus more) | B is the cluster root; A is a downstream member |
-| **Peer** | Slices share the same root node but neither contains the other | Both are peers; the shared root variable/condition is the cluster focus |
-
-The cluster representative is always the blocker with the simplest (most upstream) slice. Resolving the root blocker's barrier also unblocks all downstream members. Peer members share the same fix strategy.
-
-Cluster IDs (C01, C02, …) are assigned by the root cause analyzer in Step 2 and carried through the report.
-
-### Negative Rules (Pre-screening)
-
-`program-slice-builder` screens each blocker against four negative rules before building its slice. A blocker that matches is **skipped** and recorded in the Skipped Blockers section of the slices file, then carried through to the Skipped Blockers section of the root cause report.
-
-| Rule | Criterion |
-|------|-----------|
-| **NEG-1** | Blocked block body contains only a `return` statement |
-| **NEG-2** | Blocked block body contains only an error handler (`opt_error`, `fprintf`+`exit`, `abort`, `assert`, etc.) |
-| **NEG-3** | Blocked block body contains only cleanup (`free`, `close`, `destroy`, etc.) |
-| **NEG-4** | Branch or context is annotated `deprecated`, `legacy`, or `obsolete` |
-
-Rules are defined inline in `program-slice-builder.md` — `rules.md` is superseded.
 
 ### LibAFL Fuzzers
 
@@ -238,31 +205,31 @@ Time-series coverage snapshots:
 
 ### Branch Clustering
 
-`branch-cluster` identifies which input bytes control each blocking branch, then clusters branches by shared controlling byte regions. Uses a two-tier approach for efficiency:
+Orchestrated by `cluster_orchestrator.py`, which manages a parallel T1→T2 loop:
 
-**Tier 1 — Full analysis** (one representative per source function, or 5 total if <5 functions):
-1. Pull up to 10 positive (resolving) + 10 negative (blocking) seeds from DB; all if fewer
-2. Diff seeds byte-by-byte → find candidate controlling byte regions
-3. Find common patterns within positive seeds and within negative seeds
-4. Trace source semantics from branch backward through hit lines in coverage report
-5. Formulate hypothesis: "bytes [i:j] must be X to hit blocked side"
-6. Verify via Docker mutation (up to 5 rounds): mutate positive seed → should lose branch; mutate negative seed → should gain branch
+**Selection:** Branches from DB where `selection_tags != '[]'` and both blocking and resolving fuzzers exist.
 
-**Tier 2 — Verification only** (remaining branches):
-1. For each unfitted branch, try to fit into existing clusters (function's representative first, then all others)
-2. Apply cluster hypothesis to 1 positive + 1 negative seed (Test A + Test B, 2 Docker runs)
-3. If both pass → assign to that cluster. If no cluster fits → mark as unfitted.
+**Architecture:**
+- **Orchestrator** (`cluster_orchestrator.py`): Selects candidates, samples T1 reps, spawns agents/tools, maintains JSON state at `clusters/<target>_state.json`
+- **T1 workers** (`branch-cluster` agent): One agent per branch, spawned in parallel (default 10). Diffs seeds, traces source, formulates + verifies byte hypothesis. Returns JSON result.
+- **T2 verification** (`cluster_t2.py`): Python tool (no LLM). One Docker container per branch, tests necessity (Test A: 1 positive seed) and sufficiency (Test B: 3-5 negative seeds from different fuzzers/trials). All seeds run inside one container with unique profraw per seed.
+- **Report** (`cluster_report.py`): Generates markdown from JSON state or DB. Deterministic, no LLM.
 
-**Iterative loop:** Collect unfitted branches from Tier 2 → pick new representatives per function (highest-ranked unfitted) → run Tier 1 → produces new clusters → run Tier 2 on remaining unfitted → repeat until all branches assigned or unresolved.
+**T1 sampling:** Proportional per function, min 10 total, at least 1 per function. Priority: more selection tags > higher divergence values.
 
-**Batching:** Run Tier 1 in chunks of 5–6 functions per invocation, Tier 2 in batches. Each batch appends to `clusters/<target>_clusters.md`.
+**T2 strengthened sufficiency:** Test B uses 3-5 negative seeds. All must pass (blocked side appears after injecting controlling bytes). Partial pass → unfitted (promoted to T1).
+
+**Loop:**
+- T1 produces ≥1 new cluster → T2 fits remaining → unfitted promoted to next T1 round
+- T1 produces 0 new clusters → re-select different reps → retry
+- Two consecutive T1 rounds with 0 new clusters → mark remaining as SKIPPED
 
 ## Typical Workflow
 
 1. Run LibAFL fuzzers on target; run `run_coverage_timeseries.sh` to generate per-checkpoint coverage reports under `out/coverage_ts/`.
-2. Run `extract_blockers_ts.py` to extract blockers via chronological forward pass → writes `branches`, `trial_coverage`, `derived_metrics` to `db/blockers.sqlite`.
-3. Run `seed_bisect.py` to find resolving and blocking seeds for each blocker → writes `resolving_seeds`, `resolving_seed_lineage`, `blocking_seeds`, `blocking_seed_lineage` to DB. One Docker container per target.
-4. Use `branch-cluster` to identify controlling bytes per branch and cluster by shared byte regions → output in `clusters/`.
-5. Use `program-slice-builder` on the DB to apply NEG screening and trace execution paths → output in `slices/`.
-6. Use `fuzzing-root-cause-analyzer` on the slices file to cluster, classify root causes, and write findings → output in `reports/`.
-7. Use `fuzzing-coverage-analyst` on input-dependent blockers with seed/lineage data to diagnose fuzzer logic weaknesses → output in `analysis/`.
+2. Run `extract_blockers_ts.py` to extract blockers via chronological forward pass → writes `branches`, `trial_coverage`, `derived_metrics` (with selection tags) to `db/blockers.sqlite`.
+3. Run `seed_bisect.py scan` to find resolving and blocking seeds (parallel per target), then `insert` sequentially → writes `resolving_seeds`, `resolving_seed_lineage`, `blocking_seeds`, `blocking_seed_lineage` to DB.
+4. Run `cluster_orchestrator.py` to manage parallel T1 (agent) + T2 (tool) clustering → state in `clusters/<target>_state.json`.
+5. Run `cluster_report.py --from-json` to generate the clean cluster report → output in `clusters/`.
+6. Run `blocker_db.py import-clusters` to populate DB for SQL queries (optional).
+7. Use `fuzzing-root-cause-analyzer` on cluster results to analyze seed lineage, coverage divergence, and diagnose why specific fuzzers fail per cluster → output in `reports/`.

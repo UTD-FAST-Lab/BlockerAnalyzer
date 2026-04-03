@@ -63,7 +63,10 @@ CREATE TABLE IF NOT EXISTS derived_metrics (
     blocking_fuzzers     TEXT,    -- JSON array: fuzzers where p = 1.0 (blocked ALL reached trials)
     resolving_fuzzers    TEXT,    -- JSON array: fuzzers where 0 < p < 1.0 (resolved some but not all)
     unreached_fuzzers    TEXT,    -- JSON array: fuzzers where branch is never reached (all trials = -1)
-    rank                 INTEGER
+    prob_div             REAL,    -- max(p) - min(p) across non-null fuzzers
+    dur_div              REAL,    -- max(avg_dur) - min(avg_dur); null/-1 treated as 0
+    hit_div              REAL,    -- max(avg_hits) - min(avg_hits) across non-null fuzzers
+    selection_tags       TEXT     -- JSON array: subset of ["prob_div", "dur_div", "hit_div"]
 );
 
 -- Resolving seeds: seeds from resolving fuzzers that hit the BLOCKED side.
@@ -119,10 +122,29 @@ CREATE TABLE IF NOT EXISTS blocking_seed_lineage (
     UNIQUE(branch_id, fuzzer, trial, seed_id, depth)
 );
 
+-- Cluster assignments. One row per branch per clustering run.
+CREATE TABLE IF NOT EXISTS cluster_assignments (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id       INTEGER NOT NULL REFERENCES branches(branch_id),
+    target          TEXT NOT NULL,
+    cluster_id      TEXT NOT NULL,           -- e.g., 'BC01'
+    tier            INTEGER,                 -- 1 = T1 representative, 2 = T2 fitted
+    status          TEXT NOT NULL DEFAULT 'confirmed', -- confirmed, skipped, unresolved
+    controlling_bytes TEXT,                  -- e.g., 'bytes[16:20] = 4c616220'
+    semantic_label  TEXT,                    -- e.g., 'ICC color space = Lab'
+    source_mapping  TEXT,                    -- e.g., 'cmsGetColorSpace() reads ICC header offset 16'
+    test_a_result   TEXT,                    -- 'pass', 'fail', or null (T1 reps)
+    test_b_result   TEXT,                    -- 'pass', 'fail', or null (T1 reps)
+    run_date        TEXT,                    -- e.g., '2026-04-03'
+    UNIQUE(branch_id, run_date)
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_tc_branch ON trial_coverage(branch_id);
 CREATE INDEX IF NOT EXISTS idx_tc_fuzzer ON trial_coverage(fuzzer);
 CREATE INDEX IF NOT EXISTS idx_branches_target ON branches(target);
+CREATE INDEX IF NOT EXISTS idx_ca_target ON cluster_assignments(target, run_date);
+CREATE INDEX IF NOT EXISTS idx_ca_cluster ON cluster_assignments(cluster_id);
 CREATE INDEX IF NOT EXISTS idx_rs_branch ON resolving_seeds(branch_id);
 CREATE INDEX IF NOT EXISTS idx_rsl_branch ON resolving_seed_lineage(branch_id);
 CREATE INDEX IF NOT EXISTS idx_bs_branch ON blocking_seeds(branch_id);
@@ -296,18 +318,7 @@ def compute_derived(target, db_path=None):
               json.dumps(fuzzer_duration),
               json.dumps(blocking), json.dumps(resolving), json.dumps(unreached)))
 
-    # Rank by fuzzer divergence — larger differences = more interesting
-    # 1. probability_div DESC: max - min across fuzzers (excluding unreached)
-    # 2. duration_div DESC: max - min across fuzzers (excluding N/A)
-    # 3. hitcount_div DESC: max - min across fuzzers (excluding unreached)
-    all_derived = conn.execute("""
-        SELECT d.branch_id, d.fuzzer_block_probability, d.fuzzer_avg_hitcount,
-               d.fuzzer_avg_duration_h
-        FROM derived_metrics d
-        JOIN branches b ON d.branch_id = b.branch_id
-        WHERE b.target = ?
-    """, (target,)).fetchall()
-
+    # --------------- divergence values and selection tags ---------------
     def _divergence(values_dict, null_as=None):
         """Max - min of non-None values. If null_as is set, replace None with that value."""
         if null_as is not None:
@@ -318,26 +329,44 @@ def compute_derived(target, db_path=None):
             return 0.0
         return max(vals) - min(vals)
 
-    def rank_key(row):
-        fp = json.loads(row['fuzzer_block_probability']) if row['fuzzer_block_probability'] else {}
-        fh = json.loads(row['fuzzer_avg_hitcount']) if row['fuzzer_avg_hitcount'] else {}
-        fd = json.loads(row['fuzzer_avg_duration_h']) if row['fuzzer_avg_duration_h'] else {}
-        # prob/hitcount: exclude unreached (null) fuzzers — no data
-        # duration: null means "never blocked" = 0 hours stuck — include as 0
-        prob_div = _divergence(fp)
-        dur_div = _divergence(fd, null_as=0.0)
-        hit_div = _divergence(fh)
-        # Negate for descending sort (larger divergence = higher priority = lower rank)
-        return (-prob_div, -dur_div, -hit_div)
+    for row in branches:
+        bid = row['branch_id']
+        dm = conn.execute("""
+            SELECT fuzzer_block_probability, fuzzer_avg_hitcount, fuzzer_avg_duration_h
+            FROM derived_metrics WHERE branch_id = ?
+        """, (bid,)).fetchone()
+        if not dm:
+            continue
 
-    ranked = sorted(all_derived, key=rank_key)
+        fp = json.loads(dm['fuzzer_block_probability']) if dm['fuzzer_block_probability'] else {}
+        fh = json.loads(dm['fuzzer_avg_hitcount']) if dm['fuzzer_avg_hitcount'] else {}
+        fd = json.loads(dm['fuzzer_avg_duration_h']) if dm['fuzzer_avg_duration_h'] else {}
 
-    for i, row in enumerate(ranked, 1):
-        conn.execute("UPDATE derived_metrics SET rank = ? WHERE branch_id = ?",
-                     (i, row['branch_id']))
+        # duration: null/-1 = never blocked = 0h stuck
+        fd_clean = {}
+        for k, v in fd.items():
+            fd_clean[k] = 0.0 if (v is None or v < 0) else v
+
+        pdiv = _divergence(fp)
+        ddiv = _divergence(fd_clean, null_as=0.0)
+        hdiv = _divergence(fh)
+
+        tags = []
+        if pdiv >= 1.0:
+            tags.append("prob_div")
+        if ddiv > 8.0:
+            tags.append("dur_div")
+        if hdiv > 100:
+            tags.append("hit_div")
+
+        conn.execute("""
+            UPDATE derived_metrics
+            SET prob_div = ?, dur_div = ?, hit_div = ?, selection_tags = ?
+            WHERE branch_id = ?
+        """, (pdiv, ddiv, hdiv, json.dumps(tags), bid))
 
     conn.commit()
-    print(f"Computed derived metrics for {len(ranked)} blockers in target '{target}'", file=sys.stderr)
+    print(f"Computed derived metrics for {len(branches)} blockers in target '{target}'", file=sys.stderr)
     conn.close()
 
 
@@ -439,7 +468,8 @@ def query_blockers(target, fuzzer=None, min_prob=None, max_prob=None, fmt='json'
     sql = """
         SELECT b.*, d.fuzzer_block_probability, d.fuzzer_avg_hitcount,
                d.fuzzer_avg_duration_h,
-               d.blocking_fuzzers, d.resolving_fuzzers, d.unreached_fuzzers, d.rank
+               d.blocking_fuzzers, d.resolving_fuzzers, d.unreached_fuzzers,
+               d.prob_div, d.dur_div, d.hit_div, d.selection_tags
         FROM branches b
         LEFT JOIN derived_metrics d ON b.branch_id = d.branch_id
         WHERE b.target = ?
@@ -451,7 +481,7 @@ def query_blockers(target, fuzzer=None, min_prob=None, max_prob=None, fmt='json'
     if min_prob is not None or max_prob is not None:
         pass  # TODO: filter by specific fuzzer probability if needed
 
-    sql += " ORDER BY d.rank ASC"
+    sql += " ORDER BY d.prob_div DESC, d.dur_div DESC, d.hit_div DESC"
 
     rows = conn.execute(sql, params).fetchall()
 
@@ -491,15 +521,16 @@ def query_blockers(target, fuzzer=None, min_prob=None, max_prob=None, fmt='json'
         if not rows:
             return
         writer = csv.writer(sys.stdout)
-        writer.writerow(['rank', 'file', 'function', 'line', 'col', 'blocked_side',
+        writer.writerow(['file', 'function', 'line', 'col', 'blocked_side',
                          'source_line', 'fuzzer_block_probability', 'fuzzer_avg_hitcount',
-                         'fuzzer_avg_duration_h', 'max_probability',
-                         'blocking_fuzzers', 'resolving_fuzzers'])
+                         'fuzzer_avg_duration_h', 'prob_div', 'dur_div', 'hit_div',
+                         'selection_tags', 'blocking_fuzzers', 'resolving_fuzzers'])
         for r in rows:
-            writer.writerow([r['rank'], r['file'], r['function'], r['line'], r['col'],
+            writer.writerow([r['file'], r['function'], r['line'], r['col'],
                              r['blocked_side'], r['source_line'], r['fuzzer_block_probability'],
                              r['fuzzer_avg_hitcount'], r['fuzzer_avg_duration_h'],
-                             r['max_probability'],
+                             r['prob_div'], r['dur_div'], r['hit_div'],
+                             r['selection_tags'],
                              r['blocking_fuzzers'], r['resolving_fuzzers']])
 
     elif fmt == 'md':
@@ -517,11 +548,12 @@ def query_blockers(target, fuzzer=None, min_prob=None, max_prob=None, fmt='json'
         sep_p = " | ".join("------" for _ in fuzzers)
         sep_h = " | ".join("------" for _ in fuzzers)
         print(f"# Blockers — {target}\n")
-        print(f"| Rank | File | Line:Col | Side | {hdr_p} | {hdr_h} | Blocking | Resolving | Unreached |")
-        print(f"|------|------|----------|------|{sep_p}|{sep_h}|----------|-----------|-----------|")
+        print(f"| File | Line:Col | Side | Tags | {hdr_p} | {hdr_h} | Blocking | Resolving | Unreached |")
+        print(f"|------|----------|------|------|{sep_p}|{sep_h}|----------|-----------|-----------|")
         for r in rows:
             fp = json.loads(r['fuzzer_block_probability']) if r['fuzzer_block_probability'] else {}
             fh = json.loads(r['fuzzer_avg_hitcount']) if r['fuzzer_avg_hitcount'] else {}
+            tags = json.loads(r['selection_tags']) if r['selection_tags'] else []
 
             def fmt_p(f):
                 v = fp.get(f)
@@ -542,9 +574,78 @@ def query_blockers(target, fuzzer=None, min_prob=None, max_prob=None, fmt='json'
             resolving = r['resolving_fuzzers'] or "[]"
             unreached = r['unreached_fuzzers'] or "[]"
             fname = r['file'].split('/')[-1] if r['file'] else '—'
-            print(f"| {r['rank'] or '—'} | {fname} | {r['line']}:{r['col']} | {r['blocked_side']} | {probs} | {hits} | {blocking} | {resolving} | {unreached} |")
+            tag_str = ",".join(tags) if tags else "—"
+            print(f"| {fname} | {r['line']}:{r['col']} | {r['blocked_side']} | {tag_str} | {probs} | {hits} | {blocking} | {resolving} | {unreached} |")
 
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# import-clusters: populate cluster_assignments from orchestrator JSON state
+# ---------------------------------------------------------------------------
+
+def import_clusters(json_path, db_path=None):
+    """Read orchestrator state JSON and insert into cluster_assignments table."""
+    conn = get_db(db_path)
+    conn.executescript(SCHEMA_SQL)
+
+    with open(json_path) as f:
+        state = json.load(f)
+
+    target = state['target']
+    run_date = state.get('run_date', '')
+
+    # Clear existing assignments for this target + run_date
+    deleted = conn.execute(
+        'DELETE FROM cluster_assignments WHERE target = ? AND run_date = ?',
+        (target, run_date)).rowcount
+
+    inserted = 0
+    for cid, cdata in state.get('clusters', {}).items():
+        controlling_bytes = cdata.get('controlling_bytes', '')
+        semantic_label = cdata.get('semantic_label', '')
+        source_mapping = cdata.get('source_mapping', '')
+
+        for m in cdata.get('members', []):
+            test_b = m.get('test_b')
+            test_b_str = None
+            if isinstance(test_b, list):
+                test_b_str = ','.join(test_b)
+            elif isinstance(test_b, str):
+                test_b_str = test_b
+
+            conn.execute('''
+                INSERT INTO cluster_assignments
+                    (branch_id, target, cluster_id, tier, status,
+                     controlling_bytes, semantic_label, source_mapping,
+                     test_a_result, test_b_result, run_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(branch_id, run_date) DO UPDATE SET
+                    cluster_id=excluded.cluster_id, tier=excluded.tier,
+                    status=excluded.status, controlling_bytes=excluded.controlling_bytes,
+                    semantic_label=excluded.semantic_label, source_mapping=excluded.source_mapping,
+                    test_a_result=excluded.test_a_result, test_b_result=excluded.test_b_result
+            ''', (m['branch_id'], target, cid, m.get('tier'), m.get('status', 'confirmed'),
+                  controlling_bytes, semantic_label, source_mapping,
+                  m.get('test_a'), test_b_str, run_date))
+            inserted += 1
+
+    # Also insert skipped branches
+    for s in state.get('skipped', []):
+        conn.execute('''
+            INSERT INTO cluster_assignments
+                (branch_id, target, cluster_id, tier, status, run_date)
+            VALUES (?, ?, 'SKIPPED', NULL, 'skipped', ?)
+            ON CONFLICT(branch_id, run_date) DO UPDATE SET
+                cluster_id='SKIPPED', status='skipped'
+        ''', (s['branch_id'], target, run_date))
+        inserted += 1
+
+    conn.commit()
+    conn.close()
+    if deleted:
+        print(f"Replaced {deleted} existing assignments", file=sys.stderr)
+    print(f"Imported {inserted} assignments for '{target}' ({run_date})", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -588,6 +689,11 @@ def main():
     p_export.add_argument('--target', required=True)
     p_export.add_argument('--format', choices=['json', 'csv', 'md'], default='json')
 
+    # import-clusters
+    p_ic = sub.add_parser('import-clusters',
+                          help='Import cluster assignments from orchestrator JSON state')
+    p_ic.add_argument('--input', required=True, help='Path to <target>_state.json')
+
     args = parser.parse_args()
 
     if args.command == 'init':
@@ -606,6 +712,8 @@ def main():
                        fmt=args.format)
     elif args.command == 'export':
         query_blockers(args.target, fmt=args.format)
+    elif args.command == 'import-clusters':
+        import_clusters(args.input)
     else:
         parser.print_help()
 

@@ -150,16 +150,18 @@ def main():
     # Get divergent branches
     if args.branch_id:
         branches = conn.execute('''
-            SELECT b.branch_id, dm.rank, b.file, b.function, b.line, b.col, b.blocked_side
+            SELECT b.branch_id, b.file, b.function, b.line, b.col, b.blocked_side,
+                   dm.prob_div, dm.dur_div, dm.hit_div, dm.selection_tags
             FROM branches b JOIN derived_metrics dm ON dm.branch_id = b.branch_id
             WHERE b.target = ? AND b.branch_id = ?
         ''', (args.target, args.branch_id)).fetchall()
     else:
         branches = conn.execute('''
-            SELECT b.branch_id, dm.rank, b.file, b.function, b.line, b.col, b.blocked_side
+            SELECT b.branch_id, b.file, b.function, b.line, b.col, b.blocked_side,
+                   dm.prob_div, dm.dur_div, dm.hit_div, dm.selection_tags
             FROM branches b JOIN derived_metrics dm ON dm.branch_id = b.branch_id
             WHERE b.target = ? AND dm.blocking_fuzzers != '[]' AND dm.resolving_fuzzers != '[]'
-            ORDER BY dm.rank
+            ORDER BY dm.prob_div DESC, dm.dur_div DESC, dm.hit_div DESC
         ''', (args.target,)).fetchall()
 
     print(f"Target {args.target}: {len(branches)} divergent branches, "
@@ -180,7 +182,7 @@ def main():
     try:
         for bi, branch in enumerate(branches):
             bid = branch['branch_id']
-            rank = branch['rank']
+            tags = branch['selection_tags']
             line = branch['line']
             col = branch['col']
             blocked_side = branch['blocked_side']
@@ -198,7 +200,7 @@ def main():
             seed_status = 'both' if (has_pos and has_neg) else ('pos' if has_pos else ('neg' if has_neg else 'none'))
 
             result = {
-                'branch_id': bid, 'rank': rank,
+                'branch_id': bid, 'selection_tags': tags,
                 'file': branch['file'], 'function': branch['function'],
                 'line': line, 'col': col, 'blocked_side': blocked_side,
                 'seed_status': seed_status,

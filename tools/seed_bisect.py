@@ -244,8 +244,12 @@ def build_jobs(branches, queue_base, target):
     return dict(queues)
 
 
-def run_bisection(target, queue_base, branch_id=None, parallel=8,
-                  max_seeds=50, batch_size=500, timeout=3600, db_path=None):
+RESULTS_DIR = PROJECT_DIR / 'db' / 'bisect_results'
+
+
+def scan_bisection(target, queue_base, branch_id=None,
+                   max_seeds=50, batch_size=500, db_path=None):
+    """Run Docker bisection only — write results.json, no DB writes."""
     db_path = db_path or str(DB_PATH)
     docker_image = DOCKER_TARGET_IMAGE_FMT.format(target=target)
 
@@ -281,9 +285,8 @@ def run_bisection(target, queue_base, branch_id=None, parallel=8,
         json.dump(jobs_data, f)
 
     queue_target_dir = os.path.join(queue_base, target)
-    results_file = os.path.join(outdir, 'results.json')
+    tmp_results_file = os.path.join(outdir, 'results.json')
 
-    container_timeout_args = f' --timeout {timeout}' if timeout > 0 else ''
     cmd = [
         'docker', 'run', '--rm', '--entrypoint', '',
         '-v', f'{os.path.abspath(queue_target_dir)}:/queues:ro',
@@ -297,33 +300,43 @@ def run_bisection(target, queue_base, branch_id=None, parallel=8,
         f' --output /work/out/results.json'
         f' --max-seeds {max_seeds}'
         f' --batch-size {batch_size}'
-        + container_timeout_args
+        f' --timeout 0'
     ]
 
-    print(f"Starting container...", file=sys.stderr)
+    print(f"Starting container (no timeout)...", file=sys.stderr)
     t0 = time.time()
 
-    host_timeout = timeout + 60 if timeout > 0 else None
-    try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=host_timeout
-        )
-        if proc.stderr:
-            for line in proc.stderr.strip().splitlines():
-                print(f"  {line}", file=sys.stderr)
-    except subprocess.TimeoutExpired:
-        print(f"Container timed out", file=sys.stderr)
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.stderr:
+        for line in proc.stderr.strip().splitlines():
+            print(f"  {line}", file=sys.stderr)
 
     elapsed = time.time() - t0
     print(f"Container finished in {elapsed:.1f}s", file=sys.stderr)
 
-    # Parse results
-    if not os.path.exists(results_file):
-        print("No results file", file=sys.stderr)
+    if not os.path.exists(tmp_results_file):
+        print("No results file produced", file=sys.stderr)
         shutil.rmtree(tmpdir, ignore_errors=True)
         return
 
-    with open(results_file) as f:
+    # Copy results to stable location
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    suffix = f'_{branch_id}' if branch_id else ''
+    out_path = RESULTS_DIR / f'{target}{suffix}_results.json'
+    shutil.copy2(tmp_results_file, out_path)
+    shutil.rmtree(tmpdir, ignore_errors=True)
+
+    with open(out_path) as f:
+        data = json.load(f)
+    total = sum(len(r.get('hitting_seeds', [])) for r in data.get('results', []))
+    print(f"\nScan done. {total} seeds found. Results: {out_path}", file=sys.stderr)
+
+
+def insert_results(target, results_path, queue_base, db_path=None):
+    """Read results.json and insert seeds + lineage into the DB."""
+    db_path = db_path or str(DB_PATH)
+
+    with open(results_path) as f:
         data = json.load(f)
 
     total_seeds = total_lineage = 0
@@ -351,9 +364,20 @@ def run_bisection(target, queue_base, branch_id=None, parallel=8,
         total_seeds += sc
         total_lineage += lc
 
-    print(f"\nDone. {total_seeds} seeds, {total_lineage} lineage entries",
-          file=sys.stderr)
-    shutil.rmtree(tmpdir, ignore_errors=True)
+    print(f"Inserted {total_seeds} seeds, {total_lineage} lineage entries "
+          f"for '{target}'", file=sys.stderr)
+
+
+def run_bisection(target, queue_base, branch_id=None, parallel=8,
+                  max_seeds=50, batch_size=500, timeout=0, db_path=None):
+    """Convenience: scan + insert in one step."""
+    scan_bisection(target, queue_base, branch_id=branch_id,
+                   max_seeds=max_seeds, batch_size=batch_size, db_path=db_path)
+
+    suffix = f'_{branch_id}' if branch_id else ''
+    results_path = RESULTS_DIR / f'{target}{suffix}_results.json'
+    if results_path.exists():
+        insert_results(target, str(results_path), queue_base, db_path=db_path)
 
 
 def plan_bisection(target, queue_base, branch_id=None, db_path=None):
@@ -389,19 +413,31 @@ def main():
     p_build = sub.add_parser('build')
     p_build.add_argument('--target', required=True)
 
-    p_run = sub.add_parser('run')
+    p_scan = sub.add_parser('scan', help='Run Docker bisection only (no DB writes)')
+    p_scan.add_argument('--target', required=True)
+    p_scan.add_argument('--queue-base', required=True)
+    p_scan.add_argument('--branch-id', type=int)
+    p_scan.add_argument('--max-seeds', type=int, default=50)
+    p_scan.add_argument('--batch-size', type=int, default=500,
+                        help='Seeds per fuzz_bin invocation (default: 500)')
+    p_scan.add_argument('--db')
+
+    p_insert = sub.add_parser('insert', help='Insert results.json into DB')
+    p_insert.add_argument('--target', required=True)
+    p_insert.add_argument('--results', required=True, help='Path to results.json')
+    p_insert.add_argument('--queue-base', required=True)
+    p_insert.add_argument('--db')
+
+    p_run = sub.add_parser('run', help='Scan + insert in one step')
     p_run.add_argument('--target', required=True)
     p_run.add_argument('--queue-base', required=True)
     p_run.add_argument('--branch-id', type=int)
-    p_run.add_argument('--parallel', type=int, default=8)
     p_run.add_argument('--max-seeds', type=int, default=50)
     p_run.add_argument('--batch-size', type=int, default=500,
                        help='Seeds per fuzz_bin invocation (default: 500)')
-    p_run.add_argument('--timeout', type=int, default=3600,
-                       help='Total timeout in seconds (default: 3600)')
     p_run.add_argument('--db')
 
-    p_plan = sub.add_parser('plan')
+    p_plan = sub.add_parser('plan', help='Dry-run: show queues and branch counts')
     p_plan.add_argument('--target', required=True)
     p_plan.add_argument('--queue-base', required=True)
     p_plan.add_argument('--branch-id', type=int)
@@ -412,14 +448,23 @@ def main():
     if args.command == 'build':
         build_base_image()
         build_target_image(args.target)
+    elif args.command == 'scan':
+        scan_bisection(
+            args.target, args.queue_base,
+            branch_id=args.branch_id,
+            max_seeds=args.max_seeds,
+            batch_size=args.batch_size,
+            db_path=args.db,
+        )
+    elif args.command == 'insert':
+        insert_results(args.target, args.results, args.queue_base,
+                       db_path=args.db)
     elif args.command == 'run':
         run_bisection(
             args.target, args.queue_base,
             branch_id=args.branch_id,
-            parallel=args.parallel,
             max_seeds=args.max_seeds,
             batch_size=args.batch_size,
-            timeout=args.timeout,
             db_path=args.db,
         )
     elif args.command == 'plan':

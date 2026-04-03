@@ -128,13 +128,19 @@ def check_branches_from_profdata(profdata_path, fuzz_bin, branch_specs):
 def run_seeds_batch(seed_paths, fuzz_bin, profraw_path, batch_size=500):
     """
     Run fuzz_bin on seed_paths in sub-batches (to avoid ARG_MAX),
-    all writing to the same profraw via %m merge-pool.
+    writing each sub-batch to a unique profraw file.
+
+    profraw_path is used as the base: sub-batches write to
+    profraw_path.0, profraw_path.1, etc.
     """
     env = os.environ.copy()
-    env['LLVM_PROFILE_FILE'] = profraw_path
+    wrote_any = False
 
     for i in range(0, len(seed_paths), batch_size):
         chunk = seed_paths[i:i + batch_size]
+        batch_idx = i // batch_size
+        batch_profraw = f'{profraw_path}.{batch_idx}'
+        env['LLVM_PROFILE_FILE'] = batch_profraw
         t = max(30, len(chunk) // 10)
         try:
             subprocess.run(
@@ -143,19 +149,27 @@ def run_seeds_batch(seed_paths, fuzz_bin, profraw_path, batch_size=500):
             )
         except subprocess.TimeoutExpired:
             pass
+        if os.path.exists(batch_profraw):
+            wrote_any = True
 
-    return os.path.exists(profraw_path)
+    return wrote_any
 
 
 def make_profdata(profraw_path, profdata_path):
-    """Merge a single profraw into profdata."""
-    if not os.path.exists(profraw_path):
+    """Merge profraw file(s) into profdata.
+
+    profraw_path is the base name; actual files are profraw_path.0,
+    profraw_path.1, etc. (written by run_seeds_batch).
+    """
+    import glob as _glob
+    profraw_files = sorted(_glob.glob(f'{profraw_path}.*'))
+    if not profraw_files:
         return False
     try:
         subprocess.run(
-            ['llvm-profdata-18', 'merge', '-sparse',
-             profraw_path, '-o', profdata_path],
-            capture_output=True, timeout=60
+            ['llvm-profdata-18', 'merge', '-sparse'] +
+            profraw_files + ['-o', profdata_path],
+            capture_output=True, timeout=120
         )
     except subprocess.TimeoutExpired:
         return False
@@ -177,9 +191,11 @@ def run_and_check(seed_paths, fuzz_bin, branch_specs, work_dir, tag=''):
             return set()
         return check_branches_from_profdata(profdata, fuzz_bin, branch_specs)
     finally:
-        for p in (profraw, profdata):
-            if os.path.exists(p):
-                os.remove(p)
+        import glob as _glob
+        for p in _glob.glob(f'{profraw}.*'):
+            os.remove(p)
+        if os.path.exists(profdata):
+            os.remove(profdata)
 
 
 # ---------------------------------------------------------------------------
