@@ -23,8 +23,10 @@ BlockerAnalyzer/
 │   ├── blocker_3/      # Synthetic: compile-time gate
 │   └── blocker_4/      # Synthetic: magic value conjunction
 ├── blockers/           # Output from fuzzing-branch-analyzer (<target>_blockers.md)
-├── clusters/           # Output from branch-cluster (<target>_clusters.md)
-├── reports/            # Output from fuzzing-root-cause-analyzer (<target>_report.md)
+├── clusters/           # 3-dim clustering output: <target>_3dim_clusters.json (nested L1→L2→L3)
+├── reports/            # Per-L3 RCA findings: <target>/<cluster_id>__<fn_slug>__<l3_range>.json
+│   └── <target>/legacy/  # Reports from prior clustering schemes (kept for reference)
+├── data/functions/     # Per-target function sidecars: <target>.json (file, name, start_line, end_line)
 ├── db/                 # SQLite database (blockers.sqlite)
 ├── tables/             # Exported CSV tables from the database
 ├── tools/              # Reusable analysis scripts
@@ -32,9 +34,12 @@ BlockerAnalyzer/
 │   ├── blocker_db.py           # CLI for managing the blockers SQLite database
 │   ├── seed_bisect.py          # 10-bucket bisection to find seeds that hit blocking branches
 │   ├── seed_diff.py            # MI-based seed diff: pre-computes byte-level mutual information
-│   ├── cluster_orchestrator.py # Orchestrates parallel T1 agents + T2 verification loop
-│   ├── cluster_t2.py           # Mechanical T2 cluster verification (no LLM, Docker-based)
-│   └── cluster_report.py       # Generate cluster report from DB or JSON (deterministic, no LLM)
+│   ├── extract_functions.py    # Runs llvm-cov export in Docker; writes data/functions/<target>.json
+│   ├── cluster.py              # 3-dim clustering lib; emits nested L1→L2→L3 (function groups + Tukey splits)
+│   ├── cluster_runner.py       # CLI: load DB → run clustering → write clusters/<target>_3dim_clusters.json
+│   ├── select_rca_targets.py   # Selector: filter L3 regions by size, emit one RCA job per L3
+│   ├── cluster_verify.py       # Docker-based branch-hypothesis verification
+│   └── (legacy) cluster_orchestrator*.py, cluster_t2.py, cluster_report*.py  # T1/T2/T3 pipeline — superseded
 ├── docker/             # Docker infrastructure for coverage-instrumented builds
 │   ├── Dockerfile.coverage-base  # Base image (clang-18, llvm-18, COV_FLAGS)
 │   ├── run_bisect_entrypoint.sh  # Entrypoint: run seeds, produce llvm-cov show output
@@ -73,14 +78,16 @@ Reports are llvm-cov annotated source files. Branch data appears inline:
 
 ## Agents
 
-Four specialized agents are available in `.claude/agents/`:
+Specialized agents live in `.claude/agents/`:
 
-| Agent | Output folder | File naming | Purpose |
-|-------|--------------|-------------|---------|
-| **fuzzing-branch-analyzer** | `blockers/` | `<target>_blockers.md` | Parses coverage reports, identifies asymmetric branch pairs, cross-references across fuzzers to confirm input-dependency |
-| **branch-cluster** | `clusters/` | `<target>_clusters.md` | Identifies which input bytes control each blocking branch via seed diff + source tracing + Docker mutation verification, then clusters branches by shared controlling byte regions |
-| **fuzzing-root-cause-analyzer** | `reports/` | `<target>_report.md` | Reads cluster results, analyzes seed lineage and coverage divergence per cluster, diagnoses why specific fuzzers fail, writes findings |
-| **seed-generator** | `seeds/` | `<target>_seeds.md` | Reads blocker lists, traces constraints backward from blocked branches, constructs concrete seed byte sequences that hit blocked sides |
+| Agent | Output | Purpose |
+|-------|--------|---------|
+| **fuzzing-branch-analyzer** | `blockers/<target>_blockers.md` | Parses coverage reports, identifies asymmetric branch pairs, cross-references fuzzers to confirm input-dependency |
+| **cluster-root-cause-analyst** (current RCA unit) | `reports/<target>/<cluster_id>__<slug>.json` | One call per **sub-cluster** from the 3-dim pipeline. Reads branches, pulls seeds/lineage from DB, reads source, writes one structured JSON hypothesis. Sonnet model. Designed for parallel fan-out. |
+| **fuzzing-root-cause-analyzer** | `reports/<target>_report.md` | Legacy whole-target RCA; superseded by per-sub-cluster agent but still available for summary reports |
+| **seed-generator** | `seeds/<target>_seeds.md` | Reads blocker lists, traces constraints backward, constructs concrete seed bytes that hit blocked sides |
+
+**Legacy (T1/T2/T3 pipeline, superseded):** `branch-cluster`, `cluster-fit`, `switch-cluster`. Their `.md` files remain in `.claude/agents/` for reference but are not part of the current pipeline.
 
 ## Permissions
 
@@ -203,33 +210,134 @@ Time-series coverage snapshots:
 /home/miao/BlockerAnalyzer/out/coverage_ts/<target>/<fuzzer>/trial<N>/reports/<time_s>/branch_coverage_show.txt
 ```
 
-### Branch Clustering
+### 3-Dimensional Clustering (current pipeline)
 
-Orchestrated by `cluster_orchestrator.py`, which manages a parallel T1→T2 loop:
+Cluster branches by fuzzer *behavior* along three independent dimensions, then hypothesize a root cause per L3 line region. Supersedes the legacy T1/T2/T3 agent pipeline.
 
-**Selection:** Branches from DB where `selection_tags != '[]'` and both blocking and resolving fuzzers exist.
+#### The three dimensions (L1)
 
-**Architecture:**
-- **Orchestrator** (`cluster_orchestrator.py`): Selects candidates, samples T1 reps, spawns agents/tools, maintains JSON state at `clusters/<target>_state.json`
-- **T1 workers** (`branch-cluster` agent): One agent per branch, spawned in parallel (default 10). Diffs seeds, traces source, formulates + verifies byte hypothesis. Returns JSON result.
-- **T2 verification** (`cluster_t2.py`): Python tool (no LLM). One Docker container per branch, tests necessity (Test A: 1 positive seed) and sufficiency (Test B: 3-5 negative seeds from different fuzzers/trials). All seeds run inside one container with unique profraw per seed.
-- **Report** (`cluster_report.py`): Generates markdown from JSON state or DB. Deterministic, no LLM.
+Each branch has a 4-tuple (one entry per fuzzer) in each dimension, sourced from `derived_metrics`:
 
-**T1 sampling:** Proportional per function, min 10 total, at least 1 per function. Priority: more selection tags > higher divergence values.
+| Dim | Signal | Clustering method |
+|-----|--------|-------------------|
+| **dim1** — block probability | ternary label per fuzzer (`never`/`rarely`/`sometimes`/`mostly`/`always`/`never_reached`) | Exact `GROUP BY` on the 4-tuple. Pattern **interesting** iff it contains both `never` and `always` (deterministic capability gap). Divergence = normalized label entropy. |
+| **dim2** — blocking duration | hours blocked per fuzzer (averaged across trials) | HDBSCAN on log1p + z-scored 4-d vector with `-1` sentinels handled; keep clusters above `--dim2-min-div` divergence. |
+| **dim3** — hitcount | hits on current/opposite side per fuzzer | HDBSCAN on log1p + z-scored vector; keep clusters above `--dim3-min-div`. |
 
-**T2 strengthened sufficiency:** Test B uses 3-5 negative seeds. All must pass (blocked side appears after injecting controlling bytes). Partial pass → unfitted (promoted to T1).
+Dimensions are *independent* — same branch may appear in a dim1 cluster AND a dim2 cluster AND a dim3 cluster.
 
-**Loop:**
-- T1 produces ≥1 new cluster → T2 fits remaining → unfitted promoted to next T1 round
-- T1 produces 0 new clusters → re-select different reps → retry
-- Two consecutive T1 rounds with 0 new clusters → mark remaining as SKIPPED
+#### Three-level hierarchy (L1 → L2 → L3)
+
+- **L1 — dim cluster.** Top-level group of branches sharing a dim pattern.
+- **L2 — function group.** Within each L1, branches grouped by enclosing C function (from `data/functions/<target>.json`, built by `tools/extract_functions.py` via `llvm-cov export`). One L2 per unique `(file, function)`.
+- **L3 — line region.** Within each L2, Tukey's-fence adaptive splitting on consecutive-line gaps. A function with uniformly spaced branches → 1 L3 covering the whole function. A function with branches split across multiple distinct code regions → multiple L3s. Threshold: `gap > max(adaptive_floor=20, Q3 + 1.5·IQR)`; requires ≥ `adaptive_min_n=4` branches to attempt a split (smaller groups stay as one L3).
+
+**The RCA unit is L3.** Fan out one `cluster-root-cause-analyst` agent per L3 region.
+
+#### Function sidecar
+
+```bash
+python3 tools/extract_functions.py --target <name>
+# Runs llvm-cov export inside blocker-<target>-cov Docker.
+# Writes data/functions/<target>.json with [{file, name, start_line, end_line}, ...].
+```
+
+Required before clustering; `cluster_runner.py` auto-loads it from `data/functions/<target>.json` (override with `--functions PATH`). If absent, clustering falls back to legacy file+line-proximity grouping (function=null).
+
+#### Pipeline
+
+```bash
+python3 tools/cluster_runner.py --target <name> \
+    [--output clusters/<target>_3dim_clusters.json] \
+    [--min-cluster-size 5] [--min-size 3] \
+    [--dim2-min-div 1.0] [--dim3-min-div 1.0] \
+    [--functions data/functions/<target>.json]
+```
+
+Loads branches + `trial_coverage` from the DB, patches `cluster.FUZZERS`, loads the function sidecar, runs `cluster.run_clustering()`, writes one combined JSON.
+
+#### Output schema (`clusters/<target>_3dim_clusters.json`)
+
+```json
+{
+  "summary": {"total_branches": 670,
+              "dim1_clusters_found": 69, "dim1_clusters_kept": 8,
+              "dim2_clusters_found": 21, "dim2_clusters_kept": 8,
+              "dim3_clusters_found": 27, "dim3_clusters_kept": 5},
+  "dim1_clusters": [
+    {
+      "cluster_id": "dim1_cluster_004",
+      "pattern": {"cmplog": "always", "naive": "never", ...},
+      "size": 34,
+      "is_interesting": true,
+      "divergence": {"dim1": 0.3138},
+      "sub_clusters": [                                 // L2: function groups
+        {
+          "file": "/src/sqlite3/bld/sqlite3.c",
+          "function": "sqlite3.c:sqlite3VdbeExec",
+          "size": 9,
+          "line_range": [86324, 87289],
+          "tukey_split": true,
+          "line_regions": [                             // L3: split by Tukey
+            {"line_range": [86802, 87289], "size": 8, "branches": [...]},
+            {"line_range": [86324, 86324], "size": 1, "branches": [...]}
+          ]
+        }
+      ]
+    }
+  ],
+  "dim2_clusters": [...],
+  "dim3_clusters": [...]
+}
+```
+
+Key invariants: every L2 has `line_regions` with ≥1 entry. `tukey_split=false` → exactly 1 entry. `function=null` → L2 came from unmapped-branch fallback (legacy line-proximity grouping).
+
+#### Selecting RCA targets
+
+`tools/select_rca_targets.py` reads the cluster JSON and emits one job per L3 region whose `size` meets a per-target threshold. The threshold is **fan-out policy**, not a clustering property — the JSON is never filtered.
+
+```bash
+python3 tools/select_rca_targets.py --target sqlite3             # default threshold
+python3 tools/select_rca_targets.py --target sqlite3 --min-size 3
+python3 tools/select_rca_targets.py --target all                 # summary across targets
+python3 tools/select_rca_targets.py --target sqlite3 --format json  # feed into orchestrator
+```
+
+Per-target default threshold (`DEFAULT_MIN_SIZE` in the script):
+
+| target | threshold | rationale |
+|---|---|---|
+| mbedtls | 1 | Only 25 candidate branches — every one worth a look |
+| bloaty  | 2 | 214 candidate branches |
+| sqlite3 | 2 | 670 candidate branches |
+| lcms    | 2 | 358 candidate branches |
+| libpcap | 2 | 679 candidate branches |
+
+Under function grouping, size=2 is a meaningful unit (two branches in the same function sharing a dim pattern). Singletons under function grouping don't benefit from the shared-hypothesis framing and are skipped by default (except mbedtls).
+
+#### Per-L3 root cause analysis
+
+Fan out `cluster-root-cause-analyst` agents (sonnet, parallel) — one per L3 job emitted by the selector. Each agent:
+
+1. Receives an L3 region plus L2 function context and L1 dim-cluster context.
+2. Pulls resolving/blocking seeds + lineage from the DB for the L3 branches.
+3. Reads source context (L3 line range ± 30, plus a skim of the full L2 function).
+4. Formulates ONE hypothesis and classifies it into a `root_cause_class` (e.g., `I2S_constant_match`).
+5. Optionally produces a `sibling_observation` if L2 had a Tukey split — a short note on whether the hypothesis plausibly extends to other L3 regions in the same function (NOT a deep re-analysis).
+6. Writes one JSON to `reports/<target>/<cluster_id>__<function_slug>__<l3_line_range>.json`.
+
+`status` values: `"ok"` | `"insufficient_input"` | `"no_clear_root_cause"`.
+
+One hypothesis per call — do not try to find multiple root causes in one L3.
 
 ## Typical Workflow
 
-1. Run LibAFL fuzzers on target; run `run_coverage_timeseries.sh` to generate per-checkpoint coverage reports under `out/coverage_ts/`.
-2. Run `extract_blockers_ts.py` to extract blockers via chronological forward pass → writes `branches`, `trial_coverage`, `derived_metrics` (with selection tags) to `db/blockers.sqlite`.
-3. Run `seed_bisect.py scan` to find resolving and blocking seeds (parallel per target), then `insert` sequentially → writes `resolving_seeds`, `resolving_seed_lineage`, `blocking_seeds`, `blocking_seed_lineage` to DB.
-4. Run `cluster_orchestrator.py` to manage parallel T1 (agent) + T2 (tool) clustering → state in `clusters/<target>_state.json`.
-5. Run `cluster_report.py --from-json` to generate the clean cluster report → output in `clusters/`.
-6. Run `blocker_db.py import-clusters` to populate DB for SQL queries (optional).
-7. Use `fuzzing-root-cause-analyzer` on cluster results to analyze seed lineage, coverage divergence, and diagnose why specific fuzzers fail per cluster → output in `reports/`.
+1. Run LibAFL fuzzers; run `run_coverage_timeseries.sh` to generate per-checkpoint coverage reports under `out/coverage_ts/`.
+2. `extract_blockers_ts.py` — chronological forward pass, writes `branches`, `trial_coverage`, `derived_metrics` to `db/blockers.sqlite`.
+3. `seed_bisect.py scan` (parallel per target) → `insert` (sequential) — writes resolving/blocking seeds + lineage to DB.
+4. `extract_functions.py --target <name>` — runs `llvm-cov export` in Docker, writes `data/functions/<target>.json`.
+5. `cluster_runner.py --target <name>` — runs 3-dim clustering (L1 dim cluster → L2 function group → L3 Tukey split), writes `clusters/<target>_3dim_clusters.json`.
+6. `select_rca_targets.py --target <name>` — emits one RCA job per L3 region passing the per-target threshold.
+7. **Fan out `cluster-root-cause-analyst`** — one agent per L3 job, in parallel. Each writes a JSON hypothesis to `reports/<target>/<cluster_id>__<function_slug>__<l3_range>.json`.
+8. (Optional) roll per-L3 findings into a per-target summary report.
