@@ -14,35 +14,34 @@ BlockerAnalyzer/
 │   ├── <target>/<fuzzer>/trial<N>/queue/  # raw LibAFL corpus
 │   └── coverage_curves.png                # plot_coverage_curves.py output
 ├── csvs/               # Analysis CSV outputs (significance, candidates, reps)
-├── templates/          # Feature catalog — current synthetic-verification pipeline
-│   ├── feature_spec.template.json    # JSON schema
-│   ├── PRESENTATION.md               # Methodology summary
-│   ├── i2s_magic_number_gate/           # Verified: cmplog>naive, MAGIC_BYTES knob
-│   ├── i2s_corpus_pollution/         # Verified: vpc>cmp under pollute, COST_INNER knob
-│   └── legacy/                       # Refuted/inconclusive entries (lanes_concentration,
-│                                     # quality_chain_concentration, workload_variance_concentration)
-├── data/functions/     # Per-target function sidecars (file+line → function map)
+├── templates/          # Feature catalog — created by feature-hypothesis-generator agent (step 4)
+│   ├── feature_spec.template.json    # JSON schema for feature_spec.json
+│   ├── branch_index.json             # Append-only (target, branch_id) → template_id map
+│   ├── <feature_id>/                 # One subdir per surviving hypothesis (template.c + params.json + feature_spec.json)
+│   └── legacy/                       # Refuted / superseded hypotheses (kept as methodology record)
+├── fuzzer_mechanism_library.md  # Per-fuzzer mechanism paragraphs, spliced into prompts by study_units.py evidence-per-branch
 ├── db/                 # SQLite: blockers.sqlite (branches + study_subjects + subject_branches + seeds)
 ├── tools/              # Reusable analysis scripts
 │   ├── blocker_db.py             # Schema management for the SQLite database (init only)
 │   ├── subject_significance.py   # Per-(target,A,B) AUC + final-coverage MW U-test
 │   ├── study_units.py            # Per-target coverage walk + per-subject admission + evidence prompt assembly
-│   ├── build_candidates.py       # Per-branch ≥7/≥7 aggregation → blocker_candidates.csv
+│   ├── build_candidates.py       # Per-branch ≥8/≥8 aggregation → blocker_candidates.csv
 │   ├── select_representatives.py # Shape × region dedup → blocker_representatives.csv + dedup_map
 │   ├── run_hypothesis_fanout.py  # Manifest builder; reads reps, calls evidence-per-branch
 │   ├── lint_template_shapes.py   # Post-agent: intra/cross-template shape consistency check
 │   ├── seed_bisect.py            # 10-bucket bisection to find seeds that hit blocking branches
-│   ├── extract_functions.py      # Runs llvm-cov export in Docker → data/functions/<target>.json
+│   ├── extract_functions.py      # Library: llvm-cov export per target → (file, name, start, end) list; imported by study_units.py at add-canonical time to populate branches.function with the real C/C++ function name (demangled via c++filt)
 │   └── plot_coverage_curves.py   # Coverage-by-time spaghetti plot (per-target panels)
 ├── docker/             # Docker infrastructure for coverage-instrumented builds
-│   ├── Dockerfile.coverage-base  # Base image (clang-18, llvm-18, COV_FLAGS)
-│   ├── run_bisect_entrypoint.sh  # Entrypoint for seed_bisect
-│   └── targets/                  # Per-target coverage Dockerfiles
-│       ├── Dockerfile.bloaty.cov
-│       ├── Dockerfile.lcms.cov
-│       ├── Dockerfile.libpcap.cov   # kept for re-runs; libpcap dropped from canonical set
-│       ├── Dockerfile.mbedtls.cov   # kept for re-runs; mbedtls dropped from canonical set
-│       └── Dockerfile.sqlite3.cov
+│   ├── Dockerfile.coverage-base  # Base image: clang-18, llvm-18, COV_FLAGS env, bakes in the two scripts below → libafl-coverage-base
+│   ├── bisect_in_container.py    # 10-bucket bisection seed scanner; run inside container as /seed_scanner.py (also bind-mounted by seed_bisect.py at run time so unrebuilt images still work)
+│   ├── run_bisect_entrypoint.sh  # Standalone /run_bisect.sh helper: corpus dir → branch_coverage_show.txt (ad-hoc, not used by seed_bisect.py)
+│   └── targets/                  # Per-target coverage Dockerfiles → libafl-<target>-cov
+│       ├── Dockerfile.curl.cov
+│       ├── Dockerfile.harfbuzz.cov
+│       ├── Dockerfile.libpng.cov
+│       ├── Dockerfile.libxml2.cov
+│       └── Dockerfile.openthread.cov
 └── .claude/
     ├── agents/         # Specialized Claude agents for analysis
     └── settings.json   # Project permissions (Bash allowed for all agents)
@@ -72,9 +71,7 @@ Specialized agents live in `.claude/agents/`:
 
 | Agent | Output | Purpose |
 |-------|--------|---------|
-| **feature-hypothesis-generator** (Opus) | `templates/<feature_id>/{template.c, params.json, feature_spec.json}` | **Current hypothesis-generation step** of the metaphorical-testing pipeline. Receives a **structured prompt** (push-mode) emitted by `tools/study_units.py evidence-per-branch` for ONE (target, branch). Diffs winner-resolving vs loser-blocking seed bytes at the highest-prob_div decisive pair, reads source CMP shape, searches `templates/` for prior art, decides whether multi-pair evidence collapses to ONE template or splits into multiple, writes the three template files per surviving hypothesis. Modeled after the `i2s_corpus_pollution` pilot. One per-branch prompt per call; designed for parallel fan-out across (target, branch_id) pairs. |
-| **fuzzing-branch-analyzer** | `blockers/<target>_blockers.md` | Parses coverage reports, identifies asymmetric branch pairs, cross-references fuzzers to confirm input-dependency |
-| **seed-generator** | `seeds/<target>_seeds.md` | Reads blocker lists, traces constraints backward, constructs concrete seed bytes that hit blocked sides |
+| **feature-hypothesis-generator** (Opus) | `templates/<feature_id>/{template.c, params.json, feature_spec.json}` | Hypothesis-generation step of the metaphorical-testing pipeline. Receives a structured prompt (push-mode) emitted by `tools/study_units.py evidence-per-branch` for ONE (target, branch). Diffs winner-resolving vs loser-blocking seed bytes at the highest-prob_div decisive pair, reads source CMP shape, searches `templates/` for prior art, decides whether multi-pair evidence collapses to ONE template or splits into multiple, writes the three template files per surviving hypothesis. Modeled after the `i2s_corpus_pollution` pilot. One per-branch prompt per call; designed for parallel fan-out across (target, branch_id) pairs. |
 
 The metaphorical-testing pipeline uses **push-mode**: the orchestrator
 runs `tools/study_units.py evidence-per-branch --target T --branch-id M`
@@ -82,12 +79,6 @@ to assemble the structured prompt (BLOCKER / TRIAL VECTOR / DECISIVE
 PAIRS / SOURCE CONTEXT / PAIR-N SEEDS / MECHANISM CONTEXT / TASK), then
 feeds that prompt to `feature-hypothesis-generator`. The agent never
 queries the DB itself — the prompt IS the auditable evidence record.
-
-**Legacy agents (kept available but not part of the current pipeline):**
-- `cluster-root-cause-analyst` — per-L3 RCA for the 3-dim clustering pipeline.
-  Output: `reports/<target>/<cluster_id>__<slug>.json`. Sonnet, parallel fan-out.
-- `fuzzing-root-cause-analyzer` — legacy whole-target RCA narrative.
-- `branch-cluster`, `cluster-fit`, `switch-cluster` — legacy T1/T2/T3 cluster pipeline.
 
 ## Permissions
 
@@ -109,24 +100,17 @@ and the `init` command only. Population is handled elsewhere:
 python3 tools/blocker_db.py init    # Initialize schema (idempotent)
 ```
 
-**Database schema (subject-centric, redesigned 2026-05-16):**
+**Database schema (subject-centric):**
 
 | Table | Purpose | Key fields |
 |-------|---------|------------|
-| `branches` | One row per admitted blocker. Admission rule: ≥1 canonical subject admits the branch under the per-subject rule below. | `target`, `file`, `function` (= file basename, placeholder), `line`, `col`, `blocked_side`, `source_line` |
+| `branches` | One row per admitted blocker. Admission rule: ≥1 canonical subject admits the branch under the per-subject rule below. Branch identity is `(target, file, line, col, blocked_side)`; `function` is descriptive (real C/C++ name, demangled via c++filt; resolved at `add-canonical` time by `extract_functions.extract`). | `target`, `file`, `function`, `line`, `col`, `blocked_side`, `source_line` |
 | `study_subjects` | One row per (target, A, B) canonical pair. | `target`, `A`, `B`, `delta_technique`, `n_A`/`n_B`, `mean_auc_*`, `delta_auc`, `p_auc`, `auc_dir`, `mean_final_*`, `delta_final`, `p_final`, `final_dir`, `admissible`, `direction`, `n_branches`, `refreshed_at` |
 | `subject_branches` | Per-(subject, branch) row, one per (subject, branch) that meets the **per-subject admission rule**: across the 20 trials of (A, B), ≥1 blocked AND ≥1 resolved at final checkpoint. | `n_A_resolved/_blocked/_unreached`, `n_B_resolved/_blocked/_unreached`, `A_resolved_trials`/`A_blocked_trials`/`B_resolved_trials`/`B_blocked_trials` (JSON arrays of trial numbers), `p_A_blocked`, `p_B_blocked`, `prob_div` (oriented), `avg_dur_A/B`, `dur_div`, `avg_hits_A/B`, `hit_div`, optional `hypothesis_label`, `template_id` |
 | `resolving_seeds` | Seeds hitting the **blocked** side (from resolving fuzzers). | `branch_id`, `fuzzer`, `trial`, `seed_id`, `parent_seed_id`, `mutation_op`, `discovery_time_s` |
 | `resolving_seed_lineage` | Parent chain for resolving seeds. | `branch_id`, `fuzzer`, `trial`, `seed_id`, `depth`, `ancestor_id`, `mutation_op` |
 | `blocking_seeds` | Seeds hitting the **other** side (from blocking fuzzers). | Same schema as `resolving_seeds` |
 | `blocking_seed_lineage` | Parent chain for blocking seeds. | Same schema as `resolving_seed_lineage` |
-
-**Removed 2026-05-16:** `trial_coverage`, `derived_metrics`,
-`cluster_assignments` tables; `branches.confirmation_level` column;
-`add-blockers` / `compute-derived` / `query` / `export` / `enrich` /
-`import-clusters` CLI commands. Per-fuzzer counts are now derived from
-`subject_branches` via cross-subject join on `branch_id`. Per-subject
-queries go through `study_units.py`.
 
 **Trial-list JSON columns:** `A_resolved_trials` etc. store trial numbers
 (1..N) as JSON arrays — e.g., `[1, 3, 4, 5, 7, 8, 9]`. Unreached trials are
@@ -179,7 +163,7 @@ python3 tools/seed_bisect.py plan --target <name> --queue-base ./out
 
 **Options:** `--max-seeds N` (default 5; was 50 — small max suffices for hypothesis evidence), `--batch-size N` (seeds per `FUZZ_BIN` invocation, default 500), `--branches-from-csv PATH` (scope branches), `--queue-sample-size N` (per-queue sample cap, default 0 = no sampling).
 
-**Docker images:** Named `blocker-{target}-cov`, built from `docker/Dockerfile.coverage-base` + `docker/targets/Dockerfile.{target}.cov`.
+**Docker images:** Named `libafl-{target}-cov`, built from `docker/Dockerfile.coverage-base` + `docker/targets/Dockerfile.{target}.cov`.
 
 **LibAFL metadata format:** Each seed `HASH` has a `.HASH.metadata` JSON file containing:
 - Parent info: `parent_id`, `parent_file` (hex hash of parent seed), `execs`, `elapsed_ms`
@@ -272,7 +256,7 @@ interpretable columns instead of one opaque weighted score.
 **`evidence-per-branch` subcommand** assembles the structured prompt for
 `feature-hypothesis-generator` (push-mode). Emits sections: BLOCKER /
 TRIAL VECTOR / DECISIVE PAIRS / SOURCE CONTEXT / PAIR-N SEEDS /
-MECHANISM CONTEXT / TASK. Collapses ALL canonical pairs satisfying ≥7/≥7
+MECHANISM CONTEXT / TASK. Collapses ALL canonical pairs satisfying ≥8/≥8
 at this branch into a single prompt; verification is scoped to the
 decisive fuzzers only.
 
@@ -281,7 +265,7 @@ python3 tools/study_units.py evidence-per-branch \
     --target curl --branch-id 26 \
     [--winner-threshold 7] [--loser-threshold 7] \
     [--admissible-only | --no-admissible-only] \
-    [--mechanism-library notes/fuzzer_mechanism_library.md] \
+    [--mechanism-library fuzzer_mechanism_library.md] \
     [--queue-base /20TB/miao/fuzz-blocker] \
     [--source-lines 30] [--seeds-per-side 5] [--seed-bytes 64] \
     [--output -]
@@ -295,14 +279,14 @@ with no admitting subject get blank stats and `-` shape character); reads
 loser-blocking seed examples; reads source from inside the
 `libafl-<target>-cov` Docker image via `docker run --entrypoint sed`;
 splices the per-fuzzer mechanism paragraphs from
-`notes/fuzzer_mechanism_library.md`. The output prompt is what you feed
+`fuzzer_mechanism_library.md`. The output prompt is what you feed
 to the agent (one `(target, branch_id)` per agent invocation).
 
-### `tools/build_candidates.py` (per-branch, ≥7/≥7 rule)
+### `tools/build_candidates.py` (per-branch, ≥8/≥8 rule)
 
 Reads `study_subjects` + `subject_branches` + `branches` and writes
 `csvs/blocker_candidates[_<target>].csv` — **one row per (target, branch_id)**
-with all canonical pair-edges satisfying the ≥7/≥7 rule collapsed into a
+with all canonical pair-edges satisfying the ≥8/≥8 rule collapsed into a
 single record.
 
 ```bash
@@ -314,10 +298,10 @@ python3 tools/build_candidates.py \
 
 **Decisive-pair rule (per canonical pair at a branch):**
 - `winner_resolved >= --winner-threshold` AND `loser_blocked >= --loser-threshold`.
-  Default 7/7 (70% at n=10).
+  Default 7/7 (80% at n=10).
 - Per-subject admission already eliminates the (all-unreached, navigation-gap)
   pathology — branches reach `subject_branches` only if some trial blocked AND
-  some resolved within the subject. ≥7/≥7 then keeps the strong-signal subset.
+  some resolved within the subject. ≥8/≥8 then keeps the strong-signal subset.
 
 A branch is emitted iff it has ≥1 decisive pair (under `--admissible-only`,
 the pair's subject must also be admissible).
@@ -356,12 +340,12 @@ python3 tools/select_representatives.py \
 ```
 
 **Decisive-only shape** (4-char string, fixed order naive/cmp/vp/vpc):
-- `R` — fuzzer is winner in ≥1 decisive pair (`n_resolved ≥ 7`)
+- `R` — fuzzer is winner in ≥1 decisive pair (`n_resolved ≥ 8`)
 - `B` — fuzzer is loser  in ≥1 decisive pair (`n_blocked  ≥ 7`)
 - `-` — fuzzer is NOT in any decisive pair at this branch (reference context)
 
-By construction (n=10 + ≥7/≥7), every decisive fuzzer is unambiguously R or B
-(≥7R AND ≥7B requires n≥14).
+By construction (n=10 + ≥8/≥8), every decisive fuzzer is unambiguously R or B
+(≥8R AND ≥8B requires n≥16).
 
 **Group key**: `(decisive_shape, file, function, line // bucket)`. Default
 bucket=50 lines. Pick rep per group: highest `(max_prob_div, max_dur_div,
@@ -440,17 +424,19 @@ Exit codes: 0=clean, 1=intra-only warnings, 2=cross-template warnings.
 
 ### `tools/plot_coverage_curves.py`
 
-Coverage-by-time plot for the canonical 4 ready targets × 4 fuzzers,
-aggregated across n=10 trials. Reads
-`out/coverage_ts/<target>/<fuzzer>/trial<N>/coverage_timeseries.csv` and
-plots mean line + IQR band per fuzzer per target.
+Coverage-by-time plot for canonical targets × 4 fuzzers, n=10 trials each.
+Each panel shows per-fuzzer thin spaghetti lines (one per trial) plus a
+bold mean line, so distributional separation is visible at a glance —
+two fuzzers with overlapping means but cleanly displaced per-trial bands
+are significant under MW, two with heavy per-trial overlap are not. Reads
+`out/coverage_ts/<target>/<fuzzer>/trial<N>/coverage_timeseries.csv`.
 
 ```bash
 python3 tools/plot_coverage_curves.py
 # → out/coverage_curves.png
 ```
 
-### `notes/fuzzer_mechanism_library.md`
+### `fuzzer_mechanism_library.md`
 
 Stable canonical paragraphs describing each canonical fuzzer's mechanism
 (naive / cmplog / value_profile / value_profile_cmplog). Used by
@@ -492,66 +478,71 @@ SQL VM, color management).
 — includes domain × format × expected-divergence-driver table and design-space
 coverage axes (I2S magic / fixed-keyword / checksum / state / network / font / image).
 
-#### Function sidecar
+#### Function-name resolution
 
-```bash
-python3 tools/extract_functions.py --target <name>
-# Runs llvm-cov export inside blocker-<target>-cov Docker.
-# Writes data/functions/<target>.json with [{file, name, start_line, end_line}, ...].
-```
+`branches.function` is populated at `add-canonical` time:
+`study_units.py.build_function_index(target)` imports
+`extract_functions.extract(target)`, which runs `llvm-cov export` inside
+`libafl-<target>-cov` Docker (~1–2s per target), then batch-demangles the
+names via `c++filt`. The result is held in memory and used at upsert time —
+no on-disk sidecar.
 
-Required before clustering; `cluster_runner.py` auto-loads it from `data/functions/<target>.json` (override with `--functions PATH`). If absent, clustering falls back to legacy file+line-proximity grouping (function=null).
+If Docker is unavailable or the coverage image is missing, the lookup falls
+back to `basename(file)` with a stderr warning, and the run still succeeds.
+The schema's UNIQUE constraint excludes `function` (branch identity is
+`(target, file, line, col, blocked_side)`), so a subsequent run with the
+function index available will refresh in place via `ON CONFLICT … DO UPDATE
+SET function = COALESCE(excluded.function, branches.function)`.
 
-#### Pipeline
 
-Per-target default threshold (`DEFAULT_MIN_SIZE` in the script):
+## Feature Catalog (templates/)
 
-## Feature Catalog (current pipeline)
-
-Supersedes the per-L3 RCA report flow. Each entry in `templates/<feature_id>/` is a falsifiable hypothesis about *one* program-side parameter that controls *one* fuzzer-pair divergence. The discipline: LLM proposes axes, parameterized synthetic verifies. No free-form RCA text.
-
-### LLM roles
-
-- **LLM as hypothesis generator** — reads source for the matched-pair blocker set, proposes ≥3 candidate program-feature axes, falsifies the weakest with prior artifacts, picks the survivor.
-- **LLM as test-case writer** (mechanical) — emits a `template.c` parameterized by the surviving axis, with one Dockerfile per scan value.
-
-The LLM does NOT do free-form mechanism analysis or write RCA narratives. The harness IS the falsifiable hypothesis; the dose-response curve IS the verdict.
-
-### 4-step protocol (apply before any synthetic is built)
-
-1. **Artifact search** — Have we tried this pair before? `ls templates/`, `grep notes/benchmark_verification_log.md`, look for `targets/b_*` or `experiments/`.
-2. **Cross-target distribution** — Where does the divergence concentrate? Single-target → program-specific feature; spread across targets → general feature. Skipping this step caused two refuted templates this session.
-3. **Multi-candidate emission (≥3 hypotheses)** — Falsify each via prior verification artifacts. Pick the survivor.
-4. **Build only the surviving candidate** — Parameterized template + sweep config + Dockerfile per scan value.
-
-### Template directory layout
-
-Every `templates/<feature_id>/` has three files:
+Output of the `feature-hypothesis-generator` agent (step 4). Each entry
+`templates/<feature_id>/` is a falsifiable hypothesis about ONE
+program-side parameter controlling ONE fuzzer-pair divergence, with three
+files:
 
 | File | Purpose |
 |------|---------|
-| `template.c` | Parameterized C harness. One compile-time `-D` flag is the program-feature knob. |
-| `params.json` | Sweep grid (`scan_values`), fuzzer list, trials_per_point, duration_s, acceptance rule, expected curve per fuzzer. |
-| `feature_spec.json` | Canonical record: pair (A, B, axis_differ), hypothesis, verification block (results + verdict). Schema in `templates/feature_spec.template.json`. |
+| `template.c` | Parameterized C harness. One compile-time `-D` knob is the program-feature axis. |
+| `params.json` | Sweep grid (`scan_values`), fuzzer list, trials_per_point, duration_s, acceptance rule, expected curve. |
+| `feature_spec.json` | Canonical record: pair (A, B, delta), hypothesis, verification block (results + verdict ∈ reproduced / reproduced-in-median / partially-reproduced / refuted / inconclusive). |
 
-Per scan value, a separate Dockerfile lives in `libafl_fuzzbench/docker/targets/Dockerfile.<feature_id>_<scan_value>`. The wrapper `scripts/run_blocker_verification.sh` builds + runs all (target × fuzzer × trial) combinations.
+`templates/branch_index.json` is the append-only catalog index:
+`(target, branch_id) → template_id` with role (`primary` / `extension`)
+and `verdict_at_time`. `run_hypothesis_fanout.py --skip-existing` reads it
+to avoid re-dispatching agents for branches already covered.
 
-### Acceptance criteria
+The harness IS the falsifiable hypothesis; the dose-response curve IS the
+verdict. No free-form RCA text. Verification runs only the
+**involved fuzzers** (decisive winners + losers); reference fuzzers carry
+prompt context, not verdict weight.
 
-- **Reproduced** — observed dose-response matches predicted shape; primary pair direction holds at endpoints.
-- **Reproduced in median** — direction holds in median but mean is dominated by bimodal outliers (e.g. naive's stochastic runaways). Common for fuzzers with high per-trial variance.
-- **Partially reproduced** — endpoints match but middle is non-monotone or noisy.
-- **Refuted** — direction wrong or curve flat; the proposed program-feature axis is not what controls the divergence. Refutation is a valid catalog entry.
-- **Inconclusive** — signal below noise floor at the chosen trial count and duration. Methodology lesson, not a refutation.
+### Current entries
 
-### Verified entries (as of 2026-04-30)
+**Verified / active** (under `templates/`):
 
-| Feature | Pair | Parameter | Verdict | Sweep result |
-|---|---|---|---|---|
-| `i2s_magic_number_gate` | cmplog vs naive | MAGIC_BYTES ∈ {1,2,4,8} | reproduced | cmp/naive ratio: 43× → 135× → 1097× → 588× |
-| `i2s_corpus_pollution` | value_profile_cmplog vs cmplog | COST_INNER ∈ {0,64,512,4096} | reproduced (4-fuzzer synergy) | cmp medians 993→109→0→0 (exponential decay); vpc 632→376→258→6 (graceful) |
+| feature_id | verdict |
+|---|---|
+| `i2s_magic_number_gate` | reproduced (cmplog vs naive, I2S substitution) |
+| `i2s_anchored_length_trap` | reproduced |
+| `i2s_anchored_seed_deviation_trap` | reproduced (v5/v6/v7a/v8, three subtypes) |
+| `i2s_corpus_pollution` | reproduced (4-fuzzer synergy) |
+| `i2s_grammar_chain_length` | reproduced (v2) |
+| `i2s_pair_relational_lookup` | reproduced |
+| `vp_gradient_derived_operand` | reproduced (v2, full 4-fuzzer) |
+| `vp_length_anchor_rescue` | (no feature_spec.json yet) |
 
-Three earlier entries (`quality_chain_concentration`, `workload_variance_concentration`, `lanes_concentration`) targeted `minimizer`, which is not in the canonical comparable-pair set under the metaphorical-testing framing. They have been moved to `templates/legacy/` and are kept as methodology lessons. See `templates/PRESENTATION.md`.
+**Refuted / superseded** (under `templates/legacy/`):
+
+| feature_id | verdict |
+|---|---|
+| `i2s_indirect_dispatch_opacity` | refuted |
+| `i2s_inequality_anchor_trap` | refuted (family-bounded) |
+| `i2s_jump_table_opacity` | refuted on mechanism (2026-05-08; replaced by `i2s_indirect_dispatch_opacity`) |
+| `i2s_runtime_bound_substitution` | refuted |
+| `i2s_whitelist_anchor_trap` | refuted (remap to strpres family) |
+| `vp_rescues_i2s_derived_operand` | refuted |
 
 ## Typical Workflow (metaphorical-testing pipeline, n=10)
 
@@ -561,7 +552,7 @@ The canonical pipeline is **6 phases** (with one optional auxiliary phase
 ```
 Step 1: Statistical significance — admissibility per (target, A, B)
 Step 2: DB population            — branches + study_subjects + subject_branches
-Step 3a: Build candidate dictionary  (per-branch, ≥7/≥7 rule)
+Step 3a: Build candidate dictionary  (per-branch, ≥8/≥8 rule)
 Step 3b: Pick representatives        (decisive-shape × source-region dedup)
 Step 3.5 (optional): Seed bisection on representatives
 Step 4: Hypothesis fan-out — manifest + per-rep prompts → Claude dispatch
@@ -603,9 +594,7 @@ Then for each of the 4 canonical subjects:
    avg hits, p_blocked), and direction-oriented divergences.
 
 The `branches` table is the union of per-subject admissions across the 4
-subjects. No separate "target-level extraction" step exists anymore
-(retired 2026-05-16; `extract_blockers_ts.py`, `trial_coverage`,
-`derived_metrics`, `branches.confirmation_level` all gone).
+subjects. No separate target-level extraction step exists.
 
 **Step 3a — build candidate dictionary** (`tools/build_candidates.py`):
 
@@ -615,7 +604,7 @@ python3 tools/build_candidates.py
 ```
 
 Per-branch aggregation. A canonical pair at a branch is **decisive** iff
-`winner_resolved >= 7 AND loser_blocked >= 7`. A branch is admitted iff
+`winner_resolved >= 8 AND loser_blocked >= 8`. A branch is admitted iff
 it has ≥1 decisive pair (admissible-only by default). Reads
 `subject_branches` directly — per-subject admission already filtered out
 navigation-gap pathology upstream.
@@ -679,22 +668,18 @@ Default grouping is `(target, primary_delta)` — across groups parallel,
 within group sequential so later calls see prior templates. The script
 auto-skips reps already covered (per `templates/branch_index.json`).
 
-**Step 5 — verification sweep**:
+**Step 5 — verification sweep** (not implemented yet):
 
-```bash
-scripts/run_blocker_verification.sh \
-    --blockers "<feature_id_s0> <feature_id_s4> ..." \
-    --fuzzers "<A> <B>" \
-    --trials 5 --duration 600
-# Crash-count summary appends to notes/benchmark_verification_log.md.
-# Then fill feature_spec.json verification block:
-#   per-trial results, medians, summary, verdict ∈ {reproduced,
-#   reproduced-in-median, partially-reproduced, refuted, inconclusive}.
-```
+For each `templates/<feature_id>/` produced in step 4, build the
+parameterized harness across `params.json:scan_values`, run the
+`involved_fuzzers` for `trials_per_point` × `duration_s`, then fill the
+`feature_spec.json` verification block: per-trial results, medians,
+summary, verdict ∈ {reproduced, reproduced-in-median,
+partially-reproduced, refuted, inconclusive}.
 
-Synthetic verification runs **only the involved fuzzers** (the union of
-decisive winners + losers) — reference fuzzers are auxiliary context in
-the prompt, not part of the verdict.
+Synthetic verification runs **only the involved fuzzers** (decisive
+winners + losers). Reference fuzzers are auxiliary context in the prompt,
+not part of the verdict.
 
 **Step 6 — lint template-shape consistency**:
 
@@ -714,7 +699,3 @@ single decisive shape; (b) cross-template: a given shape doesn't span
   Outputs `out/coverage_curves.png`. Use to visually verify which subjects
   show clean fuzzer separation vs. heavy overlap.
 
-**Legacy track** (available but no longer headline): 3-dim clustering
-(`cluster_runner.py`) + per-L3 RCA reports under `reports/<target>/`.
-The metaphorical-testing pipeline replaces the clustering+RCA flow as
-the primary analysis path.

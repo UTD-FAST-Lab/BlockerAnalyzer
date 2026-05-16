@@ -21,7 +21,7 @@ Subcommands
     top                   print ranked candidate branches for one subject
     evidence-per-branch   emit per-branch structured prompt for
                           feature-hypothesis-generator — collapses ALL
-                          canonical pairs satisfying ≥7/≥7 at this branch
+                          canonical pairs satisfying ≥8/≥8 at this branch
                           into one prompt.
 
 The legacy `candidates`, `candidates-csv`, `rank`, and `evidence`
@@ -345,32 +345,98 @@ def upsert_subject(conn, target, a, b, stats):
     ).fetchone()[0]
 
 
-def _upsert_branch(conn, target, file, line, col, side, source_line):
-    """Insert branches row (or find existing). Function column = basename(file)
-    placeholder, matching legacy convention. Returns branch_id."""
-    function = file.split('/')[-1] if '/' in file else file
+def _basename(file):
+    return file.rsplit('/', 1)[-1] if '/' in file else file
+
+
+def build_function_index(target):
+    """Per-target {file: [(start_line, end_line, name), ...]} index for
+    (file, line) → function lookup. Function names are demangled (c++filt).
+
+    Built by importing tools/extract_functions.py, which runs `llvm-cov export`
+    inside the `libafl-<target>-cov` Docker image (~1-2s per target).
+
+    Returns {} if extraction fails (Docker unavailable, image missing, etc.) —
+    callers should fall back to basename(file) for the function column.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+    try:
+        import extract_functions
+        fns = extract_functions.extract(target)
+    except Exception as exc:
+        print(f"  function-index extraction failed for {target}: {exc}; "
+              f"falling back to basename(file) for branches.function",
+              file=sys.stderr)
+        return {}
+
+    if not fns:
+        return {}
+
+    # Demangle once per unique name (batch into one c++filt invocation)
+    unique_names = sorted({f["name"] for f in fns})
+    try:
+        import subprocess
+        proc = subprocess.run(
+            ["c++filt"], input="\n".join(unique_names),
+            capture_output=True, text=True, check=True, timeout=30,
+        )
+        name_map = dict(zip(unique_names, proc.stdout.rstrip("\n").split("\n")))
+    except (FileNotFoundError, subprocess.SubprocessError) as exc:
+        print(f"  c++filt unavailable ({exc}); function names will be mangled",
+              file=sys.stderr)
+        name_map = {n: n for n in unique_names}
+
+    idx = defaultdict(list)
+    for f in fns:
+        idx[f["file"]].append((f["start_line"], f["end_line"], name_map.get(f["name"], f["name"])))
+    return dict(idx)
+
+
+def _lookup_function(fn_index, file, line, fallback):
+    """Innermost function (smallest range) containing (file, line). Falls back
+    to `fallback` (typically basename(file)) when no match or no index."""
+    if not fn_index:
+        return fallback
+    candidates = [t for t in fn_index.get(file, []) if t[0] <= line <= t[1]]
+    if not candidates:
+        return fallback
+    # smallest range; tie-break by start_line then name
+    return min(candidates, key=lambda t: (t[1] - t[0], t[0], t[2]))[2]
+
+
+def _upsert_branch(conn, target, file, line, col, side, source_line, function):
+    """Insert branches row (or find existing). Branch identity is
+    (target, file, line, col, side); `function` is descriptive and refreshed
+    on conflict so re-runs with a rebuilt function index update in-place.
+    Returns branch_id.
+    """
     conn.execute(
         """INSERT INTO branches (target, file, function, line, col, blocked_side, source_line)
            VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(target, file, function, line, col, blocked_side) DO UPDATE SET
+           ON CONFLICT(target, file, line, col, blocked_side) DO UPDATE SET
+               function    = COALESCE(excluded.function, branches.function),
                source_line = COALESCE(excluded.source_line, branches.source_line)""",
         (target, file, function, line, col, side, source_line),
     )
     return conn.execute(
         """SELECT branch_id FROM branches
-           WHERE target=? AND file=? AND function=? AND line=? AND col=? AND blocked_side=?""",
-        (target, file, function, line, col, side),
+           WHERE target=? AND file=? AND line=? AND col=? AND blocked_side=?""",
+        (target, file, line, col, side),
     ).fetchone()[0]
 
 
 def populate_subject_branches(conn, subject_id, target, a, b, direction,
-                              state, source_lines):
+                              state, source_lines, fn_index=None):
     """Apply per-subject admission rule to the per-target state dict and
     materialize subject_branches for (subject_id, target, A=a, B=b).
 
     Per-subject admission: across the 20 trials of (A, B), ≥1 blocked AND
     ≥1 resolved at final checkpoint. (Trials with unreached side are
     neither — they don't contribute to admission.)
+
+    `fn_index` (optional, from build_function_index) maps (file, line) to the
+    enclosing function name. When provided, admitted branches store the real
+    function name; otherwise they fall back to basename(file).
 
     Side effect: ensures branches rows exist for admitted (file,line,col,side)
     tuples (target-level admission = union of per-subject admissions).
@@ -404,8 +470,11 @@ def populate_subject_branches(conn, subject_id, target, a, b, direction,
         if (len(a_res) + len(b_res)) == 0 or (len(a_blk) + len(b_blk)) == 0:
             continue
 
-        branch_id = _upsert_branch(conn, target, file, line, col, side,
-                                    source_lines.get((file, line)))
+        function = _lookup_function(fn_index, file, line, fallback=_basename(file))
+        branch_id = _upsert_branch(
+            conn, target, file, line, col, side,
+            source_lines.get((file, line)), function,
+        )
 
         n_A_res, n_A_blk = len(a_res), len(a_blk)
         n_B_res, n_B_blk = len(b_res), len(b_blk)
@@ -484,12 +553,12 @@ def cmd_init(args):
 
 
 def _add_one(conn, target, a, b, delta_tech, ts_base, alpha, mannwhitneyu,
-             state=None, source_lines=None):
+             state=None, source_lines=None, fn_index=None):
     """Register/refresh one subject (target, a, b).
 
-    If `state` and `source_lines` are provided (per-target walk shared across
-    subjects), they're used directly. Otherwise we walk this target's coverage
-    on-the-fly (single-subject use case).
+    If `state`, `source_lines`, and `fn_index` are provided (per-target walk
+    + function index shared across the 4 canonical subjects), they're used
+    directly. Otherwise this builds them on-the-fly (single-subject use case).
     """
     sys.path.insert(0, str(REPO_ROOT / "tools"))
     from subject_significance import pair_significance
@@ -501,8 +570,10 @@ def _add_one(conn, target, a, b, delta_tech, ts_base, alpha, mannwhitneyu,
     ).fetchone()[0]
     if state is None or source_lines is None:
         state, source_lines = walk_target_state(target, ts_base)
+    if fn_index is None:
+        fn_index = build_function_index(target)
     n_branches = populate_subject_branches(
-        conn, sid, target, a, b, direction, state, source_lines
+        conn, sid, target, a, b, direction, state, source_lines, fn_index=fn_index,
     )
     conn.execute(
         "UPDATE study_subjects SET n_branches=? WHERE subject_id=?",
@@ -570,12 +641,16 @@ def cmd_add_canonical(args):
         )
         print(f"  {n_sides} branch sides tracked, {n_asym} with ≥1 blocked trial",
               file=sys.stderr)
+        # Build the demangled function index once per target (Docker, ~1-2s).
+        # Used at upsert time so branches.function gets the real C/C++ name
+        # rather than the basename placeholder.
+        fn_index = build_function_index(tgt)
 
         for a, b, dt in CANONICAL_PAIRS:
             try:
                 sid, direction, n_branches, stats = _add_one(
                     conn, tgt, a, b, dt, ts_base, args.alpha, mannwhitneyu,
-                    state=state, source_lines=source_lines,
+                    state=state, source_lines=source_lines, fn_index=fn_index,
                 )
                 print(
                     f"  {tgt:<10} {a:<22} vs {b:<22}  Δ={dt:<14} "
@@ -685,7 +760,7 @@ import subprocess
 from pathlib import Path as _P
 
 DEFAULT_QUEUE_BASE = _P("/20TB/miao/fuzz-blocker")
-DEFAULT_MECHANISM_LIB = REPO_ROOT / "notes" / "fuzzer_mechanism_library.md"
+DEFAULT_MECHANISM_LIB = REPO_ROOT / "fuzzer_mechanism_library.md"
 
 CANONICAL_FUZZERS_LIST = ["naive", "cmplog", "value_profile", "value_profile_cmplog"]
 
@@ -779,7 +854,7 @@ def cmd_evidence_per_branch(args):
     """Per-branch structured prompt for feature-hypothesis-generator.
 
     Keyed on (target, branch_id). Collapses ALL canonical pairs satisfying the
-    >=7/>=7 rule (winner_resolved >= --winner-threshold AND loser_blocked >=
+    >=8/>=8 rule (winner_resolved >= --winner-threshold AND loser_blocked >=
     --loser-threshold) at this branch into a single prompt. Hypothesis and
     verification are scoped to those decisive pairs and their fuzzers. The
     other canonical fuzzers appear as REFERENCE context only.
@@ -1072,17 +1147,17 @@ def main():
     s = sub.add_parser(
         "evidence-per-branch",
         help="emit per-branch structured prompt for feature-hypothesis-generator: "
-             "collapses ALL canonical pairs satisfying >=7/>=7 at this branch into "
+             "collapses ALL canonical pairs satisfying >=8/>=8 at this branch into "
              "one prompt; reports the full 4-fuzzer trial vector with role tags. "
              "Hypothesis and verification are scoped to decisive pairs only.",
     )
     s.add_argument("--target", required=True,
                    help="target name (sanity-checked against branches.target)")
     s.add_argument("--branch-id", required=True, type=int)
-    s.add_argument("--winner-threshold", type=int, default=7,
-                   help="winner must have n_resolved >= THIS (default 7)")
-    s.add_argument("--loser-threshold", type=int, default=7,
-                   help="loser must have n_blocked >= THIS (default 7)")
+    s.add_argument("--winner-threshold", type=int, default=8,
+                   help="winner must have n_resolved >= THIS (default 8)")
+    s.add_argument("--loser-threshold", type=int, default=8,
+                   help="loser must have n_blocked >= THIS (default 8)")
     s.add_argument("--admissible-only", action="store_true", default=True,
                    help="restrict to admissible subjects (default ON)")
     s.add_argument("--no-admissible-only", action="store_false",

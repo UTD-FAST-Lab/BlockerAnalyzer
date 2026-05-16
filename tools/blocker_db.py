@@ -29,6 +29,10 @@ SCHEMA_SQL = """
 -- ≥1 canonical subject's per-subject input-dependence rule admits it.
 -- Per-subject admission (in subject_branches): across the 20 trials of (A, B)
 -- canonical pair, ≥1 trial blocked AND ≥1 trial resolved at final checkpoint.
+-- Branch identity is (target, file, line, col, blocked_side) — `function` is a
+-- deterministic derivation from (file, line) via tools/extract_functions.py and
+-- is descriptive only, not part of the unique key (so it can be refreshed
+-- in-place when the function index is rebuilt).
 CREATE TABLE IF NOT EXISTS branches (
     branch_id       INTEGER PRIMARY KEY AUTOINCREMENT,
     target          TEXT NOT NULL,
@@ -38,7 +42,7 @@ CREATE TABLE IF NOT EXISTS branches (
     col             INTEGER NOT NULL,
     blocked_side    TEXT NOT NULL CHECK (blocked_side IN ('T', 'F')),
     source_line     TEXT,
-    UNIQUE(target, file, function, line, col, blocked_side)
+    UNIQUE(target, file, line, col, blocked_side)
 );
 
 -- Resolving seeds: seeds from resolving fuzzers that hit the BLOCKED side.

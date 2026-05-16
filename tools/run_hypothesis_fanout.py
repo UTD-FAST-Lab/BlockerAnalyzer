@@ -73,7 +73,7 @@ def primary_delta(decisive_pairs):
     return best["delta"]
 
 
-def shape_from_row(row, winner_thr=7, loser_thr=7):
+def shape_from_row(row, winner_thr=8, loser_thr=8):
     """Decisive-only shape: fixed 4-char string over canonical fuzzers.
 
     Prefers the 'shape' column if present (from select_representatives.py

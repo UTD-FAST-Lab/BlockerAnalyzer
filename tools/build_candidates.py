@@ -3,13 +3,13 @@
 build_candidates.py — per-branch candidate aggregation.
 
 For each (target, branch_id), collapses the up-to-4 canonical pair-edges
-into ONE row containing every pair that satisfies the >=7/>=7 rule, plus
+into ONE row containing every pair that satisfies the >=8/>=8 rule, plus
 the per-fuzzer trial profile assembled by cross-subject join on
 `subject_branches`.
 
 Decisive-pair rule (per pair):
-    winner_resolved >= --winner-threshold (default 7) AND
-    loser_blocked   >= --loser-threshold  (default 7)
+    winner_resolved >= --winner-threshold (default 8) AND
+    loser_blocked   >= --loser-threshold  (default 8)
 
 A branch is emitted iff it has >=1 decisive pair (under --admissible-only,
 that pair's subject must also be admissible).
@@ -239,10 +239,10 @@ def main():
     ap.add_argument("--no-admissible-only", action="store_false",
                     dest="admissible_only",
                     help="include all subjects regardless of admissibility")
-    ap.add_argument("--loser-threshold", type=int, default=7,
-                    help="loser must have n_blocked >= THIS (default 7)")
-    ap.add_argument("--winner-threshold", type=int, default=7,
-                    help="winner must have n_resolved >= THIS (default 7)")
+    ap.add_argument("--loser-threshold", type=int, default=8,
+                    help="loser must have n_blocked >= THIS (default 8)")
+    ap.add_argument("--winner-threshold", type=int, default=8,
+                    help="winner must have n_resolved >= THIS (default 8)")
     args = ap.parse_args()
 
     conn = sqlite3.connect(args.db)

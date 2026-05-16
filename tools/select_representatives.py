@@ -8,13 +8,13 @@ Decisive-only shape
 4-char string over the canonical fuzzer order (naive, cmplog, value_profile,
 value_profile_cmplog). Each position is:
 
-    R   fuzzer is a winner in >=1 decisive pair at this branch (n_resolved >= 7)
-    B   fuzzer is a loser  in >=1 decisive pair at this branch (n_blocked  >= 7)
+    R   fuzzer is a winner in >=1 decisive pair at this branch (n_resolved >= 8)
+    B   fuzzer is a loser  in >=1 decisive pair at this branch (n_blocked  >= 8)
     -   fuzzer is NOT in any decisive pair at this branch
         (its trial counts are reference context, not part of the shape)
 
-By construction the >=7/>=7 rule plus n=10 makes each decisive fuzzer
-unambiguously R or B (>=7R AND >=7B would require n>=14).
+By construction the >=8/>=8 rule plus n=10 makes each decisive fuzzer
+unambiguously R or B (>=8R AND >=8B would require n>=16).
 
 Region
 ------
@@ -63,7 +63,7 @@ def _suffix_from(input_path: Path) -> str:
     return (m.group(1) or "") if m else ""
 
 
-def decisive_shape(row, winner_thr=7, loser_thr=7):
+def decisive_shape(row, winner_thr=8, loser_thr=8):
     involved = set(json.loads(row["involved_fuzzers"]))
     chars = []
     for fz in CANONICAL_FUZZERS:
@@ -77,7 +77,7 @@ def decisive_shape(row, winner_thr=7, loser_thr=7):
         elif B >= loser_thr:
             chars.append("B")
         else:
-            # Should not happen under the >=7/>=7 candidate rule at n=10.
+            # Should not happen under the >=8/>=8 candidate rule at n=10.
             chars.append("?")
     return "".join(chars)
 
@@ -112,8 +112,8 @@ def main():
                          "<_targets>.csv, suffix mirrors --input)")
     ap.add_argument("--line-bucket", type=int, default=50,
                     help="lines per region bucket (default 50)")
-    ap.add_argument("--winner-threshold", type=int, default=7)
-    ap.add_argument("--loser-threshold",  type=int, default=7)
+    ap.add_argument("--winner-threshold", type=int, default=8)
+    ap.add_argument("--loser-threshold",  type=int, default=8)
     args = ap.parse_args()
 
     in_path = Path(args.input)
@@ -146,7 +146,7 @@ def main():
     bad_shapes = sum(1 for sh in shape_for.values() if "?" in sh)
     if bad_shapes:
         print(f"WARNING: {bad_shapes} rows with '?' in shape (decisive fuzzer "
-              f"satisfied neither >=7R nor >=7B — should not happen at n=10)",
+              f"satisfied neither >=8R nor >=8B — should not happen at n=10)",
               file=sys.stderr)
 
     rep_headers = list(rows[0].keys()) + ["shape", "region_id", "group_size"]

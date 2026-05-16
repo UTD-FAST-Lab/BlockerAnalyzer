@@ -1,31 +1,24 @@
-#!/usr/bin/env python3
 """
-extract_functions.py — Produce per-target function→line-range sidecar.
+extract_functions.py — library: per-target function → line-range list.
 
-Runs `llvm-cov export` inside the target's coverage-instrumented Docker image,
-extracts per-function primary-file line ranges, and writes:
+Runs `llvm-cov export` inside the target's coverage-instrumented Docker image
+(`libafl-<target>-cov`) and returns a list of dicts:
 
-    data/functions/<target>.json
+    [{"file": <path>, "name": <mangled or demangled name>,
+      "start_line": int, "end_line": int}, ...]
 
-Each entry: {"file": <path>, "name": <func>, "start_line": int, "end_line": int}
+Used by tools/study_units.py (`build_function_index`) at `add-canonical` time
+to populate `branches.function` with the enclosing function name. Caller is
+responsible for demangling (typically via `c++filt` batch) — this module
+returns whatever llvm-cov export produces.
 
-Used by tools/cluster.py to group sub-clusters by enclosing C function instead
-of by line-proximity gap.
-
-Usage:
-    python3 tools/extract_functions.py --target lcms
-    python3 tools/extract_functions.py --target lcms --output data/functions/lcms.json
+Not a CLI — invoke via `import extract_functions; fns = extract_functions.extract("curl")`.
 """
 
-import argparse
 import json
-import os
 import subprocess
-import sys
-from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-IMAGE_FMT = "blocker-{target}-cov"
+IMAGE_FMT = "libafl-{target}-cov"
 
 DOCKER_SCRIPT = r"""
 set -e
@@ -40,6 +33,7 @@ llvm-cov-18 export "$FUZZ_BIN" -instr-profile=/tmp/x.profdata \
 
 
 def extract(target: str) -> list[dict]:
+    """Return [{file, name, start_line, end_line}, ...] for the target."""
     image = IMAGE_FMT.format(target=target)
     result = subprocess.run(
         ["docker", "run", "--rm", "--entrypoint=bash", image, "-c", DOCKER_SCRIPT],
@@ -57,6 +51,7 @@ def extract(target: str) -> list[dict]:
                 continue
 
             primary = filenames[0]
+            # region tuple: (start_line, start_col, end_line, end_col, count, file_id, ...)
             primary_regions = [r for r in regions if len(r) >= 6 and r[5] == 0]
             if not primary_regions:
                 continue
@@ -72,25 +67,3 @@ def extract(target: str) -> list[dict]:
 
     fns.sort(key=lambda f: (f["file"], f["start_line"]))
     return fns
-
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--target", required=True)
-    ap.add_argument("--output",
-                    help="Default: data/functions/<target>.json")
-    args = ap.parse_args()
-
-    out = Path(args.output) if args.output else REPO / "data" / "functions" / f"{args.target}.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
-
-    fns = extract(args.target)
-    out.write_text(json.dumps(fns, indent=2))
-
-    files_seen = {f["file"] for f in fns}
-    print(f"{args.target}: {len(fns)} functions across {len(files_seen)} files → {out}",
-          file=sys.stderr)
-
-
-if __name__ == "__main__":
-    main()

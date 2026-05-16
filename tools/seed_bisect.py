@@ -32,8 +32,8 @@ DOCKER_DIR = PROJECT_DIR / 'docker'
 sys.path.insert(0, str(TOOLS_DIR))
 from blocker_db import get_db, SCHEMA_SQL
 
-DOCKER_BASE_IMAGE = 'blocker-coverage-base'
-DOCKER_TARGET_IMAGE_FMT = 'blocker-{target}-cov'
+DOCKER_BASE_IMAGE = 'libafl-coverage-base'
+DOCKER_TARGET_IMAGE_FMT = 'libafl-{target}-cov'
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +385,11 @@ def scan_bisection(target, queue_base, branch_id=None,
     mounts = [
         '-v', f'{queues_mount}:/queues:ro',
         '-v', f'{os.path.abspath(tmpdir)}:/work',
+        # Bind-mount the scanner so it's available at /seed_scanner.py inside
+        # the container without rebuilding the image. The same script is also
+        # COPY'd into Dockerfile.coverage-base for fresh builds; the bind-mount
+        # just overrides whatever's in the image with the on-disk version.
+        '-v', f'{os.path.abspath(DOCKER_DIR / "bisect_in_container.py")}:/seed_scanner.py:ro',
     ]
     if queue_sample_size:
         host_queue_abs = os.path.abspath(queue_target_dir)

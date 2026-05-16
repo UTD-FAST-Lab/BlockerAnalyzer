@@ -1,0 +1,42 @@
+FROM ubuntu:22.04
+
+# Base image for the BlockerAnalyzer coverage-instrumented targets.
+# Produces `libafl-coverage-base` (also produced by the parallel
+# LibAFL_Experiments repo — keep this Dockerfile compatible so the cached
+# image can be reused across both repos).
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LLVM_VERSION=18
+
+RUN apt-get update && apt-get install -y \
+    build-essential cmake ninja-build git curl wget \
+    lsb-release software-properties-common gnupg \
+    pkg-config python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN wget -qO llvm.sh https://apt.llvm.org/llvm.sh && \
+    chmod +x llvm.sh && ./llvm.sh ${LLVM_VERSION} && rm llvm.sh
+
+RUN apt-get update && apt-get install -y \
+    clang-18 llvm-18 llvm-18-dev libstdc++-11-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-18   100 \
+ && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
+
+# Coverage-instrumentation flags consumed by every per-target Dockerfile.
+ENV COV_FLAGS="-fprofile-instr-generate -fcoverage-mapping"
+
+# Bake in the in-container seed-bisection scanner. seed_bisect.py invokes
+# /seed_scanner.py inside the container (and ALSO bind-mounts the host
+# copy of bisect_in_container.py over /seed_scanner.py at run time so an
+# unrebuilt image still works — but this COPY makes a fresh build
+# self-contained).
+COPY docker/bisect_in_container.py /seed_scanner.py
+COPY docker/run_bisect_entrypoint.sh /run_bisect.sh
+RUN chmod +x /seed_scanner.py /run_bisect.sh
+
+# No entrypoint — consumers (seed_bisect.py, study_units.py evidence_per_branch)
+# invoke `docker run --rm --entrypoint='' <image> /bin/bash -c '...'` with
+# their own command. The shared coverage_ts campaign in LibAFL_Experiments
+# layers its own entrypoint on top via that repo's Dockerfile.
