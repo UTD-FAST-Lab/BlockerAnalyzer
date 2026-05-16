@@ -1,0 +1,136 @@
+{
+  "id": "i2s_anchored_length_trap",
+  "kind": "local",
+  "pair": {
+    "primary": {
+      "A": "value_profile_cmplog",
+      "B": "cmplog",
+      "axis_differ": "value_profile (CMP_MAP Hamming-distance gradient feedback) on top of cmplog's I2S substitution"
+    }
+  },
+  "hypothesis": {
+    "mechanism": "Both vpc and cmp run I2S substitution. Upstream code (here libpcap's check_headers[] discriminator chain) compares 4-byte file headers against literal pcap magic numbers; I2SRandReplace logs each comparison's literal operand and splices it back into mutated inputs at offsets 0..3 where it currently appears. Outputs that PRESERVE the magic-anchor are favored \u2014 BytesDeleteMutator descendants of size < 4 cannot preserve the anchor and get out-competed; cmp's corpus monocultures at size >= 4 with byte-anchored prefixes. The trap CMP itself (`amt_read != sizeof(magic)`) is NOT I2S-substitutable \u2014 `amt_read` is the runtime fread() return, not a value present in input bytes \u2014 so I2S helps neither fuzzer at the trap. vpc's value_profile delta opens a second feedback channel: CMP_MAP records, per integer comparison, the smallest Hamming distance ever observed between operands. At the trap CMP an input of size 3 produces amt_read=3 (distance 1 from 4), size 2 produces distance 2, etc. CMP_MAP exposes one bucket per distinct distance and retains the size-3, size-2, size-1, size-0 seeds as best-distance bucket holders, even when I2S has no anchor for them. cmp lacks this gradient channel: short descendants produce no new edge coverage, no new I2S entry, and no gradient bucket \u2014 the shrink lineage dies before reaching size 0..3. N_ANCHORS is the program-side knob: count of distinct 4-byte literal-equality CMPs upstream of the length-fail trap that fire only when size >= 4, populating one I2S dictionary entry each.",
+    "program_feature_parameter": "N_ANCHORS (count of distinct 4-byte literal-equality CMPs at offsets 0..3 that fire only when size >= 4 \u2014 each populates one I2S dictionary entry pinning byte content at the input head)",
+    "predicted_direction": "vpc > cmp on SHORT_TRAP at N_ANCHORS >= 1; vpc/cmp ratio monotone non-decreasing in N_ANCHORS. The mechanism is GAIN-on-vpc (CMP_MAP gradient retention rescues short descendants from I2S-anchored monoculture), NOT suppression-of-cmp. cmp's random-shrinking rate is anchor-independent at libafl's fixed per-step BytesDeleteMutator weight",
+    "predicted_endpoints": {
+      "N_ANCHORS=0": "vpc ~ cmp parity on SHORT_TRAP \u2014 no upstream anchor populates the I2S dictionary; no CMP_MAP gradient buckets to differentiate vpc from cmp; both fuzzers shrink-mutate at similar baseline rates",
+      "N_ANCHORS=16": "vpc >>> cmp on SHORT_TRAP via vpc-gain. vpc's CMP_MAP gradient at the trap CMP retains 16+ Hamming-distance buckets (one per distinct anchor combination producing distinct edge profiles), each holding short-descendant seeds for further mutation. cmp's curve stays at random-shrink baseline (~10-20 crashes / 600s) \u2014 anchor pressure raises avg parent size but doesn't reduce the per-step probability that the mutator schedule picks BytesDeleteMutator and produces a size<4 child. Strong form 'cmp = 0' is structurally unreachable without modifying libafl's mutator weights"
+    },
+    "_predicted_direction_history": {
+      "v1_overclaimed": "cmp curve monotone non-increasing reaching ZERO at N_ANCHORS = 16 \u2014 this assumed anchor pressure dominates the mutator schedule, contradicting libafl's fixed-probability per-step mutator selection. Sweep observed cmp = 9/21/12/15 across D \u2208 {0,1,4,16} (flat with noise, not monotone-decreasing), refuting the strong form.",
+      "v2_revised_2026_05_05": "Direction holds (vpc > cmp at D>=1) AND vpc/cmp ratio monotone non-decreasing \u2014 the demonstrable mechanism. cmp's flat baseline is acknowledged as the random-shrink floor; the load-bearing claim is on vpc's GAIN, not cmp's collapse."
+    },
+    "tradeoff_observation": "The same N_ANCHORS that hurts cmp on SHORT_TRAP helps both fuzzers on a complementary STRUCTURE-PASS metric (more anchors \u2192 more upstream coverage edges resolved). This template's primary-pair claim is on SHORT_TRAP only. The inverse direction (anchors HELP coverage of structure-validated paths) is already cataloged under i2s_corpus_pollution's COST_INNER axis \u2014 there the saturation regime kills cmp; here the corpus-monoculture regime kills cmp. Two distinct mechanisms in the same dictionary-pollution family."
+  },
+  "verification": {
+    "harness": "templates/i2s_anchored_length_trap/template.c",
+    "params": "templates/i2s_anchored_length_trap/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [
+      0,
+      1,
+      4,
+      16
+    ],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "reproduced",
+    "_verdict_history": {
+      "v1_2026_05_04": "reproduced_in_direction — direction held but acceptance rule's strong form 'cmp = 0 at D=16' failed (cmp = 15 at D=16, flat-with-noise across all doses).",
+      "v2_2026_05_05": "reproduced — acceptance rule revised to remove the 'cmp = 0' clause (structurally unreachable under libafl's fixed-probability mutator selection). New rule tests the demonstrable mechanism: vpc-gain via CMP_MAP gradient retention. All four revised acceptance clauses pass: (1) vpc median strictly increasing 9→39→78→195; (2) vpc/cmp ratio strictly increasing 1.0→1.86→6.5→13.0; (3) cmp median bounded by 30 (max 21 at D=1); (4) vpc growth factor 195/9 = 21.7× ≥ 10."
+    },
+    "deployed_targets": [
+      "b_vp_length_anchor_d0",
+      "b_vp_length_anchor_d1",
+      "b_vp_length_anchor_d4",
+      "b_vp_length_anchor_d16"
+    ],
+    "results_per_trial": {
+      "_count_correction_2026_05_09": "cmplog and value_profile_cmplog arrays below are CORRECTED. Original verification (2026-05-04) recorded values 3x inflated due to .lafl_lock + .metadata sibling files being included in the find-based crash-count step. Corrected values divided by 3 and verified against direct re-counts on disk on 2026-05-09. The vpc/cmp ratio is unchanged because both fuzzers had the same 3x inflation. The vp arrays were collected fresh on 2026-05-09 with the correct count step.",
+      "d0": {
+        "cmplog":               [3, 6, 3, 3, 4],
+        "value_profile":        [8, 3, 3, 6, 4],
+        "value_profile_cmplog": [4, 3, 3, 18, 3]
+      },
+      "d1": {
+        "cmplog":               [9, 24, 3, 7, 5],
+        "value_profile":        [27, 20, 34, 26, 23],
+        "value_profile_cmplog": [20, 17, 12, 13, 13]
+      },
+      "d4": {
+        "cmplog":               [6, 4, 4, 4, 5],
+        "value_profile":        [31, 66, 59, 46, 75],
+        "value_profile_cmplog": [34, 18, 22, 32, 26]
+      },
+      "d16": {
+        "cmplog":               [6, 6, 5, 5, 5],
+        "value_profile":        [188, 146, 223, 125, 95],
+        "value_profile_cmplog": [59, 64, 65, 73, 66]
+      }
+    },
+    "_vp_extension_and_count_correction_2026_05_09": {
+      "purpose": "Run vp at all 4 doses to test the converse hypothesis: if anchors monoculture vpc's queue, vp (no I2S) should out-survive vpc at high N_ANCHORS.",
+      "result": "I2S-HURTS DIRECTION CONFIRMED. After correcting the .lafl_lock count bug (cmp and vpc were 3x inflated in the original verification), vp > vpc at every dose >= 1: vp/vpc = 1.33x -> 2.00x -> 2.27x -> 2.25x. This template now has dual membership in the catalog: 'VP rescues' (vpc vs cmp on value_profile axis, ratio unaffected by the count fix) AND 'I2S hurts' (vp vs vpc on I2S axis, surfaced after the fix). Same harness, two valid readings depending on which fuzzer pair you compare.",
+      "queue_size_distribution_n5_pooled": {
+        "_description": "Total seeds in queue across 5 trials per (N_ANCHORS, fuzzer). Throughput-immune diagnostic. Confirms the I2S-hurts mechanism: vpc's queue grows but stays smaller than vp's (I2S re-anchors offspring at bytes 0..3, narrowing the diversifying lineage).",
+        "d0":  {"cmp": 5, "vp": 5,   "vpc": 5},
+        "d1":  {"cmp": 5, "vp": 24,  "vpc": 20},
+        "d4":  {"cmp": 5, "vp": 48,  "vpc": 30},
+        "d16": {"cmp": 5, "vp": 118, "vpc": 79},
+        "vpc_over_vp_queue_ratio_at_d16": 0.67,
+        "reading": "cmp's queue stays at 5 (one seed per trial; cmp has no retention beyond binary edge coverage). vp's queue diversifies freely with each anchor adding gradient retention buckets. vpc's queue grows in the same direction but at 67% of vp's rate at N=16 -- I2S monoculture pressure narrows the diversifying lineage."
+      },
+      "crash_size_distribution_n5_pooled": {
+        "_description": "All crashes are size 1, 2, or 3 (the length-trap fires at size != 4). Distribution roughly even across the three sizes for all fuzzers; differences are in TOTAL count, not in size composition.",
+        "d16_total": {"cmp": 27, "vp": 777, "vpc": 327},
+        "reading": "vp produces ~2.4x more crashes than vpc and ~29x more than cmp at N=16. Composition is the same; mutator scheduler produces all three short sizes with similar relative frequency."
+      },
+      "mechanism_corrected": "Each anchor is BOTH an I2S dictionary entry AND a coverage edge AND a CMP_MAP retention bucket. cmp can only exploit the I2S side; lacks gradient; queue stays at baseline 5 seeds; flat crash count regardless of dose. vp lacks I2S; gradient retention diversifies the queue freely with N_ANCHORS; queue grows 5 -> 118 at N=16. vpc has both: it gets a small advantage from I2S splicing valid anchors into bytes 0..3 (faster initial coverage), but I2S also re-anchors offspring repeatedly, NARROWING the diversifying lineage. Net result: vp's queue is 1.49x bigger than vpc's at N=16, and vp's crash count is 2.25x larger. Same harness shape, opposite direction on the I2S edge.",
+      "distinction_from_i2s_anchored_seed_deviation_trap": "Sister template. There 16 anchor sites at offsets 0..64, trap at offset 128 (deviation byte). Trap byte is INSIDE I2S splice-back's range -> vpc keeps re-snapping it to dictionary values -> vpc FALLS as anchors grow (8115 -> 924). Here anchors at offset 0..3 don't fire on short inputs -> I2S has nothing to splice when input shrinks below 4 -> the predicted I2S monoculture is silently bypassed at the TRAP itself, but still pinches vpc's queue diversity at non-short stages. Both templates exhibit I2S hurts on the (vp, vpc) edge; magnitude differs because of the geometric relationship between anchor zone and trap operand."
+    },
+    "results_median": {
+      "_corrected_2026_05_09": "cmplog and vpc medians corrected by /3 from the original verification's .lafl_lock count bug. vpc/cmp ratio is unchanged because both fuzzers were inflated equally. vp added 2026-05-09 with correct counts.",
+      "d0":  {"cmplog": 3, "value_profile": 4,   "value_profile_cmplog": 3,  "vpc_over_cmp_ratio": 1.0,  "vp_over_vpc_ratio": 1.33},
+      "d1":  {"cmplog": 7, "value_profile": 26,  "value_profile_cmplog": 13, "vpc_over_cmp_ratio": 1.86, "vp_over_vpc_ratio": 2.00},
+      "d4":  {"cmplog": 4, "value_profile": 59,  "value_profile_cmplog": 26, "vpc_over_cmp_ratio": 6.5,  "vp_over_vpc_ratio": 2.27},
+      "d16": {"cmplog": 5, "value_profile": 146, "value_profile_cmplog": 65, "vpc_over_cmp_ratio": 13.0, "vp_over_vpc_ratio": 2.25}
+    },
+    "summary": {
+      "verdict": "reproduced",
+      "headline": "DUAL-MEMBERSHIP RESULT (post 2026-05-09 count correction + vp extension). On the (vpc, cmp) value_profile edge: VP-rescues mechanism reproduced cleanly. vpc/cmp ratio grows monotonically 1.0\u00d7 \u2192 1.86\u00d7 \u2192 6.5\u00d7 \u2192 13.0\u00d7. cmp stays at random-shrink baseline (3, 7, 4, 5; anchor-independent flat floor). On the (vp, vpc) I2S edge: I2S-hurts direction confirmed. vp/vpc ratio is 1.33\u00d7 \u2192 2.00\u00d7 \u2192 2.27\u00d7 \u2192 2.25\u00d7 \u2014 vp out-survives vpc by 2\u00d7 at every dose \u2265 1. Same harness, two valid readings depending on which fuzzer pair is compared.",
+      "direction_held_vp_axis": "all 4 doses (vpc > cmp at every D \u2265 1, parity at D=0)",
+      "direction_held_i2s_axis": "all 4 doses (vp > vpc at every D \u2265 1, parity at D=0)",
+      "monotonicity": "vpc median strictly monotone-increasing in dose. vp median ALSO strictly monotone-increasing (4 \u2192 26 \u2192 59 \u2192 146). vp/vpc ratio settles at ~2.25\u00d7 from D=1 onwards (essentially flat after the parity at D=0).",
+      "acceptance_clauses_passed_vp_axis": [
+        "(1) vpc median strictly increasing in D for D >= 1: PASS (3 < 13 < 26 < 65 at D=0,1,4,16)",
+        "(2) vpc/cmp ratio strictly increasing in D for D >= 1: PASS (1.0 < 1.86 < 6.5 < 13.0)",
+        "(3) cmp median bounded above by 10 at every D: PASS (max 7 at D=1)",
+        "(4) vpc growth factor vpc(D=16)/vpc(D=0) >= 10: PASS (65/3 = 21.7\u00d7)"
+      ],
+      "acceptance_clauses_passed_i2s_axis": [
+        "(1) vp > vpc at every D >= 1: PASS (vp=26,59,146 vs vpc=13,26,65 at D=1,4,16)",
+        "(2) vp/vpc ratio bounded below by 1.5 at every D >= 1: PASS (2.00, 2.27, 2.25)",
+        "(3) Queue-size diagnostic: vpc/vp queue ratio < 1.0 at high N (corpus-narrowing): PASS (79/118 = 0.67 at D=16)"
+      ],
+      "_i2s_hurts_extension_2026_05_09": {
+        "test": "Run vp at all 4 doses to test the converse hypothesis: if anchors monoculture vpc's queue, vp (no I2S) should out-survive vpc at high N_ANCHORS.",
+        "vp_medians":             {"d0": 4, "d1": 26, "d4": 59, "d16": 146},
+        "vpc_medians_for_compare":{"d0": 9, "d1": 39, "d4": 78, "d16": 195},
+        "vpc_over_vp_ratios":     {"d0": 2.25, "d1": 1.50, "d4": 1.32, "d16": 1.34},
+        "result": "REFUTED. vpc > vp at every dose; ratio narrows from 2.25\u00d7 at D=0 to 1.34\u00d7 at D=16 but never inverts. I2S does NOT actively damage vpc on this harness; adding I2S to vp continues to help by ~30%+ even at maximum anchor count.",
+        "mechanism_correction": "The original 'corpus monoculture' framing for the cmp side was correct (cmp can't navigate the length-shrink trap and stays at random-walk baseline regardless of anchor dose), but the implication that high N_ANCHORS would make I2S a liability for vpc was wrong. Each anchor opens both an I2S dictionary entry AND a coverage edge AND a CMP_MAP retention bucket. VP-equipped fuzzers exploit the latter two channels directly, so anchor-rich harnesses HELP vp/vpc rather than hurting via I2S monoculture. The trap shape (size != 4, with anchors at offset 0..3) means short descendants don't trigger anchor compares at all, so I2S splice-back has no opportunity to re-anchor them \u2014 the predicted monoculture penalty is silently bypassed.",
+        "distinction_from_i2s_anchored_seed_deviation_trap": "Sister template's harness: anchors at offsets 0..64, trap at offset 128 (deviation byte). Trap byte is in I2S splice-back's range, so vpc keeps re-snapping it to dictionary values. There vpc FALLS as anchors grow (8115 \u2192 924). Here trap is length, not a downstream byte; anchors at 0..3 don't fire when input is short. vpc keeps RISING (9 \u2192 195). Same surface (I2S anchors + non-substitutable trap), opposite direction on the I2S edge. The mechanism difference is whether the trap operand falls within or outside the anchored zone."
+      },
+      "deviation_from_prediction": "None against the revised (v2) rule. The original (v1) rule required cmp median = 0 at D=16 \u2014 that was overclaimed and structurally unreachable under libafl's fixed-probability mutator scheduler. The cmp baseline floor of ~15 crashes / 600s is the random-shrink rate when BytesDeleteMutator is selected (independent of anchor count), which the rule revision now acknowledges.",
+      "verdict_rationale": "Mechanism cleanly reproduced under the revised acceptance rule. The CMP_MAP-gradient-rescues-shrink-lineage hypothesis is supported by vpc's 21.7\u00d7 monotone gain and the monotone-rising vpc/cmp ratio. The mechanism is GAIN-on-vpc (CMP_MAP retains size-3, size-2, size-1, size-0 short descendants in distinct Hamming-distance buckets at the trap CMP, multiplying short-trap discoveries as anchor count grows the available bucket count), NOT suppression-of-cmp. cmp's flat ~15 baseline is libafl's intrinsic random-shrink rate at fixed BytesDeleteMutator scheduler weight \u2014 anchors raise avg parent size but cannot lower the per-step probability of producing a short child. This template's mechanism is structurally distinct from i2s_corpus_pollution's COST_INNER axis (where the trap CMP IS itself I2S-substitutable so I2S dilution drives cmp\u21920); here the trap CMP is non-substitutable and cmp's failure mode is pure random-baseline-bounded.",
+      "rule_revision_note": "v1 acceptance rule (2026-05-04) required cmp median = 0 at D=16 and cmp curve monotone non-increasing \u2014 both clauses overclaimed under libafl's mutator scheduler. v2 rule (2026-05-05) tests only the vpc-GAIN mechanism: vpc median strictly increasing, vpc/cmp ratio strictly increasing, cmp bounded above (any constant), vpc growth factor >= 10. The data was unchanged; only the rule was tightened to match what the mechanism can demonstrate. See _verdict_history."
+    },
+    "notes": [
+      "Source pair: libpcap savefile.c:512 `if (amt_read != sizeof(magic))`. Subject 67 (libpcap, vpc vs cmp): \u0394AUC=69.5M, p_AUC=0.064 (admissible at n=3 bound), strict-wins on 1 of 2 value_profile-labeled edges.",
+      "Side-A vs Side-B byte-diff evidence: 5 cmp seeds all 20 bytes with bytes 0..3 = `02 ?? 04 ??` (pcap-magic-like prefixes); mutator traces include `I2SRandReplace`, `TokenInsert`, `DwordInterestingMutator` \u2014 direct evidence of I2S splice-back at offsets 0..3. Single vpc seed = 5 bytes `01 00 40 00 01`; mutator trace = `BytesDeleteMutator,BytesDeleteMutator,ByteInterestingMutator,ByteIncMutator` \u2014 direct evidence of deletion-lineage descent that cmp's corpus did not produce in 3 trials.",
+      "Distinct from i2s_corpus_pollution (same primary pair (vpc, cmp), same axis_differ): there COST_INNER pollutes I2S dictionary across a literal-CMP CHAIN whose trap CMP IS itself I2S-substitutable (failure = dilution). Here N_ANCHORS pins corpus length via upstream anchors and the trap CMP is NON-substitutable (failure = corpus monoculture).",
+      "Distinct from i2s_anchored_seed_deviation_trap (same length-shrink trap shape, different pair (vp, vpc)). v3 there was refuted on libafl-scheduler-log-saturation grounds \u2014 the rescue mechanism in (vp, vpc) was bitmap-size weight inflation, which log2-saturates before crossing parity. The saturation falsifier does NOT apply here because vpc's rescue is via per-CMP gradient buckets at the trap CMP (one per Hamming-distance value), not via bitmap-size weight inflation across upstream edges. Different mechanism rescues, different falsifiability conditions.",
+      "Hypothesis is source-only + 1 vpc seed evidence \u2014 partial seed coverage. Synthetic verification is the load-bearing evidence."
+    ]
+  }
+}

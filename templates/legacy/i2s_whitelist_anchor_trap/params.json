@@ -1,0 +1,33 @@
+{
+  "template_id": "i2s_whitelist_anchor_trap",
+  "parameter": "WHITELIST_SIZE",
+  "scan_values": [1, 2, 4, 7],
+  "primary_pair": {"A": "value_profile", "B": "value_profile_cmplog"},
+  "fuzzers": ["value_profile", "value_profile_cmplog"],
+  "fuzzer_role": {
+    "value_profile":        "primary pair A — per-branch winner (no I2SRandReplace mutator; offspring drift past whitelist freely)",
+    "value_profile_cmplog": "primary pair B — per-branch loser (I2SRandReplace splices nearest-Hamming L_i back into operand, anchoring corpus on case arms)"
+  },
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "vp > vpc; ratio (vp/vpc) monotone non-decreasing in WHITELIST_SIZE",
+  "expected_curve_per_fuzzer": {
+    "value_profile":        "moderate at N=1, sustained or rising through N=7 (gradient guides operand past each L_i with no anchor reversion; pool size has small effect on vp)",
+    "value_profile_cmplog": "moderate at N=1, decaying as N grows (each added L_i is one more attractor competing for the operand; combinatorial cost to evade ALL N grows superlinearly in N)"
+  },
+  "acceptance": {
+    "metric": "median crash count",
+    "rule": "vp median > vpc median at WHITELIST_SIZE >= 2 AND (vp/vpc ratio at N=7) >= 1.5 * (vp/vpc ratio at N=1) AND vpc median <= vp median across the entire scan"
+  },
+  "design_basis": "validDeviceClass-style switch on a 4-byte big-endian operand with N case arms (each `case L_i: return 1`), and a `default: return 0` trap-reachable side. Each case arm emits one sancov trace_const_cmp4 entry, populating one I2S dictionary entry per L_i. Whitelist literals are the first N of {mntr, scnr, prtr, link, abst, spac, nmcl} — the actual lcms ICC class signatures from cmsio0.c — so N=7 reproduces the source-line CMP shape exactly. Upstream 4-byte 'acsp' magic gate matches the real cmsio0.c:781 cmsMagicNumber check. The WHITELIST_SIZE knob varies attractor pool size: I2SRandReplace's splice-back must be evaded across all N attractors simultaneously for the default arm to be reached, while vp's CMP_MAP gradient guides the operand past each L_i independently with no mutator pulling it back.",
+  "deployed_targets": ["b_whitelist_anchor_n1", "b_whitelist_anchor_n2", "b_whitelist_anchor_n4", "b_whitelist_anchor_n7"],
+  "notes": [
+    "Primary pair is vp (A, winner) vs vpc (B, loser). axis_differ = I2S substitution. Pattern B 'technique-hurts' orientation: A is the per-branch winner WITHOUT the technique; B is augmented with I2S on top of A.",
+    "WHITELIST_SIZE=7 reproduces lcms cmsio0.c:805/758 exactly — 7 cmsSig*Class case arms in validDeviceClass switch. WHITELIST_SIZE=1 is the minimum case (single attractor).",
+    "Sister branches in same function in real lcms: br67 (default arm at line 758), br71 (call site at line 805). Both represented at WHITELIST_SIZE=7 by the single synthetic.",
+    "Cross-target evidence: bloaty macho.cc:152 br452 (CPU_TYPE switch default; cmplog>naive I2S loses, prob_diff=0.8). Same harness shape, different primary pair (cmplog,naive). NOT in this template's claim — recorded in feature_spec.json notes only.",
+    "Dockerfiles: /home/miao/libafl_fuzzbench/docker/targets/Dockerfile.b_whitelist_anchor_n{1,2,4,7}.",
+    "If curves flatten (vp ~ vpc at N=7), the splice-back-multiple-attractors mechanism may be bounded by Hamming clustering of synthetic literals. The lcms ICC sigs are tightly clustered in the [0x61..0x7A] ASCII range — the synthetic literals here mirror that cluster, but if Hamming proximity matters more than count, a v2 retry with literals deliberately spread far in Hamming space (e.g., 0x00000001, 0x80000000, 0x55555555, 0xAAAAAAAA) would test that.",
+    "If vpc dominates regardless of N, the result joins the strpres v3 log-saturation refutation catalog: real-target divergences bounded by libafl's log-scaled scheduler weight that don't reproduce in trivial synthetics."
+  ]
+}

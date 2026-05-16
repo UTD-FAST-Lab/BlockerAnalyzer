@@ -1,0 +1,72 @@
+{
+  "id": "i2s_runtime_bound_substitution",
+  "kind": "local",
+  "pair": {
+    "primary": {
+      "A": "value_profile_cmplog",
+      "B": "value_profile",
+      "axis_differ": "I2S substitution: CmpLogObserver + AFLppCmplogTracingStage + I2SRandReplace mutator added on top of value_profile's CMP_MAP gradient feedback"
+    }
+  },
+  "hypothesis": {
+    "mechanism": "The trap CMP is `bound-literal vs (buflen - input_offset)` where the right operand is RUNTIME — derived per execution from the input size and a bytecode operand pc->k that is itself read from input bytes at a fixed offset. CmpLogObserver registers __sanitizer_cov_trace_cmp{4,8} (the variable-vs-variable sancov hooks) at each integer CMP and records both operand values at runtime. I2SRandReplace then splices either logged operand back into the input at byte windows where the matching value currently appears. For this CMP shape, splicing the runtime buflen value into the input bytes that hold pc->k makes pc->k ≈ buflen, collapsing buflen - (X + pc->k) below the SAFE_GAP threshold and flipping the bound check to T in a single mutation step. value_profile lacks I2S — its CMP_MAP gradient retains seeds that minimize Hamming distance between operands per edge, but here the comparand (buflen) varies per execution, so the gradient target moves; combined with the W bytes of Hamming distance to close, vp's convergence rate degrades sharply as K_WIDTH grows. vpc adds I2S on top of vp's CMP_MAP gradient and resolves in one step regardless of K_WIDTH.",
+    "program_feature_parameter": "K_WIDTH (width in bytes of the bytecode immediate field pc->k that is read from input and compared against the runtime buflen — controls the Hamming-distance climb VP's gradient must complete; I2S substitution is width-invariant)",
+    "predicted_direction": "A>B (vpc beats vp) at every K_WIDTH; A/B ratio grows monotonically with K_WIDTH",
+    "predicted_endpoints": {
+      "K_WIDTH=1": "vpc resolves frequently; vp resolves moderately (8-bit Hamming gradient closes within budget) — small-to-moderate ratio",
+      "K_WIDTH=8": "vpc resolves at full rate (I2S splices runtime buflen in one step); vp ≈ 0 (64-bit moving-target gradient, infeasible in budget) — large ratio"
+    },
+    "tradeoff_observation": "The same branch may also exhibit (cmplog, naive) I2S-helps under the same axis — that would be a separate template (i2s_magic_number_gate covers compile-time literals; this template covers runtime literals)."
+  },
+  "verification": {
+    "harness": "templates/i2s_runtime_bound_substitution/template.c",
+    "params": "templates/i2s_runtime_bound_substitution/params.json",
+    "dockerfile": "one per scan value, see deployed_targets in params.json",
+    "scan_values": [1, 2, 4, 8],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "refuted",
+    "deployed_targets": ["i2s_runtime_bound_w1", "i2s_runtime_bound_w2", "i2s_runtime_bound_w4", "i2s_runtime_bound_w8"],
+    "results_per_trial": {
+      "w1": {
+        "vpc": [105, 57, 69, 75, 54],
+        "vp":  [39, 81, 48, 9, 72]
+      },
+      "w2": {
+        "vpc": [3, 3, 3, 3, 3],
+        "vp":  [3, 3, 3, 3, 3]
+      },
+      "w4": {
+        "vpc": [3, 3, 3, 3, 3],
+        "vp":  [3, 3, 3, 3, 3]
+      },
+      "w8": {
+        "vpc": [3, 3, 3, 3, 3],
+        "vp":  [3, 3, 3, 3, 3]
+      }
+    },
+    "results_median": {
+      "w1": {"vpc": 69, "vp": 48, "ratio": 1.44},
+      "w2": {"vpc": 3, "vp": 3, "ratio": 1.0},
+      "w4": {"vpc": 3, "vp": 3, "ratio": 1.0},
+      "w8": {"vpc": 3, "vp": 3, "ratio": 1.0}
+    },
+    "summary": {
+      "verdict": "refuted",
+      "headline": "vpc COLLAPSES from 69 at W=1 to 3 at W∈{2,4,8} — matching vp's identical 3-floor at every dose. Both fuzzers saturate at exactly 3 crashes for W≥2 with zero variance across 5 trials, indicating a deterministic seed-time / minimal-input artifact rather than mechanism-driven crashes. Predicted vpc-flat-high curve does not hold.",
+      "direction_held": "only at W=1 (1.44× ratio); W=2,4,8 show no divergence (1.0× ratio)",
+      "monotonicity": "FAILED — vpc/vp ratio is strictly decreasing (1.44 → 1.0 → 1.0 → 1.0), opposite of predicted monotone increase",
+      "deviation_from_prediction": "Predicted vpc curve approximately flat (high) across K_WIDTH (I2S width-invariant). Observed: vpc drops 23× from W=1 to W=2. Predicted vp ≈ 0 at W=8. Observed: vp = 3 at W=8 (matching vpc exactly). Predicted ratio diverges with W. Observed: ratio is 1.0 at every W≥2.",
+      "verification_acceptance": "vpc median > vp median at every W: NO (equal at W≥2). vpc/vp ratio non-decreasing: NO (decreases from 1.44 to 1.0). vpc median > 0 at W=8: YES (=3). Acceptance fails on 2 of 3 clauses.",
+      "verdict_rationale": "REFUTED. The K_WIDTH axis does not control the predicted divergence. Two failure modes are visible. (1) At W=1, both fuzzers find ~50-100 crashes via random byte mutation — pc_k is uint8_t with ~87.5% trap rate at any non-tiny input, making the dose trivial for both. The 1.44× vpc edge is the per-byte I2S advantage but it's small. (2) At W≥2, the harness gates pc_k read at offset 16, requiring the input to be at least PREAMBLE_BYTES + K_WIDTH = 17/18/24 bytes. Both fuzzers find an identical floor of 3 minimal-input crashes (likely degenerate inputs at the gate boundary) and cannot improve, suggesting that I2S splicing of `buflen` (a runtime value derived from `size`) into the pc_k window does NOT happen as predicted. CmpLogObserver may not be logging the variable-vs-variable comparison's operands in a way that I2SRandReplace can match against input byte windows when buflen itself is not stored as a literal in the input — only the runtime value at compare time. Mechanism is invalid for this CMP shape under libafl's current I2S implementation."
+    },
+    "notes": [
+      "Originating real-target branch: libpcap bpf_filter.c:191:8 (subject 68, branch 614). Side-A (vp loser, ~250B): preserves a long structured input with 'isis' BPF keyword + pcap-magic. Side-B (vpc winner, 183B): shorter with 8 consecutive 0x4D bytes at offset 0x06 — the splice-pattern signature of I2SRandReplace writing a single logged runtime literal into multiple matching offsets.",
+      "Subject-level signal at this edge: ΔAUC=69.5M, p_AUC=0.064, ΔFinal=453, p_final=0.10 (n_A=3 n_B=3) — admissible at α=0.10 on ΔFinal but borderline at α=0.05.",
+      "Per-edge counts: vpc R1/B1/U1, vp R0/B3/U0 — vp reaches every trial but never resolves; vpc resolves 1/3 trials.",
+      "Evidence strength caveat: branch is strict-wins on 1 of 2 edges labeled I2S for libpcap (only the vpc>vp edge flags it; cmplog>naive does not).",
+      "Methodology lesson: the 'runtime' I2S sub-mechanism (variable-vs-variable trace_cmp) does not behave like the 'compile-time' I2S in `i2s_magic_number_gate`. CmpLogObserver does log both operands at runtime, but I2SRandReplace's substitution requires the LOGGED VALUE to also appear in input bytes — and a derived runtime quantity like `buflen` typically does NOT appear in the input as a 4/8-byte field unless the harness stores it there. The libpcap real-target divergence at br614 is real but is likely captured by a different mechanism (e.g., pcap header magic-anchor i2s_magic_number_gate on offsets 0..3) rather than runtime-buflen substitution. The K_WIDTH axis is wrong; the operative axis at the real target is upstream literal CMPs.",
+      "Falsification path TRIGGERED: vpc and vp produce IDENTICAL crash counts (3) at every W≥2. The runtime-bound-substitution hypothesis is invalid for this harness shape; revisit with a harness where the runtime literal IS stored in input bytes (e.g., a length-prefix field that the harness reads as both `size` and as a comparand)."
+    ]
+  }
+}

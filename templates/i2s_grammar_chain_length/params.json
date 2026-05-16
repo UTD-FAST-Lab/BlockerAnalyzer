@@ -1,0 +1,29 @@
+{
+  "template_id": "i2s_grammar_chain_length",
+  "parameter": "CHAIN_LEN",
+  "scan_values": [1, 2, 4, 8],
+  "primary_pair": {"A": "value_profile_cmplog", "B": "value_profile"},
+  "fuzzers": ["value_profile_cmplog", "value_profile"],
+  "fuzzer_role": {
+    "value_profile_cmplog": "primary pair A -- vpc; carries I2S delta over vp",
+    "value_profile":        "primary pair B -- vp; baseline without I2S"
+  },
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "vpc > vp; vpc/vp ratio grows monotonically with CHAIN_LEN",
+  "expected_curve_per_fuzzer": {
+    "value_profile_cmplog": "linear-in-CHAIN_LEN decay (one I2S substitute per slot, CHAIN_LEN slots required); resolves at every scan value",
+    "value_profile":        "exponential-in-CHAIN_LEN decay; ~0 at CHAIN_LEN>=4 within 600s budget"
+  },
+  "acceptance": {
+    "metric": "median crash count",
+    "rule": "vpc median > 0 at every CHAIN_LEN; vp median monotone non-increasing in CHAIN_LEN; vpc/vp ratio strictly increasing in CHAIN_LEN"
+  },
+  "design_basis": "N-slot multi-byte literal chain mirrors libpcap pcap-filter grammar where the trap (bpf_optimize returning -1 via opt_error from a divisor-zero constant-fold) is gated on the input containing a sequence of valid grammar tokens at fixed offsets. Each slot's 4-byte keyword is checked via memcmp; cmplog logs each as one I2S dictionary entry. vp lacks I2S so each slot's gradient is independent (per-edge Hamming bucket); compounding across CHAIN_LEN independent slot CMPs gives exponential decay in CHAIN_LEN. Orthogonal complement to i2s_pair_relational_lookup (which fixes CHAIN_LEN=2 and varies DICT_SIZE).",
+  "deployed_targets": ["b_grammar_chain_l1", "b_grammar_chain_l2", "b_grammar_chain_l4", "b_grammar_chain_l8"],
+  "notes": [
+    "CHAIN_LEN is COMPILE-TIME; one Dockerfile per scan value at libafl_fuzzbench/docker/targets/Dockerfile.b_grammar_chain_l{1,2,4,8}.",
+    "KEYWORD_LEN fixed at 4 (matches lcms FOURCC scale and pcap-filter token width); CHAIN_LEN varies. The (KEYWORD_LEN, CHAIN_LEN) plane is partitioned across templates: i2s_magic_number_gate varies KEYWORD_LEN at CHAIN_LEN=1; i2s_pair_relational_lookup varies DICT_SIZE at CHAIN_LEN=2; this template varies CHAIN_LEN at KEYWORD_LEN=4.",
+    "Primary pair is (vpc, vp) on the I2S axis -- chosen because the real-target strict-wins cell at libpcap br799 is on this edge."
+  ]
+}

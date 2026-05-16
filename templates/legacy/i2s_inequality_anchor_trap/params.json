@@ -1,0 +1,30 @@
+{
+  "template_id": "i2s_inequality_anchor_trap",
+  "parameter": "INEQ_CHAIN_LENGTH",
+  "scan_values": [1, 2, 4, 8],
+  "primary_pair": {"A": "value_profile", "B": "value_profile_cmplog"},
+  "fuzzers": ["value_profile", "value_profile_cmplog"],
+  "fuzzer_role": {
+    "value_profile":        "primary pair A — per-branch winner (no I2SRandReplace mutator)",
+    "value_profile_cmplog": "primary pair B — per-branch loser (I2S splice-back anchors operand to K)"
+  },
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "vp > vpc; ratio (vp/vpc) monotone non-decreasing in INEQ_CHAIN_LENGTH",
+  "expected_curve_per_fuzzer": {
+    "value_profile":        "moderate at N=1, sustained or rising through N=8 (gradient guides each slot independently with no anchor reversion)",
+    "value_profile_cmplog": "moderate at N=1, decaying as N grows (splice-back anchor pressure on K compounds across slots; combinatorial cost to evade simultaneously)"
+  },
+  "acceptance": {
+    "metric": "median crash count",
+    "rule": "vp median > vpc median at INEQ_CHAIN_LENGTH >= 2 AND (vp/vpc ratio at N=8) >= 2 * (vp/vpc ratio at N=1) AND vpc median <= vp median across the entire scan"
+  },
+  "design_basis": "AND-chain of N independent `> K` checks, K=100 (mirrors MAX_TABLE_TAG from cmsio0.c:827). Each slot reads a 4-byte big-endian uint at a distinct offset and tests `> K`. With N CMPs all logging K, I2S dictionary pressure on K compounds; I2SRandReplace splice-back must be evaded simultaneously at all N offsets for the trap to fire. value_profile has CMP_MAP gradient feedback (same Hamming bucketing) but no I2SRandReplace, so its offspring drift past K with no anchor reversion. The K=100 literal mirrors lcms's MAX_TABLE_TAG so the harness reproduces the source-line CMP shape exactly at N=1.",
+  "deployed_targets": ["b_ineq_anchor_n1", "b_ineq_anchor_n2", "b_ineq_anchor_n4", "b_ineq_anchor_n8"],
+  "notes": [
+    "Primary pair is vp (A, winner) vs vpc (B, loser). axis_differ = I2S substitution. This is the Pattern B 'technique-hurts' orientation: A is the per-branch winner WITHOUT the technique; B is augmented with I2S on top of A.",
+    "INEQ_CHAIN_LENGTH=1 reproduces lcms cmsio0.c:827 minimum case (one `TagCount > 100`). N=8 is the dose-response endpoint where splice-back combinatorial cost should be most acute.",
+    "Dockerfiles: /home/miao/libafl_fuzzbench/docker/targets/Dockerfile.b_ineq_anchor_n{1,2,4,8}.",
+    "If the curves flatten (vp ~ vpc at N=8), the splice-back anchor mechanism is bounded by the same scheduler-saturation that refuted strpres v3. Refute and add to the catalog of log-saturated mechanism class."
+  ]
+}

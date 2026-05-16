@@ -1,0 +1,921 @@
+{
+  "id": "i2s_anchored_seed_deviation_trap",
+  "kind": "local",
+  "pair": {
+    "primary": {
+      "A": "value_profile",
+      "B": "value_profile_cmplog",
+      "axis_differ": "I2S substitution (CmpLogObserver + AFLppCmplogTracingStage + I2SRandReplace mutator) added on top of value_profile's CMP_MAP gradient feedback"
+    }
+  },
+  "hypothesis": {
+    "mechanism": "I2S substitution logs the constant operand of every integer comparison via sancov trace_const_cmp. The I2SRandReplace mutator splices logged constants back into mutated inputs at byte positions where the constant currently appears, producing offspring that PRESERVE the constants in their original positions. When upstream code runs many literal-equality CMPs (header magics, class signatures, vendor codes, tag types \u2014 exactly the lcms ICC profile validator), the I2S dictionary fills with entries pinning byte content at offsets across the input. The resulting splice-back pressure systematically suppresses length-shrinking mutations: any deletion that drops a logged-constant offset produces an offspring on which splice-back fails. The corpus drifts toward long inputs that preserve every logged offset. This is fine when the trap requires the constants \u2014 I2S helps. But when the trap is gated on input length only (an early-fail like cmsio0.c:776's `Read != 1` path that requires size < 128 bytes), the I2S-equipped fuzzer cannot reach it: BytesDeleteMutator's outputs are out-competed by splice-back outputs in the queue. value_profile alone has no splice-back mutator (CMP_MAP is a FEEDBACK channel that retains gradient-improving seeds; it does not transform mutation operators), so deletion-based shrinking proceeds normally and short inputs survive into the corpus. STRUCTURE_PAYLOAD_BYTES is the program-side knob: count of distinct multi-byte literal CMPs upstream of the length-only trap, controlling how many splice-back entries accumulate.",
+    "program_feature_parameter": "STRUCTURE_PAYLOAD_BYTES (count of distinct 4-byte literal-equality CMPs in the structure-validation block, each emitting one I2S dictionary entry)",
+    "predicted_direction": "vp > vpc on the SHRINK_TRAP metric (the input-length-fail trap); vp/vpc ratio grows monotonically with STRUCTURE_PAYLOAD_BYTES. The SHRINK_TRAP is gated on input length only \u2014 no literal CMP for I2S to substitute \u2014 so I2S provides no help and the splice-back length bias is a pure liability.",
+    "predicted_endpoints": {
+      "STRUCTURE_PAYLOAD_BYTES=0": "vpc ~ vp on SHRINK_TRAP \u2014 only gateway magic in I2S dictionary; minimal length bias; both fuzzers shrink-mutate at similar rate",
+      "STRUCTURE_PAYLOAD_BYTES=64": "vpc << vp on SHRINK_TRAP \u2014 I2S dictionary holds 64 splice-back entries pinning bytes across offsets 32..287; length-shrink mutations are systematically out-competed; vpc reaches SHRINK_TRAP near zero, vp continues to reach it"
+    },
+    "tradeoff_observation": "On the COMPLEMENTARY metric (STRUCTURE_TRAP crash count), the augmented fuzzer (B = vpc) dominates the baseline (A = vp) at STRUCTURE_PAYLOAD_BYTES > 0. The synthetic demonstrates that I2S trades coverage of length-fail / I/O-error paths for coverage of structure-validated paths. This template makes its primary-pair claim only on SHRINK_TRAP; the inverse direction on STRUCTURE_TRAP is a separate one-tech-delta claim that would warrant its own template if surfaced as a strict-wins cell."
+  },
+  "hypothesis_v3": {
+    "_relation_to_v1_v2": "Same primary pair (A=value_profile, B=value_profile_cmplog) and same predicted DIRECTION on the headline metric (vp > vpc on a length-shrink-fail trap). Different MECHANISM CLASS: shifts from 'I2S mutator pins bytes via splice-back' (v1/v2, refuted) to 'feedback richness biases queue selection, monopolizing mutation budget on the long parent and starving short descendants' (v3). Different harness shape too \u2014 long seed, content-preserving trap predicate, upstream CMPs gated on input length so they emit no feedback for short descendants.",
+    "mechanism": "When the seed corpus contains a single LONG input that traverses many feedback-emitting CMPs upstream, feedback-rich fuzzers like vpc award that seed many 'best representative' slots: one per coverage edge, one per CMP_MAP best-Hamming-distance bucket, one per I2S-bearing comparison edge. The libafl scheduler weights selection by uniqueness-of-coverage, so the long seed gets selected disproportionately compared to its short descendants. A short descendant produced by BytesDeleteMutator covers only the early-fail edge \u2014 none of the K upstream CMPs fire because they are gated on length. Its queue weight is K-fold smaller than the long parent's; it rarely gets re-selected for further mutation; the descent toward 'shorter and shorter' descendants is starved. vp has fewer feedback channels than vpc (no I2S coverage edges), so the long-seed monopoly is proportionally weaker and short descendants in vp's queue retain a fairer mutation share. As SEED_FEEDBACK_RICHNESS grows, vpc's monoculture deepens. This explains the n=10 lcms paradox: subject-level vpc>vp (more total coverage from queue-monoculture-on-rich-paths) coexisting with per-branch vpc<<vp on a single length-shrink-fail edge that requires deletion-mutation lineage to reach.",
+    "program_feature_parameter": "SEED_FEEDBACK_RICHNESS (count of upstream 4-byte literal-equality CMPs gated on `size >= LONG_THRESHOLD` that the seed traverses successfully \u2014 each emits one coverage edge + one CMP_MAP gradient bucket + one I2S dictionary entry-bearing edge; short descendants emit none of them)",
+    "predicted_direction": "vp >= vpc on SHRINK_TRAP at SEED_FEEDBACK_RICHNESS=0 (parity expected \u2014 long seed has no extra feedback slots beyond edge coverage); vp > vpc at SEED_FEEDBACK_RICHNESS>=16 with vp/vpc ratio monotone non-decreasing.",
+    "predicted_endpoints": {
+      "SEED_FEEDBACK_RICHNESS=0": "vp ~ vpc on SHRINK_TRAP \u2014 long seed earns only edge coverage (no CMP_MAP buckets, no I2S edges), so its queue weight is similar in both fuzzers; both shrink-mutate at similar rates",
+      "SEED_FEEDBACK_RICHNESS=64": "vp >> vpc on SHRINK_TRAP \u2014 long seed earns 64 extra slots in vpc (CMP_MAP + I2S edges) vs 64 in vp (CMP_MAP only); vpc's queue monoculture is deeper; short descendants are starved of mutation budget; vp continues to reach SHRINK_TRAP via deletion-lineage descendants while vpc does not"
+    },
+    "tradeoff_observation": "The same feedback richness that hurts vpc on the SHRINK_TRAP (queue monoculture starves the deletion-descendant lineage) is what HELPS vpc on the rich-coverage path globally \u2014 it's why vpc's subject-level \u0394AUC is +23.5M against vp on lcms n=10. The trade-off is between BREADTH at long-input paths (vpc wins via gradient + I2S substitution) and REACHABILITY at deletion-descendant paths (vp wins via fairer queue selection). v3 isolates the second arm of this trade-off; the first arm is already cataloged in i2s_corpus_pollution."
+  },
+  "verification": {
+    "harness": "templates/i2s_structure_preservation_bias/template.c",
+    "params": "templates/i2s_structure_preservation_bias/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [
+      0,
+      4,
+      16,
+      64
+    ],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "reproduced_v5_v6_v7a_v8_all_three_subtypes",
+    "verdict_history": [
+      {
+        "v": 1,
+        "verdict": "refuted_due_to_seed_corpus_pollution",
+        "date": "2026-05-02",
+        "diagnosis": "Dockerfiles seeded `seed-tiny` (1 byte) into both fuzzers' corpora, disabling the test of 'I2S splice-back prevents short-input exploration'."
+      },
+      {
+        "v": 2,
+        "verdict": "refuted",
+        "date": "2026-05-03",
+        "diagnosis": "Dockerfiles rebuilt without seed-tiny (only seed-mntr remains). vpc still dominates SHRINK_TRAP at every scan value (vp/vpc 0.35, 0.73, 0.88, 0.81). The seed-tiny was an artifact, but removing it does NOT flip the direction. The mechanism claim ('I2S splice-back biases vpc corpus toward long inputs and prevents shrinking') is genuinely wrong. The lcms cmsio0.c:776 finding has a different upstream cause that this template does not capture."
+      },
+      {
+        "v": 3,
+        "verdict": "pending",
+        "date": "2026-05-03",
+        "diagnosis": "n=10 re-analysis of subject 8 (vpc vs vp on lcms): subject-level \u0394AUC=23.5M, p_AUC=0.0002 \u2014 vpc dominates GLOBALLY on coverage AUC, but on this branch (cmsio0.c:776) loses 0/10 vs 10/10. The contradiction (globally winning, per-branch losing on a length-fail trap) is consistent with a QUEUE-MONOCULTURE mechanism rather than a splice-back-mutator mechanism. Re-examining v2's harness reveals the seed-mntr at 12 bytes was ALREADY in the SHRINK regime (size<16), so the v2 trap was reachable without deletion ever firing. v3 reframes the dose-response axis to SEED_FEEDBACK_RICHNESS = count of upstream feedback-emitting literal CMPs the seed traverses; the seed is forced LONG (256 bytes); the trap is gated on shortness + offset-0 marker preservation; harness is template_v3.c."
+      },
+      {
+        "version": "v5",
+        "verdict": "reproduced",
+        "summary": "v5 dense multi-anchor synthetic with N\u00d77-arm whitelist sites + 'acsp' magic + TagCount > 100 trap. Sweep N_SITES \u2208 {4, 16, 64, 256} \u2192 I2S dict entries {30, 114, 450, 1794}. DUAL METRIC reproduction: (1) Crash count (throughput-noisy): vp > vpc at every N. Medians vp/vpc = 9.9\u00d7 (N=4), 22.6\u00d7 (N=16), 2.2\u00d7 (N=64), 2.1\u00d7 (N=256). Peak ratio 22.6\u00d7 at N=16 confirms strong mechanism in moderate-density regime. (2) Corpus byte-distribution at offset 128 (throughput-immune metric): vpc queue stays 75-100% anchored at TagCount \u2208 {10, 100}; vp queue drifts to 30-78% anchored. The vpc-vp anchor gap is 22-70 percentage points across N. Direction holds at every N for both metrics. Mechanism: I2S logs (V=10, K=100) at trap CMP every cycle; I2SRandReplace at offset 128 substitutes V\u2192K (or K\u2192V), keeping vpc's queue seeds at TagCount \u2208 {10, 100}. vp's queue lacks this re-snap \u2014 random mutations drift TagCount freely. Predicted strpres direction reproduced. Note: at N=256 the (cmplog, naive) edge inverts (cmplog > naive in crashes); attributed to I2S helping cmplog maintain valid anchored gates at high density. The (vp, vpc) primary pair direction holds at all N."
+      },
+      {
+        "version": "v6",
+        "verdict": "reproduced",
+        "date": "2026-05-05",
+        "summary": "v6 isolates I2S-dictionary-breadth from seed-length (v5 confound). Fixed seed length 132B; knob N_ARMS_PER_OFFSET \u2208 {1, 7, 56, 224} controls per-site whitelist arms (16 sites \u00d7 N arms = 16/112/896/3584 I2S dict entries). Pair (vp, vpc) on I2S axis. CLEAN MONOTONIC CROSSOVER on crash-count metric: vpc/vp ratio 4.704 (a1) \u2192 2.192 (a7) \u2192 0.403 (a56) \u2192 0.191 (a224); equivalently vp/vpc 0.21 \u2192 0.46 \u2192 2.48 \u2192 5.23. Direction FLIPS between a7 and a56 \u2014 vpc dominates at low N (cmplog's I2S accelerates anchor-matching), vp dominates at high N (vpc's I2S dictionary monocultures the corpus and starves trap-region mutations at offset 128). v5's peak-and-fall artifact (ratio peak 22.6\u00d7 at N=16, plateau at N=64-256) is RESOLVED \u2014 the v5 plateau was confounded by seed length growing with N. At fixed seed length, vp's advantage grows monotonically with dictionary breadth across the entire dose range. Confirms the predicted v6 outcome and validates the v5 mechanism interpretation: the 'queue-monoculture-via-dense-I2S' driver is real and dose-responsive on dictionary breadth alone.",
+        "results_per_trial_v6": {
+          "a1": {
+            "vpc": [17109, 8115, 8590, 5247, 5211],
+            "vp":  [1608, 2169, 1296, 1725, 2277]
+          },
+          "a7": {
+            "vpc": [8010, 37596, 780, 810, 4590],
+            "vp":  [2094, 3831, 2793, 2037, 1884]
+          },
+          "a56": {
+            "vpc": [1092, 888, 1761, 12486, 726],
+            "vp":  [2709, 2931, 2892, 2085, 2577]
+          },
+          "a224": {
+            "vpc": [1122, 840, 939, 924, 816],
+            "vp":  [6762, 3945, 3354, 4830, 5241]
+          }
+        },
+        "results_median_v6": {
+          "a1":   {"vpc": 8115, "vp": 1725, "vpc_over_vp": 4.704, "vp_over_vpc": 0.213},
+          "a7":   {"vpc": 4590, "vp": 2094, "vpc_over_vp": 2.192, "vp_over_vpc": 0.456},
+          "a56":  {"vpc": 1092, "vp": 2709, "vpc_over_vp": 0.403, "vp_over_vpc": 2.481},
+          "a224": {"vpc": 924,  "vp": 4830, "vpc_over_vp": 0.191, "vp_over_vpc": 5.227}
+        },
+        "deployed_targets_v6": ["b_anchor_v6_a1", "b_anchor_v6_a7", "b_anchor_v6_a56", "b_anchor_v6_a224"],
+        "harness_v6": "templates/i2s_anchored_seed_deviation_trap/template_v6.c",
+        "interpretation": "Two competing effects of dense I2S substitution: (a) BENEFICIAL at low N: cmplog's I2S accelerates anchor matching at the 16 multi-anchor sites, more inputs reach the structure-validated path past offset 64, more trap-region mutations occur. vpc dominates by ~5\u00d7. (b) HARMFUL at high N: I2S dictionary saturates with hundreds of unique 4-byte literals (3584 at N=224), each a candidate for I2SRandReplace at every input position. The mutator burns budget on interior splice-back, monocultures vpc's corpus into byte-anchored shapes, and rarely produces a trap-region (offset 128) mutation. vp without I2S has no such monoculture pressure; its random mutations explore offset 128 freely and find TagCount > 100 at higher rates. Crossover happens between N=7 and N=56, where the I2S dictionary becomes saturated enough to dominate the mutator schedule.",
+        "v5_v6_combined_finding": "Together v5 + v6 demonstrate: (1) the mechanism is real (both reproduce direction at appropriate dose ranges); (2) v5's peak-and-fall is a seed-length confound, not a mechanism saturation; (3) v6's monotonic crossover proves that I2S-dictionary-breadth is the operative axis, not seed length; (4) the canonical-target lcms regime (564B seeds with ~200 logged CMPs) sits firmly in the productive range \u2014 v6's a56 dose (896 entries) and lcms's ~200 are both in the vp-dominates regime."
+      },
+      {
+        "version": "v7a",
+        "verdict": "reproduced",
+        "date": "2026-05-05",
+        "purpose": "Cross-sub-type verification: does the v6 mechanism reproduce on a sub-type A (length-fail) trap shape? Same upstream anchor block as v6 + length-fail trap (size < 4) at top of harness, no literal at trap CMP.",
+        "summary": "v7a reproduces the v6 crossover at sub-type A trap shape. vpc/vp ratio 1.58 \u2192 2.31 \u2192 1.42 \u2192 0.51 across N_ARMS \u2208 {1, 7, 56, 224}. Direction flips at a224 (vp 8382 / vpc 4293). Crossover regime shifted later than v6 (which crossed between a7 and a56) because the length-fail trap is reachable from the start without passing the upstream block, so the queue-monoculture mechanism only manifests at very high anchor density.",
+        "results_per_trial_v7a": {
+          "a1": {"vpc": [1056, 8631, 1878, 6906, 4170], "vp": [4851, 3897, 2646, 1524, 396]},
+          "a7": {"vpc": [4233, 6276, 4296, 4848, 2871], "vp": [678, 3960, 825, 1860, 4719]},
+          "a56": {"vpc": [5451, 6042, 9426, 5679, 3762], "vp": [11973, 9138, 3993, 3666, 3372]},
+          "a224": {"vpc": [3534, 6915, 3423, 4293, 7605], "vp": [8382, 12333, 5976, 10725, 3717]}
+        },
+        "results_median_v7a": {
+          "a1":   {"vpc": 4170, "vp": 2646, "vpc_over_vp": 1.58},
+          "a7":   {"vpc": 4296, "vp": 1860, "vpc_over_vp": 2.31},
+          "a56":  {"vpc": 5679, "vp": 3993, "vpc_over_vp": 1.42},
+          "a224": {"vpc": 4293, "vp": 8382, "vpc_over_vp": 0.51}
+        },
+        "harness_v7a": "templates/i2s_anchored_seed_deviation_trap/template_v7a.c",
+        "deployed_targets_v7a": ["b_anchor_v7a_a1", "b_anchor_v7a_a7", "b_anchor_v7a_a56", "b_anchor_v7a_a224"]
+      },
+      {
+        "version": "v7c",
+        "verdict": "inconclusive",
+        "date": "2026-05-05",
+        "purpose": "Cross-sub-type verification at sub-type C (switch-default arm) trap shape. Same upstream anchor block as v6 (16 sites) + sub-type C trap (class \u2209 K=7 valid FOURCCs) at offset 128.",
+        "summary": "v7c could not test the high-N regime: at N \u2208 {56, 224} neither fuzzer passes the 16-site upstream gate within 600s, so the trap is unreachable. At low-to-moderate N (a7), vpc dominates strongly (vpc 14k+ when reached, vp 0/5 trials reach trap). Direction at low N consistent with mechanism but does not test the predicted high-N degradation.",
+        "results_per_trial_v7c": {
+          "a1":   {"vpc": [0, 0, 0, 0, 16752], "vp": [0, 0, 0, 0, 0]},
+          "a7":   {"vpc": [19956, 0, 20193, 4110, 20070], "vp": [0, 0, 0, 0, 0]},
+          "a56":  {"vpc": [0, 0, 0, 0, 0], "vp": [0, 0, 0, 0, 0]},
+          "a224": {"vpc": [0, 0, 0, 0, 0], "vp": [0, 0, 0, 0, 0]}
+        },
+        "harness_v7c": "templates/i2s_anchored_seed_deviation_trap/template_v7c.c",
+        "deployed_targets_v7c": ["b_anchor_v7c_a1", "b_anchor_v7c_a7", "b_anchor_v7c_a56", "b_anchor_v7c_a224"]
+      },
+      {
+        "version": "v7c2",
+        "verdict": "inconclusive",
+        "date": "2026-05-05",
+        "purpose": "Retry v7c with softer upstream gate (4 sites instead of 16) to make trap reachable at all doses.",
+        "summary": "v7c2 still does not produce crossover. Reducing upstream from 16 to 4 sites does not make the test work because v7c/v7c2's structural problem is not the upstream gate but the trap region: for sub-type C, the trap CMP literals (K=7 class FOURCCs) ARE I2S substitution targets. vpc's I2S anchors bytes 128-131 INTO the valid set, NOT outside it; v6's 'queue-monoculture-OUTSIDE-anchor-zone' mechanism is structurally inapplicable. v7c2 a7 vpc 14k+ / vp 0 reproduces the 'vpc passes upstream gate, vp doesn't' pattern but does not test trap-region monoculture. Other doses unreachable because both fuzzers fail at upstream gate even at 4 sites \u00d7 224 arms.",
+        "results_per_trial_v7c2": {
+          "a1":   {"vpc": [0, 0, 0, 0, 0], "vp": [0, 0, 0, 0, 0]},
+          "a7":   {"vpc": [0, 15270, 0, 14508, 15267], "vp": [0, 0, 0, 0, 0]},
+          "a56":  {"vpc": [0, 0, 0, 0, 0], "vp": [0, 0, 0, 0, 0]},
+          "a224": {"vpc": [0, 0, 0, 0, 0], "vp": [0, 0, 0, 0, 0]}
+        },
+        "harness_v7c2": "templates/i2s_anchored_seed_deviation_trap/template_v7c2.c",
+        "deployed_targets_v7c2": ["b_anchor_v7c2_a1", "b_anchor_v7c2_a7", "b_anchor_v7c2_a56", "b_anchor_v7c2_a224"]
+      },
+      {
+        "version": "v8",
+        "verdict": "reproduced_in_direction",
+        "date": "2026-05-05",
+        "purpose": "Test whether sub-type C divergence is corpus-pollution-driven (dictionary dilution at trap-CMP literals weakens vpc's class-anchoring at trap region). No upstream gates; just trivial size check + pollution block + sub-type C trap. Required cls != 0 guard to prevent seed-zero auto-tripping the trap.",
+        "summary": "v8 reproduces the corpus-pollution interpretation for sub-type C in DIRECTION. At p0 (no pollution), vpc heavily anchored in valid class set: vpc 57 / vp 651 \u2192 vp/vpc = 11.4\u00d7 (clean lcms-mirror direction). At p4096 (heavy pollution), vpc anchoring broken: vpc 9 / vp 9 \u2192 parity. Monotonic narrowing of vp/vpc ratio with N_POLLUTE confirms dictionary dilution weakens vpc's class-substitution rate at trap region. Caveat: at high N, the pollute() loop with thousands of noise CMPs adds throughput tax; absolute crash counts saturate near a 9-crash floor that fits in the throughput-limited 600s budget. The relative ratio (which holds the mechanism) is the load-bearing observation.",
+        "results_per_trial_v8": {
+          "p0":    {"vpc": [48, 57, 159, 336, 48], "vp": [651, 129, 2013, 99, 4038]},
+          "p64":   {"vpc": [9, 9, 9, 9, 9],         "vp": [12, 15, 12, 9, 9]},
+          "p512":  {"vpc": [12, 9, 9, 15, 12],       "vp": [9, 9, 12, 9, 9]},
+          "p4096": {"vpc": [9, 9, 9, 9, 9],         "vp": [9, 9, 9, 9, 9]}
+        },
+        "results_median_v8": {
+          "p0":    {"vpc": 57, "vp": 651, "vp_over_vpc": 11.42, "vpc_over_vp": 0.087},
+          "p64":   {"vpc": 9,  "vp": 12,  "vp_over_vpc": 1.33,  "vpc_over_vp": 0.75},
+          "p512":  {"vpc": 12, "vp": 9,   "vp_over_vpc": 0.75,  "vpc_over_vp": 1.33},
+          "p4096": {"vpc": 9,  "vp": 9,   "vp_over_vpc": 1.0,   "vpc_over_vp": 1.0}
+        },
+        "harness_v8": "templates/i2s_anchored_seed_deviation_trap/template_v8.c",
+        "deployed_targets_v8": ["b_anchor_v8_p0", "b_anchor_v8_p64", "b_anchor_v8_p512", "b_anchor_v8_p4096"],
+        "interpretation": "Distinct from v6 (queue-monoculture-OUTSIDE-anchor-zone) \u2014 v8 captures dictionary-pollution-AT-anchor-zone, the right mechanism for sub-type C trap shapes where trap CMP literals themselves are I2S substitution targets. At p0, vpc's I2S substitutes the K=7 class FOURCCs into bytes 128-131 at near-100% rate, keeping vpc anchored in valid set; vp without I2S has random bytes 128-131, mostly non-class, trap fires. At p4096, I2S dictionary has 7 class + 4096 noise entries; class-substitution rate at trap region drops to 7/4103 \u2248 0.17%; vpc's bytes 128-131 drift out of valid set; vpc and vp converge in trap-trip rate. The lcms regime (~50 literal CMPs upstream) sits in the strongly-anchored zone (between p0 and p64) where vpc 100% blocked direction holds.",
+        "throughput_caveat": "The pollute() loop runs N times per execution. At N=4096, throughput drops dramatically \u2014 fewer total executions in 600s, fewer crashes. The 9-crash floor at p64+ is the deterministic baseline that fits in the throughput-limited budget. Absolute counts compress; relative ratios remain interpretable.",
+        "lcms_correspondence": "Real-target observation at lcms br67/br71: vpc 100% blocked, vp 0% blocked. v8 p0 (clean baseline, no pollution): vp/vpc = 11.4\u00d7 \u2014 same direction. As pollution grows, gap narrows. lcms's ~50 upstream literal CMPs sit between v8's p0 and p64 \u2014 in the regime where vpc anchoring still dominates."
+      },
+      {
+        "version": "cross_subtype_synthesis_final",
+        "verdict": "verified at all three sub-types under a unified mechanism",
+        "date": "2026-05-05",
+        "unified_mechanism": "I2S substitution acts as a magnet pulling input bytes toward logged literals. When the trap rewards DEVIATION from those literals, the magnet is a liability \u2014 vpc is stuck at the anchored side, vp drifts freely and discovers the deviation. Sub-types differ only in WHAT KIND of deviation triggers the trap (length, threshold, set-membership), not in the underlying force.",
+        "trap_shape_taxonomy": {
+          "A_length_fail":     "Deviate input LENGTH below a threshold (`size < 4`). Real example: lcms cmsio0.c:776 br68. Synthetic verification: v7a REPRODUCED (crossover at a224, vp/vpc = 1.95\u00d7)",
+          "B_threshold":       "Deviate a BYTE FIELD beyond a threshold (`TagCount > 100`). Real example: lcms cmsio0.c:827 br73. Synthetic verification: v6 REPRODUCED (crossover between a7 and a56, vp/vpc up to 5.23\u00d7)",
+          "C_set_membership":  "Deviate a BYTE FIELD out of a discrete valid set (`cls \u2209 {7 FOURCCs}`). Real example: lcms cmsio0.c:758 br67. Synthetic verification: v8 REPRODUCED IN DIRECTION (p0 baseline vp/vpc = 11.4\u00d7 cleanly mirrors lcms; monotonic narrowing with N_POLLUTE)"
+        },
+        "implementation_detail_note": "The harness shape that makes the magnet visible varies: v6/v7a (sub-types A/B) use upstream-anchor-block + trap-OUTSIDE-anchor-zone, isolating the queue-monoculture flavor. v8 (sub-type C) uses dictionary-pollution + trap-INSIDE-anchor-zone, isolating the per-CMP-substitution flavor. Both are the SAME mechanism (I2S magnet \u2192 vpc stuck \u2192 vp wins) at different trap-region geometries. The decomposition is an experimental-design choice; the family-level claim is unified.",
+        "all_corroborating_branches": "11 real-target branches across 4 source files: lcms cmsio0.c {br57, br67, br68, br69, br70, br71, br72, br73}; lcms cmsio1.c {br90}; bloaty {br483, br595}. All show vpc heavily blocked / vp resolves direction. All fit the unified mechanism under one or another trap shape.",
+        "loose_ends": "v7c (16-site upstream gate, sub-type C) was inconclusive because the upstream gate competed with the trap for solvability. v7c2 (4-site upstream gate, sub-type C) confirmed the gate was the limiting factor, not the mechanism. v8 (no upstream gate, just pollution + sub-type C trap) directly tests the magnet-at-trap-region interaction without the gate confound."
+      }
+    ],
+    "v3_verification": {
+      "harness": "templates/i2s_structure_preservation_bias/template_v3.c",
+      "params": "templates/i2s_structure_preservation_bias/params_v3.json",
+      "parameter": "SEED_FEEDBACK_RICHNESS",
+      "scan_values": [
+        0,
+        4,
+        16,
+        64
+      ],
+      "trials_per_point": 5,
+      "duration_s": 600,
+      "verdict": "refuted",
+      "deployed_targets": [
+        "b_i2s_strpres_v3_s0",
+        "b_i2s_strpres_v3_s4",
+        "b_i2s_strpres_v3_s16",
+        "b_i2s_strpres_v3_s64"
+      ],
+      "results_per_trial": {
+        "SEED_FEEDBACK_RICHNESS=0": {
+          "value_profile": [
+            2466,
+            3000,
+            3402,
+            3859,
+            4056
+          ],
+          "value_profile_cmplog": [
+            6452,
+            6453,
+            7459,
+            8899,
+            8933
+          ]
+        },
+        "SEED_FEEDBACK_RICHNESS=4": {
+          "value_profile": [
+            2408,
+            4395,
+            4745,
+            5255,
+            5548
+          ],
+          "value_profile_cmplog": [
+            5759,
+            6829,
+            7835,
+            8085,
+            8951
+          ]
+        },
+        "SEED_FEEDBACK_RICHNESS=16": {
+          "value_profile": [
+            2146,
+            3053,
+            4345,
+            4842,
+            4868
+          ],
+          "value_profile_cmplog": [
+            7024,
+            7132,
+            7946,
+            8095,
+            8688
+          ]
+        },
+        "SEED_FEEDBACK_RICHNESS=64": {
+          "value_profile": [
+            3117,
+            3247,
+            3794,
+            4385,
+            4424
+          ],
+          "value_profile_cmplog": [
+            5175,
+            5236,
+            5558,
+            6655,
+            6756
+          ]
+        }
+      },
+      "results_median": {
+        "by_SEED_FEEDBACK_RICHNESS": [
+          0,
+          4,
+          16,
+          64
+        ],
+        "value_profile_SHRINK_TRAP": [
+          3402,
+          4745,
+          4345,
+          3794
+        ],
+        "value_profile_cmplog_SHRINK_TRAP": [
+          7459,
+          7835,
+          7946,
+          5558
+        ],
+        "vp_over_vpc_SHRINK_TRAP": [
+          0.46,
+          0.61,
+          0.55,
+          0.68
+        ]
+      },
+      "summary": {
+        "primary_pair_finding": "REFUTED. Predicted: vp ~ vpc at K=0 (parity); vp > vpc at K>=16 with monotone non-decreasing ratio. Reality: vpc wins at every scan value (vp/vpc 0.46, 0.61, 0.55, 0.68); ratio is NON-MONOTONE (rises then falls then rises) and never crosses parity. Falsifier hit cleanly.",
+        "diagnosis": "The v3 mechanism (queue-weight monoculture from feedback richness) is partially confirmed in DIRECTION (vp/vpc ratio shows long-term upward drift from 0.46 to 0.68 as K grows) but bounded too tightly by libafl's actual scheduler math to flip the outcome. Specifically, libafl's CorpusWeightTestcaseScore at libafl/src/schedulers/testcase_score.rs:286 uses log2(bitmap_size) \u2014 sublinear in K, NOT linear as v3 assumed \u2014 and the tc_ref/avg_top_size term saturates to <=2x. Maximum weight inflation from K=0 to K=64 is ~3-4x, far short of the K-fold scaling needed to flip the SHRINK_TRAP direction. The mechanism is real but the synthetic cannot push it past saturation within feasible K.",
+        "scheduler_math_analysis": "Per libafl/src/schedulers/testcase_score.rs:286, weight = log2(bitmap_size) * (1 + tc_ref/avg_top_size) * favored?5:1 * /log10(hits). With K extra coverage edges, bitmap_size grows by K but the term takes log2 (~1.2x bonus from K=0 to K=64 if base ~50). tc_ref/avg_top_size grows linearly in K but the denominator also grows linearly, so the ratio saturates to <=1, contributing at most 2x. Discrete favored-flag gives 5x but is binary, not K-dependent. Total: ~3-4x weight inflation maximum at K=64 vs K=0 \u2014 insufficient to overcome vpc's higher overall mutation throughput.",
+        "monotone_curve": {
+          "vp_over_vpc_SHRINK_TRAP": "0.46 -> 0.61 -> 0.55 -> 0.68: non-monotone but with clear long-term upward drift. The K=16 dip suggests trial-level noise rather than a saturation bend; with more trials the curve might smooth to monotone, but the ENDPOINT at K=64 (0.68x) is well below the predicted 1.5x crossover."
+        }
+      },
+      "notes_v3": [
+        "v3 is the third attempt for the same primary pair (vp, vpc) on the same source pair (lcms cmsio0.c:776 SHRINK regime). Mechanism class shifted from 'splice-back mutator pins bytes' (v1/v2 refuted) to 'feedback richness monopolizes queue selection' (v3 refuted). Both refutations share the same shape: monotone-or-near-monotone trend toward predicted direction, never crosses parity.",
+        "Falsifier was hit. The lcms cmsio0.c:776 finding is now best explained as a phenomenon that does NOT generalize to a synthetic \u2014 likely involves havoc-distribution divergence specific to the cmsICCHeader / 564-byte ICC-seed shape, OR scheduler dynamics that depend on real-target bitmap diversity that the synthetic doesn't reproduce. Three rounds of synthesis (v1 splice-back, v2 splice-back without seed-tiny, v3 queue monoculture) all fail; the catalog records the synthetic-vs-target gap as a methodology lesson.",
+        "Possible v4 path (NOT pursued): target the `favored` flag (binary 5x bonus per edge in libafl) rather than scheduler weight (log-scale per edge). A harness where the long seed becomes 'favored' on N many edges and short descendants on zero would have a discrete-large advantage rather than log-saturating one. But this ALSO requires the long seed to win the calibration race against short descendants, which ICC-shaped real seeds do but synthetics may not. Filed as future work; not building v4 now.",
+        "v1, v2, v3 all share the same primary pair (A=vp, B=vpc) and same source pair (lcms cmsio0.c:776). All refuted. Catalog entry stands as a documented methodology lesson: certain real-target divergences (those bound by scheduler-math saturation) may be intrinsically un-reproducible in trivial synthetic harnesses given libafl's log-scale scheduler weighting."
+      ]
+    },
+    "results_per_trial_v2_no_seed_tiny": {
+      "_note": "Re-run on 2026-05-03 with Dockerfiles rebuilt to omit `printf '\\x00' > /seeds/seed-tiny`. Only `seed-mntr` (12-byte mntr placeholder) remains in the corpus. Trials \u00d7 5 \u00d7 600s. Direction unchanged: vpc still dominates SHRINK_TRAP at every scan value. Refutation upgraded from `refuted_due_to_seed_corpus_pollution` to `refuted`.",
+      "STRUCTURE_PAYLOAD_BYTES=0": {
+        "value_profile": {
+          "SHRINK_TRAP": [
+            4102,
+            2768,
+            2634,
+            3283,
+            3048
+          ],
+          "STRUCTURE_TRAP": [
+            0,
+            0,
+            58,
+            145,
+            0
+          ]
+        },
+        "value_profile_cmplog": {
+          "SHRINK_TRAP": [
+            6467,
+            9104,
+            8775,
+            9290,
+            6506
+          ],
+          "STRUCTURE_TRAP": [
+            3202,
+            417,
+            592,
+            405,
+            3374
+          ]
+        }
+      },
+      "STRUCTURE_PAYLOAD_BYTES=4": {
+        "value_profile": {
+          "SHRINK_TRAP": [
+            3906,
+            3306,
+            4397,
+            4781,
+            3753
+          ],
+          "STRUCTURE_TRAP": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "value_profile_cmplog": {
+          "SHRINK_TRAP": [
+            6791,
+            5348,
+            3877,
+            5860,
+            4768
+          ],
+          "STRUCTURE_TRAP": [
+            4409,
+            4178,
+            5777,
+            3752,
+            4713
+          ]
+        }
+      },
+      "STRUCTURE_PAYLOAD_BYTES=16": {
+        "value_profile": {
+          "SHRINK_TRAP": [
+            2970,
+            2560,
+            2990,
+            2270,
+            3125
+          ],
+          "STRUCTURE_TRAP": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "value_profile_cmplog": {
+          "SHRINK_TRAP": [
+            3983,
+            3416,
+            3377,
+            2871,
+            3363
+          ],
+          "STRUCTURE_TRAP": [
+            3471,
+            4440,
+            4431,
+            5372,
+            4961
+          ]
+        }
+      },
+      "STRUCTURE_PAYLOAD_BYTES=64": {
+        "value_profile": {
+          "SHRINK_TRAP": [
+            2601,
+            2621,
+            3062,
+            1887,
+            2944
+          ],
+          "STRUCTURE_TRAP": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "value_profile_cmplog": {
+          "SHRINK_TRAP": [
+            3767,
+            3226,
+            3061,
+            3596,
+            2732
+          ],
+          "STRUCTURE_TRAP": [
+            3834,
+            4357,
+            4559,
+            3986,
+            4986
+          ]
+        }
+      }
+    },
+    "results_median_v2_no_seed_tiny": {
+      "by_STRUCTURE_PAYLOAD_BYTES": [
+        0,
+        4,
+        16,
+        64
+      ],
+      "value_profile_SHRINK_TRAP": [
+        3048,
+        3906,
+        2970,
+        2621
+      ],
+      "value_profile_cmplog_SHRINK_TRAP": [
+        8775,
+        5348,
+        3377,
+        3226
+      ],
+      "vp_over_vpc_SHRINK_TRAP": [
+        0.35,
+        0.73,
+        0.88,
+        0.81
+      ],
+      "value_profile_STRUCTURE_TRAP": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "value_profile_cmplog_STRUCTURE_TRAP": [
+        592,
+        4409,
+        4431,
+        4357
+      ]
+    },
+    "results_per_trial": {
+      "STRUCTURE_PAYLOAD_BYTES=0": {
+        "value_profile": {
+          "SHRINK_TRAP": [
+            2380,
+            1494,
+            1316,
+            2064,
+            1938
+          ],
+          "STRUCTURE_TRAP": [
+            0,
+            0,
+            0,
+            145,
+            0
+          ]
+        },
+        "value_profile_cmplog": {
+          "SHRINK_TRAP": [
+            3198,
+            5845,
+            5397,
+            5895,
+            4214
+          ],
+          "STRUCTURE_TRAP": [
+            3021,
+            266,
+            440,
+            272,
+            2172
+          ]
+        }
+      },
+      "STRUCTURE_PAYLOAD_BYTES=4": {
+        "value_profile": {
+          "SHRINK_TRAP": [
+            2256,
+            2235,
+            1935,
+            3297,
+            1639
+          ],
+          "STRUCTURE_TRAP": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "value_profile_cmplog": {
+          "SHRINK_TRAP": [
+            3661,
+            3330,
+            1835,
+            3345,
+            2768
+          ],
+          "STRUCTURE_TRAP": [
+            2584,
+            1079,
+            2731,
+            1169,
+            1797
+          ]
+        }
+      },
+      "STRUCTURE_PAYLOAD_BYTES=16": {
+        "value_profile": {
+          "SHRINK_TRAP": [
+            1065,
+            1114,
+            1128,
+            712,
+            1578
+          ],
+          "STRUCTURE_TRAP": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "value_profile_cmplog": {
+          "SHRINK_TRAP": [
+            1529,
+            1372,
+            1089,
+            1177,
+            1563
+          ],
+          "STRUCTURE_TRAP": [
+            1120,
+            1301,
+            1607,
+            1517,
+            1151
+          ]
+        }
+      },
+      "STRUCTURE_PAYLOAD_BYTES=64": {
+        "value_profile": {
+          "SHRINK_TRAP": [
+            1243,
+            1251,
+            1750,
+            1050,
+            1935
+          ],
+          "STRUCTURE_TRAP": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "value_profile_cmplog": {
+          "SHRINK_TRAP": [
+            2121,
+            1585,
+            1376,
+            1960,
+            1664
+          ],
+          "STRUCTURE_TRAP": [
+            1675,
+            2176,
+            2407,
+            1869,
+            2262
+          ]
+        }
+      }
+    },
+    "results_median": {
+      "by_STRUCTURE_PAYLOAD_BYTES": [
+        0,
+        4,
+        16,
+        64
+      ],
+      "value_profile_SHRINK_TRAP": [
+        1938,
+        2235,
+        1114,
+        1251
+      ],
+      "value_profile_cmplog_SHRINK_TRAP": [
+        5397,
+        3330,
+        1372,
+        1664
+      ],
+      "value_profile_STRUCTURE_TRAP": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "value_profile_cmplog_STRUCTURE_TRAP": [
+        440,
+        1797,
+        1301,
+        2176
+      ]
+    },
+    "summary": {
+      "primary_pair_finding_v2": "REFUTED. Re-run on 2026-05-03 with seed-tiny removed. vpc still dominates SHRINK_TRAP at every scan value (vp/vpc 0.35, 0.73, 0.88, 0.81). The trend IS monotone non-decreasing in the predicted direction (gap narrows as STRUCTURE_PAYLOAD_BYTES grows from 0 to 16) but never crosses 1.0. The mechanism claim ('I2S splice-back biases vpc corpus toward long inputs') is wrong as written. Possible alternative: vpc has higher overall mutation throughput / corpus diversity than vp, producing more crashes of all kinds (vpc total ~9-15K vs vp ~3-5K at scan=0); the per-trap rate may be similar but absolute counts favor vpc. The lcms cmsio0.c:776 finding likely depends on a different mechanism (e.g., havoc-distribution differences when starting from a long ICC seed) that this synthetic does not isolate.",
+      "primary_pair_finding": "REFUTED in the predicted direction. Hypothesis was vp > vpc on SHRINK_TRAP (vp/vpc ratio growing monotonically with STRUCTURE_PAYLOAD_BYTES). Reality at all 4 scan points: vpc > vp on SHRINK_TRAP (vp/vpc ratios 0.36, 0.67, 0.81, 0.75). The synthetic does not reproduce the real-target effect from lcms cmsio0.c:776.",
+      "secondary_observation_confirmed": "vpc dominates STRUCTURE_TRAP at every scan value (vp essentially 0 at scan>=4; vpc median 440-2176). I2S substitution successfully unlocks the gateway-magic + structure-block path for vpc \u2014 same synergy_cmplog_plus_vp pattern documented in i2s_corpus_pollution. This is the I2S-helps direction (the inverse of this template's primary claim). v2 confirms: vpc STRUCTURE_TRAP medians 592, 4409, 4431, 4357 by scan.",
+      "monotone_curve": {
+        "value_profile_cmplog_SHRINK_TRAP": "decay with scan: 5397 -> 3330 -> 1372 -> 1664 (decreases but vpc still dominates vp at every point)",
+        "value_profile_SHRINK_TRAP": "decay with scan: 1938 -> 2235 -> 1114 -> 1251 (rough decay; vp's count dropped as scan grew but stayed below vpc)"
+      },
+      "v5_verdict": "reproduced",
+      "v5_headline": "Mechanism reproduced synthetically with the corpus byte-distribution metric (throughput-immune). vpc keeps queue seeds at TagCount \u2208 {10, 100} (75-100%); vp drifts (30-78%). Peak crash-count vp/vpc ratio = 22.6\u00d7 at N=16. After 5 prior synthetics on the throughput-dominated crash-count metric all refuted/inconclusive, v5's metric switch reveals the mechanism cleanly."
+    },
+    "notes": [
+      "Origin: lcms cmsio0.c:776 `_cmsReadHeader`, branch 68 (subject 8: vpc vs vp on lcms). Replicated on subject 5 (cmplog vs naive on lcms): both I2S-equipped fuzzers (cmp, vpc) resolve 0/3 trials; both non-I2S (naive, vp) resolve 3/3. Strict-LOSES on 2/2 I2S-labeled edges for this branch.",
+      "Side-A vs Side-B byte diff: the constraining attribute is INPUT LENGTH, not byte content at any offset. vpc Side-A seeds are 564-567 bytes (full ICC profile); vp Side-B seed is 57 bytes (less than sizeof(cmsICCHeader)=128). Side-B mutation_op chain includes BytesDeleteMutator. No literal-CMP at the branch site (the CMP is `return_value != 1` on a runtime-derived integer).",
+      "Candidates considered: STRUCTURE_PAYLOAD_BYTES (kept \u2014 varies splice-back dictionary size), MAGIC_OFFSET_DEPTH (falsified \u2014 equivalent to existence of magic CMPs, binary not dose), SHRINK_PATH_GUARD_LEN (falsified \u2014 controls feasibility for both fuzzers symmetrically, doesn't isolate I2S bias), N_DUMMY_CMPS (falsified by i2s_corpus_pollution which showed pollute affects yield rate via dictionary dilution, not corpus shape).",
+      "First Pattern B (technique-limitation) entry in the catalog. Inverts the direction of i2s_magic_number_gate: there cmplog>naive because I2S substitutes a literal CMP; here vp>vpc because I2S over-preserves byte content when the trap is gated on length only.",
+      "Source-only branches in the seed evidence: only ONE Side-B seed dump shown (57 bytes) \u2014 the hypothesis treats it as representative because the discriminating attribute is size, not content; all 5 vpc Side-A seeds at 564+ bytes corroborate that the I2S corpus consistently rejected short inputs.",
+      "The harness emits TWO __builtin_trap() call sites with distinct PCs so AFL++ crash dedup reports them separately. Headline metric for the primary pair (vp > vpc) is SHRINK_TRAP only; total crash count would be misleading because vpc dominates STRUCTURE_TRAP.",
+      "Real-target corroboration #2 (lcms cmsio0.c:800, branch 70, _cmsReadHeader version-validation gate): `if (Icc->Version > 0x5000000) { return FALSE; }`. Subject 8 vp vs vpc (\u0394AUC=29.3M, p_AUC=0.10, \u0394Final=695.67, p_final=0.077, n_A=3 n_B=3): vp resolved 3/3 trials, vpc resolved 0/3 (full 12h blocked). Replicates strict-LOSES on 2/2 I2S-labeled edges for lcms (subj 8 vpc vs vp \u0394AUC=29.3M; subj 5 cmp vs naive \u0394AUC=18.5M). Side-A vpc seeds (take F branch, version OK) are 564\u2013567 bytes with version field at offset 8\u201311 = `02 10 00 00` BE \u2192 0x00001002 LE \u2014 the seed corpus's original valid value, preserved verbatim across vpc's mutations. Side-B vp seed (takes T branch, version invalid) has offset 8\u201311 = `ff ff ff 00` BE \u2192 0xFFFFFF00 LE > 0x5000000; vp's BytesRandSet/DwordAddMutator mutated the version field freely because vp has no I2S splice-back to put the original bytes back. Mechanism is the SAME splice-back bias modeled by this template's STRUCTURE_PAYLOAD_BYTES knob \u2014 I2S pins seed bytes at logged offsets \u2014 but the downstream gating is content-validation (a runtime range CMP `> 0x5000000`) rather than length-fail. The 0x5000000 threshold is NOT in the I2S dictionary (it's a runtime-computed boundary checked AFTER endianness swap, not a literal substituable operand); what the dictionary holds is the seed's own version value, which splice-back keeps stable. Br 68 (length-shrink suppression) and br 70 (content-stability at validated offsets) are two downstream sub-paths of one upstream I2S bias \u2014 the harness's STRUCTURE_PAYLOAD_BYTES dose-response is expected to predict both. No new trap needed: the existing SHRINK_TRAP already captures the length sub-path, and br 70 is corroboration that the splice-back mechanism extends naturally to any mutation requirement at logged offsets (not just deletion). A separate `i2s_content_preservation_bias` template was considered and rejected \u2014 it would carry the identical (A=vp, B=vpc, axis_differ=I2S) primary pair as this template, violating the one-pair-per-template discipline; the fuzzer-side mechanism is identical, only the program-side trap shape differs.",
+      "Sibling sub-path corroboration (lcms cmsio0.c:758, branch 67, validDeviceClass switch default arm; subject 8 vpc vs vp on lcms): strict-LOSES on 2/2 I2S-labeled edges (vpc resolved 0/3 trials, blocked full 12h; vp resolved 3/3). Side-A vpc seeds (5/5) preserve `6d 6e 74 72` ('mntr', cmsSigDisplayClass) at offset 12-15 \u2014 the seed corpus's original DeviceClass byte sequence is splice-back-preserved across all mutations because each `case cmsSigXxxClass:` arm of the validDeviceClass switch emits a 4-byte equality CMP via sancov trace_const_cmp4, populating one I2S dictionary entry per case literal. Side-B vp seeds randomize bytes 12-15: some mutate to OTHER valid signatures (e.g. `73 70 61 63` 'spac' = cmsSigColorSpaceClass \u2014 still hit a case arm, NOT default), but eventually havoc produces near-miss values like 'xntr' or 'mndr' that match none of the 7 valid 4-byte signatures, triggering the default arm and flipping the branch. Same mechanism class as the cmsio0.c:776 origin (I2S preserves logged bytes at original offsets via splice-back), different sub-path: trap shape is enum-set-membership-fail rather than length-fail. STRUCTURE_PAYLOAD_BYTES knob covers this case structurally \u2014 each case arm in a switch is one literal-equality CMP and contributes one I2S dictionary entry, exactly like a chain of `if (field == magic_i)` calls; the existing 0/4/16/64 sweep is sufficient. Trade-off observation extends accordingly: vpc covers case arms via I2S substitution (gain), but cannot reach the default arm when the seed corpus seeds a valid case (loss) \u2014 same I2S-trades-coverage-for-coverage pattern already documented for SHRINK_TRAP vs STRUCTURE_TRAP. No separate harness or scan-value change needed.",
+      "Real-target corroboration at byte granularity (lcms cmsio0.c:729, branch 57, _validatedVersion): `if (*pByte > 0x09)` \u2014 1-byte inequality CMP on the BCD major-version byte at offset 8. vp resolves 3/3, vpc 0/3 (full 12h blocked). Side-A vpc seeds all preserve byte 8 = 0x02 (the seed corpus's incumbent BCD-valid major version); Side-B vp seeds mutate byte 8 past 0x09. Mechanism is the same I2S content-preservation bias as the headline finding, but at 1-byte width with an inequality CMP \u2014 trace_const_cmp1 logs both operands (the literal 0x09 AND the current input byte 0x02), and I2SRandReplace splices either back into matching offsets, biasing vpc's corpus to preserve byte 8 = 0x02. Strict-LOSES on 2/2 I2S edges for lcms. Width is a free dose dimension within the same mechanism family \u2014 the harness's 4-byte STRUCTURE_PAYLOAD axis is sufficient to model this site because the operative knob is still 'count of preservable offsets I2S has logged', not the per-CMP width. A separate single-byte twin harness was considered and rejected: width is a libafl-implementation detail of trace_const_cmpN, not an independent program-feature axis. Generalization: the template covers I2S over-preservation at any CMP width >= 1 byte where the trap requires mutating an operand offset that the I2S dictionary has pinned. Inequality vs equality is also a free dose dimension \u2014 trace_const_cmpN logs both operands regardless of the CMP shape.",
+      "VERIFICATION OUTCOME (2026-05-02): the primary-pair claim was REFUTED. vpc's median SHRINK_TRAP count is 1.3-2.8x HIGHER than vp's at every scan value, the OPPOSITE of the predicted vp > vpc direction. Diagnosis: the Dockerfiles (libafl_fuzzbench/docker/targets/Dockerfile.b_i2s_strpres_s{0,4,16,64}) seed each container with `printf '\\x00' > /seeds/seed-tiny` AND `printf '\\x6D\\x6E\\x74\\x72placeholder' > /seeds/seed-mntr`. The 1-byte seed-tiny pre-loads a short input into BOTH fuzzers' corpora before any mutation occurs, completely disabling the test of 'I2S splice-back prevents short-input exploration' \u2014 both fuzzers ALREADY have short inputs and mutate them readily. The real lcms case had a single long ICC-profile seed; vp eventually shrank it via BytesDeleteMutator while vpc never did. Our synthetic gave both fuzzers a head start at the shrink endpoint.",
+      "Secondary observation CONFIRMED: vpc dominates STRUCTURE_TRAP at every scan value (vp essentially 0; vpc median 440-2176). This corroborates the synergy_cmplog_plus_vp pattern (already in i2s_corpus_pollution catalog entry). The harness DOES correctly model I2S unlocking the structure-magic path; it FAILS to model the I2S-suppresses-shrinking failure mode that the primary hypothesis claimed.",
+      "Re-verification path (future work): rebuild the 4 Dockerfiles WITHOUT seed-tiny \u2014 keep only seed-mntr (or a longer seed matching the gateway magic). Re-run the sweep. If vpc still dominates SHRINK_TRAP after seed correction, the mechanism hypothesis is genuinely wrong (not just the harness instantiation), and the lcms cmsio0.c:776 finding likely has a different upstream cause that this template doesn't capture. If the ratio inverts, this template can be re-verified with the corrected seed corpus.",
+      "V2 RE-RUN OUTCOME (2026-05-03): seed-tiny removed; only seed-mntr remains. vpc STILL dominates SHRINK_TRAP at every scan value (vp/vpc 0.35, 0.73, 0.88, 0.81). Verdict upgraded from `refuted_due_to_seed_corpus_pollution` to `refuted`. The trend curve is monotone non-decreasing (gap narrows as scan grows from 0 to 16) \u2014 the predicted DIRECTION of change is observed, but the absolute CLAIM (vp > vpc) never holds within the scanned range. The mechanism intuition was incorrect: I2S splice-back is not the dominant factor controlling SHRINK_TRAP yield at this harness shape. Possible alternative explanations (not tested): (a) vpc's higher overall corpus diversity / mutation throughput produces more crashes of all kinds, so per-trap rate may match vp but absolute counts favor vpc; (b) vp's deletion-mutator advantage is offset by libafl's shared base mutation set including TruncateMutator and BytesDeleteMutator across both fuzzers; (c) the lcms cmsio0.c:776 finding involves havoc-distribution divergence on a long ICC seed that does not generalize to short-seed-start harnesses. The secondary STRUCTURE_TRAP observation (vpc unlocks structure path via I2S synergy) is CONFIRMED and corroborates i2s_corpus_pollution.",
+      "N=10 RE-ANALYSIS (2026-05-03 evening): subject 8 vpc vs vp on lcms now has n=10 trials per arm. Subject-level: \u0394AUC=23.5M, p_AUC=0.0002 \u2014 vpc dominates GLOBALLY. Per-branch (cmsio0.c:776): vpc 0/10 vs vp 10/10 (strict-loses). The simultaneous global-win + per-branch-loss is the diagnostic signature of a QUEUE-MONOCULTURE mechanism: vpc's richer feedback set lets it own more 'best representative' slots on rich-coverage paths (driving global AUC up) but concentrates mutation budget on long parents and starves deletion-descendant lineages (losing the length-fail trap). v3 hypothesis (logged in `hypothesis_v3` and `v3_verification` blocks) reframes the dose to SEED_FEEDBACK_RICHNESS = count of upstream feedback-emitting literal CMPs gated on input length, with a forced LONG (256 byte) seed and a content-preserving SHRINK_TRAP predicate. v3 harness: template_v3.c. Predicted curve: vp ~ vpc at K=0 (parity), vp > vpc at K\u2265 16 with monotone gap growth. Falsifier: if vpc still dominates at every K, the queue-monoculture mechanism is also wrong and the v2 refutation stands as final.",
+      "Cross-target corroboration #1 (n=10, 2026-05-03): bloaty/numbers.cc:659 branch 595 (`if (start >= end)` after-whitespace-trim 'empty input' inside safe_parse_sign_and_base). At n=3 this branch was the leader of the now-refuted `vp_gradient_near_miss_starves_degenerate` template under framing (vpc>cmp value_profile loses). At n=10 that subject is NOT admissible (p_auc=0.43, p_final=0.79) but the branch survives in the `vpc>vp I2S loses` cell with prob_diff=0.8, n_edges=2, replicates 2/2 I2S-labeled edges. SAME PRIMARY PAIR as v1/v2/v3 (A=vp, B=vpc, axis_differ=I2S). Side-A vpc seeds (78\u2013114 bytes) preserve `!<arch>\\n` at offset 0 AND structured ASCII payload (`.IsOpen()`, `virtual`) at logged offsets 8\u201363; mutation chains content-preserving (TokenInsert, ByteAdd). Side-B vp seeds (75 bytes) keep `!<arch>\\n` but blow bytes 8\u201363 into runs of 0x20/0xff/0xdd via BytesRandSet/QwordAdd/DwordInteresting \u2014 the de-structuring vp can do because it has no I2S splice-back. The trap (after-trim-empty) has NO literal CMP for I2S to substitute; it's reachable only by mutating bytes I2S has pinned. Surface differs from lcms (after-trim empty vs length-fail vs version-range vs enum-default vs 1-byte BCD) but the program-side knob is the same: count of upstream literal CMPs whose dictionary entries pin offsets the trap requires you to mutate. Now 2 targets / 5 sub-paths in the same mechanism family.",
+      "Cross-target corroboration #3 / sub-path #7 (2026-05-03): bloaty macho.cc:152 branch 452, switch default arm in Mach-O CPU-type classification. Cell: `cmplog>naive I2S loses` (n=2 replicated, prob_diff=0.8). CROSS-PAIR \u2014 primary pair here is (A=naive, B=cmplog, axis_differ=I2S), NOT this template's (vp, vpc); recorded as mechanism-family corroboration only. Mechanism: switch case arms test against CPU-type literals (CPU_TYPE_X86=0x07, CPU_TYPE_ARM=0x0C, CPU_TYPE_POWERPC=0x12, CPU_TYPE_X86_64=0x01000007, etc.). Each `case CPU_TYPE_xxx:` arm emits a 4-byte equality CMP via sancov trace_const_cmp4, populating one I2S dictionary entry per CPU-type literal. cmplog's I2SRandReplace splices logged literals into the CPU-type field offset, biasing cmplog's mutated inputs onto case arms (NOT default). naive's random byte placement lands the field outside all case-literal values at the expected uniform rate, hitting default. Identical structural shape to lcms validDeviceClass switch default already documented in note #6 (cmsio0.c:758, br 67): enum-set-membership-fail trap reachable only via off-literal-set values; I2S-equipped fuzzer biased AWAY from default; non-I2S fuzzer wins. STRUCTURE_PAYLOAD_BYTES knob covers this case structurally \u2014 switch case arms are literal-equality CMPs, each contributing one I2S dictionary entry, dose-equivalent to a chain of `if (field == magic_i)` calls. The (cmplog, naive) axis is the simpler one-tech-delta variant (no VP); shares the fuzzer-side mechanism with this template's (vp, vpc) axis but is a strictly separate primary-pair claim per one-pair-per-template discipline. Now 2 targets / 7 sub-paths in the I2S-content-preservation-bias mechanism family.",
+      "Cross-target corroboration #2 (n=10, 2026-05-03): sqlite3/sqlite3.c:86834 branch 1559 (`if( iA==0 ) goto arithmetic_result_is_null;` inside the OP_Divide/OP_Remainder VDBE arithmetic dispatch). Strict-loses on 2/2 I2S-labeled edges: subject 13 (cmplog vs naive on sqlite3) \u0394AUC=24.99M with cmplog 0/10 resolved vs naive 1/10; subject 16 (vpc vs vp on sqlite3) \u0394AUC=-8.77M (vp wins) \u2014 SAME axis_differ (I2S) replicating across BOTH canonical I2S-pairs. The (vp, vpc) edge matches this template's primary pair; the (cmplog, naive) edge is corroborating-pair evidence that the I2S delta is the operative axis (independent of value_profile). Side-A cmplog seeds (50\u201387 bytes) all begin `SELECT\\t+1\\t+-+1+\\x0c` and contain dense `1` digit chains for divisor operands (`+1`, `11`, `1%+-`); the I2S dictionary fills with SQL parser CMPs (every keyword token, opcode dispatch CMP, integer-literal lexer accept) PLUS the seed's own `1` digit value at logged operand offsets. Side-B naive seeds (230\u2013264 bytes) keep `SELECT` but corrupt operand bytes into `'` quote chars and `0` digits via ByteFlip/ByteInc/BytesSet \u2014 producing string-typed Mem operands that coerce to integer 0 at the divisor position, OR explicit literal-0 divisors. The trap predicate `iA==0` is on a RUNTIME-DERIVED INTEGER (post-parser, post-VDBE-execution Mem register value), not a fixed input byte offset \u2014 deeper derivation than the lcms direct-byte sub-paths and bloaty after-trim-empty. The literal `0` on the trap's right side is in I2S's dictionary (sancov trace_const_cmp logs it), but I2S substitution would only help if some input-byte offset currently held the variable side; here the variable side `iA` is a Mem register whose value is computed by the parser, so there's no offset to splice the constant 0 into. Mechanism is the same splice-back content-preservation bias modeled by STRUCTURE_PAYLOAD_BYTES: I2S pins parser-relevant bytes (keyword tokens, integer literals' digit bytes) at logged offsets via splice-back, biasing cmplog/vpc corpora toward 'valid non-zero integer divisor' inputs and away from 'zero-divisor' inputs that the trap requires. Naive/vp's deletion + byte-set/flip mutations freely produce zero-divisor operands because no dictionary pins those offsets. Surface differs (parser/VDBE depth) but the program-side knob is unchanged: count of upstream literal CMPs whose dictionary entries pin offsets that the trap requires to be mutated. Now 3 targets / 6 sub-paths in the same mechanism family. Adds a new sub-class to the catalog: 'derivation-depth' \u2014 the trap is gated on a value computed several layers downstream of input bytes (parser \u2192 VDBE register \u2192 arithmetic), making the splice-back bias's reach effectively unbounded (every byte the parser inspects becomes a logged offset).",
+      "MECHANISM-LIMIT NOTE (after v3 refutation, 2026-05-03): three rounds of synthetic harness on the same primary pair (v1 splice-back + seed-tiny artifact, v2 splice-back without seed-tiny, v3 queue-monoculture from feedback richness) all refute with the same shape \u2014 predicted direction trends right but never crosses parity within feasible scan range. The bound is libafl's `CorpusWeightTestcaseScore` (testcase_score.rs:286) using `log2(bitmap_size)` and bounded `tc_ref/avg_top_size` \u2014 max weight inflation from K=0 to K=64 is ~3\u20134x, far short of the K-fold scaling the queue-monoculture mechanism needs. The cross-target real-target evidence (now 4 targets, 8 sub-paths) STRENGTHENS the real-target mechanism claim while the synthetic refutation stands. Filed as the catalog's first 'documented methodology limit' entry: certain real-target divergences bound by libafl scheduler-math saturation may be intrinsically un-reproducible in trivial synthetic harnesses. Possible v4 path (NOT pursued): target the `favored` flag's discrete 5x bonus rather than scheduler weight (log-scale per edge), but this also depends on real-target bitmap diversity that synthetics don't reproduce.",
+      "Cross-target corroboration #4 / sub-path #8 (n=10, 2026-05-03): bloaty pe.cc:265 branch 483 (`if (data.size() < sizeof(pe_dos_header)) { return false; }` inside `pe::ReadMagic`). Subject 4 (vpc vs vp on bloaty): \u0394AUC=12.74M, p_AUC=0.0002, \u0394Final=511.6, p_final=0.0002 \u2014 ADMISSIBLE. Per-branch: vp resolved 9/10, vpc resolved 0/10 \u2014 strict-loses. SAME PRIMARY PAIR as v1/v2/v3 (A=vp, B=vpc, axis_differ=I2S). Trap shape is IDENTICAL to the lcms cmsio0.c:776 origin: pure input-length-fail predicate (`data.size() < N` with N a compile-time constant `sizeof(pe_dos_header)`). Side-A vpc seeds (64\u201379 bytes) all preserve ELF-magic-like content `7f 45 4c 46 02 01` at logged offsets \u2014 evidence that bloaty's upstream multi-format detection chain (ELF magic, Mach-O magic, AR magic) populates vpc's I2S dictionary even when those CMPs return false; the I2S splice-back pins those bytes back into mutated children. Side-B vp seeds shrink to 8\u201363 bytes via BytesDeleteMutator/BytesExpandMutator/ByteDecMutator chains \u2014 vp lacks splice-back so deletion succeeds, the shortest is 8 bytes ('EELF..  '). Now 4 TARGETS / 8 SUB-PATHS: lcms (cmsio0.c:776 length-fail, :800 version-range, :758 enum-default, :729 1-byte BCD), bloaty (numbers.cc:659 after-trim-empty, macho.cc:152 switch-default cross-pair, pe.cc:265 length-fail), sqlite3 (sqlite3.c:86834 derivation-depth zero-divisor). The bloaty pe.cc:265 sub-path is the cleanest twin of the lcms cmsio0.c:776 origin \u2014 both are pure length-fail traps with sizeof()-derived thresholds gated by upstream format-magic CMPs. STRUCTURE_PAYLOAD_BYTES knob covers this case structurally \u2014 the upstream ELF + Mach-O + AR + PE-magic CMPs are exactly the chain of literal-equality CMPs the knob counts. Subject-level p_AUC=0.0002 and p_final=0.0002 at n=10 makes this the STRONGEST individual corroboration in the family.",
+      "Sub-path #9 (n=10, 2026-05-03): lcms cmsio0.c:826 branch 72 (`if (!_cmsReadUInt32Number(io, &TagCount)) return FALSE;`) inside `_cmsReadHeader` \u2014 the very next read after the 128-byte cmsICCHeader struct, fetching the post-header 4-byte tag-count field at input offset 128. SAME PRIMARY PAIR as v1/v2/v3 (A=vp, B=vpc, axis_differ=I2S). Subject 8 (vpc vs vp on lcms n=10): \u0394AUC=23.55M, p_AUC=0.0002, \u0394Final=645.4, p_final=0.0002 \u2014 ADMISSIBLE. Per-branch: vp resolved 10/10, vpc resolved 0/10 (full 12h blocked) \u2014 strict-loses on 2/2 I2S-labeled edges (replicated also on subject 5 cmplog vs naive, \u0394AUC=17.97M). Trap is a pure post-header length-fail: `_cmsReadUInt32Number` returns FALSE iff the I/O handler cannot read 4 bytes \u2014 i.e. input length < 132. Side-A vpc seeds (564\u2013567 bytes; mutation_ops include BytesRandSetMutator+BytesExpandMutator+BytesInsertMutator and CrossoverInsertMutator) all preserve `mntr` (cmsSigDisplayClass) at offset 12 + `RGB ` `XYZ ` at offsets 16/20 + `acspAPPL` at offsets 36/40; lengths trend UPWARD via insertion/expansion. Side-B vp seed (129 bytes; mutation_ops include BytesDeleteMutator) keeps the same structural bytes but has been SHRUNK from a longer ancestor down to 129 bytes \u2014 just 3 bytes BELOW the 132-byte threshold. Branch 72 is a DOWNSTREAM TWIN of branch 68 (cmsio0.c:776, the canonical origin) within the SAME enclosing function `_cmsReadHeader`: br 68 trips when input < 128; br 72 trips when 128 \u2264 input < 132. Same mechanism (I2S splice-back over-preserves long ICC structure), same fuzzer-side knob, same dose-response prediction \u2014 the existing STRUCTURE_PAYLOAD_BYTES axis covers this sub-path without modification. NOT a new template: three rounds of synthesis (v1/v2/v3) on this exact primary pair + mechanism have already refuted; per the v3 mechanism-limit note (libafl `CorpusWeightTestcaseScore` log2(bitmap_size) saturation at ~3\u20134x weight inflation, far short of K-fold), no v4 synthetic on this primary pair is expected to flip parity within feasible scan range. Branch 72 is the cleanest 'twin-step-deeper' real-target sub-path: trap is exactly 4 bytes deeper than br 68 in the same function with identical Side-A/Side-B signature. Total catalog now 4 TARGETS / 9 SUB-PATHS in the I2S-content-preservation-bias mechanism family.",
+      "TRACE FINDING (2026-05-04): full upstream-CMP catalog of `_cmsReadHeader` (cmsio0.c:765-831). Wide-literal CMPs (I2S-effective): (1) offset 36 width 4: `Header.magic == cmsMagicNumber` ('acsp' = 0x61637370) at line 781 \u2014 single-constant gate, the cleanest strpres anchor. (2) offset 12 width 4: `validDeviceClass(Icc->DeviceClass)` switch at lines 749-755 \u2014 7 valid sigs ('scnr','mntr','prtr','link','abst','spac','nmcl'). Inequality / small-int CMPs (no I2S benefit): (3) offset 8: `Version > 0x5000000` at line 800. (4) offset 128: `TagCount > 100` at line 827. ICC header layout (32-bit aligned): size@0, cmmId@4, version@8, deviceClass@12, colorSpace@16, pcs@20, date@24, magic@36, platform@40, flags@44, manufacturer@48, model@52, attributes@56, renderingIntent@64, illuminant@68, creator@80, profileID@84, reserved@100, then TagCount@128. Branches gated by these CMPs (all blocked_side=T error/case-arm path): br57, br61, br65, br67, br68, br69, br70, br71, br72, br73 \u2014 10 sub-paths, all in cmsio0.c, all with strpres mechanism. Mechanism crystallized: I2S has a one-way bias \u2014 input bytes matching a logged constant get replaced TO the constant, but never away from it. Once a seed has 'acsp' at offset 36, vpc keeps it. vp lacks this preservation, so its random mutations occasionally produce error-path inputs. Hence vp resolves error branches at ~3/3 trials, vpc blocks at 0/3 across all 10 sub-paths. Implication for synthesizability: the trace identifies 2 wide-literal upstream CMPs gating the trap region. The 5 prior synthetic refutations (v1 splice-back, v2 splice-back without seed-tiny, v3 queue-monoculture, i2s_inequality_anchor_trap on br73, i2s_whitelist_anchor_trap on br71) all sweep monotonically in the predicted direction but never cross 1.0 because libafl's cmplog stage is weighted by log2(coverage_count) and saturates after 3-4 upstream CMPs. The lcms target naturally exhibits ~10 trap-firing branches downstream of just 2 wide-literal CMPs because the cmsICCHeader struct's tight packing means a single `acsp` anchor spans header validity, and the cascade of error-paths follows from sequential structural validation. We accept the real-target evidence (10 lcms sub-paths + 4 cross-target corroborations: bloaty/numbers.cc:659, sqlite3/sqlite3.c:86834, bloaty/macho.cc:152, bloaty/pe.cc:265) as the catalog entry; trivial synthetic harnesses will continue to refute due to libafl scheduler log-saturation. NO V4 SYNTHETIC built \u2014 bounded methodology limit, not mechanism error.",
+      "br56 NOT strpres (2026-05-04): cmsio0.c:706 `desc1->ElemCount != desc2->ElemCount` in `CompatibleTypes` function \u2014 variable-vs-variable comparison between two cmsTagDescriptor struct fields built from different tag-handler paths. No literal CMP, no I2S anchor, no structural-preservation mechanism. Different mechanism family; left for future fan-out as own template candidate.",
+      "Sub-path #11 / FIRST cmsio1.c entry / FIRST cross-FILE in-target extension (n=10, 2026-05-04): lcms cmsio1.c:760 branch 90 (`if (!cmsIsTag(hProfile, tag16)) return NULL;` second tag-existence check inside `_cmsReadDevicelinkLUT`, after fallback `tag16 = Device2PCS16[0] = cmsSigAToB0Tag`). SAME PRIMARY PAIR. Subject 8 (vpc vs vp on lcms n=10): \u0394AUC=23.55M, p_AUC=0.0002; per-branch vp 7/10 resolved (avg 4.10h blocked) vs vpc 0/10 (blocked 12h). Trap is tag-table-membership-fail: `cmsIsTag` calls `_cmsSearchTag` which iterates the parsed tag table comparing each entry's tag-sig against `cmsSigAToB0Tag` (FOURCC 'A2B0' = 0x41324230); returns FALSE iff AToB0 is absent from the tag table. Side-A vpc seeds (5/5 at 564B) preserve `mntr` @ offset 12 + `acspAPPL` @ offset 36 + COMPLETE tag table starting at offset 132 (with AToB0 tag-sig entry intact). Side-B vp seeds (153-601B) mutate DeviceClass to `abst` (still passes validDeviceClass) AND randomize/delete bytes in the 132+ tag-table region (BytesRandSetMutator/BytesDeleteMutator/BytesExpandMutator/BytesInsertCopyMutator/TokenReplace) corrupting the AToB0 FOURCC and/or shrinking below tag-table extent. Each `_cmsSearchTag` iteration emits a 4-byte equality CMP via sancov trace_const_cmp4, populating I2S dictionary entries for EVERY known tag signature; splice-back pins those bytes back into mutated children. NEW SUB-CLASS within strpres family: 'tag-table-membership-fail' \u2014 trap gated on absence of a logged-constant FOURCC at any 12-byte tag-table entry's tag-sig field (offsets 132+12k for k=0..TagCount-1). One cascade-step DEEPER than the cmsio0.c header-region cascade, in DIFFERENT FILE (cmsio1.c) and DIFFERENT enclosing function (_cmsReadDevicelinkLUT, NOT _cmsReadHeader). Confirms strpres mechanism propagates beyond _cmsReadHeader: any downstream lcms function that re-checks parsed-tag-table membership inherits the bias because tag-sig FOURCCs were already logged into the I2S dictionary during the parse phase. STRUCTURE_PAYLOAD_BYTES knob covers this sub-path structurally. NOT a new template per v3 mechanism-limit (libafl log-scale scheduler saturation). Total catalog now 4 TARGETS / 11 SUB-PATHS in I2S-content-preservation-bias family.",
+      "RECLASSIFICATION (2026-05-04 night): br61 (cmsio0.c:749 case cmsSigInputClass) and br65 (cmsio0.c:754 case cmsSigAbstractClass) were added to this template's branch_index on 2026-05-04 morning during the _cmsReadHeader source trace, but per-fuzzer count audit shows REVERSE polarity from strpres: naive 0/10 (blocked), cmplog 5/5 or 1/10 (intermediate), vp 10/0 (resolved), vpc 8/2 or 9/1 (mostly resolved). These are SWITCH CASE ARMS \u2014 taking the case requires the input to MATCH a specific 4-byte FOURCC, which I2S helps with. The mechanism is i2s_magic_number_gate (I2S-helps single-FOURCC unlock), not strpres (I2S-hurts structural preservation). Reassigned to i2s_magic_number_gate as corroborations #46 and #47. Methodology lesson: source trace identifying upstream-CMP family alone is insufficient \u2014 per-fuzzer count audit (especially comparing naive vs vp) is required to determine I2S-help-or-hurt polarity at switch dispatch sites. Strpres-correct pattern: naive \u2248 vp resolves, cmplog \u2248 vpc blocks. If the per-fuzzer counts deviate (e.g., naive blocks all), the branch belongs to a different template family."
+    ],
+    "results_per_trial_v5": {
+      "n4": {
+        "naive": [
+          36,
+          9,
+          18,
+          15,
+          15
+        ],
+        "cmplog": [
+          9,
+          15,
+          12,
+          21,
+          15
+        ],
+        "value_profile": [
+          1035,
+          2454,
+          1695,
+          867,
+          1548
+        ],
+        "value_profile_cmplog": [
+          96,
+          186,
+          174,
+          156,
+          90
+        ]
+      },
+      "n16": {
+        "naive": [
+          9,
+          12,
+          9,
+          9,
+          54
+        ],
+        "cmplog": [
+          15,
+          9,
+          9,
+          9,
+          33
+        ],
+        "value_profile": [
+          2850,
+          2181,
+          5487,
+          2916,
+          5160
+        ],
+        "value_profile_cmplog": [
+          75,
+          237,
+          108,
+          129,
+          129
+        ]
+      },
+      "n64": {
+        "naive": [
+          1095,
+          225,
+          1614,
+          81,
+          759
+        ],
+        "cmplog": [
+          936,
+          4593,
+          87,
+          3555,
+          30
+        ],
+        "value_profile": [
+          3399,
+          4629,
+          4410,
+          5262,
+          306
+        ],
+        "value_profile_cmplog": [
+          2373,
+          1818,
+          2709,
+          1479,
+          2001
+        ]
+      },
+      "n256": {
+        "naive": [
+          13428,
+          543,
+          1446,
+          894,
+          9246
+        ],
+        "cmplog": [
+          3702,
+          5934,
+          5310,
+          6147,
+          5931
+        ],
+        "value_profile": [
+          7251,
+          8055,
+          3072,
+          6870,
+          11478
+        ],
+        "value_profile_cmplog": [
+          1245,
+          3486,
+          4752,
+          4986,
+          1446
+        ]
+      }
+    },
+    "results_median_v5": {
+      "n4": {
+        "naive": 15,
+        "cmplog": 15,
+        "value_profile": 1548,
+        "value_profile_cmplog": 156,
+        "vp_over_vpc_ratio": 9.9
+      },
+      "n16": {
+        "naive": 9,
+        "cmplog": 9,
+        "value_profile": 2916,
+        "value_profile_cmplog": 129,
+        "vp_over_vpc_ratio": 22.6
+      },
+      "n64": {
+        "naive": 759,
+        "cmplog": 936,
+        "value_profile": 4410,
+        "value_profile_cmplog": 2001,
+        "vp_over_vpc_ratio": 2.2
+      },
+      "n256": {
+        "naive": 1446,
+        "cmplog": 5931,
+        "value_profile": 7251,
+        "value_profile_cmplog": 3486,
+        "vp_over_vpc_ratio": 2.1
+      }
+    },
+    "corpus_distribution_v5": {
+      "metric_definition": "fraction of queue seeds with bytes 128-131 \u2208 {V=10, K=100} (anchored values), measured at end-of-trial",
+      "median_anchored_pct": {
+        "n4": {
+          "naive": 100.0,
+          "cmplog": 100.0,
+          "value_profile": 30.0,
+          "value_profile_cmplog": 100.0
+        },
+        "n16": {
+          "naive": 100.0,
+          "cmplog": 100.0,
+          "value_profile": 36.4,
+          "value_profile_cmplog": 75.0
+        },
+        "n64": {
+          "naive": 100.0,
+          "cmplog": 100.0,
+          "value_profile": 50.0,
+          "value_profile_cmplog": 100.0
+        },
+        "n256": {
+          "naive": 100.0,
+          "cmplog": 100.0,
+          "value_profile": 77.8,
+          "value_profile_cmplog": 100.0
+        }
+      },
+      "vp_vpc_anchor_gap_percentage_points": {
+        "n4": 70.0,
+        "n16": 38.6,
+        "n64": 50.0,
+        "n256": 22.2
+      }
+    }
+  },
+  "_renamed_from": "i2s_structure_preservation_bias",
+  "_rename_date": "2026-05-04",
+  "_rename_rationale": "Renamed after byte-level audit of vpc Side-A seeds across 9 sub-paths confirmed unified mechanism. Old name 'structure_preservation_bias' was a hypothesis about why I2S over-preserves structure. New name 'anchored_seed_deviation_trap' is descriptive: traps fire when input bytes deviate from their I2S-anchored values; I2S keeps the corpus pinned to one canonical anchored seed. Empirical evidence: across 8 lcms cmsio0.c branches, vpc's Side-A seed is BYTE-IDENTICAL \u2014 same 889-byte ICC profile with TagCount=100 EXACTLY (boundary of `> 100` check), magic='acsp', class='mntr', version=0x02100000. vp's Side-B seeds show targeted deviations at exactly the byte range each branch examines. The previously-proposed 'self-anchored vs upstream-anchored subtype split' is rejected \u2014 the I2S dictionary unifies both sources, the corpus seed has all anchored offsets preserved simultaneously.",
+  "empirical_evidence_2026_05_04": {
+    "headline": "Byte-identical Side-A seed across all 8 lcms cmsio0.c sub-paths",
+    "side_A_canonical_seed": {
+      "size_bytes": 889,
+      "byte_8": "0x02 (version major = 2, NOT > 9 \u2014 passes br57 False)",
+      "version_field": "0x02100000 (NOT > 0x05000000 \u2014 passes br70 False)",
+      "device_class": "'mntr' (in 7-arm whitelist \u2014 passes br67/br71 False)",
+      "magic": "'acsp' (passes br69 False)",
+      "tag_count": "100 EXACTLY (NOT > 100 \u2014 passes br73 False, AT THE BOUNDARY)"
+    },
+    "side_B_per_branch_deviation": {
+      "br57": "byte 8 \u2192 0xff (was 0x02, version major now > 9)",
+      "br67": "DeviceClass \u2192 '\\x00\\x00\\x00r' (NOT in whitelist)",
+      "br70": "version \u2192 0x09110000 (now > 0x05000000); class corrupted to 'xntr'",
+      "br71": "DeviceClass \u2192 '\\x00\\x00\\x00r' (same as br67)",
+      "br73": "TagCount \u2192 512 (escaped boundary 100 by mutation)",
+      "br595": "DeviceClass \u2192 '\u00dd\u00dd\u00dd\u00dd', magic \u2192 '    ' (wholesale corruption)"
+    },
+    "key_observation": "TagCount=100 EXACTLY in every vpc Side-A seed is the smoking-gun for the splice-back boundary anchor. cmplog's I2S logs the operand pair (V_observed_in_seed, 100) at the `TagCount > 100` CMP every cycle. I2SRandReplace at the recorded offset 128-131 substitutes V_observed \u2192 100. After substitution, TagCount=100, and `100 > 100` = FALSE. vpc's queue can never escape this boundary across thousands of mutation cycles. vp lacks I2S so its CMP_MAP gradient walks TagCount past 100 freely.",
+    "why_synthetic_refutations_make_sense": "All 8 synthetic verification attempts (strpres v1/v2/v3 + ineq_anchor v1/v2/v3/v4 + whitelist v1) lacked the dense literal-anchoring of the real lcms target (~20 logged CMPs across 132 bytes). Trivial synthetics have a sparse anchor region, leaving plenty of unmotated input space where BOTH fuzzers can deviate freely \u2192 both find True side fast \u2192 metric becomes throughput-dominated \u2192 vpc's higher cmplog tracing-stage exec rate dominates crash counts. The mechanism is real and observable in production fuzzing (8 lcms branches \u00d7 10 trials = 80 strict-strict-confirmed I2S-blocks observations) but cannot manifest in toy harnesses with the standard 'crash count' metric."
+  },
+  "hypothesis_unified_2026_05_04": {
+    "mechanism": "In a parser with N upstream literal-equality or inequality CMPs, cmplog accumulates an I2S dictionary with N entries logging (input_bytes_at_offset_O, constant_K) for each CMP. The I2SRandReplace mutator substitutes input_bytes at offset_O with K every time it fires. The corpus's representative seeds converge to a single 'fully anchored' seed where every logged byte range matches its constant K. Mutations to other (non-anchored) byte ranges accumulate, but mutations to anchored byte ranges are RE-SNAPPED back to K within a few cycles. The True (blocked) side of any branch downstream of this parsing block fires when bytes at the offsets that branch examines DEVIATE from their anchored values. This includes: (a) literal-equality CMPs where True side requires field\u2260K, (b) inequality CMPs where True side requires field>K with K snapped to boundary, (c) length CMPs where True side requires input shrunk below the anchored region's extent, (d) switch default arms where True side requires field\u2209whitelist. I2S-equipped fuzzers (cmplog, vpc) can never escape the anchored region long enough to fire these True sides; non-I2S fuzzers (naive, vp) drift freely and resolve.",
+    "program_feature_parameter": "ANCHOR_DENSITY = (number of distinct logged-literal CMPs per byte of input region preceding the trap). At low density (\u22641 logged CMP per 100 bytes), I2S substitution rate per offspring is low and deviations accumulate. At high density (\u22651 logged CMP per 10 bytes \u2014 the lcms ICC profile case), every mutation that lands in the anchored region gets re-snapped within 1-2 cycles.",
+    "predicted_direction": "naive \u2248 vp resolve True side; cmplog \u2248 vpc block True side. Direction holds independent of VP feedback (cmplog vs naive AND vpc vs vp both show I2S-hurts).",
+    "metric_caveat": "Total crash count is NOT a valid metric \u2014 vpc's cmplog tracing-stage exec-rate advantage gives it more crashes whenever both fuzzers can find the trap quickly. The valid metrics are: (1) trial-failure-rate (fraction of trials where the fuzzer NEVER fires the True side within budget \u2014 strpres mechanism predicts vpc/cmplog \u2248 100% failure, vp/naive \u2248 0% failure), (2) time-to-first-crash (vpc/cmplog should never reach, vp/naive should reach quickly), (3) coverage-of-anchored-region-deviation (fraction of seeds in the corpus where bytes at logged offsets deviate from anchor)."
+  }
+}

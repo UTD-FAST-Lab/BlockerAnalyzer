@@ -1,0 +1,225 @@
+{
+  "id": "i2s_corpus_pollution",
+  "kind": "local",
+  "pair": {
+    "primary": {
+      "A": "value_profile_cmplog",
+      "B": "cmplog",
+      "axis_differ": "value_profile (CMP_MAP gradient feedback) on top of cmplog's I2S substitution"
+    },
+    "extended_4_fuzzer": [
+      "naive",
+      "cmplog",
+      "value_profile",
+      "value_profile_cmplog"
+    ]
+  },
+  "hypothesis": {
+    "mechanism": "cmp's I2S substitution dictionary collects K useful constants (chain operands) + N noise constants. Each substitution attempt has K/(K+N) useful rate; over a K-step chain it compounds to (K/(K+N))^K \u2014 exponential dilution that kills cmp at high N. vpc adds value_profile's CMP_MAP feedback on top of I2S: CMP_MAP records each comparison's Hamming distance to its operand, exposing a gradient that steers the corpus toward chain operands without consulting the I2S dictionary. The gradient is dilution-immune because pollute CMPs add static (always-failing) entries that don't form a useful gradient; only the chain CMPs do, and their gradient is the same whether the dictionary contains 4 or 68 entries. So vpc resolves where cmp dies \u2014 same I2S benefit at low pollute, plus CMP_MAP fallback at high pollute.",
+    "program_feature_parameter": "COST_INNER (loop count over 64-entry pollute table per execution)",
+    "predicted_direction": "vpc resolves at every COST_INNER value; cmp's resolution count decays exponentially. Effect = vpc/cmp ratio grows monotonically with COST_INNER, diverging to infinity as cmp -> 0.",
+    "predicted_4fuzzer_signatures": {
+      "naive": "bimodal \u2014 mostly 0, occasional runaway at low pollute (high-variance stochastic, supporting context)",
+      "cmplog": "monotone exponential decay with COST_INNER (the B side of the primary pair)",
+      "value_profile": "slow but persistent \u2014 CMP_MAP gradient alone, no I2S (supporting context: shows the gradient mechanism in isolation)",
+      "value_profile_cmplog": "uniformly best \u2014 combines I2S's high-yield low-pollute regime with CMP_MAP's robustness at high pollute (the A side of the primary pair)"
+    }
+  },
+  "verification": {
+    "harness": "targets/b_chain_pollute/b_chain_pollute.c",
+    "scan_values": [
+      0,
+      64,
+      512,
+      4096
+    ],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "reproduced_4fuzzer_synergy",
+    "results_per_trial": {
+      "c0": {
+        "naive": [
+          1566,
+          18,
+          805,
+          24,
+          122
+        ],
+        "cmplog": [
+          1408,
+          993,
+          5893,
+          757,
+          563
+        ],
+        "value_profile": [
+          43,
+          25,
+          52,
+          0,
+          172
+        ],
+        "value_profile_cmplog": [
+          632,
+          1306,
+          1254,
+          338,
+          74
+        ]
+      },
+      "c1": {
+        "naive": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "cmplog": [
+          109,
+          179,
+          110,
+          61,
+          76
+        ],
+        "value_profile": [
+          10,
+          5,
+          2,
+          13,
+          9
+        ],
+        "value_profile_cmplog": [
+          376,
+          571,
+          58,
+          392,
+          158
+        ]
+      },
+      "c3": {
+        "naive": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "cmplog": [
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "value_profile": [
+          48,
+          6,
+          30,
+          12,
+          54
+        ],
+        "value_profile_cmplog": [
+          81,
+          159,
+          384,
+          7239,
+          258
+        ]
+      },
+      "c2": {
+        "naive": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "cmplog": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "value_profile": [
+          4,
+          0,
+          0,
+          9,
+          1
+        ],
+        "value_profile_cmplog": [
+          7,
+          6,
+          7,
+          6,
+          4
+        ]
+      }
+    },
+    "results_median": {
+      "by_cost_inner": [
+        0,
+        64,
+        512,
+        4096
+      ],
+      "naive": [
+        122,
+        0,
+        0,
+        0
+      ],
+      "cmplog": [
+        993,
+        109,
+        0,
+        0
+      ],
+      "value_profile": [
+        43,
+        9,
+        30,
+        1
+      ],
+      "value_profile_cmplog": [
+        632,
+        376,
+        258,
+        6
+      ]
+    },
+    "summary": {
+      "primary_pair_finding": "vpc vs cmp: at COST_INNER=4096 cmp is dead (median 0) while vpc still resolves (median 6). vpc's median curve is graceful (632 -> 376 -> 258 -> 6, never zero); cmp's is exponential decay (993 -> 109 -> 0 -> 0). The vpc/cmp ratio diverges as COST_INNER grows.",
+      "supporting_context": {
+        "vp_alone": "small but persistent (43 -> 9 -> 30 -> 1) \u2014 confirms CMP_MAP gradient is the mechanism that carries vpc through high pollute; without it, cmp by itself dies",
+        "naive": "bimodal at c0 (one trial 1566 vs others ~18-805); blocks at c1+ \u2014 the high-variance stochastic pattern, separate from the vpc>cmp story"
+      },
+      "monotone_decay": {
+        "cmp": "exponential: 993 -> 109 -> 0 -> 0",
+        "vpc": "graceful: 632 -> 376 -> 258 -> 6 (decreases but never zero)",
+        "vp": "small but persistent: 43 -> 9 -> 30 -> 1 (no clean monotone, ~stable around 1-50)",
+        "naive": "step function: 122 -> 0 -> 0 -> 0 (high-variance bimodal at c0; collapses for c1+)"
+      }
+    },
+    "notes": [
+      "Primary pair: (A=value_profile_cmplog, B=cmplog). Axis differs by ONE component: the addition of value_profile's CMP_MAP feedback on top of cmplog's I2S substitution. COST_INNER controls how heavily the program pollutes the I2S dictionary; vpc's extra CMP_MAP gradient is what lets it resolve when I2S fails.",
+      "cmp degrades exponentially with COST_INNER, matching the (K/(K+N))^K dilution model.",
+      "vpc resolves at c2 where cmp is dead \u2014 the synergy_cmplog_plus_vp pattern. vp's CMP_MAP gradient is robust to I2S dictionary pollution.",
+      "naive and vp data included as supporting context: vp alone shows the gradient mechanism in isolation; naive shows the orthogonal high-variance stochastic regime.",
+      "Single-harness, single program-feature parameter (COST_INNER), one isolated component delta (CMP_MAP added to cmplog) \u2014 the cleanest matched-pair test of the synergy hypothesis.",
+      "Real-target corroboration #1 (n=10 trials, 2026-05-03): mbedtls/library/ssl_msg.c branch 370 inside `ssl_handle_message_type` alert handler, conjunctive chain `in_msgtype==MBEDTLS_SSL_MSG_ALERT(0x15) AND in_msglen==2 AND in_msg[0]==ALERT_LEVEL_WARNING(1) AND in_msg[1]==MBEDTLS_SSL_ALERT_MSG_NO_RENEGOTIATION(0x64)`. Subject 27 vpc vs cmp (n_A=10 n_B=10): vpc resolved 9/10, cmp resolved 1/10, \u0394AUC=1.42M, p_AUC=0.0113. Replicates strict-wins on 2/2 value_profile-labeled edges (vpc>cmp AND vp>naive \u0394AUC=1.33M) \u2014 n_edges=2. Side-B vpc seeds carry 0x04 and 0x24 at offset 14 \u2014 Hamming-near-misses to NO_RENEGOTIATION=0x64 (2-bit and 1-bit difference); CMP_MAP retains these as best-distance buckets and steers the corpus toward 0x64 without consulting the I2S dictionary. This is the natural-pollute regime: TLS record-layer parsing populates cmp's I2S dictionary with many byte-level magic numbers (5 record content types, ~12 handshake types, cipher suites, extensions, ~30 alert codes), diluting useful-substitution rate for the specific 0x64 literal across the conjunctive 4-CMP chain \u2014 exactly the (K/(K+N))^K model. Considered and rejected: a separate `vp_rescues_polluted_dictionary` template (merged into this one \u2014 same mechanism), a `state_machine_derivation` fork (falsified by source: operands are direct field reads ssl->in_msg[0/1], no derivation), and a `chain_length_axis` fork (falsified \u2014 the synthetic's 4-step opcode chain already covers chain depth implicitly).",
+      "Real-target corroboration #3 (n=10 trials, 2026-05-03): sqlite3/bld/sqlite3.c branch 1572 at line 86940 inside `sqlite3VdbeExec` \u2014 the `case OP_ShiftLeft:` label of the VDBE bytecode dispatch switch (shared block with OP_BitAnd/OP_BitOr/OP_ShiftLeft/OP_ShiftRight). Subject 15 vpc vs cmp (n_A=10 n_B=10): vpc resolved 7/10 (avg hits=16, avg dur blocked=7.90h), cmp resolved 0/10 (avg dur blocked=12.00h), \u0394AUC=808110, p_AUC=0.9097, \u0394Final=191.5, p_final=0.0022. The subject-AUC p-value is non-significant because the metric mixes hundreds of branches and OP_ShiftLeft is a low-frequency opcode; the branch-level final-coverage signal is the load-bearing one (10/10 vs 0/10 split, p_final=0.0022). Strict-wins on 1 of 2 value_profile-labeled edges. Side-A cmp seeds are short SQL fragments (`vacuum`, `;.T.;.T.`, `SrLL.CTS -1 1;`, 13\u201329 bytes) that compile to VDBE programs WITHOUT a ShiftLeft opcode. Side-B vpc seeds are uniformly long (128\u2013198 bytes) with the prefix `SELECT 111011111/111-1111111111/111-111/...` containing the operator/punctuator characters that drive the parser's expression grammar through TK_LSHIFT into OP_ShiftLeft. All five Side-B mutation_op traces are arithmetic mutators (`CrossoverInsertMutator`, `ByteDecMutator`, `BytesExpandMutator`, `ByteInterestingMutator`, `BytesCopyMutator`, `WordAddMutator`, `DwordAddMutator`, `QwordAddMutator`, `BytesSwapMutator`) \u2014 none carry `I2SRandReplace`. Same CMP_MAP-gradient-fallback signature as corroboration #2. The pollution source is structurally distinct: VDBE has ~190 opcode enum literals, each surfacing as a `case OP_X:` literal CMP in the dispatch switch, plus ~180 SQL TK_* token literals feeding the parser's state machine. The conjunctive chain to reach the trap is `parse SQL \u2192 bytecode-compile \u2192 enter dispatch \u2192 opcode==OP_ShiftLeft`, with each parser/codegen/dispatcher CMP populating cmplog's I2S dictionary with literal opcode/token values. cmp's dictionary is saturated against the specific OP_ShiftLeft literal across the chain; vpc's CMP_MAP retains arithmetic-near-miss buckets on whichever opcode the seed currently produces and walks toward OP_ShiftLeft via byte/word/dword arithmetic on input bytes driving the operator-selection grammar. Considered and rejected: (a) a `dispatch_table_arity` fork keyed on switch-case count \u2014 already captured by COST_INNER (each unreachable case is one polluting CMP); (b) a `parser_grammar_chain` fork \u2014 the parser+codegen chain itself raises the effective N in the COST_INNER model, not a separate axis; (c) a `vpc_compiler_path_bias` fork (vpc preferentially preserves seeds that discover downstream opcodes) \u2014 falsified by Side-B seed shapes: 128\u2013198 bytes WITH the operator characters present indicates the gradient acted at the parser-token-recognition layer, not via downstream opcode-coverage incentive. NEW DOMAIN added by this corroboration: bytecode interpreter dispatch tables (distinct from network protocol parsers and document/file format parsers). The mechanism extends naturally \u2014 any large switch-on-tag pattern (VM dispatchers, message-type dispatchers, protocol PDU dispatchers) will surface the same I2S-dilution failure mode for cmp and the same CMP_MAP-gradient-fallback rescue for vpc.",
+      "Real-target corroboration #4 \u2014 within-target call-site replication (n=10 trials, 2026-05-03): lcms/src/cmslut.c branch 115 at line 1373 inside `cmsPipelineAlloc(ctx, InputChannels, OutputChannels)` \u2014 the LUT-allocator entry point. Same `cmsMAXCHANNELS=16` literal as corroboration #2 but at a DIFFERENT call site: `if (InputChannels >= cmsMAXCHANNELS || OutputChannels >= cmsMAXCHANNELS) return NULL;`. Blocked-side T = the violation/early-return side (channels >= 16). Subject 7 same primary pair (vpc, cmp, axis_differ=value_profile) (n_A=10 n_B=10): vpc resolved 10/10, cmp resolved 0/10, \u0394AUC=11.49M, p_AUC=0.0022, \u0394Final=284.2, p_final=0.0013. Stats are subject-level (identical to #2 by construction; this is a source-line replication, not an independent statistical sample). Strict-wins on 1 of 2 value_profile-labeled edges. The single Side-B vpc seed carries `abst` (abstract profile class) and `Lab Lab` colorspace plus header bytes 0x18-0x19 = `86 c9`, with mutation_op trace `BytesInsertMutator,ByteIncMutator,ByteIncMutator,DwordAddMutator,BitFlipMutator` \u2014 again with NO `I2SRandReplace`. Identical CMP_MAP-gradient signature as #2: arithmetic mutators stepping through Hamming distance to a boundary value. `cmsPipelineAlloc` is the constructor invoked by every LUT-tag reader (`Type_MPE_Read`, `Type_LUTA2B_Read`, `Type_LUT8_Read`, `Type_LUT16_Read`, ...), so this branch is a downstream gate sharing the same dictionary-pollution context as br 2355. NOT promoted to a separate template \u2014 same primary pair, same literal, same mechanism, same COST_INNER axis; would violate one-pair-per-template and duplicate the corroboration. Value added: rules out a 'Type_MPE_Read-specific quirk' alternative \u2014 the mechanism reappears at a structurally unrelated call site (allocator vs dispatcher), confirming the controlling factor is the saturated I2S dictionary, not any one reader's state. Considered and rejected: (a) a separate `range_check_at_constructor` template \u2014 duplicates #2's mechanism; (b) a `dual_field_range_check` fork (because cmsPipelineAlloc disjuncts `InputChannels >= 16` with `OutputChannels >= 16`) \u2014 falsified because CMP_MAP retains best-distance buckets independently per field and the disjunction makes T-side EASIER to reach (either field crossing 16 suffices), not harder; no new axis is exposed.",
+      "Real-target corroboration #2 (n=10 trials, 2026-05-03): lcms/src/cmstypes.c branch 2355 at line 4585 inside `Type_MPE_Read` (Multi Processing Element dispatcher), range check `if (InputChans == 0 || InputChans >= cmsMAXCHANNELS) return NULL;` where InputChans is a 16-bit field parsed via `_cmsReadUInt16Number` from the MPE tag body. Subject 7 vpc vs cmp (n_A=10 n_B=10): vpc resolved 9/10 (avg hits=4), cmp resolved 0/10 (avg dur blocked=12.00h), \u0394AUC=11.49M, p_AUC=0.0022, \u0394Final=284.2, p_final=0.0013. Strict-wins on 1 of 2 value_profile-labeled edges. Side-B vpc resolving seeds were produced by generic byte/word-arithmetic mutators (`ByteIncMutator`, `WordAddMutator`, `ByteInterestingMutator`, `BytesCopyMutator`, `ByteNegMutator`, `BytesSetMutator`) \u2014 NOT `I2SRandReplace` \u2014 direct evidence that I2S dictionary lookup did not produce these seeds; the CMP_MAP Hamming gradient guided arithmetic mutations toward a valid `1..15` channel count. This is the natural-pollute regime applied to a document/file format: ICC color-management parsing populates cmp's I2S dictionary with hundreds of literal discriminators \u2014 4-byte profile signatures (`acsp`, `mntr`, `prtr`, `scnr`, ...), 4-byte colorspace tags (`RGB `, `CMY `, `XYZ `, `Lab `, ...), 4-byte tag-type magic (`mft1`, `mft2`, `mAB `, `mBA `, `mpet`, `desc`, `XYZ `, `curv`, `sf32`, ...), per-tag header fields, version/reserved fields, and N MPE element-type signatures inside the LUT body \u2014 diluting useful-substitution rate for the specific `{0, 16}` literals at this CMP. Reaching `Type_MPE_Read` itself requires successfully discriminating the MPE tag type (`mpet` literal at the tag header), forcing the fuzzer through a long chain of literal-discriminator CMPs before evaluating this branch \u2014 at which point the dictionary is saturated. Considered and rejected: (a) a `derived_operand` fork \u2014 falsified because `_cmsReadUInt16Number`'s endian swap is bijective and the literal operands `{0, 16}` are directly substitutable into input bytes; cmp's failure is dictionary saturation, not non-substitutability; (b) a `multi_step_navigation` fork \u2014 same mechanism family, since the navigation chain IS the source of dictionary pollution; (c) a `range_check_vs_equality` fork \u2014 falsified because vp's resolution path uses arithmetic mutators stepping through Hamming distance, identical to the mechanism captured in the existing synthetic.",
+      "Generalization observation (updated 2026-05-04 round-14): the natural-pollute regime for cmplog now has corroborations across FOUR domains: (1) network protocol parsers (TLS \u2014 mbedtls br370); (2) document/file format parsers (ICC \u2014 lcms br2355 + br115); (3) bytecode interpreter dispatch tables \u2014 TWO instances: (3a) sqlite3 VDBE br1572 (~190 opcode + ~180 SQL token literals); (3b) libpcap BPF VM br623 (~30+ BPF opcodes); (4) network link-type protocol dispatchers (libpcap gencode.c br808 + br853, ~70+ DLT enum arms). All five corroborations produce the same mechanism signature: cmp's I2S dictionary saturated by literal discriminators; vpc rescues via CMP_MAP arithmetic-Hamming gradient. COST_INNER models this parametrically \u2014 the JUMP-TABLE vs CHAINED-CMP lowering choice is INVISIBLE to instrumentation (operates at IR level before backend lowers), so jump-table-opacity collapses into pollution at IR level. Side-B vpc mutation_op traces lacking I2SRandReplace remain the cleanest field-level evidence.",
+      "Flip-side tradeoff observation (lcms cmstypes.c:4585 branch 2354, n=10, 2026-05-03): SAME source line as corroboration #2 above (`if (InputChans == 0 || InputChans >= cmsMAXCHANNELS) return NULL;`), but the OPPOSITE branch direction. Subject 7 same primary pair (vpc, cmp, axis_differ=value_profile): F-side (valid 1..15 channel count, br 2355) vpc resolves 9/10 vs cmp 0/10 (vpc WINS \u2014 already documented as #2); T-side (violation 0 or >=16, br 2354) vpc resolves 0/10 vs cmp 1/10 (vpc LOSES \u2014 \u0394AUC=11.49M, p_AUC=0.0022). Same line, same source CMP, opposite outcomes per side. RECONCILIATION: the mechanism is consistent \u2014 it's the SAME CMP_MAP gradient that helps vpc on br 2355. CMP_MAP retains the seed corpus's incumbent valid InputChans value (the ICC seeds shipped to libafl all carry valid LUT structures with channel counts in 1..15); the gradient walks arithmetic mutations through small distances around that incumbent, which is why vpc reliably keeps reaching the F-side at br 2355. The T-side (early-fail violation) is rare under this gradient because seed-incumbent values are deep inside the valid range and the gradient retention biases the corpus AGAINST mutating away from them. Compounding: when a mutation does flip InputChans to a violation value, the resulting `return NULL` early-fail produces FEWER downstream coverage edges than the valid path (which proceeds into MPE element parsing). vpc's richer feedback set (CMP_MAP buckets + I2S dictionary entries from the entire downstream MPE pipeline) gives the valid-path lineage many more 'best representative' slots in queue weight, starving the violation-path lineage. cmp without VP has weaker queue monoculture AND its I2S dictionary contains the literal operands `0` and `16` of this very CMP \u2014 so cmp can substitute either literal directly into the InputChans offset in one step (its 1/10 resolution rate). This is the FLIP-SIDE of the synergy story: the SAME gradient retention that compounds VP's advantage on chain-of-narrow-CMP paths compounds AGAINST VP on inverse-side / rare-violation paths where the trap requires mutating AWAY from seed-incumbent valid values to a literal that I2S already holds. Mechanism is INTERNALLY CONSISTENT \u2014 the same retention helps on one side and hurts on the other. Considered and rejected: a separate `vp_gradient_violation_side_starvation` fork \u2014 same primary pair (vpc, cmp, value_profile), same underlying CMP_MAP-retention mechanism, just inverted direction; would violate one-pair-per-template AND the same COST_INNER axis is sufficient to model both faces. Empirical falsifier for future synthetic extension: re-run the existing harness with a SECOND trap added at the violation side of one chain CMP (require any chain operand to flip to a value OUTSIDE the seed corpus's incumbent range); predicted shape vpc < cmp on the violation-side trap with ratio worsening as COST_INNER grows. The lcms br 2354/2355 pair IS the natural fixed-point sample at COST_INNER ~= ICC-saturation level.",
+      "Real-target corroboration #5 (n=3 trials, 2026-05-04, ROUND-14 LIBPCAP) \u2014 FOURTH DOMAIN: libpcap gencode.c branch 853 line 1654 `case DLT_MTP2_WITH_PHDR:` (and sibling br808 `case DLT_ENC:` line 1265, folded as sibling-arm fixed-points on the same wide switch(linktype) dispatch). Subject 67 vpc vs cmp (n_A=3 n_B=3): vpc 3/3 (avg 5 hits, 2.17h blocked) vs cmp 2/3 (0.17h blocked). \u0394AUC=69.5M, p_AUC=0.0636 (structurally above \u03b1=0.05 because n=3 vs n=3 has minimum 2-sided MW p=0.10). Side-A cmp seeds carry pcap savefile magic `a1 b2 cd 34` with linktype field bytes `00 02` at offsets 6-7 (low-DLT fall-through). Side-B vpc seeds preserve magic but mutate linktype field \u2014 Side-B mutation_ops are pure arithmetic (WordAddMutator, ByteDecMutator, BytesSetMutator, BytesRandInsertMutator) with NO I2SRandReplace \u2014 canonical CMP_MAP-gradient-fallback signature matching corroborations #1-#4. Pollution source: gencode.c switch(cstate->linktype) has ~70+ `case DLT_X:` arms (DLT_NULL=0, DLT_EN10MB=1, DLT_RAW=12, DLT_ENC=13, DLT_MTP2=140, DLT_MTP2_WITH_PHDR=141, ..., DLT_JUNIPER_*, ranging into 200s). Each arm contributes a literal CMP populating cmp's I2S dictionary \u2014 substitution rate K/(K+N) with N\u224870. NEW DOMAIN: network link-type protocol dispatcher (joins TLS, ICC, VDBE). Considered and rejected: (a) jump_table_opacity new template \u2014 case-arm count IS the COST_INNER axis; each unreachable DLT arm = one polluting I2S CMP entry; whether compiled to jump table or chained-CMP is INVISIBLE to cmplog/CMP_MAP (instrumentation operates at IR level before backend lowering); (b) dispatch_arity_axis fork \u2014 already spans 64-200+ arity within existing framework; (c) linktype_field_width fork \u2014 width axis is orthogonal (controls cmp vs naive divergence, not vpc vs cmp). br808 + br853 folded into ONE corroboration entry (same switch, same edge, same mechanism).",
+      "Real-target corroboration #6 (n=3 trials, 2026-05-04, ROUND-14 LIBPCAP) \u2014 SECOND BYTECODE-VM-DISPATCH instance: libpcap bpf_filter.c branch 623 line 237 `case BPF_JMP|BPF_JA:` of the BPF VM bytecode dispatch switch (distinct from gencode.c's link-type switch). Subject 67 vpc vs cmp: vpc 1/3 (4.83h blocked), cmp 0/3 (0.50h blocked), naive 0/3, vp 0/3 \u2014 CLEAN 4-FUZZER SYNERGY (only the value_profile_cmplog combination resolves; all three single-technique fuzzers blocked). Side-A cmp seeds carry pcap-savefile magic prefix; Side-B vpc seed carries `clnp`, `bmon /tm <+` ASCII fragments + 4-byte LE BPF instruction layout. Side-B mutation_op trace (`TokenReplace,BytesSetMutator,BytesExpandMutator,BytesRandInsertMutator,...`) lacks I2SRandReplace. Pollution source: bpf_filter.c dispatch switch has ~30+ explicit BPF opcode literals (BPF_LD|BPF_IMM=0x00, BPF_LDX|BPF_IMM, BPF_LD|BPF_MEM=0x60, BPF_ST=0x02, BPF_JMP|BPF_JA=0x05, BPF_JMP|BPF_JGT|BPF_K=0x25, BPF_JMP|BPF_JGE|BPF_K=0x35, BPF_JMP|BPF_JEQ|BPF_K=0x15, BPF_JMP|BPF_JSET|BPF_K=0x45, plus |BPF_X variants, ALU ops, RET, MISC). Together with br808/br853 (DLT switch), libpcap contributes TWO independent dispatch sites to corpus_pollution. The bytecode-VM domain now has TWO target instances (sqlite3 VDBE + libpcap BPF VM), strengthening the wider generalization.",
+      "Real-target corroboration #7 (n=3 trials, 2026-05-04 round-14) \u2014 FIFTH DOMAIN: libpcap pcap-common.c:1374 branch 1182, `if (linktype == LINKTYPE_PKTAP)` inside `linktype_to_dlt()` link-layer-type\u2192DLT translator. Subject 67 vpc 3/3 (avg blocked 2.33h) vs cmp 1/3 (avg blocked 0.33h). Side-A cmp seeds carry canonical pcap savefile header `d4 c3 b2 a1` with wrong linktype at offset 20-23. Side-B vpc seed: perturbed magic `34 cd b2 a1` + linktype-region bytes within Hamming-step distance of LINKTYPE_PKTAP. Mutation_op = `ByteAddMutator` SOLO, no I2SRandReplace \u2014 diagnostic CMP_MAP-gradient signature. Pollution source: pcap-common.c's linktype_to_dlt explicit if-chain (PFSYNC, PKTAP, MATCHING_MIN..MAX, ATM_CLIP) + a static map[] iterating ~100+ DLT*\u2194LINKTYPE* pairs \u2014 every iteration adds polluting CMP entries. NEW DOMAIN: link-layer translator dispatchers (distinct from gencode.c's switch-based DLT dispatcher in #5). Considered and rejected: 'VP-amplified-I2S' fork \u2014 falsified by libafl architecture (I2SRandReplace selects input offsets based on operand byte runs in input; does NOT consult CMP_MAP; no architectural coupling for VP to amplify I2S substitution speed). Same natural-pollute regime as #1-#6. Caveat: n=3 below MW significance floor; directional + field-evidence corroboration.",
+      "Real-target corroboration #8 \u2014 within-target third-call-site replication (n=10 trials, 2026-05-06 round-B-R): lcms/src/cmstypes.c branch 326 at line 2567 inside `Type_LUTA2B_Read` (LUT-A2B tag reader, sibling to `Type_MPE_Read`/`cmsPipelineAlloc` from corroborations #2/#4). The trap CMP is `if (!_cmsReadUInt32Number(io, &offsetB)) return NULL;` \u2014 the FIRST stream-read failure check after entering this LUT reader (after consuming inputChan, outputChan, reserved16). Globally blocked side T = the I/O-failure / early-return arm; reaching T requires producing an input where the mAB tag body is truncated AFTER the 4-byte input/output/reserved header but BEFORE all 32 bits of offsetB land. Subject 7 same primary pair (vpc, cmp, axis_differ=value_profile) (n_A=10 n_B=10): vpc resolved 9/10 (avg blocked 3.20h, 1 hit), cmp resolved 3/10 (avg blocked 8.95h, 0 hits), prob_div=0.60, dur_div=5.75h. Subject-level stats (\u0394AUC=11.49M, p_AUC=0.0022, \u0394Final=284.2, p_final=0.0013) are identical to #2/#4 \u2014 lcms ICC parsing produces a single shared dictionary-pollution context across all LUT-tag readers. Side-B vpc resolving seed (size=558 bytes, trial=2, discovered_at=303s, mutation_op=`ByteDecMutator,ByteIncMutator,TokenReplace,BytesDeleteMutator`) carries `XYZ XYZ` at offsets 0x10\u20130x17 (PCS=XYZ + colorspace=XYZ) and `acsp` at 0x24 \u2014 identical ICC header skeleton to Side-A cmp seeds; the difference is in mutation operations and tag-body length, NOT header bytes. Side-A cmp seeds (5/5) carry `CCLR` (5-channel) or `MCH:` (multi-channel) colorspaces at offset 0x10 \u2014 valid-but-different colorspaces that send the LUT-tag dispatcher down DIFFERENT mAB-vs-LUT16 vs LUT8 paths. NO Side-B mutation_op trace contains `I2SRandReplace`, the canonical CMP_MAP-gradient-fallback signature. The structural distinction from #2/#4: the trap is a BOOLEAN return-value CMP on a stream-read function (not a value-equality on a parsed field). Mechanism is identical \u2014 the navigation chain to reach `Type_LUTA2B_Read` itself (acsp \u2192 tag-table iteration \u2192 mAB tag-type discriminator) saturates cmp's I2S dictionary with the same hundreds of FOURCC literals listed in #2; once saturated, even reaching this LUT-reader frequently enough to land truncated tag-bodies on the T-arm requires CMP_MAP's gradient guidance toward valid `acsp+mAB+inputChan/outputChan != 0` configurations, then bytestream length truncation. cmp's 3/10 partial resolution (vs 0/10 at #2/#4) is consistent with the mechanism: the boolean CMP at line 2567 is BYTE-AGNOSTIC (no specific literal must be matched in input), so cmp occasionally lands T via random truncation once it produces a few mAB-routing seeds; vpc's CMP_MAP gradient compounds the navigation advantage and resolves more reliably. NOT promoted to a separate template \u2014 same primary pair, same lcms ICC dictionary-pollution context, same COST_INNER axis. Considered and rejected: (a) a `boolean_io_failure_navigation` fork \u2014 falsified because the boolean CMP at line 2567 itself is trivially flippable in isolation (a single-byte truncation suffices); the difficulty is the upstream navigation chain that saturates cmp's dictionary, which is exactly what COST_INNER models; (b) a `lut_reader_dispatcher_arity` fork keyed on the count of LUT-tag readers (mAB/mBA/mft1/mft2/mpet) \u2014 falsified because each reader's tag-type literal is one entry in the dictionary, no different from any other FOURCC literal in #2's enumeration; (c) a `bytestream_truncation_axis` fork (varying tag-body length to control truncation rate) \u2014 falsified because vpc/cmp divergence persists at any truncation rate once the navigation chain is polluted; truncation is the trap shape, pollution is the mechanism. Value added: extends the same-target call-site replication (#2 in `Type_MPE_Read`, #4 in `cmsPipelineAlloc`, #8 in `Type_LUTA2B_Read`) to THREE structurally distinct CMP shapes within lcms ICC parsing \u2014 range-check on parsed integer (#2), range-check on constructor argument (#4), boolean return-value of stream-read function (#8) \u2014 confirming the controlling factor is the saturated I2S dictionary upstream, not any one CMP-shape specific quirk.",
+      "Real-target corroboration #9 \u2014 BBR-shape (4-fuzzer-synergy) replication on the GENERIC type-base reader (n=10 trials, 2026-05-06 round-BBR): lcms/src/cmsplugin.c branch 233 at line 444 inside `_cmsReadTypeBase`. The trap CMP is `if (io -> Read(io, &Base, sizeof(_cmsTagBase), 1) != 1) return (cmsTagTypeSignature) 0;` \u2014 a boolean stream-read failure check on the 12-byte tag-base structure (4-byte type signature + 4-byte reserved + 4-byte... wait, sizeof(_cmsTagBase) is 8 bytes: cmsTagTypeSignature sig + cmsUInt8Number reserved[4]). Globally blocked side T = the I/O-failure / early-return arm. UNIQUELY this branch shows the TWO-DECISIVE-PAIRS BBR shape (vpc>cmp on value_profile delta AND vpc>vp on I2S delta simultaneously) \u2014 i.e., 4-fuzzer synergy where BOTH techniques are required to resolve. Trial vector: naive 0/10, cmplog 2/10, value_profile 0/10, value_profile_cmplog 10/10. Subject 8 (vpc vs vp, I2S delta): vpc 10/10 vs vp 0/10, prob_div=1.00, \u0394AUC=23.55M, p_AUC=0.0002, \u0394Final=645.4, p_final=0.0002 (the SAME subject-level signature as #2/#4/#8 but at the strongest possible per-branch divergence: 10-vs-0 strict-wins). Subject 7 (vpc vs cmp, value_profile delta): vpc 10/10 vs cmp 2/10, prob_div=0.80, \u0394AUC=11.49M, p_AUC=0.0022, \u0394Final=284.2, p_final=0.0013 (identical subject-level stats to #2/#4/#8 by construction; per-branch 10-vs-2 stronger than #8's 9-vs-3). The branch is in `_cmsReadTypeBase` itself \u2014 the GENERIC type-base reader called by EVERY tag-type-handling path (`_cmsReadTag` at cmsio0.c:1694, plus call sites at cmstypes.c:2471 and cmstypes.c:3314). Every successful ICC tag read passes through this CMP, making it a higher-multiplicity site than #8's per-tag-type-reader CMP. Side-B vpc resolving seed (size=438 bytes, trial=1, discovered_at=9143s, mutation_op=`BitFlipMutator,ByteIncMutator,BytesRandSetMutator,BitFlipMutator`) carries the canonical lcms ICC header skeleton: header.size=0x00000234 (=564) at offset 0, `mntr` at 0x0c, `RGB ` at 0x10, `XYZ ` at 0x14, `acsp` at 0x24, `APPL` at 0x28 \u2014 IDENTICAL to all 5 Side-A loser seeds. The 438-byte seed length is SHORTER than the declared header.size=564 (truncation by 126 bytes), AND shorter than all five vp/cmp Side-A seeds which are 564\u2013571 bytes (matching declared length within \u00b17). NO `I2SRandReplace` in the mutation_op trace; the active mutators are the standard byte-arithmetic/bit-flip set. This is the canonical CMP_MAP-gradient-fallback signature documented across #1\u2013#8. The trap-shape mechanism: (a) upstream parsing reaches the tag-table iteration in `_cmsReadHeader` (cmsio0.c:730\u2013880), where each tag entry sanity-checks `Tag.offset + Tag.size > HeaderSize` against the runtime-derived HeaderSize value; this is a CMP_MAP-friendly Hamming-gradient comparison (HeaderSize is not in the input bytes verbatim but Hamming distance to it remains a useful metric for byte-level mutations of Tag.offset/Tag.size); (b) once Tag.offset + Tag.size lands close to but \u2264 HeaderSize, the file is admitted to the tag-loop and `_cmsReadTag` calls `Seek(Offset)` then `_cmsReadTypeBase`; (c) if the actual file length is BELOW the declared header.size such that Seek lands within the file but Read of 8 bytes goes past EOF, the trap fires. Only vpc reaches this confluence: (i) cmplog's I2S preserves the upstream FOURCC anchors (`acsp`, `mntr`, `RGB `, `XYZ `, etc.) needed to navigate `_cmsReadHeader` past header validation; (ii) value_profile's CMP_MAP gradient retains seeds where Tag.offset+Tag.size approaches HeaderSize boundary (the derived-comparand is runtime, NOT a I2S substitution target); (iii) deletion mutations actually shrink the file length below header.size while preserving the offset table content. cmp alone has (i) but not (ii) \u2014 random walk almost never produces near-boundary Tag.offset; cmp's 2/10 partial resolution = pure stochastic luck on Tag.offset+Tag.size near HeaderSize. vp alone has (ii) but not (i) \u2014 without I2S anchors, the upstream `acsp` magic check at cmsio0.c:781 (already documented elsewhere as a 4-byte I2S-mandatory CMP) blocks navigation to the tag table; vp's 0/10 = strict failure at the upstream gate. naive has neither and 0/10. Only vpc combines I2S header preservation with CMP_MAP boundary-approach gradient AND inherits naive's deletion mutators \u2014 the unique 3-way confluence required for this trap. NOT promoted to a separate template \u2014 same primary pairs (vpc vs cmp, vpc vs vp), same lcms ICC dictionary-pollution context, same COST_INNER axis. Considered and rejected: (a) a `derived_comparand_offset_truncation` fork (axis: ratio of declared-size to actual-size truncation window) \u2014 falsified because vpc/cmp divergence persists at any truncation window; the controlling axis is upstream pollution depth, not truncation arithmetic; (b) a `boolean_io_failure_at_generic_reader` fork (axis: count of call sites that fan into the generic reader) \u2014 the higher multiplicity (`_cmsReadTypeBase` called from 3 sites vs Type_LUTA2B_Read at 1 site) explains the 10-vs-2 vs 9-vs-3 strength gradient between #9 and #8 in the SAME data, but the mechanism is identical and call-site count is downstream of the upstream FOURCC dictionary saturation; (c) a `runtime_derived_HeaderSize_gradient` fork (axis: how many runtime-derived comparands must be approached) \u2014 falsified because the existing COST_INNER axis already raises the effective N at the upstream chain; the runtime-derived gradient is downstream of pollution, not orthogonal to it. Value added: FIRST corroboration with the BBR shape signature (BOTH I2S-delta AND value_profile-delta deciding for vpc on the same branch simultaneously) \u2014 the cleanest possible per-branch evidence that the synergy_cmplog_plus_vp pattern is DECISIVE on naturally-occurring length-truncation traps within saturated parsers. The trap shape (boolean I/O-failure on a derived-comparand-gated path) joins #8 as the SECOND structural variant within ICC; together with #2/#4 (range-check) this catalogs four lcms-internal CMP shapes that all reduce to the same dictionary-pollution mechanism, ruling out CMP-shape specificity as a competing explanation."
+    ]
+  }
+}

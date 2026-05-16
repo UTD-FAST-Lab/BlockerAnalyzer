@@ -1,0 +1,33 @@
+{
+  "template_id": "i2s_structure_preservation_bias",
+  "parameter": "STRUCTURE_PAYLOAD_BYTES",
+  "scan_values": [0, 4, 16, 64],
+  "primary_pair": {"A": "value_profile", "B": "value_profile_cmplog"},
+  "fuzzers": ["value_profile", "value_profile_cmplog"],
+  "primary_pair_metric": "SHRINK_TRAP crash count (the input-length-fail trap; the I2S-hurts side)",
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "vp > vpc on the SHRINK_TRAP metric; vp/vpc ratio grows monotonically with STRUCTURE_PAYLOAD_BYTES",
+  "expected_curve_per_fuzzer": {
+    "value_profile":        "SHRINK_TRAP count flat-to-rising in STRUCTURE_PAYLOAD_BYTES (CMP_MAP gradient does not bias length; deletion mutators free to shrink)",
+    "value_profile_cmplog": "SHRINK_TRAP count monotone decay in STRUCTURE_PAYLOAD_BYTES (I2S splice-back accumulates entries pinning byte content far from offset 0; corpus drifts toward long inputs)"
+  },
+  "expected_curve_secondary": {
+    "metric": "STRUCTURE_TRAP crash count",
+    "note": "B (value_profile_cmplog) dominates A (value_profile) on the structure path — this is the I2S-helps side of the trade-off. Reporting both metrics shows the trade: vpc gains structure coverage but loses shrink coverage. Note that the secondary-metric inversion is a SEPARATE one-tech-delta claim that would warrant its own template if surfaced as a strict-wins cell on a real target."
+  },
+  "acceptance": {
+    "metric": "median SHRINK_TRAP crash count (primary pair only)",
+    "rule": "vp median > 0 at STRUCTURE_PAYLOAD_BYTES=64 AND vpc median = 0 (or << vp) at STRUCTURE_PAYLOAD_BYTES=64 AND vpc's SHRINK_TRAP curve monotone non-increasing"
+  },
+  "design_basis": "I2S substitution biases the corpus toward inputs that preserve the byte content of logged constants at their original offsets. Each distinct literal-CMP execution adds one I2S dictionary entry; entries are spliced back into mutated inputs by I2SRandReplace. STRUCTURE_PAYLOAD_BYTES counts how many such entries the harness produces in a structure block at offsets >= 32. Higher values pin more bytes far from the input start, making length-shrinking mutations fitness-suppressed (any shrink that drops the structure block disqualifies the splice-back outputs). value_profile lacks a splice-back mutator: its CMP_MAP gradient is feedback-only, used to retain seeds that reduce Hamming distance, but does not directly bias mutation operators against deletion. The synthetic mirrors the cmsio0.c:776 shape: a length-only branch (SHRINK_TRAP = the incomplete-read path) is symmetric in principle, but I2S's accumulated splice-back pressure kills it.",
+  "deployed_targets": ["b_i2s_strpres_s0", "b_i2s_strpres_s4", "b_i2s_strpres_s16", "b_i2s_strpres_s64"],
+  "notes": [
+    "First catalog entry for an I2S-HURTS case (Pattern B / technique limitation). Direction inverts the i2s_magic_number_gate finding: there I2S helps when a magic-equality CMP gates the trap; here I2S hurts when the trap is gated on input length only and many upstream literal CMPs accumulate in the dictionary.",
+    "Per-scan Dockerfiles needed: /home/miao/libafl_fuzzbench/docker/targets/Dockerfile.b_i2s_strpres_s{0,4,16,64} (one per STRUCTURE_PAYLOAD_BYTES value).",
+    "STRUCTURE_PAYLOAD_BYTES is COMPILE-TIME; pass via -DSTRUCTURE_PAYLOAD_BYTES=<N>.",
+    "Headline metric is SHRINK_TRAP only — vpc may have higher TOTAL crashes (driven by STRUCTURE_TRAP) while losing the SHRINK_TRAP-specific comparison. The verification harness must dedup crashes by trap PC and report each separately.",
+    "The 0 scan point isolates the gateway-magic-only baseline (no splice-back targets beyond the 4-byte gateway). Expect vpc ~ vp on SHRINK_TRAP at scan=0; divergence emerges at scan=16 and 64.",
+    "Strictly two fuzzers per template — only the primary pair (A=value_profile, B=value_profile_cmplog) is verified here. Other fuzzers' behavior at this harness is incidental data, not part of this template's claim."
+  ]
+}

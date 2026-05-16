@@ -1,0 +1,34 @@
+{
+  "template_id": "i2s_indirect_dispatch_opacity",
+  "parameter": "N_HANDLERS",
+  "scan_values": [4, 16, 64, 256],
+  "primary_pair": {"A": "naive", "B": "cmplog", "axis_differ": "I2S substitution (cmplog has it, naive does not) — axis-of-failure: dispatch is opaque to I2S, so the technique adds tax without yield"},
+  "extended_4_fuzzer": ["naive", "cmplog", "value_profile", "value_profile_cmplog"],
+  "fuzzer_role": {
+    "naive":                "primary pair A — winner. Random walk on data[0] hits TARGET at uniform rate 1/N. Pays only pc-guard tax.",
+    "cmplog":               "primary pair B — loser. Same dispatch hit rate as naive, but pays N_NOISE_PER_HANDLER trace_const_cmp4 hooks per non-target execution (16 hooks × (N-1)/N of executions). I2S dictionary fills with noise MAGICs that splice into bytes 4-7, which don't gate dispatch.",
+    "value_profile":        "supporting context — should track naive (no I2S, gradient on noise compares doesn't help dispatch).",
+    "value_profile_cmplog": "supporting context — should track cmp or worse (pays both cmp and vp overhead with no compensating signal at dispatch)."
+  },
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "naive > cmp at every N_HANDLERS; cmp/naive ratio approximately FLAT across N (throughput tax is per-execution, not per-arm); absolute crash counts scale as 1/N for both fuzzers.",
+  "expected_curve_per_fuzzer": {
+    "naive":                "monotone-decreasing in N: ~1/N scaling. Highest of the 4 at every N.",
+    "cmplog":               "monotone-decreasing in N: ~1/N scaling but multiplied by ~0.2-0.5 (throughput tax).",
+    "value_profile":        "tracks naive, possibly slightly lower from VP map updates.",
+    "value_profile_cmplog": "tracks cmp or worse."
+  },
+  "acceptance": {
+    "metric": "median crash count per fuzzer per scan value",
+    "rule": "naive median > cmp median at EVERY N_HANDLERS scan value; vp median > vpc median at every N (RBRB shape preserved across the sweep)"
+  },
+  "design_basis": "Function-pointer table indexed by data[0] % N. The dispatch emits NO icmp/switch IR — therefore NO trace_const_cmp4/trace_switch sancov hooks. cmplog's I2S has nothing to substitute for the dispatch tag; only random walk reaches TARGET_TAG. Per-non-target-execution noise compares (16 unhelpful literal-equality CMPs reading bytes 4-7) impose throughput tax on cmp/vpc without giving any useful signal at the dispatch.",
+  "deployed_targets": ["b_indirect_n4", "b_indirect_n16", "b_indirect_n64", "b_indirect_n256"],
+  "notes": [
+    "Replaces refuted i2s_jump_table_opacity. Original premise (jump-table dispatch invisible to cmplog) was disproven by inspecting LibAFL's __sanitizer_cov_trace_switch hook in libafl_targets/src/sancov_cmp.c:53-87, which iterates all case literals into the cmplog dictionary.",
+    "True opacity requires absence of icmp/switch IR — function-pointer dispatch is the canonical example. Other unhookable idioms: C++ vtable, computed goto, JIT-emitted code.",
+    "No instance of this mechanism exists in the canonical 5-target DB. Real-world examples are common in C++ codebases (virtual dispatch) and C codebases with method-table patterns (Linux kernel ops structs, OpenSSL EVP, etc.) — not in our currently-instrumented set.",
+    "Trap is a direct __builtin_trap() in handler_trap with NO upstream gating — eliminates confound with any other I2S/VP-relevant comparison."
+  ]
+}

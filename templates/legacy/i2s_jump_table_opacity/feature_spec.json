@@ -1,0 +1,84 @@
+{
+  "id": "jump_table_opacity",
+  "kind": "local",
+  "pair": {
+    "primary": {
+      "A": "cmplog",
+      "B": "naive",
+      "axis_differ": "I2S substitution: CmpLogObserver + AFLppCmplogTracingStage + I2SRandReplace mutator added on top of naive's random-mutation baseline"
+    },
+    "tradeoff_observation": "Counter-example to the i2s_magic_number_gate norm. At small N (compare-chain dispatch), I2S helps cmp (the i2s_magic_number_gate direction). At large N (jump-table dispatch), I2S harms cmp — no per-case CMP for I2S to log, plus throughput tax. The (cmp, naive) edge inverts direction across the dose range. This template makes its primary-pair claim only on the strict-loses cell at large N; the small-N regime is reported as the regime-transition baseline."
+  },
+  "origins": [
+    {
+      "target": "libpcap",
+      "function_class": "switch dispatchers on input-derived integer fields",
+      "concrete_examples": [
+        "gen_linktype() switch on cstate->linktype (60+ DLT values, gencode.c lines 3218-3623)",
+        "gen_load_dlt() switch on cstate->linktype (gencode.c lines 3520-3623)",
+        "gen_load_llc_linktype() switch on cstate->linktype",
+        "pcap_filter_with_aux_data() switch on bpf opcode (217-359)"
+      ],
+      "rca_count": "39 of 148 libpcap RCA reports map to jump_table_opacity_I2S_lock_in family",
+      "concrete_artifact": "At dim1_cluster_002 in gen_linktype (lines 3218-3361), the IDENTICAL cmplog seed (0093e088696593e2 from cmplog trial 2) blocks all 9 branches in the L3 region — direct evidence of cmp's corpus monocultured on filter-keyword CMPs, with the DLT dispatch field never mutated"
+    }
+  ],
+  "hypothesis": {
+    "mechanism": "Clang at -O2 lowers dense contiguous switch statements to JUMP TABLES: a single indirect-branch instruction indexed by the dispatch value, plus a .rodata table of jump targets. NO per-case integer comparison is emitted. CmpLogObserver registers __sanitizer_cov_trace_cmp{1,2,4,8} hooks at CMPs only, so the dispatch is INVISIBLE to cmplog's I2S. The case literals (DLT_NULL=0, DLT_EN10MB=1, ..., DLT_LINUX_PPP_WITHDIRECTION=163) never enter the I2S dictionary. cmplog's I2SRandReplace mutator therefore has nothing to substitute into bytes that select the dispatch value. Combined with cmplog's tracing-stage throughput tax (~10-20% slower execs/sec than naive in our setup), cmp performs WORSE than naive at branches gated by jump-table dispatch.\n\nThe symptom in real targets is corpus monoculture: cmp's I2S budget is consumed by comparisons it CAN see (filter-keyword strncmp, header magics, struct field equality), locking the corpus into seeds that exercise those CMPs while leaving the controlling dispatch field unmutated. naive without I2S applies arithmetic and havoc mutations indifferently to all input bytes, eventually landing on the required dispatch values via DwordAddMutator/ByteIncMutator. value_profile retains stepping-stone seeds via CMP_MAP gradient on arithmetic inside the case bodies. value_profile_cmplog inherits both — VP gradient rescues from I2S blackout.",
+    "program_feature_parameter": "N_CASES — number of contiguous switch cases. Below the compiler's chain-vs-table threshold (~5-8 dense cases at clang -O2), the switch lowers to a comparison chain whose per-case CMPs ARE visible to I2S; above the threshold, lowering to a jump table makes I2S blind",
+    "predicted_direction": "(cmp, naive, I2S delta): cmp WINS at small N (compare-chain regime, I2S-helps as in i2s_magic_number_gate); cmp LOSES at large N (jump-table regime, I2S-blind plus throughput tax). The (cmp, naive) edge crosses parity between N=4 and N=64",
+    "predicted_endpoints": {
+      "N=4":   "cmp/naive median ratio > 5× — compare chain emits per-case CMP for case 0/1/2/3; I2SRandReplace substitutes case literals into bytes 0-3; cmp lands TARGET_CASE in O(1) per attempt while naive needs 1/4 random mutation rate",
+      "N=64":  "cmp/naive median ratio < 1.5× — jump-table dispatch, no per-case CMP, I2S provides nothing useful. naive's random hit rate is 1/64; cmp's hit rate is similar plus throughput-tax penalty",
+      "N=256": "cmp/naive median ratio < 1.0× — same mechanism as N=64, hit rate 1/256, throughput tax dominates. cmp falls strictly below naive"
+    }
+  },
+  "verification": {
+    "harness": "templates/jump_table_opacity/template_v3.c",
+    "params": "templates/jump_table_opacity/params.json",
+    "dockerfile": "libafl_fuzzbench/docker/targets/Dockerfile.b_jump_table_v3_d0 (load-bearing dose; other doses cited as confound checks only)",
+    "verdict": "refuted_on_mechanism_2026_05_08_replaced_by_i2s_indirect_dispatch_opacity",
+    "_verdict_history": {
+      "v1_2026_05_05": "untested — flawed design with post-dispatch `if (m == TARGET_CASE)` check that exposed TARGET_CASE to cmplog's I2S. cmp dominated at every dose via the leak, not via per-case CMP visibility. Discarded.",
+      "v2_2026_05_05": "ambiguous — fixed v1's post-check leak by moving trap into target case body. Observed cmp/naive collapsing 2564× → 52× → 3.6× → 1.15× across N_CASES ∈ {4, 16, 64, 256}. INITIALLY interpreted as the predicted regime transition (compare-chain → jump-table). However, disassembly revealed clang emits a jump table at ALL N (`jmp *%rcx` indirect dispatch even at N=4) — the cmp advantage at small N was NOT from per-case CMP visibility. It was from TARGET_CASE = N_CASES/2 happening to be small powers of 2 (2, 8, 32, 128) which leaked into cmp's I2S via libafl-internal CMPs against common constants. The collapsing ratio reflected 'TARGET stops being a leaked common constant' as N grew, not jump-table opacity.",
+      "v3_2026_05_05": "REPRODUCED IN DIRECTION at the d=0 cell only. Fixes v2's small-power-of-2 leak with TARGET_CASE = 23 (prime, not a leaked common constant). Uses function pointer table dispatch (forces true indirect call regardless of compiler heuristics — opaque at all N). At N_CASES=64, N_DISTRACTORS=0: cmp/naive median = 0.18 (cmp 5.6× WORSE than naive). Direction matches libpcap real-target signal."
+    },
+    "scan_values_v3": [0, 16, 64, 4096],
+    "scan_axis_v3": "N_DISTRACTORS — number of additional noise literal CMPs at non-dispatch offsets",
+    "trials_per_point_v3": 5,
+    "duration_s_v3": 600,
+    "deployed_targets_v3": ["b_jump_table_v3_d0", "b_jump_table_v3_d16", "b_jump_table_v3_d64", "b_jump_table_v3_d4096"],
+    "results_per_trial_v3": {
+      "d0":    {"naive": [17817, 17844, 17898, 15096, 10149], "cmplog": [3051, 3150, 3174, 3162, 3411], "value_profile": [4491, 4326, 4509, 4353, 4491], "value_profile_cmplog": [2130, 2106, 2127, 2121, 2190]},
+      "d16":   {"naive": [17346, 17313, 17358, 16803, 17457], "cmplog": [4239, 4293, 4554, 4704, 4617], "value_profile": [5172, 5226, 4050, 4413, 4056], "value_profile_cmplog": [1584, 1701, 1764, 1689, 1683]},
+      "d64":   {"naive": [8235, 14871, 15147, 15174, 15345],  "cmplog": [3753, 3693, 1260, 1236, 3675], "value_profile": [4080, 3984, 4473, 4359, 4422], "value_profile_cmplog": [1860, 1683, 1752, 1719, 1722]},
+      "d4096": {"naive": [1674, 1725, 1647, 1605, 1911],      "cmplog": [498, 447, 468, 462, 504],      "value_profile": [1149, 1092, 1161, 1176, 1167], "value_profile_cmplog": [432, 432, 390, 411, 426]}
+    },
+    "results_median_v3": {
+      "d0":    {"naive": 17817, "cmplog": 3162,  "value_profile": 4491, "value_profile_cmplog": 2127, "cmp_over_naive": 0.18},
+      "d16":   {"naive": 17346, "cmplog": 4554,  "value_profile": 4413, "value_profile_cmplog": 1689, "cmp_over_naive": 0.26},
+      "d64":   {"naive": 15147, "cmplog": 3693,  "value_profile": 4359, "value_profile_cmplog": 1719, "cmp_over_naive": 0.24},
+      "d4096": {"naive": 1674,  "cmplog": 468,   "value_profile": 1161, "value_profile_cmplog": 411,  "cmp_over_naive": 0.28}
+    },
+    "load_bearing_cell": "d=0 — N_CASES=64 jump-table dispatch with leak-resistant TARGET=23 and no distractor pollution. naive 17817 vs cmp 3162: cmp/naive = 0.18, cmp 5.6× worse than naive. This single measurement validates the jump-table-opacity direction.",
+    "knob_acknowledgment": "The N_DISTRACTORS knob is effectively a no-op for the cmp/naive ratio: 0.18 → 0.26 → 0.24 → 0.28 across {0, 16, 64, 4096}. The variation is dominated by throughput tax (both fuzzers slow proportionally as the distractor loop grows), not by genuine I2S-pollution-induced corpus monoculture. The pollution mechanism would require distractors that emit per-match coverage rewards strong enough to dominate cmp's queue scheduler — the v3 distractors emit single-edge match coverage that doesn't fire often enough at random inputs to monopolize the queue. d=16/64/4096 cells are confound checks for d=0, not independent pollution dose-response measurements.",
+    "summary": {
+      "verdict": "reproduced (direction only, single-cell measurement)",
+      "headline": "At jump-table dispatch with leak-resistant TARGET, cmp/naive median = 0.18 — cmp is 5.6× WORSE than naive. The 'I2S blind to indirect dispatch' mechanism is empirically confirmed: cmp pays cmplog tracing-stage overhead with no I2S signal to recover with.",
+      "direction_held": "yes — at the d=0 measurement (jump-table dispatch isolated)",
+      "magnitude_caveat": "5.6× gap is much larger than throughput-tax-alone (~1.1-1.2×), suggesting cmp's mutator schedule diversion (I2SRandReplace fires with empty/useless dictionary) compounds the tax. But the libpcap-magnitude 'cmp = 0' signal is NOT reproduced at 600s × 5 trials — that requires longer trials or stronger queue-monoculture pressure than v3 generates.",
+      "verdict_rationale": "The mechanism direction (naive >> cmp under jump-table dispatch) is empirically validated. The dose-response on N_DISTRACTORS does NOT validate corpus pollution as a separate axis — that would need v4 with coverage-reward-emitting distractors. Single-cell d=0 verdict is the honest scope of v3."
+    },
+    "future_work": "v4 would test corpus pollution as a true separate axis. Requires distractor CMPs that emit MANY new coverage edges per match (so cmp's queue scheduler prefers distractor-matching seeds) and distractor literals that match common input bytes (so I2S substitutions actually fire and stick). Would also need 1-2h trials to approach libpcap-magnitude 'cmp = 0' signal. Current scope: cite v3 d=0 as direction confirmation; cite libpcap RCA (39/148 cmp blocked) for magnitude.",
+    "notes": [
+      "MECHANISM REFUTED 2026-05-08 (kept for historical record). Premise was 'CmpLogObserver hooks __sanitizer_cov_trace_cmp{1,2,4,8} only; the dispatch is invisible to I2S.' Direct inspection of LibAFL's __sanitizer_cov_trace_switch handler at libafl_targets/src/sancov_cmp.c:53-87 shows the hook iterates over every case literal in the cases-array and feeds each into cmplog_instructions_checked() with arg1_is_const=1 — the SAME path as trace_const_cmp4. Switches lowered to jump tables ARE visible to cmp's I2S, just routed through trace_switch instead of per-arm trace_const_cmp4. Empirical confirmation: libpcap gencode.c.o gen_linktype emits 22 trace_const_cmp4 + 8 trace_switch calls under the cmplog build (`-fsanitize-coverage=trace-pc-guard,trace-cmp`).",
+      "REPLACED BY i2s_indirect_dispatch_opacity. The 5.6× cmp/naive deficit observed at libpcap's wide-switch branches is real, but the correct mechanism is corpus pollution amplified by trace_switch's per-call N-fanout (a single trace_switch over 70 case values dumps 70 dictionary entries per execution), not visibility loss. The libpcap branches in this template's RCA list are now classified as i2s_corpus_pollution corroborations #5/#6/#7.",
+      "True opacity to sancov requires absence of icmp eq AND switch at the IR level. The replacement template (i2s_indirect_dispatch_opacity) uses function-pointer-table dispatch — the discriminator resolves via indirect call, not value comparison — to demonstrate the mechanism exists in principle.",
+      "Origin: 39 of 148 libpcap RCA reports map to jump_table_opacity. Most concentrated at gen_linktype/gen_load_dlt/gen_load_llc_linktype switches on cstate->linktype.",
+      "Concrete real-target artifact (3-dim clustering, dim1_cluster_002): the SAME cmplog seed `0093e088696593e2` blocks all 9 branches in the L3 region. Direct evidence of cmp's corpus locked to one DLT distribution, missing every required case value.",
+      "Reporting all 4 fuzzers (naive, cmp, vp, vpc) in verification: full ranking at d=0 is naive ≫ vp > cmp ≥ vpc — augmentation-overhead dominates when no I2S/VP signal is available from the dispatch.",
+      "The strict-loses cell vs naive (cmp < naive at jump-table dispatch) is the load-bearing claim. Counter-example in the catalog: i2s_magic_number_gate REPRODUCED with cmp/naive ratio 43× → 135× → 1097× → 588× — there cmp WINS because per-case CMPs ARE visible. Same fuzzer pair, opposite direction depending on dispatch shape.",
+      "v2 design note (kept as historical record): the original v2 swept N_CASES ∈ {4, 16, 64, 256} and observed cmp/naive collapsing 2564× → 1.15×. This was misinterpreted as the regime transition. Disassembly revealed clang emits jump tables at ALL N (no per-case CMP at any dose), so the apparent regime transition was a small-power-of-2 leak in TARGET_CASE: at N=4, TARGET=2 leaked from libafl runtime CMPs into cmp's I2S; at N=256, TARGET=128 didn't. The collapse reflected leak strength, not dispatch shape change."
+    ]
+  }
+}

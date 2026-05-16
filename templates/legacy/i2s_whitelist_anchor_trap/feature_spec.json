@@ -1,0 +1,63 @@
+{
+  "id": "i2s_whitelist_anchor_trap",
+  "kind": "local",
+  "pair": {
+    "primary": {
+      "A": "value_profile",
+      "B": "value_profile_cmplog",
+      "axis_differ": "I2S substitution (CmpLogObserver + AFLppCmplogTracingStage + I2SRandReplace mutator) added on top of value_profile's CMP_MAP gradient feedback"
+    }
+  },
+  "hypothesis": {
+    "mechanism": "When a switch dispatches on an integer operand `cl` with N `case L_i:` arms, each case emits a 4-byte equality CMP via sancov trace_const_cmp4, populating one I2S dictionary entry per L_i every execution. The `default:` arm is trap-reachable iff `cl != L_i` for ALL i. I2SRandReplace finds the bytes in offspring inputs approximating ANY L_i and rewrites to that L_i exactly, flipping the operand back to a case arm and AWAY from default. CMP_MAP retains near-miss offspring at minimum Hamming distance to the nearest L_i, so the corpus monocenters at multiple valid-signature attractors surrounding default. The more whitelist members, the more attractors competing for the operand and the harder for any offspring to land outside ALL of them simultaneously. value_profile lacks I2SRandReplace; its offspring drift past every L_i freely once mutated past, and no mutator drags them back, so vp resolves default reliably. value_profile_cmplog has the splice-back mutator on top of CMP_MAP, so beneficial off-literal mutations are undone on the next selection.",
+    "program_feature_parameter": "WHITELIST_SIZE (count of case-arm literals in a switch whose default arm is trap-reachable; each case adds one I2S dictionary entry as a splice-back attractor). Active literals at sizes 1..7 are the real lcms cmsSig*Class signatures: mntr, scnr, prtr, link, abst, spac, nmcl.",
+    "predicted_direction": "vp > vpc on TRAP crash count at every WHITELIST_SIZE >= 1; vp/vpc ratio monotone non-decreasing in WHITELIST_SIZE; at N=7 vp >> vpc.",
+    "predicted_endpoints": {
+      "WHITELIST_SIZE=1": "vp moderately > vpc — single splice-back attractor is weak; vpc occasionally evades when offspring drifts far enough; vp resolves more often.",
+      "WHITELIST_SIZE=7": "vp >> vpc — seven competing attractors blanket the literal space around the corpus; near-miss offspring snap back to whichever L_i is closest in Hamming; vpc starves at default. Reproduces lcms br67/br71 maximum case."
+    },
+    "tradeoff_observation": "The mirror-direction question — does I2S help vpc on EQUALITY case-arm coverage — is exactly the verified i2s_magic_number_gate pattern (cmplog >> naive on multi-byte equality CMPs against literals). The two templates together describe the I2S asymmetry on whitelist switches: I2S helps cover each `case L_i:` arm in one shot (substitute the literal at the operand offset), but the same splice-back biases the operand AWAY from `default:`. The 'helps case-arm' direction is on a different primary pair (cmplog vs naive) so it warrants its own template, not a section here. This template stays strict-two-fuzzer (vp, vpc)."
+  },
+  "verification": {
+    "harness": "templates/i2s_whitelist_anchor_trap/template.c",
+    "params": "templates/i2s_whitelist_anchor_trap/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [1, 2, 4, 7],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "refuted_remap_to_strpres_family",
+    "deployed_targets": ["b_whitelist_anchor_n1", "b_whitelist_anchor_n2", "b_whitelist_anchor_n4", "b_whitelist_anchor_n7"],
+    "results_per_trial": {
+      "v1_seed_at_mntr": {
+        "comment": "Seed: 'mntracsp' + 8 zeros — starts AT whitelist member L_1='mntr' with valid 'acsp' magic. Both fuzzers begin past the upstream magic gate AND inside the whitelist; the dose-response should be purely on splice-back-vs-no-splice-back.",
+        "totals_5trials_summed_after_~1min": {
+          "vp_n1":  6341,  "vpc_n1":  15359,
+          "vp_n2":  9525,  "vpc_n2":  15150,
+          "vp_n4":  10060, "vpc_n4":  12352,
+          "vp_n7":  3712,  "vpc_n7":  6216
+        },
+        "vpc_over_vp_ratio_by_N": {"N1": 2.42, "N2": 1.59, "N4": 1.23, "N7": 1.67},
+        "time_to_first_crash_s": {"all_trials_all_N": 0},
+        "verdict_v1": "refuted — vpc dominates at every N (predicted vp wins); ratio non-monotone (2.42 → 1.59 → 1.23 → 1.67) (predicted monotone non-decreasing favoring vp); time-to-first-crash 0s across all 40 trials (random walk off 'mntr' drifts to non-whitelisted value within 1 mutation)."
+      }
+    },
+    "results_median": {},
+    "summary": {
+      "verdict": "refuted",
+      "diagnosis": "Same root cause as i2s_inequality_anchor_trap refutation. The whitelist-attractor framing is wrong: random walk off the seed cl='mntr' drifts to a non-whitelisted value within 1 mutation (whitelist is sparse in 2^32 space — 7 specific values out of 4.3 billion). Splice-back DOES occasionally substitute a logged L_i into cl bytes, but that's a no-op event for trap-firing — when vpc's offspring lands on an L_i, no trap fires; when it lands off, trap fires; the splice-back doesn't preferentially anchor offspring at attractor positions because random byte mutation samples from a vast off-attractor space first. Both fuzzers find the trap in 0 sec at every N. The crash-count differential is post-discovery mutation throughput from vpc's cmplog tracing stage, NOT the splice-back anchor mechanism.",
+      "remap": "All 4 lcms cmsio0.c branches (br67 default arm, br68/br69/br70 sister cases, br71 call site, plus br72/br73 from sister TagCount cluster) belong to the i2s_anchored_seed_deviation_trap observation set. The actual anchor is at UPSTREAM ICC parser CMPs (cmsMagicNumber 'acsp' check at cmsio0.c:781, signature validation, version field check, etc.) — those CMPs log the structural ICC bytes, and I2S splice-back restores the entire profile region across mutations. vp's lack of splice-back lets BytesDeleteMutator shrink the input past DeviceClass/TagCount field offsets, OR lets random byte mutation corrupt those fields without restoration. Either failure mode produces the trap. This is the strpres v3 queue-monoculture mechanism applied at multiple downstream sub-paths in the same enclosing function _cmsReadHeader.",
+      "methodology_lesson": "Two consecutive new-template attempts (i2s_inequality_anchor_trap and i2s_whitelist_anchor_trap) targeted the same primary pair (vp,vpc) and the same root claim (I2S splice-back hurts vp's gradient progress) but framed the trap-site CMP geometry differently (band vs point-set). Both refuted with the same diagnosis: trap-site CMP geometry is not the operative axis; the operative axis is which CMP location the I2S splice-back acts on (= upstream parser CMP location, captured by strpres's STRUCTURE_PAYLOAD_BYTES knob). New rule: when proposing a Pattern B (technique-hurts) template on (vp, vpc), require the candidate to identify the ANCHOR CMP location (where I2S splice-back logs the constants that preserve the input region of interest) — not just the trap-site CMP geometry. If the anchor reduces to upstream-parser-CMPs, the candidate IS the strpres family (which is bounded by libafl's log2(bitmap_size) scheduler weight saturation, structurally below the K-fold flip threshold any synthetic harness can reproduce).",
+      "all_4_lcms_cmsio0_branches_refuted_under_strpres": ["br67", "br68", "br69", "br70", "br71", "br72", "br73"],
+      "synthesis_attempts_on_strpres_family": ["v1 splice-back pinning (REFUTED)", "v2 no-seed-tiny correction (REFUTED)", "v3 queue-monoculture from feedback richness (REFUTED — log-saturation diagnosis)", "v4 trap-site inequality anchor (THIS — REFUTED, mis-attributed mechanism)", "v5 trap-site whitelist anchor (THIS — REFUTED, mis-attributed mechanism)"],
+      "catalog_status": "lcms cmsio0.c region has now had 5 rounds of synthetic-verification attempts on the same primary pair (vp, vpc, I2S delta), all REFUTED. Filed as the catalog's primary 'unreproducible synthetic-vs-target gap' exhibit — a real-target divergence cluster bounded by libafl's actual scheduler/throughput dynamics that does NOT reproduce in trivial synthetic harnesses. Future attempts on this pair require either (a) a substantially different harness shape that exercises a NON-anchored mechanism, or (b) accepting the mechanism class is intrinsically non-synthetic-verifiable and documenting the real-target evidence as the catalog entry."
+    },
+    "notes": [
+      "Source-only hypothesis at this stage. Side-A (vpc, false branch = valid class): all 5 lcms br71 seeds pin offset 12-15 to whitelisted ICC class signatures — `6d 6e 74 72` ('mntr'=cmsSigDisplayClass) on seeds 1/2/3/5 and `73 70 61 63` ('spac'=cmsSigColorSpaceClass) on seed 4. Side-B (vp, true branch = default = invalid class): seed 1 has `00 00 00 72` (random drift), seed 2 `6d 6e 64 72` ('mndr', one byte off mntr), seed 3 `6d 6e 01 00` ('mn' prefix preserved, suffix mutated), seed 4 `6d 6d 74 72` ('mmtr', one byte off mntr), seed 5 `77 77 77 77` ('wwww', fully randomized). vpc's seeds are anchored to whitelist members; vp's drift past every whitelist member into default. Consistent with the mechanism but seed observations are not falsifiable on their own — the synthetic must reproduce the dose-response.",
+      "Three prior templates target overlapping mechanism space, all mechanism-distinct from this one. (1) i2s_anchored_seed_deviation_trap REFUTED 3x — that family hypothesizes UPSTREAM literal CMPs polluting the I2S dictionary and starving descendants of an UNRELATED downstream length trap. v3's log-saturation diagnosis bounds the scheduler-side mechanism. THIS template targets the trap-site CMP itself (the case arms ARE the gate to default), not upstream pollution, and the proposed mechanism is mutator-side (splice-back attractor pool), not scheduler-side, so log-saturation does not directly apply. (2) i2s_inequality_anchor_trap PENDING — same primary pair, mechanism class 'splice-back snaps operand to one K at the boundary of `>K`'. Geometry is a band, not a point-set. ineq_anchor's notes set the precedent for forking when trap-site CMP geometry differs. (3) i2s_magic_number_gate VERIFIED — different primary pair (cmplog,naive), inverse direction (I2S helps on equality case arms). The whitelist trap's default arm is the negation of the equality cases; this template documents the asymmetric loss-side.",
+      "Lcms branches br67 (cmsio0.c:758 default), br71 (cmsio0.c:805 call site) are sister blockers in the same function and same switch. n_edges=2 means both edges (subject 8 vpc-vs-vp AND subject 5 cmplog-vs-naive) flag this branch as strict-loses on the I2S delta. The cross-edge replication is methodologically load-bearing: the mechanism is robust to whether VP feedback is also present. WHITELIST_SIZE=7 covers br67 and br71 simultaneously; the synthetic is one harness for two real branches.",
+      "Cross-target sub-path: bloaty macho.cc:152 br452 (CPU_TYPE switch with CPU_TYPE_X86=0x07, CPU_TYPE_ARM=0x0C, CPU_TYPE_POWERPC=0x12, CPU_TYPE_X86_64=0x01000007 etc. as case-arm literals; default arm is trap-reachable). Cell: cmplog>naive I2S loses, prob_diff=0.8. Same harness shape, different primary pair — recorded as mechanism-family corroboration only. Per strict-two-fuzzer rule, the (cmplog,naive) variant would be a separate template if surfaced as a strict cell warranting its own catalog entry.",
+      "If the synthetic refutes (vpc dominates or matches vp at every scan value), most likely diagnosis is Hamming clustering of synthetic literals: lcms's 7 ICC sigs are 4-letter ASCII words tightly clustered in [0x61..0x7A]. The synthetic uses the SAME literals to preserve fidelity, but if vpc still wins, the splice-back-multiple-attractors mechanism is bounded by per-literal anchor weight rather than count — a v2 retry with literals deliberately spread far in Hamming space (e.g., 0x00000001, 0x80000000, 0x55555555, 0xAAAAAAAA) would test that.",
+      "If the synthetic refutes with a non-monotone curve like strpres v3, the result joins the log-saturation catalog of real-target divergences that don't reproduce in trivial synthetics under libafl's actual scheduler/throughput dynamics. That would be a methodology lesson, not a contradiction — but at that point lcms cmsio0.c's three rounds (strpres family + ineq_anchor + this) collectively constitute the catalog's 'unreproducible synthetic-vs-target gap' exhibit and should be cross-linked."
+    ]
+  }
+}

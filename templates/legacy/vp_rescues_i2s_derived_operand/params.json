@@ -1,0 +1,35 @@
+{
+  "template_id": "vp_rescues_i2s_derived_operand",
+  "parameter": "KEYWORD_LEN",
+  "scan_values": [1, 2, 3, 5],
+  "primary_pair": {"A": "value_profile_cmplog", "B": "cmplog"},
+  "fuzzers": ["value_profile_cmplog", "cmplog"],
+  "fuzzer_role": {
+    "value_profile_cmplog": "primary pair A — vpc; gains gradient from CMP_MAP on the table-lookup CMP",
+    "cmplog":               "primary pair B — cmp; I2S has no literal to substitute (DFA transitions are table lookups), reduces to naive baseline"
+  },
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "vpc > cmp; vpc/cmp ratio grows monotonically with KEYWORD_LEN as cmp's geometric 1/256^KEYWORD_LEN per-attempt rate falls below the 600s budget while vpc's per-character CMP_MAP gradient compounds linearly",
+  "expected_curve_per_fuzzer": {
+    "value_profile_cmplog": "graceful degradation across KEYWORD_LEN; non-zero at every scan value (gradient retains intermediate-state seeds character-by-character)",
+    "cmplog":               "geometric decay matching naive (~600s/256^KEYWORD_LEN expected hits); resolves trivially at KEYWORD_LEN=1, drops sharply at KEYWORD_LEN>=3"
+  },
+  "acceptance": {
+    "metric": "median crash count",
+    "rule": "vpc median > 0 at KEYWORD_LEN=3 AND cmp median = 0 at KEYWORD_LEN=3 AND vpc/cmp ratio monotone non-decreasing across KEYWORD_LEN"
+  },
+  "design_basis": "Hand-rolled DFA with KEYWORD_LEN+1 states; transitions encoded in a runtime-initialised table to prevent the compiler from folding per-character literal CMPs. The gating CMP is `dfa_table[state*256+c] != REJECT_SENTINEL` — both operands runtime-derived array values. cmplog's I2S logs `next` and `REJECT` (=0xFF) as cmp1 operands; substituting 0xFF into input bytes does not advance the DFA, so I2S provides zero useful entries for the keyword. value_profile's CMP_MAP records Hamming distance between the table-lookup result and the reject sentinel; intermediate-state seeds (state=1 after 'd' lands at offset 0) are retained, giving vpc a per-character gradient. Mirrors flex-generated lex scanners (libpcap scanner.c case-arms) where the DFA traversal CMP `yy_chk[base+c] != state` has the same shape. Also mirrors BPF-optimizer bitmask accumulator at libpcap optimize.c:650 (br1077) where the runtime-built `use` mask is structurally similar (table-lookup-against-mask).",
+  "deployed_targets": [
+    "vp_rescues_i2s_derived_operand_kw1",
+    "vp_rescues_i2s_derived_operand_kw2",
+    "vp_rescues_i2s_derived_operand_kw3",
+    "vp_rescues_i2s_derived_operand_kw5"
+  ],
+  "notes": [
+    "Primary comparison: vpc vs cmp on the value_profile axis. They differ by ONE component (CMP_MAP added to cmplog) — same axis as i2s_corpus_pollution but a different I2S-failure regime.",
+    "Distinct from i2s_corpus_pollution (case (c) — dictionary pollution by N noise CMPs) and from vp_gradient_derived_operand (case (b) on the (vp, naive) pair with bijective derivation to a literal target). This template covers case (b) on the (vpc, cmp) pair where the gating CMP is a TABLE LOOKUP and there is no literal target at all — pure I2S blackout.",
+    "KEYWORD_LEN is COMPILE-TIME parameter; one Dockerfile per scan value at /home/miao/libafl_fuzzbench/docker/targets/Dockerfile.vp_rescues_i2s_derived_operand_kw{1,2,3,5}.",
+    "Design history: br1077 agent originally proposed a bijective XOR chain (DERIVATION_DEPTH knob). Replaced 2026-05-04 with br736's DFA design (KEYWORD_LEN knob) — more faithful to both libpcap origins (BPF optimizer bitmask AND flex DFA scanner). Both br1077 and br736 are listed as real-target origins."
+  ]
+}

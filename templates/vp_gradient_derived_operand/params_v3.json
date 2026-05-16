@@ -1,0 +1,33 @@
+{
+  "template_id": "vp_gradient_derived_operand",
+  "version": "v3",
+  "harness": "templates/vp_gradient_derived_operand/template_v3.c",
+  "parameter": "DERIVATION_DEPTH",
+  "scan_values": [0, 1, 2, 4],
+  "primary_pair": {"A": "value_profile", "B": "naive"},
+  "fuzzers": ["naive", "value_profile"],
+  "fuzzer_role": {
+    "value_profile": "primary pair A — has CMP_MAP gradient",
+    "naive":         "primary pair B — coverage-only baseline"
+  },
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "vp >> naive at every DERIVATION_DEPTH; vp/naive ratio approximately FLAT (depth-invariance is the load-bearing claim)",
+  "expected_curve_per_fuzzer": {
+    "value_profile": "approximately flat across DERIVATION_DEPTH IF the 64-bit gradient is wide enough to bootstrap at depth=0",
+    "naive":         "≈ 0 at every dose; 1/2^64 per attempt regardless of depth"
+  },
+  "acceptance": {
+    "metric": "median crash count",
+    "rule": "vp median > 10x naive median at depth=0 AND vp_rate at depth ∈ {1,2,4} within 2x of vp_rate at depth=0"
+  },
+  "design_basis": "Single 64-bit equality CMP at the trap; DERIVATION_DEPTH bijective XOR-with-constant layers between the input read and the CMP. Each layer is a noinline function-pointer-table call writing to a volatile sink (prevents constant-folding the chain into a single XOR). Hamming distance between layered output and TRAP_TARGET equals Hamming distance between raw input and (TRAP_TARGET XOR cumulative_mask). VP's gradient over input bytes is isomorphic to its gradient at the CMP under any depth; if VP's gradient bootstraps at depth=0, depth-invariance should hold.",
+  "deployed_targets": ["b_vp_deriv_v3_d0", "b_vp_deriv_v3_d1", "b_vp_deriv_v3_d2", "b_vp_deriv_v3_d4"],
+  "notes": [
+    "DERIVATION_DEPTH is COMPILE-TIME; one Dockerfile per scan value at libafl_fuzzbench/docker/targets/Dockerfile.b_vp_deriv_v3_d{0,1,2,4}.",
+    "Initial seed: 8 bytes of zero. With XOR_MASKS chosen such that none equal the trap target's pre-image, the seed is GUARANTEED non-trap at every depth — no spurious crash on first execution.",
+    "If vp ≈ naive at depth=0, the verdict is 'refuted_for_single_cmp_gradient_narrowness' — does NOT refute the bijective-derivation feature itself; refutes only this synthesis design's ability to test it. In that case the next experiment is a wider-operand variant (e.g. 128-bit equality split into two cmps, accepting that this slightly compromises 'one cmp' fidelity).",
+    "If vp >> naive at depth=0 AND ratio degrades monotonically with depth, the verdict is 'refuted' or 'partially_reproduced' — the bijective transform DOES degrade the gradient, contradicting the load-bearing depth-invariance claim. This would be a substantive finding correcting the original feature description.",
+    "Compared to v2 (chain-compounding gradient): v2's mechanism is gradient-compounding-across-K-CMPs; v3's mechanism is gradient-preservation-through-bijective-derivation. These are STRUCTURALLY DIFFERENT features; v2 should be promoted to its own template, v3 returns this template to its original feature claim."
+  ]
+}

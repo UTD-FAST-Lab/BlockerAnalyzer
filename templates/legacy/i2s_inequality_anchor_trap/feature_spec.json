@@ -1,0 +1,356 @@
+{
+  "id": "i2s_inequality_anchor_trap",
+  "kind": "local",
+  "pair": {
+    "primary": {
+      "A": "value_profile",
+      "B": "value_profile_cmplog",
+      "axis_differ": "I2S substitution (CmpLogObserver + AFLppCmplogTracingStage + I2SRandReplace mutator) added on top of value_profile's CMP_MAP gradient feedback"
+    }
+  },
+  "hypothesis": {
+    "mechanism": "When `if (X > K)` fires, sancov's trace_const_cmp logs K as a 4-byte I2S dictionary entry every execution. The I2SRandReplace mutator splices K back into offspring inputs at byte sequences approximating K. The pathology: a beneficial mutation that bumps X from K-1 to K+1 produces an offspring whose target-offset bytes are one byte off from K; on the next selection of that offspring, splice-back rewrites those bytes to K exactly. X==K, so X>K is false; the trap is no longer reached. CMP_MAP retains the seed at the K boundary as a 'best Hamming distance' near-miss, so the corpus monocenters at the boundary. The narrow band (K, K+small) is exactly where splice-back is most aggressive \u2014 the operand's bit pattern is closest to K's. value_profile has CMP_MAP gradient feedback (same Hamming bucketing) but NO I2SRandReplace mutator. vp's offspring drift past K freely; once X>K, no mutator pulls it back, and the trap is reached. INEQ_CHAIN_LENGTH is the program-side knob: count of independent `> K` checks gating the trap, each on a different 4-byte input slot, all against the SAME literal K. As N grows, I2S dictionary pressure on K compounds; vpc must evade splice-back simultaneously at all N offsets; vp's gradient guides all N independently with no anchor reversion.",
+    "program_feature_parameter": "INEQ_CHAIN_LENGTH (count of independent `> K` checks gated AND, K=100; each slot reads a 4-byte big-endian uint at a distinct offset and emits one I2S dictionary entry for K)",
+    "predicted_direction": "vp > vpc on TRAP crash count at every INEQ_CHAIN_LENGTH >= 1; vp/vpc ratio monotone non-decreasing in INEQ_CHAIN_LENGTH; at N=8 vp >> vpc.",
+    "predicted_endpoints": {
+      "INEQ_CHAIN_LENGTH=1": "vp moderately > vpc \u2014 single-slot splice-back anchor is weak; vpc still resolves trap occasionally when offspring overshoots K by enough to evade splice-back; vp resolves more often (no anchor at all). Reproduces lcms br73 minimum case.",
+      "INEQ_CHAIN_LENGTH=8": "vp >> vpc \u2014 splice-back must be evaded at all 8 slots simultaneously; combinatorial cost starves vpc's trap-bearing lineage; vp's gradient reaches all 8 slots independently."
+    },
+    "tradeoff_observation": "The mirror-direction question \u2014 does I2S help vpc on EQUALITY CMPs against the same literal K \u2014 is already cataloged in i2s_magic_number_gate (verified: cmplog >> naive on equality CMPs against multi-byte literals). The two templates together describe the I2S asymmetry: I2S helps when the comparison is `==` (substitute the literal in one shot) and hurts when the comparison is `>` (splice-back snaps the operand to the boundary, where `K > K` is false). The 'helps' case is on a different primary pair (cmplog vs naive) so it warrants its own template, not a section here."
+  },
+  "verification": {
+    "harness": "templates/i2s_inequality_anchor_trap/template.c",
+    "params": "templates/i2s_inequality_anchor_trap/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "refuted_family_bounded",
+    "deployed_targets": [
+      "b_ineq_anchor_n1",
+      "b_ineq_anchor_n2",
+      "b_ineq_anchor_n4",
+      "b_ineq_anchor_n8"
+    ],
+    "results_per_trial": {
+      "v1_K100": {
+        "comment": "v1 with K=100 \u2014 too easy, both fuzzers crash in <1s at every N (random uint32 > 100 with prob ~99.99999%). objectives=1 at run_time=0 across all 40 trials.",
+        "vp_n1": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "vpc_n1": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "vp_n2": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "vpc_n2": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "vp_n4": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "vpc_n4": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "vp_n8": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "vpc_n8": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "verdict_v1": "inconclusive_too_easy"
+      },
+      "v2_K_uint32_max_minus_1": {
+        "comment": "v2 with K=0xFFFFFFFE \u2014 random hit rate 1/2^32; both fuzzers reach trap in 0-2s via gradient walk to all-0xff first 32 bytes. crash count is post-discovery throughput, not splice-back signal. Direction INVERTED vs prediction.",
+        "totals_5trials_summed_after_5min_of_10min_budget": {
+          "vp_n1": 7418,
+          "vpc_n1": 24898,
+          "vp_n2": 6933,
+          "vpc_n2": 22856,
+          "vp_n4": 7109,
+          "vpc_n4": 15982,
+          "vp_n8": 4951,
+          "vpc_n8": 9253
+        },
+        "vpc_over_vp_ratio_by_N": {
+          "N1": 3.36,
+          "N2": 3.3,
+          "N4": 2.25,
+          "N8": 1.87
+        },
+        "verdict_v2": "refuted \u2014 vpc dominates at every N (predicted vp wins); ratio MONOTONE DECREASING in N (predicted monotone non-decreasing favoring vp)"
+      }
+    },
+    "results_median": {},
+    "summary": {
+      "verdict": "refuted",
+      "diagnosis": "The trap-site anchor framing was wrong. sancov-trace_const_cmp at `X > K` logs only K (the literal) into the I2S dictionary; substituting K into the operand (TagCount=K) produces K > K = false, which neither fires the trap nor blocks it (it's a no-op for trap-firing). I2SRandReplace cannot 'snap K+1 \u2192 K' because the substitution path requires bytes in input that already approximate K, and K=UINT32_MAX-1 is rare in input bytes. The dominant differentiator in the synthetic is vpc's higher post-discovery mutation throughput from the cmplog tracing stage \u2014 pure throughput, not mechanism. Re-reading the lcms br73 lineage: Side-A vpc seeds preserve the FULL 564-byte ICC structure (mntr/acsp/RGB/XYZ/acspAPPL at logged offsets); Side-B vp shrinks to 129 bytes via BytesDeleteMutator. The trap fires when input shrinks past the TagCount field (offset 128, 4 bytes). The actual anchor is at UPSTREAM ICC parser CMPs (signature validation, magic check, etc.) \u2014 those CMPs log the structural ICC bytes, and I2S splice-back restores the entire profile region across mutations, preventing deletion-mutators from corrupting the TagCount byte region. This is the strpres v3 queue-monoculture mechanism applied at the trap site, NOT a new trap-site-CMP anchor mechanism.",
+      "remap": "lcms br71/br72/br73 belong to the i2s_anchored_seed_deviation_trap observation set (REFUTED 3x; bounded by libafl's log2(bitmap_size) scheduler weight saturation). They are sub-paths of the same family that contains br67/br68/br69/br70 + bloaty br452/br483/br595 + sqlite3 br1559. Recommend updating strpres feature_spec.json to add br71 and br73 as sub-paths (br72 already there as #9).",
+      "methodology_lesson": "When proposing a new template that shares the same primary pair as a refuted template (vp,vpc here) and reduces to the same root claim (I2S hurts vp's gradient progress via splice-back-anchoring), require the new template to identify a CMP location distinct from the prior template's anchor location \u2014 not just a different surface CMP geometry. Both i2s_inequality_anchor_trap and i2s_anchored_seed_deviation_trap root-cause to upstream-CMP splice-back; the inequality framing was a description of the trap-site geometry, not a description of the operative anchor location.",
+      "family_status_after_v4": "After 4 versions on the same primary pair (v1 K=100 too-easy / v2 K=UINT32_MAX-1 inverted / v3 bare uniform-tie / v4 88-upstream-CMP inverted), all REFUTED, this template joins strpres (REFUTED 3\u00d7) + i2s_whitelist_anchor_trap (REFUTED 1\u00d7) as the lcms cmsio0.c synthetic-vs-target gap exhibit. 8 total synthetic verification attempts on the same primary pair (vp, vpc, I2S delta) across 3 sister templates, ALL REFUTED. The lcms cmsio0.c divergence cluster (br67-73 + br56) is intrinsically non-synthesizable in trivial harnesses given libafl's actual scheduler/throughput dynamics. CATALOG STATUS: this is the canonical 'unreproducible synthetic-vs-target gap' exhibit. Real-target evidence (vpc 0/10 vs vp 3-10/10 across 7 lcms cmsio0.c branches at n=10) is the catalog entry; trivial synthetics consistently show the opposite direction because vpc's throughput advantage dominates whatever splice-back/queue-monoculture effects exist. Future attempts on this pair require either (a) a substantially different harness shape exercising a NON-anchored mechanism, or (b) accepting the mechanism class is intrinsically non-synthetic-verifiable."
+    },
+    "notes": [
+      "Source-only hypothesis at this stage. Side-A (vpc) seeds all preserve the full 564-byte ICC structure with `02 10 00 00` at offset 8 (header.size=528) and locked `mntr/RGB /XYZ /acsp` literals \u2014 vpc corpus is anchored to the I2S-logged constants. Side-B (vp) seeds include the same plus variant sizes (264/417/302) and altered bytes near the TagCount offset (seed 5 has `02 80 00 20` at offset 8) \u2014 vp tolerates more byte-level deviation. Consistent with the splice-back-vs-no-splice-back contrast, but the seed observations are not falsifiable on their own; the synthetic must reproduce the dose-response.",
+      "Three prior templates target overlapping mechanism space: (1) i2s_anchored_seed_deviation_trap REFUTED 3x \u2014 that family hypothesizes upstream-literal-CMP corpus pollution starving descendants of UNRELATED traps; this template targets the trap-site CMP itself. (2) i2s_corpus_pollution VERIFIED \u2014 that template is on a different pair (vpc vs cmplog) and a different mechanism (CMP_MAP gradient rescues cmp from dictionary dilution); this template's mechanism is the inverse on a different pair. (3) i2s_magic_number_gate VERIFIED \u2014 that template establishes I2S helps on multi-byte equality CMPs; this template is the asymmetric case where I2S hurts on inequality CMPs. The catalog is consistent.",
+      "Lcms branches br72 (cmsio0.c:826 read-fail) and br73 (cmsio0.c:827 TagCount > MAX_TABLE_TAG) are sister blockers in the same code region with the same direction (vpc strict-loses 10/10 to vp). br72 was already attempted via strpres family and refuted. br73's `>` against a literal at the trap site is mechanistically distinct \u2014 that's the basis for forking a new template here rather than extending strpres v4.",
+      "If the synthetic refutes (vpc dominates or matches vp at every scan value), the falsification suggests the splice-back anchor mechanism is also bounded by libafl's scheduler/throughput dynamics, joining strpres in the catalog of 'real-target divergences that don't reproduce in trivial synthetic harnesses given libafl's saturation behavior'. That would be a methodology lesson, not a contradiction \u2014 but at that point the lcms cmsio0.c region's three rounds (strpres v1/v2/v3 + this one) collectively constitute the catalog's 'unreproducible synthetic-vs-target gap' exhibit and should be cross-linked."
+    ],
+    "verdict_history": [
+      {
+        "version": "v1",
+        "verdict": "inconclusive_too_easy",
+        "summary": "K=100, no seed corpus \u2014 random uint32 > 100 fires with prob ~99.99999%; trap fires on initial random input, both fuzzers crash at run_time=0. No anchor opportunity for I2S to act."
+      },
+      {
+        "version": "v2",
+        "verdict": "refuted_inverted_direction",
+        "summary": "K=UINT32_MAX-1, no seed corpus \u2014 random hit rate 1/2^32; both fuzzers gradient-ascend via CMP_MAP regardless of I2S. After first discovery, throughput dominates (vpc's cmplog tracing stage gives more execs/sec). Direction inverted."
+      },
+      {
+        "version": "v2_remap",
+        "verdict": "refuted_remap_to_strpres_family",
+        "summary": "Re-diagnosis 2026-05-03: 'actual anchor is upstream parser CMPs preserving structural ICC region'. WRONG \u2014 superseded by v3 trace finding 2026-05-04: anchor IS at the trap-site CMP, but only when the seed corpus carries a natural V at the comparison offset that populates the (V, K) operand pair into the I2S dictionary."
+      },
+      {
+        "version": "v3",
+        "verdict": "refuted_uniform_tie",
+        "summary": "Sweep result 2026-05-04 (5 trials \u00d7 600s \u00d7 4 gaps \u00d7 2 fuzzers): uniform 3 crashes per trial across ALL gaps \u00d7 both fuzzers \u00d7 all trials. No vp vs vpc divergence detected at any SEED_GAP value. Diagnosis: bare harness lacks dictionary competition \u2014 libafl's random byte mutation immediately walks TagCount past K (random uint32 > K with prob >99.9% for all K up to 1010). Splice-back snap V\u2192K cannot manifest because no other CMPs compete for I2S substitution slots and CMP_MAP gradient is unobstructed. The seed-induced anchor requires REAL-CMP-MIMICKING upstream gates (v4 design)."
+      },
+      {
+        "version": "v4",
+        "verdict": "refuted_inverted_direction",
+        "summary": "Sweep result 2026-05-04 night (5 trials \u00d7 600s \u00d7 4 gaps \u00d7 2 fuzzers): vpc dominates at every gap by 2.8\u00d7 to 11.8\u00d7 \u2014 direction INVERTED vs predicted (vp >= vpc). Medians: g1 vp=1623/vpc=19095 (vpc 11.8\u00d7); g10 vp=6477/vpc=18363 (vpc 2.8\u00d7); g90 vp=2466/vpc=15912 (vpc 6.4\u00d7); g1000 vp=2589/vpc=17679 (vpc 6.8\u00d7). Diagnosis: adding 88 upstream wide-literal CMPs (acsp magic + 7-arm class switch + 80-entry tag-sig lookup loop) did NOT make vp win. Random byte mutation walks past K trivially (random uint32 > K with high prob for all gaps). I2S substitution at the trap offset 128 is rare (1/88 \u2248 1.1% per attempt) and quickly undone by next-round random mutation. vpc's higher post-discovery throughput (cmplog tracing-stage exec rate) dominates the crash count. The 'seed-induced boundary anchor' mechanism (V=10 logged from seed \u2192 splice-back snaps V\u2192K) is NOT load-bearing in this synthetic. The family bound holds: lcms cmsio0.c divergence cluster is intrinsically non-synthesizable in trivial harnesses regardless of upstream CMP density."
+      }
+    ],
+    "results_per_trial_v3": {
+      "g1": {
+        "vp": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "vpc": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ]
+      },
+      "g10": {
+        "vp": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "vpc": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ]
+      },
+      "g90": {
+        "vp": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "vpc": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ]
+      },
+      "g1000": {
+        "vp": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "vpc": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ]
+      }
+    },
+    "results_per_trial_v4": {
+      "g1": {
+        "vp": [
+          1623,
+          4863,
+          1128,
+          1056,
+          5988
+        ],
+        "vpc": [
+          15654,
+          19095,
+          15846,
+          20118,
+          20298
+        ]
+      },
+      "g10": {
+        "vp": [
+          7809,
+          6477,
+          4881,
+          6960,
+          2778
+        ],
+        "vpc": [
+          22221,
+          16098,
+          16596,
+          18363,
+          21354
+        ]
+      },
+      "g90": {
+        "vp": [
+          1677,
+          2496,
+          3828,
+          2466,
+          1860
+        ],
+        "vpc": [
+          16971,
+          15522,
+          14346,
+          15912,
+          17088
+        ]
+      },
+      "g1000": {
+        "vp": [
+          2421,
+          2772,
+          2724,
+          2317,
+          2589
+        ],
+        "vpc": [
+          17829,
+          17679,
+          17127,
+          18615,
+          16644
+        ]
+      }
+    },
+    "results_median_v4": {
+      "g1": {
+        "vp": 1623,
+        "vpc": 19095,
+        "ratio_vpc_over_vp": 11.77
+      },
+      "g10": {
+        "vp": 6477,
+        "vpc": 18363,
+        "ratio_vpc_over_vp": 2.84
+      },
+      "g90": {
+        "vp": 2466,
+        "vpc": 15912,
+        "ratio_vpc_over_vp": 6.45
+      },
+      "g1000": {
+        "vp": 2589,
+        "vpc": 17679,
+        "ratio_vpc_over_vp": 6.83
+      }
+    }
+  },
+  "hypothesis_v3": {
+    "_relation_to_v1_v2": "SAME primary pair (A=value_profile, B=value_profile_cmplog) and SAME predicted DIRECTION (vp > vpc on the trap-firing rate). DIFFERENT mechanism diagnosis: shifts from 'splice-back snaps K+e to K' (v1/v2, refuted) to 'SEED-INDUCED BOUNDARY ANCHOR \u2014 splice-back snaps V to K when seed corpus carries natural value V at the comparison offset' (v3). The on-disk vpc Side-A seed for lcms br73 has TagCount=10 in a 564B ICC profile; cmplog logs the operand pair (10, 100) at line 827; I2SRandReplace substitutes any `00 00 00 0a` byte sequence in offspring with `00 00 00 64` (=100), locking TagCount=100 where `100 > 100` is false. The seed corpus is the load-bearing ingredient that v1 and v2 lacked.",
+    "mechanism": "Seed corpus carries value V at the comparison offset. Trap is `read_at_offset() > K` where K > V. sancov trace_const_cmp4 logs (V, K) into the I2S dictionary on every execution that reaches the CMP. I2SRandReplace mutator finds byte-sequences in input matching V and substitutes with K. After substitution, the read value = K, so `K > K` = false; the trap is locked at the boundary. vpc's splice-back creates a sticky boundary that vpc can only escape stochastically. vp lacks splice-back; CMP_MAP gradient ascent walks V \u2192 V+1 \u2192 ... \u2192 K+1 freely. The mechanism predicts vp resolves the trap in O(K-V) gradient steps; vpc resolves much slower (or fails) because each escape attempt is re-anchored by splice-back.",
+    "program_feature_parameter": "SEED_GAP = K - V (V=10 fixed via seed corpus mirroring the lcms TagCount=10 observation). Sweep K \u2208 {11, 20, 100, 1010} \u2192 SEED_GAP \u2208 {1, 10, 90, 1000}. SEED_GAP=90 is the lcms-canonical case.",
+    "predicted_direction": "vp >= vpc at every gap; vp/vpc TIME-TO-FIRST-CRASH ratio peaks around gap=90, declines slightly at large gap as gradient ascent dominates both fuzzers.",
+    "predicted_endpoints": {
+      "SEED_GAP=1": "trivial 1-step random walk; both fuzzers crack immediately. Floor case, parity expected.",
+      "SEED_GAP=10": "short gradient path; splice-back weakly active. vp slightly > vpc.",
+      "SEED_GAP=90": "the lcms-canonical case. Splice-back load-bearing. Predicted vp >> vpc.",
+      "SEED_GAP=1000": "long gradient ascent path; both rely on CMP_MAP feedback. Predicted vp > vpc with smaller delta as gradient saturates."
+    },
+    "headline_metric": "TIME-TO-FIRST-CRASH (NOT total crash count). Total count after first discovery is post-discovery throughput, dominated by vpc's higher cmplog tracing-stage execs/sec. The meaningful signal is whether vpc EVER escapes the K boundary within the budget. Methodology lesson #3 from 2026-05-03.",
+    "harness": "templates/i2s_inequality_anchor_trap/template_v3.c",
+    "deployed_targets_v3": [
+      "b_ineq_anchor_v3_g1",
+      "b_ineq_anchor_v3_g10",
+      "b_ineq_anchor_v3_g90",
+      "b_ineq_anchor_v3_g1000"
+    ],
+    "verdict_v3": "refuted_uniform_tie"
+  },
+  "hypothesis_v4": {
+    "_relation_to_v3": "Same primary pair, same predicted direction. v4 ADDS upstream wide-literal CMPs (1 'acsp' magic + 7-arm validDeviceClass switch + 80-entry tag-sig lookup loop) so the I2S dictionary has ~88 entries competing for splice-back budget. Tests whether dictionary competition is the load-bearing ingredient for the boundary-anchor effect.",
+    "harness": "templates/i2s_inequality_anchor_trap/template_v4.c",
+    "scan_values": [
+      1,
+      10,
+      90,
+      1000
+    ],
+    "deployed_targets_v4": [
+      "b_ineq_anchor_v4_g1",
+      "b_ineq_anchor_v4_g10",
+      "b_ineq_anchor_v4_g90",
+      "b_ineq_anchor_v4_g1000"
+    ],
+    "verdict_v4": "refuted_inverted_direction"
+  }
+}

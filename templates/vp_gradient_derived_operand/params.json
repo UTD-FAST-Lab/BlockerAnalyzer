@@ -1,0 +1,36 @@
+{
+  "template_id": "vp_gradient_derived_operand",
+  "parameter": "DERIVATION_DEPTH",
+  "scan_values": [0, 1, 2, 4],
+  "primary_pair": {"A": "value_profile", "B": "naive"},
+  "fuzzers": ["value_profile", "naive"],
+  "primary_pair_metric": "trap crash count (single __builtin_trap site)",
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "vp >> naive at every DERIVATION_DEPTH; vp/naive ratio approximately FLAT across DERIVATION_DEPTH (gradient is depth-invariant under bijective XOR derivations)",
+  "expected_curve_per_fuzzer": {
+    "value_profile": "trap count consistently in the hundreds-to-thousands at every depth — CMP_MAP gradient steers bit-flip mutations to drive popcount(derived XOR MAGIC) toward 0 regardless of how many XOR layers sit between input and CMP",
+    "naive":         "trap count near zero at every depth — geometric 1/2^32 per-attempt; in 600s × ~600k execs/s ≈ 4e8 attempts, expected hits ≈ 0.1; bimodal high-variance, mostly zero"
+  },
+  "expected_curve_secondary": {
+    "metric": "no secondary trap (single trap site by design)",
+    "note": "v3 lesson from i2s_structure_preservation_bias: fewer competing crash sites means cleaner per-trial signal. One trap, one mechanism."
+  },
+  "seed_corpus": {
+    "description": "Single 4-byte seed of all zeros (data[0..3] = 0x00). Both fuzzers start from the same point with all 32 bits of distance to the MAGIC at every depth (popcount(0 XOR (MAGIC ^ XORed_keys)) is uniform 16 in expectation across depths since the keys are themselves balanced). No literal pre-load.",
+    "rationale": "The falsifier requires depth-invariance, which means the seed must NOT contain any pre-image of MAGIC at any depth. Zero-bytes is the cleanest control. Avoids the seed-tiny / seed-mntr lesson from i2s_structure_preservation_bias: pre-loading content related to the trap can disable the very mechanism we are testing."
+  },
+  "acceptance": {
+    "metric": "median trap crash count, vp / naive ratio per scan",
+    "rule": "vp_median > 50 at EVERY DERIVATION_DEPTH (gradient is functional) AND naive_median <= 5 at EVERY DERIVATION_DEPTH (geometric bound holds) AND vp/naive ratio variance across depths < 5x (depth-invariance — the falsifier-relevant claim)"
+  },
+  "design_basis": "Pattern A (single-tech wins) entry. value_profile's CMP_MAP feedback records popcount of operand XOR per integer comparison. When the operands are derived by bijective bytewise transforms of input bytes (XOR-style mask, byte-inversion, simple shifts), Hamming distance between the COMPARED values equals Hamming distance between the corresponding input bytes — so VP's gradient transparently propagates back to mutations. cmplog's I2S substitution looks for the literal CMP value in input bytes and substitutes it; under derivation, the literal isn't in input, so I2S misfires. Naive's coverage-only retention has nothing to bias bit-flips toward the target. Mbedtls TLS uses the (255 - byte) inversion for legacy version negotiation reasons; ASN.1 DER, base64, network-byte-order swaps, and many other byte-level encodings are similar bijective bytewise transforms — this template covers all of them.",
+  "deployed_targets": ["b_vp_derived_d0", "b_vp_derived_d1", "b_vp_derived_d2", "b_vp_derived_d4"],
+  "notes": [
+    "First Pattern A 'VP alone helps over naive' template in the catalog. Strictly two fuzzers per template — only the primary pair (A=value_profile, B=naive) is verified here. The same branch shows vpc>cmp (axis_differ=value_profile, opposite-direction subject) — that's a SEPARATE one-tech-delta claim, would warrant its own template if surfaced as a distinct strict-wins cell. We mention it in `tradeoff_observation` as cousin evidence; not part of THIS template's claim.",
+    "Per-scan Dockerfiles needed at /home/miao/libafl_fuzzbench/docker/targets/Dockerfile.b_vp_derived_d{0,1,2,4} (one per DERIVATION_DEPTH value).",
+    "DERIVATION_DEPTH is COMPILE-TIME; pass via -DDERIVATION_DEPTH=<N>.",
+    "FALSIFIER: if vp/naive ratio DECAYS as DERIVATION_DEPTH grows, the gradient is NOT depth-invariant and the mechanism is wrong. The most plausible alternative would be 'literal-in-input absence' driving naive's failure — which would manifest as DEPTH=0 having LOWER ratio (trap is literally in input bytes) than DEPTH=4 (trap requires inversion). If the curve shape is the OPPOSITE — flat or rising in depth — the depth-invariance claim survives.",
+    "Generalization: this template covers ALL bijective bytewise derivations: XOR-mask, byte-inversion (255-x), endianness swap, simple-shift bit-rotation, base64 encoding (depth ≈ 1.33), ASN.1 DER tag/length encoding, network-byte-order swaps. Anywhere a parser computes a value via a bijection of input bytes before comparing it to a constant, this mechanism applies. The mbedtls origin (TLS version inversion) is the simplest case (depth=1)."
+  ]
+}

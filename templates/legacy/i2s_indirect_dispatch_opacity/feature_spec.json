@@ -1,0 +1,81 @@
+{
+  "id": "i2s_indirect_dispatch_opacity",
+  "kind": "general",
+  "pair": {
+    "primary": {
+      "A": "naive",
+      "B": "cmplog",
+      "axis_differ": "I2S substitution (cmplog has it; naive does not). Predicted that under indirect-dispatch the technique would add throughput tax with no yield, inverting the usual cmp>naive direction."
+    },
+    "extended_4_fuzzer": ["naive", "cmplog", "value_profile", "value_profile_cmplog"]
+  },
+  "hypothesis": {
+    "mechanism": "An array-of-function-pointers dispatch indexed by an input-derived tag emits NO icmp eq and NO switch at the LLVM IR level. The discriminator resolves through an indirect call through memory, not a value comparison. Therefore none of sancov's value-side hooks (__sanitizer_cov_trace_const_cmp1/2/4/8, __sanitizer_cov_trace_cmp1/2/4/8, __sanitizer_cov_trace_switch) is emitted on the dispatch. Predicted that cmplog would lose to naive because cmplog pays tracing-stage overhead via N_NOISE_PER_HANDLER literal-equality CMPs in the non-target arm without any compensating I2S yield on the dispatch.",
+    "program_feature_parameter": "N_HANDLERS (table size). Trap rate per execution = 1/N. Throughput-tax per execution is roughly constant (driven by N_NOISE_PER_HANDLER in non-target arm). Predicted cmp/naive ratio FLAT across N; absolute counts ~1/N.",
+    "predicted_direction": "naive > cmp at every scan value. cmp/naive ratio approximately constant in N.",
+    "predicted_4fuzzer_signatures": {
+      "naive":                "highest at every N; ~1/N scaling, no extra tax",
+      "cmplog":               "below naive at every N; same 1/N scaling, multiplied by ~0.2-0.5 from throughput tax",
+      "value_profile":        "tracks naive (gradient on bytes 4-7 noise compares doesn't reach the dispatch)",
+      "value_profile_cmplog": "tracks cmp (combined tax, no extra signal)"
+    }
+  },
+  "verification": {
+    "harness": "templates/i2s_indirect_dispatch_opacity/template.c",
+    "scan_values": [4, 16, 64, 256],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "refuted",
+    "results_per_trial": {
+      "n4": {
+        "naive":                [3, 3, 3, 3, 3],
+        "cmplog":               [3, 3, 3, 3, 3],
+        "value_profile":        [14, 16, 24, 15, 16],
+        "value_profile_cmplog": [19, 27, 9, 22, 22]
+      },
+      "n16": {
+        "naive":                [9, 6, 5, 8, 10],
+        "cmplog":               [10, 7, 11, 9, 4],
+        "value_profile":        [40, 68, 79, 73, 35],
+        "value_profile_cmplog": [103, 87, 43, 73, 98]
+      },
+      "n64": {
+        "naive":                [0, 0, 0, 0, 0],
+        "cmplog":               [0, 0, 0, 0, 0],
+        "value_profile":        [84, 138, 183, 352, 97],
+        "value_profile_cmplog": [75, 58, 47, 57, 184]
+      },
+      "n256": {
+        "naive":                [0, 0, 0, 0, 0],
+        "cmplog":               [0, 0, 0, 0, 0],
+        "value_profile":        [465, 61, 49, 110, 105],
+        "value_profile_cmplog": [36, 100, 50, 100, 191]
+      }
+    },
+    "results_median": {
+      "n4":   {"naive": 3, "cmplog": 3, "value_profile": 16,  "value_profile_cmplog": 22},
+      "n16":  {"naive": 8, "cmplog": 9, "value_profile": 68,  "value_profile_cmplog": 87},
+      "n64":  {"naive": 0, "cmplog": 0, "value_profile": 138, "value_profile_cmplog": 58},
+      "n256": {"naive": 0, "cmplog": 0, "value_profile": 105, "value_profile_cmplog": 100}
+    },
+    "summary": {
+      "predicted_shape": "RBRB (naive R, cmp B, vp R, vpc B)",
+      "observed_shape":  "BBRR (naive B, cmp B, vp R, vpc R) — value_profile axis dominates I2S axis at every N",
+      "naive_vs_cmp":    "TIE at every N. cmp/naive ratio ≈ 1.0 across N=4 (3/3), N=16 (9/8), and N=64/256 (both fuzzers at 0). The predicted throughput tax from cmplog instrumentation on N_NOISE_PER_HANDLER compares is NOT measurable in this synthetic at this duration. cmp neither helps (no I2S signal on dispatch) nor hurts (no measurable overhead).",
+      "vp_vs_vpc":       "TIE at small N (n=4: 16 vs 22, n=16: 68 vs 87 — vpc slightly ahead), vp pulls ahead at n=64 (138 vs 58). vp ≈ vpc at n=256 (105 vs 100). The predicted vp>vpc direction emerges only at one N (n=64); not a clean monotone curve.",
+      "vp_dominates_naive_cmp": "vp/vpc dominate naive/cmp at every N by orders of magnitude (n=4: 5×–7×, n=16: 8×–10×, n=64: ∞ vs 0, n=256: ∞ vs 0). This is the dominant unpredicted finding.",
+      "mechanism_correction": "The handler_noop function contains 16 literal-equality compares against NOISE_MAGICS at bytes 4–7. value_profile retains seeds in distinct CMP_MAP buckets per compare per hamming distance, enriching the corpus far beyond naive's edge-only retention. The enriched corpus carries more diverse byte-0 values across mutation-eligible seeds, accelerating random walk on the dispatch tag — the only path to TARGET_TAG. cmplog's I2S splices NOISE_MAGICS values into bytes 4–7 (where they were observed), which gives no benefit on byte 0 (the dispatch tag is uncomparable). Net: cmp ≈ naive (no benefit, no measurable tax); vp ≈ vpc (corpus enrichment dominates).",
+      "naive_cliff_at_n64": "naive=cmp=0 at n=64 and n=256 across all 5 trials. At n=4 naive saturates at 3 unique crash hashes; at n=16 grows to 5–10. The cliff at n=64 reflects that LibAFL records UNIQUE minimized crash inputs (content-hash dedup) — without value-side feedback to grow corpus diversity, naive/cmp's queue stays small enough that the few seeds that mutate byte 0 to TARGET_TAG produce too few unique inputs to register as separate crashes within the budget."
+    },
+    "verdict_rationale": "Acceptance rule (params.json): 'naive median > cmp median at EVERY N_HANDLERS scan value; vp median > vpc median at every N (RBRB shape preserved across the sweep)'. The naive>cmp clause FAILS at every N (always tied or cmp slightly ahead). The vp>vpc clause FAILS at n=4 and n=16 (vpc ahead) and n=256 (tied); only holds at n=64. Both clauses of the predicted RBRB direction are refuted. The mechanism (indirect dispatch is opaque to value-side hooks) is correct in mechanism but wrong in consequence: opacity neither helps nor hurts cmp materially; the bigger force is value_profile's corpus-enrichment via the noise compares.",
+    "notes": [
+      "Replaces refuted i2s_jump_table_opacity. Original premise (jump-table dispatch invisible to cmplog) was disproven by inspecting LibAFL's __sanitizer_cov_trace_switch hook in libafl_targets/src/sancov_cmp.c:53-87, which iterates all case literals into the cmplog dictionary.",
+      "True opacity requires absence of icmp/switch IR — function-pointer dispatch is the canonical example. Other unhookable idioms: C++ vtable, computed goto, JIT-emitted code.",
+      "No instance of this mechanism exists in the canonical 5-target DB. Real-world examples are common in C++ codebases (virtual dispatch) and C codebases with method-table patterns (Linux kernel ops structs, OpenSSL EVP, etc.) — not in our currently-instrumented set.",
+      "Trap is a direct __builtin_trap() in handler_trap with NO upstream gating — eliminates confound with any other I2S/VP-relevant comparison.",
+      "REFUTATION (2026-05-09): The harness DOES achieve sancov opacity on the dispatch as designed (verified by inspecting the IR / disassembly: TABLE[tag](...) emits an indirect call, no trace_const_cmp4 on the dispatch byte). But the predicted CONSEQUENCE — that this opacity flips cmp<naive — does not hold. Instrumenting the dispatch is not what makes cmp win in the canonical i2s_magic_number_gate regime; the win comes from cmp's I2S splicing the literal at the input offset where it was compared. Removing the compare removes the WIN, but doesn't create a LOSS. cmplog instrumentation overhead per non-target execution turns out to be too small to measure against naive at this duration.",
+      "UNEXPECTED FINDING: value_profile-based fuzzers dominate naive/cmplog at every N. The 16 noise compares in handler_noop give value_profile rich CMP_MAP feedback, leading to corpus enrichment that indirectly accelerates random walk on the dispatch byte. This is essentially i2s_corpus_pollution running in REVERSE — corpus enrichment via downstream noise CMPs HELPS instead of hurting because there's no chain of useful CMPs to dilute. The actual decisive shape is BBRR (axis = value_profile), aligning the template with the corpus_pollution mechanism family rather than the predicted I2S-hurts/jump-table family.",
+      "Methodological lesson: 'opaque to cmp's I2S' ≠ 'cmp loses to naive'. To force cmp to LOSE, the harness needs an actively penalizing factor (corpus pollution, anchored monoculture) — pure absence of I2S signal yields TIE, not LOSS. Future templates targeting RBRB should use the i2s_anchored_seed_deviation_trap or i2s_corpus_pollution mechanism, not pure opacity."
+    ]
+  }
+}

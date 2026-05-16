@@ -1,0 +1,30 @@
+{
+  "template_id": "i2s_pair_relational_lookup",
+  "parameter": "DICT_SIZE",
+  "scan_values": [4, 16, 64, 256],
+  "primary_pair": {"A": "value_profile_cmplog", "B": "value_profile"},
+  "fuzzers": ["value_profile_cmplog", "value_profile"],
+  "fuzzer_role": {
+    "value_profile_cmplog": "primary pair A — vpc; carries I2S delta over vp",
+    "value_profile":        "primary pair B — vp; baseline without I2S"
+  },
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "vpc > vp; vpc/vp ratio grows monotonically with DICT_SIZE",
+  "expected_curve_per_fuzzer": {
+    "value_profile_cmplog": "polynomial decay ~ 1/DICT_SIZE^2 (37k → 2.3k → 150 → 10 crashes)",
+    "value_profile":        "≈ 0 at every scan value; (1/2^32)^2 per attempt regardless of DICT_SIZE"
+  },
+  "acceptance": {
+    "metric": "median crash count",
+    "rule": "vpc median > 0 at every DICT_SIZE; vp median ≈ 0 at every DICT_SIZE; vpc curve monotone non-increasing in DICT_SIZE"
+  },
+  "design_basis": "Two-slot tag-table input mirrors lcms _cmsReadHeader's tag-pair iteration. Each slot's 4-byte FOURCC is checked against a DICT_SIZE-entry compile-time literal table via lookup_descriptor(); each entry emits one trace_const_cmp_4 site that I2S logs. Trap requires (group_id equal, value distinct) — a RELATIONAL property of the static-lookup result, which can only be satisfied by chaining TWO dictionary substitutions. vp lacks I2S so cannot land FOURCC bytes in either slot; vpc inherits cmplog's I2S so substitutes both slots and reaches the relational test. The mechanism is qualitatively distinct from i2s_magic_number_gate (single-substitution unlock) because the trap requires a PAIR drawn from the dictionary, not a single literal at a fixed offset.",
+  "deployed_targets": ["b_pair_rel_d4", "b_pair_rel_d16", "b_pair_rel_d64", "b_pair_rel_d256"],
+  "notes": [
+    "DICT_SIZE is COMPILE-TIME; one Dockerfile per scan value at libafl_fuzzbench/docker/targets/Dockerfile.b_pair_rel_d{4,16,64,256}.",
+    "The dictionary is laid out so consecutive (2k, 2k+1) entries form a group with distinct values; thus DICT_SIZE/2 valid trap-pairs exist. As DICT_SIZE grows, |trap-pairs| grows linearly while |all-pairs| grows quadratically, so resolution rate decays as 1/DICT_SIZE.",
+    "Primary pair is (vpc, vp) on the I2S axis — chosen because the real target's strict-wins cell at lcms br56 is on this edge (subject 8 vpc vs vp ΔAUC=23.55M at n=10).",
+    "Cousin observation NOT part of this template's claim: at the same branch the (cmplog, naive) edge ALSO shows I2S-helps (subject 5 ΔAUC=17.97M). Same I2S delta direction, but different primary pair. If a separate strict cell on a different real target surfaces with (cmplog, naive) on a pair-relational lookup, it would extend this template via the (cmp, naive) edge; both edges share the I2S mechanism."
+  ]
+}

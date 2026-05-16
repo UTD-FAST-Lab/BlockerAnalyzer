@@ -1,0 +1,40 @@
+{
+  "template_id": "jump_table_opacity",
+  "parameter": "N_CASES",
+  "scan_values": [4, 16, 64, 256],
+  "primary_pair": {"A": "cmplog", "B": "naive"},
+  "fuzzers": ["naive", "cmplog", "value_profile", "value_profile_cmplog"],
+  "fuzzer_role": {
+    "cmplog":               "primary pair A — cmp; carries the I2S delta over naive. Predicted to WIN at small N (compare-chain dispatch, I2S sees per-case CMPs) and LOSE at large N (jump-table dispatch, I2S blind + tracing-stage throughput tax)",
+    "naive":                "primary pair B — naive baseline. Random havoc hits TARGET_CASE at rate 1/N per execution",
+    "value_profile":        "supporting fuzzer — CMP_MAP gradient on the modulo result CMP and case-body arithmetic; predicted to slightly beat naive at medium-to-high N",
+    "value_profile_cmplog": "supporting fuzzer — both I2S and CMP_MAP. At small N, vpc ≳ cmp. At large N, vpc ≳ vp (VP rescues cmp from I2S blackout)"
+  },
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "cmp WINS over naive at small N (I2S-helps regime); cmp LOSES to naive at large N (I2S-blind regime); transition between N=4 and N=64",
+  "expected_curve_per_fuzzer": {
+    "cmplog":               "non-monotone — high crash count at N=4 (I2S substitutes TARGET_CASE quickly), declining at N=16, falls below naive at N=64 and N=256 (I2S-blind, plus throughput tax)",
+    "naive":                "geometric decay in N (~1/N hit rate from random byte mutation); approximately constant relative to vp/vpc at high N",
+    "value_profile":        "geometric decay in N similar to naive but with CMP_MAP gradient retention bonus; vp ≥ naive at every N",
+    "value_profile_cmplog": "best fuzzer at every N — has both I2S and CMP_MAP rescue; gap over cmp grows as N increases (jump-table opacity strands cmp; VP rescues vpc)"
+  },
+  "acceptance": {
+    "metric": "median crash count",
+    "rule": "(1) cmp/naive median ratio > 5x at N=4 (I2S-helps regime confirmed); (2) cmp/naive median ratio < 1.5x at N=64 (I2S-blind regime confirmed); (3) cmp's curve non-monotone (peaks at N=4 or N=16, declines at N=64+); (4) vpc median > cmp median at every N (VP rescues from I2S blackout)"
+  },
+  "design_basis": "libpcap gen_linktype() switch on cstate->linktype: 60+ contiguous DLT case values, compiled to a jump table at -O2. RCA-cataloged at 39 of 148 libpcap blockers under jump_table_opacity_I2S_lock_in family. Same blocking cmplog seed (0093e088696593e2) was observed across all 9 branches in dim1_cluster_002 (gen_linktype lines 3218-3361) — direct artifact of cmp's corpus locking on filter-keyword CMPs while the DLT dispatch stays opaque. The synthetic varies N_CASES to span the compiler's chain-vs-table threshold and demonstrate the regime transition.",
+  "deployed_targets": [
+    "b_jump_table_n4",
+    "b_jump_table_n16",
+    "b_jump_table_n64",
+    "b_jump_table_n256"
+  ],
+  "notes": [
+    "Dispatch shape verification: after building each Dockerfile, the compiled binary should be inspected with `objdump -d /fuzz/b_jump_table_n<N>` to confirm: at N=4 a comparison chain (sequence of `cmp $imm, %eax; je <label>`); at N≥16 a jump table (a single `jmp *<table>(,%rax,8)` plus a `.rodata` block of pointers). If the compiler chooses unexpectedly, the harness can force jump-table emission via `__attribute__((optimize(\"jump-tables\")))`.",
+    "Reporting all 4 fuzzers (not just the canonical pair) is intentional — jump_table_opacity is a counterexample to the i2s_magic_number_gate norm and showing the full 4-fuzzer table makes the regime transition visually clear. For the canonical-pair verdict, only the (cmp, naive) edge counts.",
+    "Distinct from i2s_magic_number_gate: that template's CHAIN_LEN=1 trap has a single literal CMP that I2S can substitute into the input. Here the dispatch has N literal case values but they are NOT instrumented as per-case CMPs at high N — I2S has no dictionary entries for them.",
+    "Distinct from i2s_corpus_pollution: that template adds noise CMPs to a polluted dictionary. Here the dictionary is EMPTY of dispatch literals (the compiler simply doesn't emit them), not flooded with noise.",
+    "Real-target evidence at libpcap: 39/148 RCA reports under jump_table_opacity_I2S_lock_in family. Most concentrated at gencode.c gen_linktype, gen_load_llc_linktype, gen_load_dlt; cmsio0.c (lcms equivalent on switch-default arms — a related but structurally different sub-mechanism)."
+  ]
+}

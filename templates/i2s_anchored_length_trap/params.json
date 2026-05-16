@@ -1,0 +1,36 @@
+{
+  "template_id": "i2s_anchored_length_trap",
+  "parameter": "N_ANCHORS",
+  "scan_values": [0, 1, 4, 16],
+  "primary_pair": {"A": "value_profile_cmplog", "B": "cmplog"},
+  "fuzzers": ["value_profile_cmplog", "cmplog"],
+  "fuzzer_role": {
+    "value_profile_cmplog": "primary pair A — vpc (CMP_MAP gradient on trap CMP rescues short descendants from I2S-anchored monoculture)",
+    "cmplog":               "primary pair B — cmp (I2S anchors offset 0..3 in corpus; no per-CMP gradient bucket on trap; short descendants discarded by coverage-only scheduler)"
+  },
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "vpc > cmp on SHORT_TRAP at N_ANCHORS >= 1; vpc/cmp ratio monotone non-decreasing in N_ANCHORS; the mechanism is 'anchors GAIN vpc via CMP_MAP gradient retention', NOT 'anchors suppress cmp's random shrinking'",
+  "expected_curve_per_fuzzer": {
+    "value_profile_cmplog": "monotone-increasing gain with N_ANCHORS — each upstream anchor populates a CMP_MAP Hamming-distance bucket on the trap CMP, retaining size-3, size-2, size-1, size-0 descendants that would otherwise be discarded by the coverage-only scheduler. Growth is roughly linear in N_ANCHORS at low D and may saturate at high D once all distinct distance buckets are filled",
+    "cmplog":               "approximately flat ~10-20 baseline noise floor across N_ANCHORS. cmp's random-shrinking rate is determined by libafl's mutator schedule (BytesDeleteMutator is one of many mutators selected at fixed per-step probability), not by I2S dictionary size. Anchors raise cmp's average parent-input size in the queue but do NOT suppress short-descendant production from the random-mutation arm of the schedule. cmp curve is bounded above by some small constant; the 'cmp = 0' strong-form prediction is structurally unreachable without additional mutator-weight modifications"
+  },
+  "acceptance": {
+    "metric": "median crash count of SHORT_TRAP",
+    "rule": "(1) vpc median strictly increasing in N_ANCHORS for D >= 1 — gradient retention compounds with anchors; (2) vpc/cmp median ratio strictly increasing in N_ANCHORS for D >= 1 — vpc-gain dominates cmp-noise; (3) cmp median bounded above by 30 at every N_ANCHORS — random-shrink baseline is anchor-independent; (4) vpc growth factor vpc(D=16)/vpc(D=0) >= 10 — anchor pressure cumulatively rescues 10x more short-trap descendants",
+    "rationale_for_revision": "The original strong-form rule ('cmp median = 0 at D=16') was structurally unreachable: libafl's mutator scheduler picks BytesDeleteMutator at a fixed per-step probability regardless of how many I2S entries the dictionary has, so cmp's blind random-shrinking floor is anchor-independent. The honest mechanism claim is 'CMP_MAP gradient retention rescues vpc from I2S-anchor-induced corpus monoculture', NOT 'anchors crush cmp'. The revised rule tests only the demonstrable mechanism."
+  },
+  "design_basis": "Upstream literal-CMP block reachable only when size>=4 (N_ANCHORS controls the count). Trap CMP at length comparison amt_read != sizeof(magic), I2S-non-substitutable (the runtime read length is not a value present in input bytes). The asymmetry — anchors fire only on size>=4, gradient on trap CMP fires on every size — is the dose-response axis. cmp's I2S preserves byte-anchored prefixes blocking deletion-lineage descent to size<4; vpc's CMP_MAP exposes Hamming-distance buckets at amt_read in {3,2,1,0} retaining short descendants in the queue.",
+  "deployed_targets": [
+    "b_vp_length_anchor_d0",
+    "b_vp_length_anchor_d1",
+    "b_vp_length_anchor_d4",
+    "b_vp_length_anchor_d16"
+  ],
+  "notes": [
+    "Source pair: libpcap savefile.c:512 if (amt_read != sizeof(magic)). Subject 67 (libpcap, vpc vs cmp) ΔAUC=69.5M, p_AUC=0.064 at n=3 (admissible bound). Strict-wins on 1 of 2 value_profile-labeled edges.",
+    "Distinct from i2s_corpus_pollution despite the same primary pair (vpc, cmp): there COST_INNER pollutes I2S dictionary across a literal-CMP CHAIN whose trap CMP IS itself I2S-substitutable (failure is dilution at the chain). Here N_ANCHORS pins corpus length via upstream anchors and the trap CMP is non-substitutable (failure is corpus monoculture).",
+    "Distinct from i2s_anchored_seed_deviation_trap (same length-shrink trap shape but pair is (vp, vpc)). v3 was refuted because libafl scheduler weight uses log2(bitmap_size) and saturates before flipping direction. The libafl-saturation falsifier does NOT apply here: vpc's rescue is via per-CMP gradient buckets at the trap CMP, not bitmap-size weight inflation.",
+    "Side-A/Side-B byte-diff evidence: cmp seeds (20 bytes, byte 0..3 = '02 ?? 04 ??' pcap-magic-like) carry I2SRandReplace,ByteFlipMutator,DwordInterestingMutator,TokenInsert traces. The single vpc seed (5 bytes 01 00 40 00 01) carries BytesDeleteMutator x2 + ByteInterestingMutator + ByteIncMutator — direct evidence of deletion-lineage descent that cmp's corpus does not produce."
+  ]
+}

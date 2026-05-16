@@ -1,0 +1,92 @@
+{
+  "id": "vp_rescues_i2s_derived_operand",
+  "kind": "local",
+  "pair": {
+    "primary": {
+      "A": "value_profile_cmplog",
+      "B": "cmplog",
+      "axis_differ": "value_profile (CMP_MAP Hamming-distance gradient feedback) on top of cmplog's I2S substitution"
+    }
+  },
+  "_design_history": {
+    "v1_2026_05_04_morning": "Bijective XOR chain (DERIVATION_DEPTH knob) — designed from br1077 agent. Mathematical abstraction of state-machine accumulator using XOR-by-constant layers (Hamming-preserving).",
+    "v2_2026_05_04_evening": "DFA state-machine (KEYWORD_LEN knob) — designed from br736 agent. Replaces v1 design after agent identified that the actual real-target gating CMP at both br1077 (BPF optimizer ATOMELEM bitmask) and br736 (flex DFA traversal) is a TABLE LOOKUP with NO literal target. Bijective XOR was Hamming-preserving but not faithful — VP could ride the gradient too easily. DFA design exposes per-character gradient through state machine, matching real-target evidence.",
+    "current_version": "v2"
+  },
+  "origins": [
+    {
+      "target": "libpcap",
+      "branch_id": 1077,
+      "source": "optimize.c:650 `if (!ATOMELEM(use, atom))`",
+      "mechanism_substrate": "BPF optimizer state accumulator — `use` mask runtime-built by compute_local_ud walking basic-block stmts; bit-test against runtime mask"
+    },
+    {
+      "target": "libpcap",
+      "branch_id": 736,
+      "source": "scanner.c:3514 `case 1: return DST` inside flex-generated yylex switch(yy_act)",
+      "mechanism_substrate": "flex DFA traversal — `yy_chk[base+c] != state` CMP with both operands runtime-derived from yy_chk/yy_base/yy_def/yy_nxt tables; keyword bytes 'd','s','t' encoded in DFA tables, never as CMP literals"
+    }
+  ],
+  "hypothesis": {
+    "mechanism": "A keyword-style equality unlock requires a sequence of KEYWORD_LEN input bytes to drive a hand-rolled DFA into an accepting state. The DFA transitions are encoded in a runtime-initialised lookup table, so the gating CMP is `dfa_table[state*256+c] != REJECT_SENTINEL`. Both operands are runtime-derived: the left-hand side is an array load, the right-hand side is a fixed sentinel (0xFF) but it is NEVER one of the keyword bytes. cmplog's I2S logs `next` and `REJECT` via __sanitizer_cov_trace_const_cmp1, but splicing 0xFF into input bytes does not advance the DFA — the keyword characters appear nowhere in the program's CMP literals (they live inside the table contents). I2S therefore provides zero useful substitutions and cmplog reduces to naive's geometric 1/256^KEYWORD_LEN per-attempt rate. value_profile's CMP_MAP records the Hamming distance between the table-lookup result and the sentinel; bytes that produce intermediate states (closer to non-reject values) generate new distance buckets and retain the seeds that produced them. The gradient compounds character by character through the DFA, so vpc resolves the trap at KEYWORD_LEN values where cmp's geometric rate is below the per-trial budget. This is the case-(b) failure mode of cmplog's mechanism library entry: `comparison is on a value derived from input via a non-invertible function (state-machine accumulator)`.",
+    "program_feature_parameter": "KEYWORD_LEN (number of characters the DFA must recognise to reach the accepting state — equivalently, the depth of the state-machine accumulator before the trap CMP). Each character requires one table-lookup transition and emits one coverage edge.",
+    "predicted_direction": "vpc > cmp at every KEYWORD_LEN >= 2; vpc/cmp ratio grows monotonically with KEYWORD_LEN as cmp's geometric 1/256^KEYWORD_LEN rate drops below the 600s budget while vpc's per-character gradient compounds linearly.",
+    "predicted_endpoints": {
+      "KEYWORD_LEN=1": "vpc ~ cmp ratio ~1: single-byte unlock is trivial for both fuzzers; gradient is unnecessary because random bytes hit 'd' (0x64) within ~256 attempts.",
+      "KEYWORD_LEN=5": "vpc >> cmp ratio: cmp's 1/256^5 = 1/1.1 trillion is far below the 600s budget (cmp median expected = 0); vpc still resolves via gradient (median expected > 0 because each character is found by CMP_MAP independently — total budget is ~5 * gradient-finds-one-byte rather than 1/256^5)."
+    },
+    "tradeoff_observation": "The (value_profile, naive) pair on this same harness would also show vp >> naive — that is the orthogonal axis already covered by vp_gradient_derived_operand v2 (which uses bijective XOR derivation rather than a DFA table). The two templates probe different program-feature substrates of the same VP-gradient mechanism: vp_gradient_derived_operand uses bijective bytewise transforms with a literal target; this template uses a table-lookup state machine with no literal target. They are NOT redundant — vp_gradient_derived_operand requires an N-byte CMP at the trap (so VP's CMP_MAP has many distance buckets), while this template's gating CMP is a 1-byte (uint8_t) sentinel CMP, testing whether VP gradients per-character through a multi-step DFA. The expected libpcap real-target signature matches this template (DFA, no literal target) more closely than vp_gradient_derived_operand."
+  },
+  "verification": {
+    "harness": "templates/vp_rescues_i2s_derived_operand/template.c",
+    "params": "templates/vp_rescues_i2s_derived_operand/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [1, 2, 3, 5],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "refuted",
+    "deployed_targets": ["vp_rescues_i2s_derived_operand_kw1", "vp_rescues_i2s_derived_operand_kw2", "vp_rescues_i2s_derived_operand_kw3", "vp_rescues_i2s_derived_operand_kw5"],
+    "results_per_trial": {
+      "kw1": {
+        "vpc": [18, 9, 9, 9, 9],
+        "cmp": [45, 21, 9, 12, 9]
+      },
+      "kw2": {
+        "vpc": [255, 213, 375, 390, 210],
+        "cmp": [237, 294, 252, 267, 249]
+      },
+      "kw3": {
+        "vpc": [0, 0, 3, 0, 0],
+        "cmp": [0, 0, 3, 0, 0]
+      },
+      "kw5": {
+        "vpc": [0, 0, 0, 0, 0],
+        "cmp": [0, 0, 0, 0, 0]
+      }
+    },
+    "results_median": {
+      "kw1": {"vpc": 9, "cmp": 12, "ratio": 0.75},
+      "kw2": {"vpc": 255, "cmp": 252, "ratio": 1.01},
+      "kw3": {"vpc": 0, "cmp": 0, "ratio": 1.00},
+      "kw5": {"vpc": 0, "cmp": 0, "ratio": 1.00}
+    },
+    "summary": {
+      "verdict": "refuted",
+      "headline": "vpc does NOT rescue cmp on this DFA harness. Direction is REVERSED at kw1 (cmp 12 > vpc 9), parity at kw2 (255 vs 252), both saturate at 0 at kw3+. No vp-gradient advantage manifests at any KEYWORD_LEN.",
+      "direction_held": "no — cmp slightly wins at kw1; parity at kw2; both fail at kw3 and kw5",
+      "monotonicity": "FAILED — vpc/cmp ratio is 0.75 → 1.01 → 1.00 → 1.00. Predicted monotone increase to large vpc/cmp; observed essentially flat or slightly cmp-favoring.",
+      "deviation_from_prediction": "Predicted vpc median > 0 at kw3 (cmp = 0). Observed: BOTH vpc and cmp medians = 0 at kw3. Predicted vpc retains gradient as cmp's geometric rate drops below budget. Observed: vpc and cmp degrade in lockstep as KEYWORD_LEN increases.",
+      "verification_acceptance": "vpc median > 0 at kw3: NO. cmp median = 0 at kw3: YES. vpc/cmp ratio non-decreasing: WEAKLY (0.75 → 1.01 → 1.00 → 1.00). Acceptance fails on the primary clause (vpc > 0 at kw3).",
+      "verdict_rationale": "REFUTED. The DFA-with-table-lookup harness does NOT expose a CMP_MAP gradient that vpc can ride character-by-character. Diagnosis: the gating CMP `next != REJECT` is a SINGLE source-location uint8 comparison, iterated per input byte inside dfa_step's caller. CMP_MAP buckets at this CMP are indexed by Hamming distance between the runtime `next` value (one of {1,2,3,4,5,REJECT}) and the constant 0xFF. There are at most 6 distinct distance buckets across the entire input — not the per-character compounding gradient the hypothesis assumed. With only ~6 buckets at one CMP edge, vp's gradient retention is no richer than cmp's. Both fuzzers must hit the keyword via random byte mutation, and both fail at the same geometric rate. The hypothesis's mental model — that each DFA character produces an independent gradient signal — fails because the DFA's table-lookup architecture funnels all per-character checks through one shared CMP location. To synthesize the predicted mechanism, the harness would need separate per-character CMP edges (e.g., explicit `if (data[i] == 'd') ...` chains), which contradicts the design goal of avoiding literal targets."
+    },
+    "notes": [
+      "Two real-target origins (BOTH at libpcap): br1077 BPF optimizer ATOMELEM bitmask + br736 flex DFA scanner. Both share the same mechanism-substrate class: gating CMP with both operands runtime-derived from runtime tables/masks, with NO literal target appearing in program's CMP space.",
+      "Source-only design — Side-A and Side-B seeds for libpcap branch 736 were the primary diff evidence. Side-A (cmplog) = filterSize=2 with pcap-magic in binary tail; Side-B (vpc) = filterSize=32 with ASCII keyword tokens. cmplog burns its I2S budget on the pcap-magic CMPs in the binary parser path; the BPF filter parser (lex DFA) provides zero I2S yield, so cmplog's mutator schedule looks identical to naive on the filter half.",
+      "KEYWORD_LEN scan values cover the regime transition: KEYWORD_LEN=1 (both resolve trivially), KEYWORD_LEN=2 (cmp at noise floor, vpc resolves), KEYWORD_LEN=3 (cmp ≈ 0 in 600s, vpc resolves — matches libpcap 'dst' keyword length), KEYWORD_LEN=5 (cmp = 0, vpc may degrade but should remain above zero).",
+      "Real-target motivation: libpcap branch 736 scanner.c:3514 'case 1: return DST' inside flex-generated yylex's switch(yy_act). Subject 67 vpc 2/3 vs cmp 0/3 (with cmplog WORSE than naive 1/3 — I2S anti-helps because pcap-magic background CMPs consume the input budget without advancing the BPF filter parser). ΔAUC=69.5M, p_AUC=0.06.",
+      "Design history (2026-05-04): v1 used bijective XOR chain (DERIVATION_DEPTH knob). v2 replaces with DFA state-machine (KEYWORD_LEN knob) per user direction — DFA is more faithful to both libpcap origins. v1 design (XOR) is preserved in commit history; if v2 synthetic refutes, v1 can be re-considered as alternative substrate.",
+      "Distinct from i2s_corpus_pollution: that template's COST_INNER knob adds N noise CMPs to a pollute table (case (c) — dictionary pollution), where I2S has the right literal but it is diluted to K/(K+N). This template has KEYWORD_LEN literals that I2S would need but they exist nowhere in the program's CMP space (case (b) — derived operand with no literal target). Same primary pair, complementary failure-mode coverage.",
+      "Distinct from vp_gradient_derived_operand: that template tests the (value_profile, naive) pair with bijective bytewise XOR derivation to a 32-bit literal target; it probes whether VP's CMP_MAP gradient survives bijective transforms. This template tests the (vpc, cmp) pair with a state-machine DFA that has no literal target at all; it probes whether VP rescues cmp when I2S literally cannot help. Different pair, different program-feature substrate."
+    ]
+  }
+}

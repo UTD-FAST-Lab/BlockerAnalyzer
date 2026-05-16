@@ -1,0 +1,34 @@
+{
+  "template_id": "i2s_corpus_pollution",
+  "parameter": "COST_INNER",
+  "scan_values": [0, 64, 512, 4096],
+  "primary_pair": {"A": "value_profile_cmplog", "B": "cmplog"},
+  "fuzzers": ["value_profile_cmplog", "cmplog", "value_profile", "naive"],
+  "fuzzer_role": {
+    "value_profile_cmplog": "primary pair A — vpc",
+    "cmplog":               "primary pair B — cmp",
+    "value_profile":        "supporting context — shows CMP_MAP gradient mechanism in isolation",
+    "naive":                "supporting context — high-variance stochastic regime, orthogonal to the vpc/cmp story"
+  },
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "vpc > cmp; ratio (vpc/cmp) grows monotonically with COST_INNER",
+  "expected_curve_per_fuzzer": {
+    "value_profile_cmplog": "graceful degradation, never reaches zero (CMP_MAP gradient carries through high pollute)",
+    "cmplog":               "monotone exponential decay in COST_INNER (I2S dictionary diluted to uselessness)",
+    "value_profile":        "small but persistent across the entire range (CMP_MAP gradient alone, no I2S yield)",
+    "naive":                "bimodal at COST_INNER=0 (high-variance stochastic), 0 elsewhere"
+  },
+  "acceptance": {
+    "metric": "median crash count",
+    "rule": "vpc median > 0 at COST_INNER=4096 AND cmp median = 0 at COST_INNER=4096 AND cmp's curve monotone non-increasing"
+  },
+  "design_basis": "Sequential 4-step opcode chain with N=64 noise CMP table. COST_INNER controls how many noise CMPs are invoked per execution. cmp's I2S substitution rate compounds to (K/(K+N))^K over the chain — exponential dilution. vpc adds value_profile's CMP_MAP gradient feedback on top of cmplog's I2S; the gradient is dilution-immune (pollute CMPs add static no-gradient entries) and carries vpc through where cmp dies.",
+  "deployed_targets": ["b_chain_pollute_c0", "b_chain_pollute_c1", "b_chain_pollute_c3", "b_chain_pollute_c2"],
+  "notes": [
+    "Primary comparison: vpc vs cmp. They differ by ONE component (CMP_MAP added to cmplog) — the cleanest matched-pair test of the synergy hypothesis.",
+    "COST_INNER is COMPILE-TIME parameter; one Dockerfile per scan value at /home/miao/libafl_fuzzbench/docker/targets/Dockerfile.b_chain_pollute_c{0,1,2,3}.",
+    "c0=0, c1=64, c3=512, c2=4096 — note that c2 and c3 names are swapped relative to natural ordering (c2 was the first overshoot built; c3 added later for smoother curve).",
+    "Existing fuzzbench targets directory: /home/miao/libafl_fuzzbench/targets/b_chain_pollute_c{0,1,2,3}/. The .c files in those dirs are byte-identical to this template.c."
+  ]
+}

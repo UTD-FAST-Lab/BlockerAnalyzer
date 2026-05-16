@@ -1,0 +1,30 @@
+{
+  "template_id": "i2s_runtime_bound_substitution",
+  "parameter": "K_WIDTH",
+  "scan_values": [1, 2, 4, 8],
+  "primary_pair": {"A": "value_profile_cmplog", "B": "value_profile"},
+  "fuzzers": ["value_profile_cmplog", "value_profile"],
+  "fuzzer_role": {
+    "value_profile_cmplog": "primary pair A — vpc (carries the +I2S delta over vp)",
+    "value_profile":        "primary pair B — vp baseline (CMP_MAP gradient only, no I2S)"
+  },
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "vpc > vp at every K_WIDTH; ratio (vpc/vp) grows monotonically with K_WIDTH",
+  "expected_curve_per_fuzzer": {
+    "value_profile_cmplog": "approximately flat (high) across K_WIDTH — I2S substitutes the runtime buflen literal in one step regardless of operand width",
+    "value_profile":        "monotone decreasing in K_WIDTH — Hamming-distance gradient must close O(8*K_WIDTH) bits while the comparand moves between executions; weakest at K_WIDTH=8"
+  },
+  "acceptance": {
+    "metric": "median crash count",
+    "rule": "vpc median > vp median at EVERY K_WIDTH AND vpc/vp ratio non-decreasing across K_WIDTH AND vpc median > 0 at K_WIDTH=8"
+  },
+  "design_basis": "Real-target source: libpcap/bpf_filter.c:191:8 (case BPF_LD|BPF_H|BPF_IND) — runtime CMP `sizeof(int16_t) > buflen - k` where k = X + pc->k and pc->k is read from an input-derived BPF program operand. CmpLogObserver registers __sanitizer_cov_trace_cmp{4,8} (the variable-vs-variable hooks) at this CMP and logs both operands at runtime. I2SRandReplace splices either operand back into the input at byte windows where the matching value appears. Width K_WIDTH controls how many bits of Hamming distance vp's CMP_MAP gradient must close to land the same flip. I2S substitution is width-invariant (one logged literal, one splice) so vpc remains effective at K_WIDTH=8 while vp degrades.",
+  "deployed_targets": ["i2s_runtime_bound_w1", "i2s_runtime_bound_w2", "i2s_runtime_bound_w4", "i2s_runtime_bound_w8"],
+  "notes": [
+    "Primary pair: vpc vs vp. They differ by exactly ONE component (cmplog's I2S substitution added on top of vp's CMP_MAP gradient feedback) — clean matched-pair test of the I2S-on-runtime-comparand hypothesis.",
+    "K_WIDTH is COMPILE-TIME parameter; one Dockerfile per scan value at /home/miao/libafl_fuzzbench/docker/targets/Dockerfile.i2s_runtime_bound_w{1,2,4,8}.",
+    "Distinct from i2s_magic_number_gate because the constant being substituted is RUNTIME (input length), not compile-time.",
+    "Distinct from i2s_pair_relational_lookup because there is NO static dictionary and NO two-slot relational property — just one runtime length-bound CMP."
+  ]
+}

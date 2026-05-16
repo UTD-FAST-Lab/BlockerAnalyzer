@@ -1,0 +1,38 @@
+{
+  "template_id": "i2s_structure_preservation_bias",
+  "version": 3,
+  "parameter": "SEED_FEEDBACK_RICHNESS",
+  "scan_values": [0, 4, 16, 64],
+  "primary_pair": {"A": "value_profile", "B": "value_profile_cmplog"},
+  "fuzzers": ["value_profile", "value_profile_cmplog"],
+  "primary_pair_metric": "SHRINK_TRAP crash count (input shrunk below 8 bytes with marker preserved at offset 0)",
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "vp >= vpc on SHRINK_TRAP at SEED_FEEDBACK_RICHNESS=0 (parity); vp > vpc at SEED_FEEDBACK_RICHNESS>=16 with vp/vpc ratio monotone non-decreasing in SEED_FEEDBACK_RICHNESS",
+  "expected_curve_per_fuzzer": {
+    "value_profile":        "SHRINK_TRAP relatively flat (or mildly decaying) across SEED_FEEDBACK_RICHNESS — fewer feedback channels means the long seed's queue dominance grows more slowly with K",
+    "value_profile_cmplog": "SHRINK_TRAP monotone decay in SEED_FEEDBACK_RICHNESS — long seed's K coverage edges + K CMP_MAP buckets + K I2S edges deepen its queue monoculture, starving short descendants"
+  },
+  "expected_curve_secondary": {
+    "metric": "STRUCTURE_TRAP-equivalent (none in v3 — the harness only emits one trap site)",
+    "note": "v3 deliberately drops the secondary STRUCTURE_TRAP path. v2's secondary observation (vpc dominates STRUCTURE_TRAP) is already cataloged in i2s_corpus_pollution; we don't need to re-confirm it. v3 isolates ONE trap: the SHRINK_TRAP path that v2 failed to reproduce. Fewer competing crash sites means cleaner per-trial signal."
+  },
+  "seed_corpus": {
+    "description": "REQUIRED: a single 256-byte seed shaped to satisfy all 64 FEEDBACK_LITERALS at offsets 32..287. Built by the Dockerfile (see deployed_targets). The seed's offset 0 byte is 0xA5 (MARKER_BYTE). Bytes 32..287 are the big-endian encoding of FEEDBACK_LITERALS[0..63].",
+    "rationale": "v2 used a 12-byte seed-mntr placeholder which is ALREADY in the SHRINK regime (size < SHRINK_THRESHOLD=16). Both fuzzers could reach the trap from the seed without any deletion. v3 mandates a 256-byte seed so the trap is reachable ONLY via deletion-based shrinking from the long parent (or random short inputs that happen to satisfy MARKER_BYTE == 0xA5, which is 1/256 — much rarer than direct seed access)."
+  },
+  "acceptance": {
+    "metric": "median SHRINK_TRAP crash count (primary pair only)",
+    "rule": "vp_median >= vpc_median at SEED_FEEDBACK_RICHNESS=0 (within 1.5x — parity tolerance) AND vp_median >= 1.5 * vpc_median at SEED_FEEDBACK_RICHNESS=64 AND vpc's SHRINK_TRAP curve monotone non-increasing in SEED_FEEDBACK_RICHNESS"
+  },
+  "design_basis": "Mechanism shift from v1/v2. Prior versions framed the bias as I2SRandReplace MUTATING children to preserve bytes (a mutation-side hypothesis) — empirically refuted at every scan value. v3 reframes to QUEUE SELECTION: the long seed earns more 'best representative' slots in feedback-rich fuzzers (vpc has edge + CMP_MAP + I2S edges; vp has edge + CMP_MAP), so the libafl scheduler selects the long parent disproportionately and short descendants are starved of mutation budget. The dose is the count of upstream literal CMPs (each = 1 coverage edge + 1 CMP_MAP bucket + 1 I2S entry-bearing edge) the seed traverses successfully. The trap is gated to require both shortness AND content-preservation at offset 0, so random short inputs cannot bypass the deletion-mutation requirement.",
+  "deployed_targets": ["b_i2s_strpres_v3_s0", "b_i2s_strpres_v3_s4", "b_i2s_strpres_v3_s16", "b_i2s_strpres_v3_s64"],
+  "notes": [
+    "v3 supersedes v1/v2 harnesses (template.c remains for archival reproducibility of the refuted result). v3 harness lives at template_v3.c; per-scan Dockerfiles needed at /home/miao/libafl_fuzzbench/docker/targets/Dockerfile.b_i2s_strpres_v3_s{0,4,16,64}.",
+    "Each Dockerfile MUST install the long seed: bytes [0]=0xA5, [1..31]=zero padding, [32..287]=big-endian encoding of FEEDBACK_LITERALS[0..63]. Do NOT include any short seed (no seed-tiny, no seed-mntr).",
+    "SEED_FEEDBACK_RICHNESS is COMPILE-TIME; pass via -DSEED_FEEDBACK_RICHNESS=<N>.",
+    "v3 isolates ONE trap (SHRINK_TRAP). v2's secondary STRUCTURE_TRAP is dropped; the I2S-helps-on-structure direction is already verified in i2s_corpus_pollution.",
+    "Strictly two fuzzers per template — only the primary pair (A=value_profile, B=value_profile_cmplog) is verified here. Other fuzzers' behavior at this harness is incidental data, not part of this template's claim.",
+    "Falsifier: if vpc still dominates SHRINK_TRAP at every scan value (or if vp ~ vpc with no dose-response trend at any K), the queue-monoculture mechanism is also wrong. In that case, the lcms cmsio0.c:776 finding is best explained as a havoc-distribution divergence specific to the cmsICCHeader / 564-byte ICC-seed shape that does not generalize to a synthetic, and the refutation of i2s_structure_preservation_bias stands as a final verdict."
+  ]
+}
