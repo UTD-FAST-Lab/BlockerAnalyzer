@@ -4,7 +4,8 @@ build_candidates.py — per-branch candidate aggregation.
 
 For each (target, branch_id), collapses the up-to-4 canonical pair-edges
 into ONE row containing every pair that satisfies the >=7/>=7 rule, plus
-the full 4-fuzzer trial profile from `trial_coverage`.
+the per-fuzzer trial profile assembled by cross-subject join on
+`subject_branches`.
 
 Decisive-pair rule (per pair):
     winner_resolved >= --winner-threshold (default 7) AND
@@ -26,12 +27,15 @@ Output columns
                         This is the set the synthetic experiment will run.
     <fuzzer>_resolved/_blocked/_unreached for each canonical fuzzer
         (naive, cmplog, value_profile, value_profile_cmplog).
-        Sourced directly from trial_coverage so all 4 are populated when
-        any trial of that fuzzer reached the branch's target.
+        Sourced via cross-subject join on subject_branches: a fuzzer's
+        counts at this branch come from any canonical subject involving
+        that fuzzer that ADMITTED the branch. Reference fuzzers (no
+        admitting subject involving them) are blank — represented as '-'
+        in the decisive shape.
     max_prob_div, max_dur_div, max_hit_div  -- magnitudes across decisive
                                                 pairs (abs).
 
-Default output: out/blocker_candidates.csv.
+Default output: csvs/blocker_candidates[_<targets>].csv.
 """
 
 import argparse
@@ -44,9 +48,18 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB = REPO_ROOT / "db" / "blockers.sqlite"
-DEFAULT_OUTPUT = REPO_ROOT / "out" / "blocker_candidates.csv"
+DEFAULT_CSV_DIR = REPO_ROOT / "csvs"
 
 CANONICAL_FUZZERS = ["naive", "cmplog", "value_profile", "value_profile_cmplog"]
+
+
+def _default_output(targets):
+    """csvs/blocker_candidates[_<targets>].csv."""
+    if targets:
+        suffix = "_" + "-".join(targets)
+    else:
+        suffix = ""
+    return DEFAULT_CSV_DIR / f"blocker_candidates{suffix}.csv"
 
 
 def _build_headers():
@@ -65,9 +78,17 @@ def _build_headers():
 HEADERS = _build_headers()
 
 
-def fetch_decisive_pairs(conn, loser_thr, winner_thr, admissible_only):
+def fetch_decisive_pairs(conn, loser_thr, winner_thr, admissible_only, targets=None):
     """One row per (target, branch_id, decisive canonical pair)."""
-    where_extra = " AND s.admissible = 1" if admissible_only else ""
+    clauses = []
+    params = [winner_thr, loser_thr] * 4
+    if admissible_only:
+        clauses.append("s.admissible = 1")
+    if targets:
+        placeholders = ",".join("?" * len(targets))
+        clauses.append(f"s.target IN ({placeholders})")
+        params.extend(targets)
+    extra = (" AND " + " AND ".join(clauses)) if clauses else ""
     sql = f"""
         SELECT s.target, sb.branch_id,
                s.A, s.B, s.delta_technique AS delta,
@@ -82,25 +103,46 @@ def fetch_decisive_pairs(conn, loser_thr, winner_thr, admissible_only):
         JOIN study_subjects s USING (subject_id)
         WHERE ((sb.n_A_resolved >= ? AND sb.n_B_blocked >= ?)
             OR (sb.n_B_resolved >= ? AND sb.n_A_blocked >= ?))
-              {where_extra}
+              {extra}
     """
-    params = [winner_thr, loser_thr] * 4
     return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
-def fetch_fuzzer_counts(conn):
-    """(target, branch_id, fuzzer) -> {n_resolved, n_blocked, n_unreached}."""
-    sql = """
-        SELECT b.target, tc.branch_id, tc.fuzzer,
-               SUM(CASE WHEN tc.hit_status =  1 THEN 1 ELSE 0 END) AS n_resolved,
-               SUM(CASE WHEN tc.hit_status =  0 THEN 1 ELSE 0 END) AS n_blocked,
-               SUM(CASE WHEN tc.hit_status = -1 THEN 1 ELSE 0 END) AS n_unreached
-        FROM trial_coverage tc
-        JOIN branches b ON b.branch_id = tc.branch_id
-        GROUP BY tc.branch_id, tc.fuzzer
+def fetch_fuzzer_counts(conn, targets=None):
+    """(target, branch_id, fuzzer) -> {n_resolved, n_blocked, n_unreached}.
+
+    Assembled by cross-subject join on subject_branches. Each canonical
+    fuzzer appears in 2 of the 4 canonical subjects; whichever ones admitted
+    the branch contribute counts. Counts for a (branch, fuzzer) tuple are
+    deterministic (same fuzzer at same branch has the same trial outcomes
+    regardless of which pair admitted) — UNION DISTINCT collapses duplicates.
+    Reference fuzzers (no admitting subject involving them) are absent.
+    """
+    target_filter = ""
+    params = []
+    if targets:
+        placeholders = ",".join("?" * len(targets))
+        target_filter = f" WHERE b.target IN ({placeholders})"
+        params = list(targets) + list(targets)  # used in both UNION halves
+    sql = f"""
+        SELECT b.target, sb.branch_id, s.A AS fuzzer,
+               sb.n_A_resolved AS n_resolved,
+               sb.n_A_blocked  AS n_blocked,
+               sb.n_A_unreached AS n_unreached
+          FROM subject_branches sb
+          JOIN study_subjects s USING (subject_id)
+          JOIN branches b ON b.branch_id = sb.branch_id
+        {target_filter}
+        UNION
+        SELECT b.target, sb.branch_id, s.B AS fuzzer,
+               sb.n_B_resolved, sb.n_B_blocked, sb.n_B_unreached
+          FROM subject_branches sb
+          JOIN study_subjects s USING (subject_id)
+          JOIN branches b ON b.branch_id = sb.branch_id
+        {target_filter}
     """
     out = {}
-    for r in conn.execute(sql).fetchall():
+    for r in conn.execute(sql, params).fetchall():
         out[(r["target"], r["branch_id"], r["fuzzer"])] = {
             "n_resolved": r["n_resolved"],
             "n_blocked":  r["n_blocked"],
@@ -109,13 +151,19 @@ def fetch_fuzzer_counts(conn):
     return out
 
 
-def fetch_branch_meta(conn):
-    sql = """
+def fetch_branch_meta(conn, targets=None):
+    where = ""
+    params = []
+    if targets:
+        placeholders = ",".join("?" * len(targets))
+        where = f" WHERE target IN ({placeholders})"
+        params = list(targets)
+    sql = f"""
         SELECT branch_id, target, file, function, line, col,
                blocked_side AS side, source_line
-        FROM branches
+        FROM branches{where}
     """
-    return {r["branch_id"]: dict(r) for r in conn.execute(sql).fetchall()}
+    return {r["branch_id"]: dict(r) for r in conn.execute(sql, params).fetchall()}
 
 
 def _abs_or_zero(x):
@@ -181,8 +229,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", default=str(DEFAULT_DB),
                     help=f"SQLite path (default {DEFAULT_DB})")
-    ap.add_argument("--output", default=str(DEFAULT_OUTPUT),
-                    help=f"output CSV (default {DEFAULT_OUTPUT}); '-' for stdout")
+    ap.add_argument("--targets", nargs="+",
+                    help="restrict to these targets (default: all in DB)")
+    ap.add_argument("--output", default=None,
+                    help="output CSV path or - for stdout "
+                         "(default: csvs/blocker_candidates[_<targets>].csv)")
     ap.add_argument("--admissible-only", action="store_true", default=True,
                     help="restrict to admissible subjects (default ON)")
     ap.add_argument("--no-admissible-only", action="store_false",
@@ -199,18 +250,20 @@ def main():
 
     decisive = fetch_decisive_pairs(conn, args.loser_threshold,
                                     args.winner_threshold,
-                                    args.admissible_only)
-    counts   = fetch_fuzzer_counts(conn)
-    meta     = fetch_branch_meta(conn)
+                                    args.admissible_only,
+                                    args.targets)
+    counts   = fetch_fuzzer_counts(conn, args.targets)
+    meta     = fetch_branch_meta(conn, args.targets)
     conn.close()
 
     rows = aggregate(decisive, counts, meta)
 
-    if args.output == "-":
+    output = args.output if args.output is not None else str(_default_output(args.targets))
+    if output == "-":
         w = csv.DictWriter(sys.stdout, fieldnames=HEADERS)
         w.writeheader(); w.writerows(rows)
     else:
-        out = Path(args.output)
+        out = Path(output)
         out.parent.mkdir(parents=True, exist_ok=True)
         with out.open("w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=HEADERS)
