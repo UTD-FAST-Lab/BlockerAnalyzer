@@ -164,15 +164,53 @@ def insert_seeds_and_lineage(branch_id, fuzzer, trial, queue_dir, seed_names,
 # Orchestration
 # ---------------------------------------------------------------------------
 
+def _trial_sets_for_branch(conn, branch_id):
+    """Return {fuzzer: {'resolved': [trial,...], 'blocked': [trial,...]}}.
+
+    Assembled by cross-subject join on subject_branches. Each canonical
+    fuzzer appears in 2 of 4 canonical subjects; whichever ones admit the
+    branch contribute its trial sets. UNION DISTINCT collapses duplicates
+    since per-fuzzer trial outcomes are deterministic across subjects.
+    """
+    rows = conn.execute("""
+        SELECT s.A AS fuzzer, sb.A_resolved_trials AS res, sb.A_blocked_trials AS blk
+          FROM subject_branches sb JOIN study_subjects s USING (subject_id)
+         WHERE sb.branch_id = ?
+        UNION
+        SELECT s.B AS fuzzer, sb.B_resolved_trials AS res, sb.B_blocked_trials AS blk
+          FROM subject_branches sb JOIN study_subjects s USING (subject_id)
+         WHERE sb.branch_id = ?
+    """, (branch_id, branch_id)).fetchall()
+    out = {}
+    for r in rows:
+        out[r['fuzzer']] = {
+            'resolved': json.loads(r['res'] or '[]'),
+            'blocked':  json.loads(r['blk'] or '[]'),
+        }
+    return out
+
+
+def _pick_lex_min(trial_sets, kind):
+    """Lex-min (fuzzer, trial) where trial ∈ trial_sets[fuzzer][kind].
+    Returns None if no fuzzer has any trial of that kind."""
+    candidates = [(fz, t) for fz, sets in trial_sets.items() for t in sets[kind]]
+    return min(candidates) if candidates else None
+
+
 def get_branches_to_process(target, branch_id=None, db_path=None,
                             branch_ids=None):
-    """Pull branch metadata + resolving/blocking trials from DB.
+    """Pull branch metadata + one (fuzzer, trial) per direction from DB.
 
     Args:
-        target: target name (e.g. "lcms").
+        target: target name (e.g. "curl").
         branch_id: single branch id, or None.
         branch_ids: iterable of branch ids to scope work, or None for ALL
                     branches in the target. Mutually exclusive with branch_id.
+
+    Each branch yields exactly ONE resolving (fuzzer, trial) and ONE
+    blocking (fuzzer, trial) (lex-min). One queue per direction is
+    sufficient evidence for the bisection; scanning every (fuzzer, trial)
+    wastes time on huge queues.
     """
     conn = get_db(db_path)
     conn.executescript(SCHEMA_SQL)
@@ -200,33 +238,16 @@ def get_branches_to_process(target, branch_id=None, db_path=None,
 
     result = []
     for b in branches:
-        # Pick exactly ONE (fuzzer, trial) per direction. The bisection
-        # only needs one queue's worth of evidence per side; scanning
-        # every (fuzzer, trial) that resolved/blocked the branch wastes
-        # bisection time on huge queues (sqlite3/bloaty have millions
-        # of seeds). Lexicographic min keeps the choice deterministic
-        # and tends to cluster jobs on shared queues across branches.
-        resolving = conn.execute("""
-            SELECT fuzzer, trial FROM trial_coverage
-            WHERE branch_id = ? AND hit_status = 1
-            ORDER BY fuzzer, trial
-            LIMIT 1
-        """, (b['branch_id'],)).fetchall()
-
-        blocking = conn.execute("""
-            SELECT fuzzer, trial FROM trial_coverage
-            WHERE branch_id = ? AND hit_status = 0
-            ORDER BY fuzzer, trial
-            LIMIT 1
-        """, (b['branch_id'],)).fetchall()
-
+        trial_sets = _trial_sets_for_branch(conn, b['branch_id'])
+        resolving = _pick_lex_min(trial_sets, 'resolved')
+        blocking  = _pick_lex_min(trial_sets, 'blocked')
         if resolving:
             result.append({
                 'branch_id': b['branch_id'],
                 'file': b['file'], 'line': b['line'], 'col': b['col'],
                 'blocked_side': b['blocked_side'],
-                'resolving_trials': [(t['fuzzer'], t['trial']) for t in resolving],
-                'blocking_trials': [(t['fuzzer'], t['trial']) for t in blocking],
+                'resolving_trials': [resolving],
+                'blocking_trials':  [blocking] if blocking else [],
             })
 
     conn.close()

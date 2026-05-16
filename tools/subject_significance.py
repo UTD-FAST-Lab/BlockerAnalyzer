@@ -52,6 +52,18 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TS_BASE = REPO_ROOT / "out" / "coverage_ts"
+DEFAULT_CSV_DIR = REPO_ROOT / "csvs"
+
+
+def _default_output(stem: str, targets) -> Path:
+    """Build csvs/<stem>[_<target-suffix>].csv. Suffix is the targets list joined
+    by '-' when --targets is explicit; bare stem when --targets is omitted
+    (i.e. the default canonical-target run)."""
+    if targets:
+        suffix = "_" + "-".join(targets)
+    else:
+        suffix = ""
+    return DEFAULT_CSV_DIR / f"{stem}{suffix}.csv"
 
 CANONICAL_TARGETS = ["bloaty", "lcms", "mbedtls", "sqlite3"]
 CANONICAL_FUZZERS = ["naive", "cmplog", "value_profile", "value_profile_cmplog"]
@@ -152,7 +164,13 @@ def cmd_per_trial(args):
         "branch_total",
         "auc_branch_seconds", "auc_normalized", "final_branches",
     ]
-    out_stream = sys.stdout if args.output == "-" else open(args.output, "w", newline="")
+    output = args.output if args.output is not None else str(_default_output("subject_per_trial", args.targets))
+    if output == "-":
+        out_stream = sys.stdout
+    else:
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_stream = open(out_path, "w", newline="")
     try:
         writer = csv.DictWriter(out_stream, fieldnames=fieldnames)
         writer.writeheader()
@@ -160,8 +178,8 @@ def cmd_per_trial(args):
     finally:
         if out_stream is not sys.stdout:
             out_stream.close()
-    if args.output != "-":
-        print(f"wrote {len(rows)} rows to {args.output}", file=sys.stderr)
+    if output != "-":
+        print(f"wrote {len(rows)} rows to {output}", file=sys.stderr)
 
 
 def _direction(delta: float) -> str:
@@ -261,7 +279,13 @@ def cmd_pair(args):
         "mean_final_A", "mean_final_B", "delta_final", "p_final", "final_dir",
         "admissible",
     ]
-    out_stream = sys.stdout if args.output == "-" else open(args.output, "w", newline="")
+    output = args.output if args.output is not None else str(_default_output("subject_pair_significance", args.targets))
+    if output == "-":
+        out_stream = sys.stdout
+    else:
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_stream = open(out_path, "w", newline="")
     try:
         writer = csv.DictWriter(out_stream, fieldnames=fieldnames)
         writer.writeheader()
@@ -269,8 +293,8 @@ def cmd_pair(args):
     finally:
         if out_stream is not sys.stdout:
             out_stream.close()
-    if args.output != "-":
-        print(f"wrote {len(rows)} rows to {args.output}", file=sys.stderr)
+    if output != "-":
+        print(f"wrote {len(rows)} rows to {output}", file=sys.stderr)
 
 
 def main():
@@ -281,7 +305,8 @@ def main():
     pt.add_argument("--targets", nargs="+", help=f"default: {CANONICAL_TARGETS}")
     pt.add_argument("--fuzzers", nargs="+", help=f"default: {CANONICAL_FUZZERS}")
     pt.add_argument("--ts-base", default=str(DEFAULT_TS_BASE), help="root of coverage_ts/")
-    pt.add_argument("--output", default="-", help="CSV output path or - for stdout (default)")
+    pt.add_argument("--output", default=None,
+                    help="CSV output path or - for stdout (default: csvs/subject_per_trial[_<targets>].csv)")
     pt.set_defaults(func=cmd_per_trial)
 
     pr = sub.add_parser("pair", help="per-(A,B,T) MW U-test over per-trial AUC and final coverage")
@@ -289,7 +314,8 @@ def main():
     pr.add_argument("--ts-base", default=str(DEFAULT_TS_BASE), help="root of coverage_ts/")
     pr.add_argument("--alpha", type=float, default=0.05,
                     help="significance threshold for the advisory admissible column (default 0.05)")
-    pr.add_argument("--output", default="-", help="CSV output path or - for stdout (default)")
+    pr.add_argument("--output", default=None,
+                    help="CSV output path or - for stdout (default: csvs/subject_pair_significance[_<targets>].csv)")
     pr.set_defaults(func=cmd_pair)
 
     args = p.parse_args()

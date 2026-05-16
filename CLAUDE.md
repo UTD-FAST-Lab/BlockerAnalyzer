@@ -12,11 +12,8 @@ BlockerAnalyzer/
 │   │   ├── reports/<time_s>/branch_coverage_show.txt
 │   │   └── profraw_ts/running.profdata
 │   ├── <target>/<fuzzer>/trial<N>/queue/  # raw LibAFL corpus
-│   ├── subject_per_trial.csv              # subject_significance.py output
-│   └── subject_pair_significance.csv      # subject_significance.py output
-├── blockers/           # Output from fuzzing-branch-analyzer (<target>_blockers.md)
-├── clusters/           # Legacy 3-dim clustering output (no longer headline)
-├── reports/            # Per-L3 RCA findings (legacy track)
+│   └── coverage_curves.png                # plot_coverage_curves.py output
+├── csvs/               # Analysis CSV outputs (significance, candidates, reps)
 ├── templates/          # Feature catalog — current synthetic-verification pipeline
 │   ├── feature_spec.template.json    # JSON schema
 │   ├── PRESENTATION.md               # Methodology summary
@@ -24,27 +21,19 @@ BlockerAnalyzer/
 │   ├── i2s_corpus_pollution/         # Verified: vpc>cmp under pollute, COST_INNER knob
 │   └── legacy/                       # Refuted/inconclusive entries (lanes_concentration,
 │                                     # quality_chain_concentration, workload_variance_concentration)
-├── data/functions/     # Per-target function sidecars (legacy clustering)
-├── db/                 # SQLite: blockers.sqlite (all tables)
-├── tables/             # Exported CSV tables from the database
+├── data/functions/     # Per-target function sidecars (file+line → function map)
+├── db/                 # SQLite: blockers.sqlite (branches + study_subjects + subject_branches + seeds)
 ├── tools/              # Reusable analysis scripts
-│   ├── extract_blockers_ts.py    # Time-series blocker extraction → branches/trial_coverage/derived_metrics
-│   ├── blocker_db.py             # CLI for managing the SQLite database
-│   ├── subject_significance.py   # Per-(target,A,B) AUC + final-coverage MW U-test (METAPHORICAL TESTING)
-│   ├── study_units.py            # Per-subject DB tables + evidence/evidence-per-branch prompt assembly
-│   ├── build_candidates.py       # Per-branch ≥7/≥7 aggregation → blocker_candidates.csv (275)
-│   ├── select_representatives.py # Shape × region dedup → blocker_representatives.csv (158) + dedup_map
+│   ├── blocker_db.py             # Schema management for the SQLite database (init only)
+│   ├── subject_significance.py   # Per-(target,A,B) AUC + final-coverage MW U-test
+│   ├── study_units.py            # Per-target coverage walk + per-subject admission + evidence prompt assembly
+│   ├── build_candidates.py       # Per-branch ≥7/≥7 aggregation → blocker_candidates.csv
+│   ├── select_representatives.py # Shape × region dedup → blocker_representatives.csv + dedup_map
 │   ├── run_hypothesis_fanout.py  # Manifest builder; reads reps, calls evidence-per-branch
 │   ├── lint_template_shapes.py   # Post-agent: intra/cross-template shape consistency check
-│   ├── extract_extra_trials.sh   # Targeted re-extraction wrapper for trials 4–10
 │   ├── seed_bisect.py            # 10-bucket bisection to find seeds that hit blocking branches
-│   ├── seed_diff.py              # MI-based seed diff
 │   ├── extract_functions.py      # Runs llvm-cov export in Docker → data/functions/<target>.json
-│   ├── cluster.py                # Legacy 3-dim clustering library
-│   ├── cluster_runner.py         # Legacy 3-dim clustering CLI
-│   ├── select_rca_targets.py     # Legacy: filter L3 regions, emit RCA jobs
-│   ├── cluster_verify.py         # Docker-based branch-hypothesis verification
-│   └── (legacy) cluster_orchestrator*.py, cluster_t2.py, cluster_report*.py, select_candidates.py  # superseded by per-branch + reps reframe
+│   └── plot_coverage_curves.py   # Coverage-by-time spaghetti plot (per-target panels)
 ├── docker/             # Docker infrastructure for coverage-instrumented builds
 │   ├── Dockerfile.coverage-base  # Base image (clang-18, llvm-18, COV_FLAGS)
 │   ├── run_bisect_entrypoint.sh  # Entrypoint for seed_bisect
@@ -62,7 +51,7 @@ BlockerAnalyzer/
 **Note:** `out/` is a symlink to `/20TB/miao/fuzz-blocker`, the same physical
 directory as `/home/miao/libafl_fuzzbench/out/`. Coverage Dockerfiles for
 the new canonical targets (jsoncpp, woff2 already present in libafl_fuzzbench;
-libpng, libxml, openthread, harfbuzz, curl pending) live in
+libpng, libxml2, openthread, harfbuzz, curl pending) live in
 `libafl_fuzzbench/docker/targets/`, not here.
 
 ## Coverage Report Format
@@ -83,16 +72,16 @@ Specialized agents live in `.claude/agents/`:
 
 | Agent | Output | Purpose |
 |-------|--------|---------|
-| **feature-hypothesis-generator** (Opus) | `templates/<feature_id>/{template.c, params.json, feature_spec.json}` | **Current hypothesis-generation step** of the metaphorical-testing pipeline. Receives a **structured prompt** (push-mode) emitted by `tools/study_units.py evidence` for ONE (subject, branch). Diffs Side-A vs Side-B seed bytes, reads source CMP shape, searches `templates/` for prior art, proposes ≥3 program-feature axes, falsifies the weakest, picks survivor, writes the three template files. Modeled after the `i2s_corpus_pollution` pilot. One hypothesis per call; designed for parallel fan-out across (subject, branch) pairs. |
+| **feature-hypothesis-generator** (Opus) | `templates/<feature_id>/{template.c, params.json, feature_spec.json}` | **Current hypothesis-generation step** of the metaphorical-testing pipeline. Receives a **structured prompt** (push-mode) emitted by `tools/study_units.py evidence-per-branch` for ONE (target, branch). Diffs winner-resolving vs loser-blocking seed bytes at the highest-prob_div decisive pair, reads source CMP shape, searches `templates/` for prior art, decides whether multi-pair evidence collapses to ONE template or splits into multiple, writes the three template files per surviving hypothesis. Modeled after the `i2s_corpus_pollution` pilot. One per-branch prompt per call; designed for parallel fan-out across (target, branch_id) pairs. |
 | **fuzzing-branch-analyzer** | `blockers/<target>_blockers.md` | Parses coverage reports, identifies asymmetric branch pairs, cross-references fuzzers to confirm input-dependency |
 | **seed-generator** | `seeds/<target>_seeds.md` | Reads blocker lists, traces constraints backward, constructs concrete seed bytes that hit blocked sides |
 
 The metaphorical-testing pipeline uses **push-mode**: the orchestrator
-runs `tools/study_units.py evidence --subject-id N --branch-id M` to
-assemble the structured prompt (FUZZER PAIR / BLOCKER / SOURCE CONTEXT /
-SIDE-A SEEDS / SIDE-B SEEDS / TASK), then feeds that prompt to
-`feature-hypothesis-generator`. The agent never queries the DB itself —
-the prompt IS the auditable evidence record.
+runs `tools/study_units.py evidence-per-branch --target T --branch-id M`
+to assemble the structured prompt (BLOCKER / TRIAL VECTOR / DECISIVE
+PAIRS / SOURCE CONTEXT / PAIR-N SEEDS / MECHANISM CONTEXT / TASK), then
+feeds that prompt to `feature-hypothesis-generator`. The agent never
+queries the DB itself — the prompt IS the auditable evidence record.
 
 **Legacy agents (kept available but not part of the current pipeline):**
 - `cluster-root-cause-analyst` — per-L3 RCA for the 3-dim clustering pipeline.
@@ -102,76 +91,53 @@ the prompt IS the auditable evidence record.
 
 ## Permissions
 
-`.claude/settings.json` grants `Bash(*)` project-wide, so all agents can run shell commands (including `extract_blockers_ts.py`) without prompting. Do not remove this — the `fuzzing-branch-analyzer` agent requires Bash to invoke the extraction tool on large coverage files.
+`.claude/settings.json` grants `Bash(*)` project-wide so agents can run shell
+commands without prompting. The DB-population step (per-target coverage walk
+in `study_units.py`) needs Bash access to read large `branch_coverage_show.txt`
+files under `out/coverage_ts/`.
 
 ## Tools
 
-### `tools/extract_blockers_ts.py` (primary)
-
-Time-series blocker extraction. Walks coverage checkpoints chronologically (30-min intervals), maintaining per-(fuzzer, trial) state for every branch. At each checkpoint: parses all reports, identifies asymmetric branches, applies an input-dependence filter, and accumulates duration. Writes directly to the DB.
-
-```bash
-python3 tools/extract_blockers_ts.py \
-  --target lcms \
-  --ts-base ./out/coverage_ts \
-  [--fuzzers naive cmplog value_profile value_profile_cmplog] \
-  [--trials 10] \
-  [--step 1800]
-```
-
-**Algorithm (single forward pass):**
-1. For each checkpoint T (1800s, 3600s, ...):
-   - Parse all (fuzzer, trial) `branch_coverage_show.txt` at T
-   - For each branch side, update `hit_status`: -1 (unreached) → 0 (blocked) → 1 (resolved)
-   - Accumulate `duration_h` only while `hit_status=0` (+0.5h per step)
-2. **Input-dependence filter:** at the final checkpoint, admit a branch iff
-   ≥1 (fuzzer, trial) blocks it AND ≥1 (fuzzer, trial) resolves it. Drops
-   branches that are never reached or never resolved by any trial. Replaces
-   the legacy 3-level (L1/L2/L3) confirmation, which was redundant once
-   downstream admissibility gating took over at n=10.
-3. Write confirmed blockers to DB (`branches` + `trial_coverage`), then run `compute-derived`
-
-**Duration values:** -1.0 = N/A (never blocked — unreached or resolved from first checkpoint), ≥0 = time spent blocked.
-
-**`branches.confirmation_level`:** kept as a column for back-compat but
-always 3 under the new logic (every confirmed branch is "cross-fuzzer" by
-construction). No longer carries semantic meaning.
-
-**Data path:** `{ts-base}/{target}/{fuzzer}/trial{N}/reports/{time_s}/branch_coverage_show.txt`
-
 ### `tools/blocker_db.py`
 
-CLI for managing the blockers SQLite database at `db/blockers.sqlite`.
+Schema-management for `db/blockers.sqlite`. Owns the schema definition
+and the `init` command only. Population is handled elsewhere:
+`study_units.py add-canonical` writes `branches` + `study_subjects` +
+`subject_branches`; `seed_bisect.py` writes the 4 seed tables directly.
 
 ```bash
-python3 tools/blocker_db.py init                          # Initialize schema
-python3 tools/blocker_db.py compute-derived --target <name>  # Recompute derived metrics
-python3 tools/blocker_db.py query --target <name> [--format md|csv|json]
-python3 tools/blocker_db.py export --target <name> [--format md|csv|json]
-python3 tools/blocker_db.py import-clusters --input clusters/<target>_state.json  # JSON → DB
+python3 tools/blocker_db.py init    # Initialize schema (idempotent)
 ```
 
-**Database schema (10 tables):**
+**Database schema (subject-centric, redesigned 2026-05-16):**
 
 | Table | Purpose | Key fields |
 |-------|---------|------------|
-| `branches` | One row per confirmed blocker | `target`, `file`, `function`, `line`, `col`, `blocked_side`, `source_line`, `confirmation_level` (1/2/3) |
-| `trial_coverage` | Per-(fuzzer, trial) metrics | `hit_status` (-1=unreached/0=blocked/1=resolved), `duration_h` (-1=N/A, ≥0=time blocked), `hitcount`, `other_hitcount` |
-| `derived_metrics` | Per-branch summary | `fuzzer_block_probability` (JSON), `fuzzer_avg_hitcount` (JSON), `fuzzer_avg_duration_h` (JSON), `blocking_fuzzers`, `resolving_fuzzers`, `unreached_fuzzers`, `prob_div`, `dur_div`, `hit_div`, `selection_tags` (JSON) |
-| `study_subjects` | One row per (target, A, B) under the metaphorical-testing pipeline | `target`, `A`, `B`, `delta_technique`, n_A/n_B, mean_auc + delta_auc + p_auc + auc_dir, mean_final + delta_final + p_final + final_dir, `admissible`, `direction`, `n_branches`, `refreshed_at` |
-| `subject_branches` | One row per (subject, branch) for branches resolved by ≥1 A-or-B trial | per-fuzzer trial counts (resolved/blocked/unreached), `p_A_blocked`, `p_B_blocked`, `prob_div` (oriented), `avg_dur_A/B`, `dur_div`, `avg_hits_A/B`, `hit_div`, optional `hypothesis_label`, `template_id` |
-| `cluster_assignments` | Branch-to-cluster mapping per clustering run (legacy) | `branch_id`, `target`, `cluster_id`, `tier` (1=T1/2=T2), `controlling_bytes`, `semantic_label`, `run_date` |
-| `resolving_seeds` | Seeds hitting the **blocked** side (from resolving fuzzers) | `branch_id`, `fuzzer`, `trial`, `seed_id`, `parent_seed_id`, `mutation_op`, `discovery_time_s` |
-| `resolving_seed_lineage` | Parent chain for resolving seeds | `branch_id`, `fuzzer`, `trial`, `seed_id`, `depth`, `ancestor_id`, `mutation_op` |
-| `blocking_seeds` | Seeds hitting the **other** side (from blocking fuzzers) | Same schema as `resolving_seeds` |
-| `blocking_seed_lineage` | Parent chain for blocking seeds | Same schema as `resolving_seed_lineage` |
+| `branches` | One row per admitted blocker. Admission rule: ≥1 canonical subject admits the branch under the per-subject rule below. | `target`, `file`, `function` (= file basename, placeholder), `line`, `col`, `blocked_side`, `source_line` |
+| `study_subjects` | One row per (target, A, B) canonical pair. | `target`, `A`, `B`, `delta_technique`, `n_A`/`n_B`, `mean_auc_*`, `delta_auc`, `p_auc`, `auc_dir`, `mean_final_*`, `delta_final`, `p_final`, `final_dir`, `admissible`, `direction`, `n_branches`, `refreshed_at` |
+| `subject_branches` | Per-(subject, branch) row, one per (subject, branch) that meets the **per-subject admission rule**: across the 20 trials of (A, B), ≥1 blocked AND ≥1 resolved at final checkpoint. | `n_A_resolved/_blocked/_unreached`, `n_B_resolved/_blocked/_unreached`, `A_resolved_trials`/`A_blocked_trials`/`B_resolved_trials`/`B_blocked_trials` (JSON arrays of trial numbers), `p_A_blocked`, `p_B_blocked`, `prob_div` (oriented), `avg_dur_A/B`, `dur_div`, `avg_hits_A/B`, `hit_div`, optional `hypothesis_label`, `template_id` |
+| `resolving_seeds` | Seeds hitting the **blocked** side (from resolving fuzzers). | `branch_id`, `fuzzer`, `trial`, `seed_id`, `parent_seed_id`, `mutation_op`, `discovery_time_s` |
+| `resolving_seed_lineage` | Parent chain for resolving seeds. | `branch_id`, `fuzzer`, `trial`, `seed_id`, `depth`, `ancestor_id`, `mutation_op` |
+| `blocking_seeds` | Seeds hitting the **other** side (from blocking fuzzers). | Same schema as `resolving_seeds` |
+| `blocking_seed_lineage` | Parent chain for blocking seeds. | Same schema as `resolving_seed_lineage` |
 
-**Selection tags:** Branches are tagged for analysis based on three divergence metrics:
-- `prob_div` — max(p) - min(p) across fuzzers (excluding unreached). Tagged when = 1.0
-- `dur_div` — max(avg_dur) - min(avg_dur), null/-1 treated as 0. Tagged when > 8.0h
-- `hit_div` — max(avg_hits) - min(avg_hits) (excluding unreached). Tagged when > 100
+**Removed 2026-05-16:** `trial_coverage`, `derived_metrics`,
+`cluster_assignments` tables; `branches.confirmation_level` column;
+`add-blockers` / `compute-derived` / `query` / `export` / `enrich` /
+`import-clusters` CLI commands. Per-fuzzer counts are now derived from
+`subject_branches` via cross-subject join on `branch_id`. Per-subject
+queries go through `study_units.py`.
 
-`selection_tags` is a JSON array (e.g., `["prob_div", "dur_div"]`). Branches with any tag are candidates for clustering and root cause analysis. Branches with more tags are higher priority.
+**Trial-list JSON columns:** `A_resolved_trials` etc. store trial numbers
+(1..N) as JSON arrays — e.g., `[1, 3, 4, 5, 7, 8, 9]`. Unreached trials are
+omitted (derive as `{1..N} − resolved ∪ blocked`). `seed_bisect.py` reads
+these to pick a representative resolving/blocking `(fuzzer, trial)` without
+re-introducing a per-trial fact table.
+
+**Per-branch divergence tags:** there is no longer a `selection_tags`
+table column — tag derivation is done at candidate-build time from
+`subject_branches.{prob_div, dur_div, hit_div}` using thresholds:
+`prob_div ≥ 1.0`, `dur_div > 8.0` h, `hit_div > 100`.
 
 ### `tools/seed_bisect.py`
 
@@ -180,11 +146,11 @@ Finds which seeds in each fuzzer's queue hit each confirmed blocker. Runs **one 
 ```bash
 python3 tools/seed_bisect.py build --target <name>      # Build Docker image (one-time)
 python3 tools/seed_bisect.py scan --target <name> --queue-base ./out \
-        [--branches-from-csv out/blocker_selected.csv] \
+        [--branches-from-csv csvs/blocker_representatives.csv] \
         [--queue-sample-size 10000]                     # Docker scan only → results.json
 python3 tools/seed_bisect.py insert --target <name> --results <path> --queue-base ./out
 python3 tools/seed_bisect.py run --target <name> --queue-base ./out \
-        [--branches-from-csv out/blocker_selected.csv]  # scan + insert in one step
+        [--branches-from-csv csvs/blocker_representatives.csv]  # scan + insert in one step
 python3 tools/seed_bisect.py plan --target <name> --queue-base ./out
 ```
 
@@ -244,13 +210,18 @@ metaphorical-testing pipeline. Reads `out/coverage_ts/<target>/<fuzzer>/trial<N>
 
 ```bash
 python3 tools/subject_significance.py per-trial \
-    [--targets bloaty lcms ...] [--fuzzers naive cmplog ...] \
-    [--output out/subject_per_trial.csv]
+    [--targets curl harfbuzz ...] [--fuzzers naive cmplog ...] \
+    [--output csvs/subject_per_trial.csv]
 
 python3 tools/subject_significance.py pair \
-    [--targets bloaty lcms ...] [--alpha 0.05] \
-    [--output out/subject_pair_significance.csv]
+    [--targets curl harfbuzz ...] [--alpha 0.05] \
+    [--output csvs/subject_pair_significance.csv]
 ```
+
+Defaults write to `csvs/subject_per_trial[_<targets>].csv` and
+`csvs/subject_pair_significance[_<targets>].csv`. When `--targets` is
+explicit, the target list is appended to the filename so per-target runs
+don't overwrite each other.
 
 `per-trial` emits one row per (target, fuzzer, trial) with
 `auc_branch_seconds` (trapezoidal AUC of the coverage-over-time curve),
@@ -298,13 +269,18 @@ to ≥⌈n/2⌉ vs ≤⌊n/2⌋. `all` disables filtering and shows raw ranking.
 **Ranking** sorts by `prob_div DESC, dur_div DESC, hit_div DESC` — three
 interpretable columns instead of one opaque weighted score.
 
-**`evidence` subcommand** assembles the structured prompt for
-`feature-hypothesis-generator` (push-mode). Emits six sections (FUZZER
-PAIR / BLOCKER / SOURCE CONTEXT / SIDE-A SEEDS / SIDE-B SEEDS / TASK):
+**`evidence-per-branch` subcommand** assembles the structured prompt for
+`feature-hypothesis-generator` (push-mode). Emits sections: BLOCKER /
+TRIAL VECTOR / DECISIVE PAIRS / SOURCE CONTEXT / PAIR-N SEEDS /
+MECHANISM CONTEXT / TASK. Collapses ALL canonical pairs satisfying ≥7/≥7
+at this branch into a single prompt; verification is scoped to the
+decisive fuzzers only.
 
 ```bash
-python3 tools/study_units.py evidence \
-    --subject-id 8 --branch-id 26 \
+python3 tools/study_units.py evidence-per-branch \
+    --target curl --branch-id 26 \
+    [--winner-threshold 7] [--loser-threshold 7] \
+    [--admissible-only | --no-admissible-only] \
     [--mechanism-library notes/fuzzer_mechanism_library.md] \
     [--queue-base /20TB/miao/fuzz-blocker] \
     [--source-lines 30] [--seeds-per-side 5] [--seed-bytes 64] \
@@ -312,24 +288,20 @@ python3 tools/study_units.py evidence \
 ```
 
 Reads `study_subjects` + `branches` + `subject_branches` for trial counts
-and divergences; reads `resolving_seeds` + `blocking_seeds` for the
-Side-A/Side-B seed examples; reads source from inside the
+and decisive-pair classification; the per-fuzzer trial vector is
+assembled by cross-subject join on `subject_branches` (reference fuzzers
+with no admitting subject get blank stats and `-` shape character); reads
+`resolving_seeds` + `blocking_seeds` for per-pair winner-resolving and
+loser-blocking seed examples; reads source from inside the
 `libafl-<target>-cov` Docker image via `docker run --entrypoint sed`;
 splices the per-fuzzer mechanism paragraphs from
 `notes/fuzzer_mechanism_library.md`. The output prompt is what you feed
-to the agent (one `(subject, branch)` per agent invocation).
-
-**Side-A vs Side-B convention**: Side-A is the side the *loser* (blocking
-fuzzer) takes when it reaches the branch; Side-B is the side the *winner*
-flips to. `subject_branches.blocked_side` (= `T` or `F`) names Side-B's
-branch direction. Seed sources: Side-A from `blocking_seeds`, Side-B from
-`resolving_seeds`. If `seed_bisect.py` hasn't been run for this branch,
-both sections show `[no seeds available]`.
+to the agent (one `(target, branch_id)` per agent invocation).
 
 ### `tools/build_candidates.py` (per-branch, ≥7/≥7 rule)
 
-Reads `study_subjects` + `subject_branches` + `trial_coverage` + `branches`
-and writes `out/blocker_candidates.csv` — **one row per (target, branch_id)**
+Reads `study_subjects` + `subject_branches` + `branches` and writes
+`csvs/blocker_candidates[_<target>].csv` — **one row per (target, branch_id)**
 with all canonical pair-edges satisfying the ≥7/≥7 rule collapsed into a
 single record.
 
@@ -337,16 +309,15 @@ single record.
 python3 tools/build_candidates.py \
     [--admissible-only | --no-admissible-only] \
     [--winner-threshold 7] [--loser-threshold 7] \
-    [--output out/blocker_candidates.csv]
+    [--output csvs/blocker_candidates.csv]
 ```
 
 **Decisive-pair rule (per canonical pair at a branch):**
 - `winner_resolved >= --winner-threshold` AND `loser_blocked >= --loser-threshold`.
   Default 7/7 (70% at n=10).
-- Catches navigation-gap pathology directly: if loser is mostly *unreached*
-  (not blocked), the pair is dropped — that's a navigation gap, not a
-  divergence. The previous `n_edges ≥ 2` heuristic only caught this via
-  cross-edge replication.
+- Per-subject admission already eliminates the (all-unreached, navigation-gap)
+  pathology — branches reach `subject_branches` only if some trial blocked AND
+  some resolved within the subject. ≥7/≥7 then keeps the strong-signal subset.
 
 A branch is emitted iff it has ≥1 decisive pair (under `--admissible-only`,
 the pair's subject must also be admissible).
@@ -360,23 +331,27 @@ decisive_pairs   -- JSON array; each element:
                      winner_resolved, loser_blocked, prob_div, dur_div, hit_div}
 involved_fuzzers -- JSON array; union across decisive pairs.
                     Synthetic verification scope.
-<fuzzer>_resolved/_blocked/_unreached  -- per-fuzzer (4 fuzzers × 3 cols),
-                                          sourced from trial_coverage.
-                                          ALL 4 fuzzers populated; reference
-                                          fuzzers carry context, not verdict.
+<fuzzer>_resolved/_blocked/_unreached  -- per-fuzzer (4 cols × ≤4 fuzzers),
+                                          assembled by cross-subject join on
+                                          subject_branches. ONLY fuzzers
+                                          appearing in some subject that
+                                          admits this branch are populated.
+                                          Reference fuzzers (no admitting
+                                          subject) are absent — represented
+                                          as '-' in the decisive shape.
 max_prob_div, max_dur_div, max_hit_div  -- magnitudes across decisive pairs.
 ```
 
 ### `tools/select_representatives.py` (shape × region dedup)
 
-Reads `out/blocker_candidates.csv` and writes `out/blocker_representatives.csv`
-(one rep per group) + `out/blocker_dedup_map.csv` (full mapping).
+Reads `csvs/blocker_candidates.csv` and writes `csvs/blocker_representatives.csv`
+(one rep per group) + `csvs/blocker_dedup_map.csv` (full mapping).
 
 ```bash
 python3 tools/select_representatives.py \
-    [--input out/blocker_candidates.csv] \
-    [--reps-output out/blocker_representatives.csv] \
-    [--map-output  out/blocker_dedup_map.csv] \
+    [--input csvs/blocker_candidates.csv] \
+    [--reps-output csvs/blocker_representatives.csv] \
+    [--map-output  csvs/blocker_dedup_map.csv] \
     [--line-bucket 50]
 ```
 
@@ -413,15 +388,15 @@ count per template = agent-verified count, not group-size-weighted.
 
 ### `tools/run_hypothesis_fanout.py`
 
-Prompt-prep + manifest builder. Reads `out/blocker_representatives.csv`
-**by default** (158 reps); pass `--input out/blocker_candidates.csv` to fan
+Prompt-prep + manifest builder. Reads `csvs/blocker_representatives.csv`
+**by default** (158 reps); pass `--input csvs/blocker_candidates.csv` to fan
 out across all 275. Generates one structured prompt per row via
 `tools/study_units.py evidence-per-branch`, writes prompts under
 `out/hypothesis_fanout/<group_id>/`, and emits manifest.json.
 
 ```bash
 python3 tools/run_hypothesis_fanout.py \
-    [--input out/blocker_representatives.csv] \
+    [--input csvs/blocker_representatives.csv] \
     [--outdir out/hypothesis_fanout] \
     [--group-by target-delta | target] \
     [--skip-existing templates/branch_index.json] \
@@ -456,8 +431,8 @@ decisive-shape × region equivalence rule. Two checks:
 ```bash
 python3 tools/lint_template_shapes.py \
     [--index templates/branch_index.json] \
-    [--reps  out/blocker_representatives.csv] \
-    [--map   out/blocker_dedup_map.csv] \
+    [--reps  csvs/blocker_representatives.csv] \
+    [--map   csvs/blocker_dedup_map.csv] \
     [--include-legacy] [--show-clean] [--output -]
 ```
 
@@ -479,14 +454,14 @@ python3 tools/plot_coverage_curves.py
 
 Stable canonical paragraphs describing each canonical fuzzer's mechanism
 (naive / cmplog / value_profile / value_profile_cmplog). Used by
-`study_units.py evidence` to fill the `Mechanism — <fuzzer>:` blocks of
+`study_units.py evidence-per-branch` to fill the `Mechanism — <fuzzer>:` blocks of
 the structured prompt. Edits should be deliberate — the prompt-record
 needs to be reproducible across sessions.
 
 ### Canonical 10-target set (paper scope, locked 2026-05-02)
 
 ```
-lcms, bloaty, jsoncpp, libpng, libxml, openthread, sqlite3, woff2, harfbuzz, curl
+lcms, bloaty, jsoncpp, libpng, libxml2, openthread, sqlite3, woff2, harfbuzz, curl
 ```
 
 Targets are picked for *technique sensitivity* (rich blocker surface that can
@@ -509,7 +484,7 @@ SQL VM, color management).
   bloaty extras)
 - `Dockerfile.cov` exists but no campaign yet: `jsoncpp`, `woff2`
 - Need full plumbing (Dockerfile + Dockerfile.cov + harness wiring):
-  `libpng`, `libxml`, `openthread`, `harfbuzz`, `curl`. Oss-fuzz harnesses
+  `libpng`, `libxml2`, `openthread`, `harfbuzz`, `curl`. Oss-fuzz harnesses
   exist for all of them at `/home/miao/oss-fuzz/projects/<target>/`.
 
 **Per-target divergence assessment** lives in
@@ -597,50 +572,60 @@ Step 6: Lint template-shape consistency (post-agent quality check)
 **Step 1 — significance** (`tools/subject_significance.py`):
 
 ```bash
-python3 tools/subject_significance.py per-trial  # → out/subject_per_trial.csv
-python3 tools/subject_significance.py pair       # → out/subject_pair_significance.csv
+python3 tools/subject_significance.py per-trial  # → csvs/subject_per_trial.csv
+python3 tools/subject_significance.py pair       # → csvs/subject_pair_significance.csv
 ```
 
 Computes per-trial AUC + final-coverage scalars; pair-level Mann-Whitney
 U-test over the 4 canonical pairs. `admissible = (p_auc < α OR p_final
 < α)` — at n=10 this is meaningful (smallest 2-sided MW p ≈ 0.0079).
 
-**Step 2 — DB population** (`tools/extract_blockers_ts.py` +
-`tools/study_units.py`):
+**Step 2 — DB population** (`tools/study_units.py add-canonical`):
 
 ```bash
-for t in lcms bloaty sqlite3 mbedtls; do
-    python3 tools/extract_blockers_ts.py \
-        --target $t --ts-base ./out/coverage_ts --trials 10
-done
-python3 tools/study_units.py add-canonical
+python3 tools/study_units.py add-canonical \
+    --targets curl libxml2 libpng openthread harfbuzz
 ```
 
-`extract_blockers_ts` writes the `branches` table using the
-input-dependence rule (≥1 trial blocks AND ≥1 trial resolves at final
-checkpoint). `add-canonical` populates `study_subjects` (with
-`admissible` flag from step 1) and `subject_branches` (one row per
-(subject, branch) where ≥1 A-or-B trial resolved).
+One per-target coverage walk shared across the 4 canonical subjects
+(Option A). The walk reads every `branch_coverage_show.txt` under
+`out/coverage_ts/<target>/<fuzzer>/trial<N>/reports/<time_s>/` once and
+caches per-(branch, fuzzer, trial) state in memory: `hit_status`
+(-1/0/1), `duration_h` (-1.0 = never blocked, ≥0 = time spent blocked),
+`hitcount` (this side at final), `other_hitcount` (other side at final).
+
+Then for each of the 4 canonical subjects:
+1. Apply per-subject admission rule: across the 20 trials of (A, B),
+   ≥1 blocked AND ≥1 resolved at final checkpoint.
+2. For admitted branches: ensure `branches` row exists; insert
+   `subject_branches` row with per-arm counts (`n_*`), trial-set JSON
+   arrays (`A_resolved_trials` etc.), per-arm aggregates (avg duration,
+   avg hits, p_blocked), and direction-oriented divergences.
+
+The `branches` table is the union of per-subject admissions across the 4
+subjects. No separate "target-level extraction" step exists anymore
+(retired 2026-05-16; `extract_blockers_ts.py`, `trial_coverage`,
+`derived_metrics`, `branches.confirmation_level` all gone).
 
 **Step 3a — build candidate dictionary** (`tools/build_candidates.py`):
 
 ```bash
 python3 tools/build_candidates.py
-# → out/blocker_candidates.csv (one row per (target, branch_id))
+# → csvs/blocker_candidates.csv (one row per (target, branch_id))
 ```
 
 Per-branch aggregation. A canonical pair at a branch is **decisive** iff
 `winner_resolved >= 7 AND loser_blocked >= 7`. A branch is admitted iff
-it has ≥1 decisive pair (admissible-only by default). The ≥7 loser-blocked
-clause filters navigation-gap pathology — if loser is mostly *unreached*
-(not blocked), the pair is dropped.
+it has ≥1 decisive pair (admissible-only by default). Reads
+`subject_branches` directly — per-subject admission already filtered out
+navigation-gap pathology upstream.
 
 **Step 3b — pick representatives** (`tools/select_representatives.py`):
 
 ```bash
 python3 tools/select_representatives.py
-# → out/blocker_representatives.csv (one row per (shape × region) group)
-# → out/blocker_dedup_map.csv       (auditable 275 → 158 mapping)
+# → csvs/blocker_representatives.csv (one row per (shape × region) group)
+# → csvs/blocker_dedup_map.csv       (auditable full → reps mapping)
 ```
 
 Decisive-only shape is a 4-char string over (naive, cmp, vp, vpc) with
@@ -654,16 +639,18 @@ the dedup map records implied corroborations without inflating
 prompts):
 
 ```bash
-for t in lcms bloaty sqlite3 mbedtls; do
+for t in curl libxml2 libpng openthread harfbuzz; do
     python3 tools/seed_bisect.py run --target $t --queue-base ./out \
-        --branches-from-csv out/blocker_representatives.csv \
-        [--queue-sample-size 10000]   # for sqlite3/bloaty 100K+ queues
+        --branches-from-csv csvs/blocker_representatives.csv \
+        [--queue-sample-size 10000]   # for big targets with 100K+ seeds/queue
 done
 ```
 
 Per-target Docker container scans the queues for the selected reps only
 (one resolving + one blocking queue per branch), populates
-`resolving_seeds` + `blocking_seeds` + lineage tables. Without this,
+`resolving_seeds` + `blocking_seeds` + lineage tables. seed_bisect picks
+the representative trial from `subject_branches.{A,B}_{resolved,blocked}_trials`
+JSON arrays — lexicographic min, one per direction. Without this step,
 evidence prompts show `[no seeds available]` for the affected branches;
 agent can still propose hypotheses from source + per-trial counts.
 
@@ -678,12 +665,14 @@ python3 tools/run_hypothesis_fanout.py
 # → templates/<feature_id>/{template.c, params.json, feature_spec.json}
 ```
 
-Default input is `out/blocker_representatives.csv` (158 reps); pass
-`--input out/blocker_candidates.csv` for the full 275 candidate set.
+Default input is `csvs/blocker_representatives.csv`; pass
+`--input csvs/blocker_candidates.csv` for the full candidate set.
 Each agent call receives a per-branch prompt from
-`tools/study_units.py evidence-per-branch` containing the full 4-fuzzer
-trial vector with role tags (winner/loser/REFERENCE), every decisive
-pair's seeds, source context, and a TASK section instructing the
+`tools/study_units.py evidence-per-branch` containing the trial vector
+**only for fuzzers in decisive pairs** (winner/loser tags). Reference
+fuzzers (`-` slot in the decisive shape) carry no numeric stats —
+they're indicated only via their position. Each decisive pair's seeds
+are included, plus source context and a TASK section instructing the
 agent to scope verification to `involved_fuzzers` only.
 
 Default grouping is `(target, primary_delta)` — across groups parallel,
@@ -720,10 +709,10 @@ single decisive shape; (b) cross-template: a given shape doesn't span
 ≥2 templates. Catches over-lumping and missed merges by the agent.
 
 **Auxiliary tools:**
-- `tools/extract_extra_trials.sh <target> <lo> <hi>` — re-extract trials
-  4–10 to `coverage_ts/` after upstream campaign completes (idempotent).
-- `tools/plot_coverage_curves.py` — coverage-by-time PNG for the 4
-  ready targets, mean ± IQR band.
+- `tools/plot_coverage_curves.py` — coverage-by-time spaghetti plot.
+  Per-target panels, per-fuzzer thin lines (one per trial) + bold mean.
+  Outputs `out/coverage_curves.png`. Use to visually verify which subjects
+  show clean fuzzer separation vs. heavy overlap.
 
 **Legacy track** (available but no longer headline): 3-dim clustering
 (`cluster_runner.py`) + per-L3 RCA reports under `reports/<target>/`.

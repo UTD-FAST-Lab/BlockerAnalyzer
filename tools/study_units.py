@@ -6,27 +6,30 @@ metaphorical-testing pipeline.
 A subject is `(target, fuzzer A, fuzzer B)` where A and B differ in exactly
 one technique (the canonical comparable-pair set). For each subject we
 register significance stats (delegating to subject_significance.pair_significance)
-and materialize one row per branch that was resolved by A or B in at least
-one trial. Per-branch aggregates and direction-oriented divergences let us
-rank candidate B-unique blockers (or A-unique, when B beats A).
+and materialize one row per branch that meets the per-subject admission
+rule: across the 20 trials of (A, B), ≥1 blocked AND ≥1 resolved at final
+checkpoint. Per-branch aggregates and direction-oriented divergences let
+us rank candidate B-unique blockers (or A-unique, when B beats A).
 
 Subcommands
 -----------
-    init           create the two tables (idempotent)
-    add            register/refresh ONE subject; populate subject_branches
-    add-canonical  add all 4 canonical pairs for one or more targets
-    list           list registered subjects
-    top            print ranked candidate branches for one subject (legacy, per-subject)
-    candidates     emit the dictionary `(target, A, B, delta, direction) → branches`
-                   as a flat table — the primary data structure for hypothesis-
-                   generation prioritization.
-    rank           per-(target, delta, direction) priority queue: branches sorted by
-                   evidence count (how many edges in this delta-direction cell flag
-                   them strict).
-    evidence       emit the structured prompt for feature-hypothesis-generator
-                   for one (target, delta, direction, branch_id) cell.
+    init                  create the two tables (idempotent)
+    add                   register/refresh ONE subject; populate subject_branches
+    add-canonical         add all 4 canonical pairs for one or more targets
+                          (per-target coverage walk shared across the 4 subjects)
+    list                  list registered subjects
+    top                   print ranked candidate branches for one subject
+    evidence-per-branch   emit per-branch structured prompt for
+                          feature-hypothesis-generator — collapses ALL
+                          canonical pairs satisfying ≥7/≥7 at this branch
+                          into one prompt.
 
-Design choices (locked 2026-05-02):
+The legacy `candidates`, `candidates-csv`, `rank`, and `evidence`
+subcommands were removed 2026-05-16; per-branch candidate aggregation lives
+in tools/build_candidates.py and the agent prompt builder is
+`evidence-per-branch`.
+
+Design choices:
 - Canonical pairs only by default — non-canonical pairs require an explicit
   --delta-technique override, since one-technique-delta is the admissibility
   cornerstone of metaphorical testing.
@@ -36,13 +39,18 @@ Design choices (locked 2026-05-02):
 - Strict policy (default) for top: winner resolved every trial, loser
   resolved zero. Majority is a knob; "all" disables filtering and surfaces
   the raw ranking.
-- `branches` only contains confirmed blockers; we do not add new branches.
-  Eligibility within a subject = at least one A or B trial resolved it.
+- (2026-05-16 redesign) Admission is per-subject: a branch lands in
+  `branches` iff some canonical subject admits it (≥1 of 20 trials blocked
+  AND ≥1 resolved at final checkpoint). Per-target coverage walk happens
+  once and is shared across the 4 subjects (Option A).
 """
 
 import argparse
+import json
+import re
 import sqlite3
 import sys
+from collections import defaultdict
 from datetime import datetime, timezone
 from math import ceil, floor
 from pathlib import Path
@@ -51,7 +59,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB = REPO_ROOT / "db" / "blockers.sqlite"
 DEFAULT_TS_BASE = REPO_ROOT / "out" / "coverage_ts"
 
-CANONICAL_TARGETS = ["bloaty", "lcms", "mbedtls", "sqlite3"]
+CANONICAL_TARGETS = [
+    "curl", "harfbuzz", "jsoncpp", "libpng", "libxml2",
+    "openthread", "woff2", "lcms", "bloaty", "sqlite3",
+]
 CANONICAL_PAIRS = [
     ("cmplog",                "naive",         "I2S"),
     ("value_profile",         "naive",         "value_profile"),
@@ -84,6 +95,12 @@ CREATE TABLE IF NOT EXISTS subject_branches (
     branch_id       INTEGER NOT NULL REFERENCES branches(branch_id),
     n_A_resolved    INTEGER, n_A_blocked INTEGER, n_A_unreached INTEGER,
     n_B_resolved    INTEGER, n_B_blocked INTEGER, n_B_unreached INTEGER,
+    -- Trial-set JSON arrays (which specific trials had each outcome). Used by
+    -- seed_bisect to pick a representative resolving/blocking (fuzzer, trial)
+    -- without re-introducing a per-trial fact table. Unreached trials omitted
+    -- (derivable as {1..n} minus resolved ∪ blocked).
+    A_resolved_trials TEXT, A_blocked_trials TEXT,
+    B_resolved_trials TEXT, B_blocked_trials TEXT,
     p_A_blocked     REAL,    p_B_blocked REAL,    prob_div REAL,  -- direction-oriented
     avg_dur_A       REAL,    avg_dur_B   REAL,    dur_div  REAL,  -- direction-oriented
     avg_hits_A      REAL,    avg_hits_B  REAL,    hit_div  REAL,  -- direction-oriented
@@ -91,13 +108,170 @@ CREATE TABLE IF NOT EXISTS subject_branches (
     PRIMARY KEY (subject_id, branch_id)
 );
 CREATE INDEX IF NOT EXISTS idx_sb_subject ON subject_branches(subject_id);
+CREATE INDEX IF NOT EXISTS idx_sb_branch  ON subject_branches(branch_id);
 """
+
+
+CANONICAL_FUZZERS = ["naive", "cmplog", "value_profile", "value_profile_cmplog"]
+DEFAULT_N_TRIALS = 10
+DEFAULT_STEP_S = 1800  # 30 min checkpoint cadence
 
 
 def open_db(path):
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
+
+
+# ─── coverage parser (inlined from extract_blockers_ts.py, retired 2026-05-16) ──
+
+_BRANCH_RE = re.compile(
+    r'Branch \((\d+):(\d+)\): \[True: ([^\],]+), False: ([^\]]+)\]'
+)
+
+
+def _parse_count(s):
+    """Parse '35.7M', '2.20k', '0', '1,234', '18.4E' into int."""
+    s = s.strip().replace(',', '')
+    mult = {'k': 1_000, 'M': 1_000_000, 'G': 1_000_000_000}
+    if s and s[-1] in mult:
+        return int(float(s[:-1]) * mult[s[-1]])
+    s = s.rstrip('eE')  # llvm-cov-18 sometimes emits truncated '18.4E'
+    if not s:
+        return 0
+    return int(float(s))
+
+
+def _parse_coverage_file(path):
+    """Parse an llvm-cov show file. Returns {(file, line, col): (T_hits, F_hits)}."""
+    results = {}
+    current_file = None
+    with open(path) as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped.endswith(':') and '|' not in line and '/' in stripped:
+                current_file = stripped.rstrip(':')
+                continue
+            if current_file is None:
+                continue
+            m = _BRANCH_RE.search(line)
+            if m:
+                ln, col = int(m.group(1)), int(m.group(2))
+                try:
+                    t_hits = _parse_count(m.group(3))
+                    f_hits = _parse_count(m.group(4))
+                except (ValueError, IndexError):
+                    continue
+                results[(current_file, ln, col)] = (t_hits, f_hits)
+    return results
+
+
+def _extract_source_lines(cov_file):
+    """Extract source-line text per (file, line) from one llvm-cov show file."""
+    results = {}
+    current_file = None
+    line_re = re.compile(r'^\s*(\d+)\|[^|]*\|(.*)$')
+    with open(cov_file) as f:
+        for raw_line in f:
+            stripped = raw_line.strip()
+            if stripped.endswith(':') and '|' not in raw_line and '/' in stripped:
+                current_file = stripped.rstrip(':')
+                continue
+            if current_file is None:
+                continue
+            m = line_re.match(raw_line)
+            if m:
+                ln = int(m.group(1))
+                text = m.group(2).rstrip()
+                if text:
+                    results[(current_file, ln)] = text
+    return results
+
+
+# ─── per-target walk (Option A: parse once, share across subjects) ──────────
+
+def walk_target_state(target, ts_base, fuzzers=None, n_trials=DEFAULT_N_TRIALS,
+                      step_s=DEFAULT_STEP_S, verbose=False):
+    """Walk all checkpoints for (fuzzer, trial) under one target.
+
+    Returns:
+      branch_state: dict {(file, line, col, side): dict {(fuzzer, trial): leaf}}
+        leaf has: hit_status (-1/0/1), duration_h (-1.0 = never blocked,
+        ≥0 = time spent blocked), hitcount (this side at final),
+        other_hitcount (other side at final).
+      source_lines: dict {(file, line): str}
+    """
+    fuzzers = fuzzers or CANONICAL_FUZZERS
+    ts_base = Path(ts_base)
+    target_dir = ts_base / target
+    if not target_dir.is_dir():
+        raise FileNotFoundError(f"target dir not found: {target_dir}")
+
+    # Discover checkpoints across the whole target
+    checkpoints = set()
+    for fz in fuzzers:
+        for trial in range(1, n_trials + 1):
+            reports = target_dir / fz / f"trial{trial}" / "reports"
+            if reports.is_dir():
+                for d in reports.iterdir():
+                    if d.name.isdigit():
+                        checkpoints.add(int(d.name))
+    if not checkpoints:
+        return {}, {}
+    checkpoints = sorted(checkpoints)
+    step_h = step_s / 3600.0
+
+    branch_state = defaultdict(dict)
+
+    for cp in checkpoints:
+        for fz in fuzzers:
+            for trial in range(1, n_trials + 1):
+                cov = target_dir / fz / f"trial{trial}" / "reports" / str(cp) / "branch_coverage_show.txt"
+                if not cov.is_file():
+                    continue
+                bd = _parse_coverage_file(str(cov))
+                ft = (fz, trial)
+                for (file, line, col), (th, fh) in bd.items():
+                    for side in ('T', 'F'):
+                        bkey = (file, line, col, side)
+                        blocked_hits = th if side == 'T' else fh
+                        other_hits   = fh if side == 'T' else th
+                        if ft not in branch_state[bkey]:
+                            branch_state[bkey][ft] = {
+                                'hit_status': -1, 'duration_h': -1.0,
+                                'hitcount': 0, 'other_hitcount': 0,
+                            }
+                        s = branch_state[bkey][ft]
+                        s['hitcount'] = blocked_hits
+                        s['other_hitcount'] = other_hits
+                        if blocked_hits > 0:
+                            new = 1
+                        elif other_hits > 0:
+                            new = 0
+                        else:
+                            new = -1
+                        if new > s['hit_status']:
+                            s['hit_status'] = new
+                        if s['hit_status'] == 0:
+                            if s['duration_h'] < 0:
+                                s['duration_h'] = 0.0
+                            s['duration_h'] += step_h
+        if verbose:
+            n_asym = sum(1 for sts in branch_state.values()
+                         if any(s['hit_status'] == 0 for s in sts.values()))
+            print(f"  T={cp/3600:.1f}h: {len(branch_state)} sides tracked, "
+                  f"{n_asym} with ≥1 blocked trial", file=sys.stderr)
+
+    # Source lines: take from first available trial1 final-checkpoint coverage
+    final_t = checkpoints[-1]
+    source_lines = {}
+    for fz in fuzzers:
+        cov = target_dir / fz / "trial1" / "reports" / str(final_t) / "branch_coverage_show.txt"
+        if cov.is_file():
+            source_lines.update(_extract_source_lines(str(cov)))
+            break
+
+    return dict(branch_state), source_lines
 
 
 def _empty(v):
@@ -129,47 +303,6 @@ def _infer_delta_technique(a, b):
         if ca == a and cb == b:
             return dt
     return None
-
-
-# ── DB-side aggregates ──────────────────────────────────────────────────────
-
-# duration_h sentinel: -1.0 means 'never blocked' (unreached or resolved
-# from first checkpoint) per CLAUDE.md. Treat as 0 for averaging.
-
-AGG_SQL = """
-SELECT b.branch_id,
-       SUM(CASE WHEN tc.hit_status =  1 THEN 1 ELSE 0 END) AS n_resolved,
-       SUM(CASE WHEN tc.hit_status =  0 THEN 1 ELSE 0 END) AS n_blocked,
-       SUM(CASE WHEN tc.hit_status = -1 THEN 1 ELSE 0 END) AS n_unreached,
-       SUM(CASE WHEN tc.hit_status != -1 THEN 1 ELSE 0 END) AS n_reached,
-       SUM(CASE WHEN tc.hit_status != -1 AND tc.duration_h >= 0
-                THEN tc.duration_h ELSE 0 END)             AS sum_dur_h,
-       SUM(CASE WHEN tc.hit_status != -1 THEN tc.hitcount        ELSE 0 END) AS sum_hits,
-       SUM(CASE WHEN tc.hit_status != -1 THEN tc.other_hitcount  ELSE 0 END) AS sum_other_hits,
-       COUNT(tc.id) AS n_total
-FROM branches b
-LEFT JOIN trial_coverage tc
-       ON tc.branch_id = b.branch_id AND tc.fuzzer = ?
-WHERE b.target = ?
-GROUP BY b.branch_id
-"""
-
-
-def fetch_branch_aggregates(conn, target, fuzzer):
-    rows = conn.execute(AGG_SQL, (fuzzer, target)).fetchall()
-    return {
-        r[0]: {
-            "n_resolved":  r[1] or 0,
-            "n_blocked":   r[2] or 0,
-            "n_unreached": r[3] or 0,
-            "n_reached":   r[4] or 0,
-            "sum_dur_h":   r[5] or 0.0,
-            "sum_hits":    r[6] or 0,
-            "sum_other":   r[7] or 0,
-            "n_total":     r[8] or 0,
-        }
-        for r in rows
-    }
 
 
 # ── upsert subject + populate branches ─────────────────────────────────────
@@ -212,52 +345,95 @@ def upsert_subject(conn, target, a, b, stats):
     ).fetchone()[0]
 
 
-def populate_subject_branches(conn, subject_id, target, a, b, direction):
-    """Re-populate subject_branches for one subject. Returns row count."""
+def _upsert_branch(conn, target, file, line, col, side, source_line):
+    """Insert branches row (or find existing). Function column = basename(file)
+    placeholder, matching legacy convention. Returns branch_id."""
+    function = file.split('/')[-1] if '/' in file else file
+    conn.execute(
+        """INSERT INTO branches (target, file, function, line, col, blocked_side, source_line)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(target, file, function, line, col, blocked_side) DO UPDATE SET
+               source_line = COALESCE(excluded.source_line, branches.source_line)""",
+        (target, file, function, line, col, side, source_line),
+    )
+    return conn.execute(
+        """SELECT branch_id FROM branches
+           WHERE target=? AND file=? AND function=? AND line=? AND col=? AND blocked_side=?""",
+        (target, file, function, line, col, side),
+    ).fetchone()[0]
+
+
+def populate_subject_branches(conn, subject_id, target, a, b, direction,
+                              state, source_lines):
+    """Apply per-subject admission rule to the per-target state dict and
+    materialize subject_branches for (subject_id, target, A=a, B=b).
+
+    Per-subject admission: across the 20 trials of (A, B), ≥1 blocked AND
+    ≥1 resolved at final checkpoint. (Trials with unreached side are
+    neither — they don't contribute to admission.)
+
+    Side effect: ensures branches rows exist for admitted (file,line,col,side)
+    tuples (target-level admission = union of per-subject admissions).
+
+    Returns row count.
+    """
     conn.execute("DELETE FROM subject_branches WHERE subject_id = ?", (subject_id,))
-    aggs_a = fetch_branch_aggregates(conn, target, a)
-    aggs_b = fetch_branch_aggregates(conn, target, b)
-
-    # Direction sign for div orientation. A>B → loser=B, so prob_div = p_B - p_A
-    # is positive when B blocks more (= the loser is worse). B>A → flip sign.
     sign = {"A>B": +1, "B>A": -1}.get(direction, 0)
-
     rows = []
-    for branch_id in set(aggs_a) | set(aggs_b):
-        ra = aggs_a.get(branch_id, {})
-        rb = aggs_b.get(branch_id, {})
-        n_A_res = ra.get("n_resolved", 0); n_A_blk = ra.get("n_blocked", 0); n_A_unr = ra.get("n_unreached", 0)
-        n_B_res = rb.get("n_resolved", 0); n_B_blk = rb.get("n_blocked", 0); n_B_unr = rb.get("n_unreached", 0)
-        n_A_reached = ra.get("n_reached", 0); n_B_reached = rb.get("n_reached", 0)
 
-        # Eligibility: input-dependent within (A, B) = resolved by ≥1 A-or-B trial.
-        if (n_A_res + n_B_res) == 0:
+    for bkey, ft_states in state.items():
+        file, line, col, side = bkey
+
+        # Partition trial states into A and B arms
+        a_trials = {}  # trial → leaf state
+        b_trials = {}
+        for (fz, trial), s in ft_states.items():
+            if fz == a:
+                a_trials[trial] = s
+            elif fz == b:
+                b_trials[trial] = s
+
+        a_res = sorted(t for t, s in a_trials.items() if s['hit_status'] == 1)
+        a_blk = sorted(t for t, s in a_trials.items() if s['hit_status'] == 0)
+        a_unr = sum(1 for s in a_trials.values() if s['hit_status'] == -1)
+        b_res = sorted(t for t, s in b_trials.items() if s['hit_status'] == 1)
+        b_blk = sorted(t for t, s in b_trials.items() if s['hit_status'] == 0)
+        b_unr = sum(1 for s in b_trials.values() if s['hit_status'] == -1)
+
+        # Per-subject admission rule (≥1 blocked AND ≥1 resolved across 20)
+        if (len(a_res) + len(b_res)) == 0 or (len(a_blk) + len(b_blk)) == 0:
             continue
 
-        denom_a = n_A_blk + n_A_res
-        denom_b = n_B_blk + n_B_res
-        p_A = (n_A_blk / denom_a) if denom_a > 0 else None
-        p_B = (n_B_blk / denom_b) if denom_b > 0 else None
+        branch_id = _upsert_branch(conn, target, file, line, col, side,
+                                    source_lines.get((file, line)))
 
-        avg_dur_A  = (ra["sum_dur_h"] / n_A_reached) if n_A_reached > 0 else None
-        avg_dur_B  = (rb["sum_dur_h"] / n_B_reached) if n_B_reached > 0 else None
-        avg_hits_A = (ra["sum_hits"]  / n_A_reached) if n_A_reached > 0 else None
-        avg_hits_B = (rb["sum_hits"]  / n_B_reached) if n_B_reached > 0 else None
+        n_A_res, n_A_blk = len(a_res), len(a_blk)
+        n_B_res, n_B_blk = len(b_res), len(b_blk)
+        n_A_reached = n_A_res + n_A_blk
+        n_B_reached = n_B_res + n_B_blk
 
-        # Direction-oriented divergences. Loser - winner (positive ⇒ loser worse).
-        # For tie (sign=0) store unsigned magnitudes so ranking still works.
-        def _div(loser_val, winner_val):
-            if loser_val is None and winner_val is None:
+        p_A = (n_A_blk / n_A_reached) if n_A_reached > 0 else None
+        p_B = (n_B_blk / n_B_reached) if n_B_reached > 0 else None
+
+        def _avg_dur(trial_states):
+            reached = [s for s in trial_states if s['hit_status'] != -1]
+            if not reached:
                 return None
-            l = loser_val or 0
-            w = winner_val or 0
-            return abs(l - w) if sign == 0 else (l - w) * (1 if direction == "A>B" else -1)
+            return sum(max(0.0, s['duration_h']) for s in reached) / len(reached)
 
-        # In A>B: loser=B → prob/dur use B-A; hits use A-B (winner-loser, since
-        # high hits = more frequently exercised = winner advantage on the SIDE
-        # of the branch we care about; for input-distance ranking, larger gap
-        # in hits is informative regardless of sign).
-        if sign == 1:    # A>B
+        def _avg_hits(trial_states):
+            reached = [s for s in trial_states if s['hit_status'] != -1]
+            if not reached:
+                return None
+            return sum(s['hitcount'] for s in reached) / len(reached)
+
+        avg_dur_A  = _avg_dur(a_trials.values())
+        avg_dur_B  = _avg_dur(b_trials.values())
+        avg_hits_A = _avg_hits(a_trials.values())
+        avg_hits_B = _avg_hits(b_trials.values())
+
+        # Direction-oriented divergences (positive ⇒ loser worse than winner).
+        if sign == 1:    # A>B (A winner, B loser)
             prob_div = (p_B or 0) - (p_A or 0) if (p_A is not None or p_B is not None) else None
             dur_div  = (avg_dur_B  or 0) - (avg_dur_A  or 0)
             hit_div  = (avg_hits_A or 0) - (avg_hits_B or 0)
@@ -272,8 +448,10 @@ def populate_subject_branches(conn, subject_id, target, a, b, direction):
 
         rows.append((
             subject_id, branch_id,
-            n_A_res, n_A_blk, n_A_unr,
-            n_B_res, n_B_blk, n_B_unr,
+            n_A_res, n_A_blk, a_unr,
+            n_B_res, n_B_blk, b_unr,
+            json.dumps(a_res), json.dumps(a_blk),
+            json.dumps(b_res), json.dumps(b_blk),
             p_A, p_B, prob_div,
             avg_dur_A, avg_dur_B, dur_div,
             avg_hits_A, avg_hits_B, hit_div,
@@ -284,10 +462,12 @@ def populate_subject_branches(conn, subject_id, target, a, b, direction):
                subject_id, branch_id,
                n_A_resolved, n_A_blocked, n_A_unreached,
                n_B_resolved, n_B_blocked, n_B_unreached,
+               A_resolved_trials, A_blocked_trials,
+               B_resolved_trials, B_blocked_trials,
                p_A_blocked, p_B_blocked, prob_div,
                avg_dur_A, avg_dur_B, dur_div,
                avg_hits_A, avg_hits_B, hit_div
-           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         rows,
     )
     return len(rows)
@@ -303,7 +483,14 @@ def cmd_init(args):
     print(f"initialized {args.db}", file=sys.stderr)
 
 
-def _add_one(conn, target, a, b, delta_tech, ts_base, alpha, mannwhitneyu):
+def _add_one(conn, target, a, b, delta_tech, ts_base, alpha, mannwhitneyu,
+             state=None, source_lines=None):
+    """Register/refresh one subject (target, a, b).
+
+    If `state` and `source_lines` are provided (per-target walk shared across
+    subjects), they're used directly. Otherwise we walk this target's coverage
+    on-the-fly (single-subject use case).
+    """
     sys.path.insert(0, str(REPO_ROOT / "tools"))
     from subject_significance import pair_significance
     stats = pair_significance(target, a, b, delta_tech, ts_base, mannwhitneyu, alpha)
@@ -312,7 +499,11 @@ def _add_one(conn, target, a, b, delta_tech, ts_base, alpha, mannwhitneyu):
     direction = conn.execute(
         "SELECT direction FROM study_subjects WHERE subject_id=?", (sid,)
     ).fetchone()[0]
-    n_branches = populate_subject_branches(conn, sid, target, a, b, direction)
+    if state is None or source_lines is None:
+        state, source_lines = walk_target_state(target, ts_base)
+    n_branches = populate_subject_branches(
+        conn, sid, target, a, b, direction, state, source_lines
+    )
     conn.execute(
         "UPDATE study_subjects SET n_branches=? WHERE subject_id=?",
         (n_branches, sid),
@@ -361,17 +552,33 @@ def cmd_add_canonical(args):
         sys.exit(2)
 
     targets = args.targets or CANONICAL_TARGETS
+    ts_base = Path(args.ts_base).resolve()
     conn = open_db(args.db)
     conn.executescript(SCHEMA_SQL)
     for tgt in targets:
+        # Option A: walk the target's coverage once, share state across the 4 subjects.
+        print(f"== walking {tgt} ==", file=sys.stderr)
+        try:
+            state, source_lines = walk_target_state(tgt, ts_base)
+        except FileNotFoundError as e:
+            print(f"  skip {tgt}: {e}", file=sys.stderr)
+            continue
+        n_sides = len(state)
+        n_asym = sum(
+            1 for sts in state.values()
+            if any(s['hit_status'] == 0 for s in sts.values())
+        )
+        print(f"  {n_sides} branch sides tracked, {n_asym} with ≥1 blocked trial",
+              file=sys.stderr)
+
         for a, b, dt in CANONICAL_PAIRS:
             try:
                 sid, direction, n_branches, stats = _add_one(
-                    conn, tgt, a, b, dt,
-                    Path(args.ts_base).resolve(), args.alpha, mannwhitneyu,
+                    conn, tgt, a, b, dt, ts_base, args.alpha, mannwhitneyu,
+                    state=state, source_lines=source_lines,
                 )
                 print(
-                    f"  {tgt:<8} {a:<22} vs {b:<22}  Δ={dt:<14} "
+                    f"  {tgt:<10} {a:<22} vs {b:<22}  Δ={dt:<14} "
                     f"n=({stats.get('n_A')},{stats.get('n_B')}) "
                     f"dir={direction:<3}  n_br={n_branches}",
                     file=sys.stderr,
@@ -472,251 +679,7 @@ def cmd_top(args):
         print("\t".join("" if v is None else str(v) for v in r))
 
 
-# ── candidates: dictionary `(target, A, B, delta, direction) → branches` ──
-
-def _direction_predicate(policy):
-    """SQL fragment that classifies a (subject_branches, study_subjects) row
-    into 'wins' / 'loses' / NULL based on per-branch resolution counts.
-
-    'wins'  : A is strict per-branch winner (delta-helps)
-    'loses' : A is strict per-branch loser  (delta-hurts)
-    Direction here is per-edge per-branch and is INDEPENDENT of the subject's
-    AUC-level direction.
-    """
-    if policy == "strict":
-        # New strict filter (2026-05-03): loser_blocked >= 7 AND
-        # winner_resolved >= 7 (= the build_candidates.py filter).
-        # Catches both n=1 noise and navigation-gap pathologies.
-        wins  = "(sb.n_B_blocked >= 7 AND sb.n_A_resolved >= 7)"
-        loses = "(sb.n_A_blocked >= 7 AND sb.n_B_resolved >= 7)"
-    elif policy == "majority":
-        # winner ≥ ⌈n/2⌉, loser ≤ ⌊n/2⌋
-        wins  = ("(sb.n_A_resolved >= (s.n_A + 1) / 2 "
-                 "AND sb.n_B_resolved <= s.n_B / 2)")
-        loses = ("(sb.n_A_resolved <= s.n_A / 2 "
-                 "AND sb.n_B_resolved >= (s.n_B + 1) / 2)")
-    else:  # 'all' — no filter; both wins and loses based on simple comparison
-        wins  = "(sb.n_A_resolved > sb.n_B_resolved)"
-        loses = "(sb.n_A_resolved < sb.n_B_resolved)"
-    return wins, loses
-
-
-def cmd_candidates(args):
-    """Emit the (target, A, B, delta, direction) → branches dictionary as a flat table."""
-    conn = open_db(args.db)
-    wins_pred, loses_pred = _direction_predicate(args.policy)
-
-    where = ["1=1"]
-    params = []
-    if args.targets:
-        where.append("s.target IN (" + ",".join("?" * len(args.targets)) + ")")
-        params.extend(args.targets)
-    if args.delta:
-        where.append("s.delta_technique = ?")
-        params.append(args.delta)
-    if args.direction:
-        if args.direction == "wins":
-            where.append(wins_pred)
-        elif args.direction == "loses":
-            where.append(loses_pred)
-    else:
-        where.append(f"({wins_pred} OR {loses_pred})")
-
-    sql = f"""
-        SELECT s.target, s.A, s.B, s.delta_technique AS delta,
-               CASE
-                 WHEN {wins_pred}  THEN 'wins'
-                 WHEN {loses_pred} THEN 'loses'
-               END AS direction,
-               sb.subject_id, sb.branch_id,
-               b.file, b.function, b.line, b.col, b.blocked_side,
-               sb.n_A_resolved AS A_res, s.n_A AS n_A,
-               sb.n_B_resolved AS B_res, s.n_B AS n_B,
-               ROUND(sb.prob_div, 3) AS prob_div,
-               ROUND(sb.dur_div, 2)  AS dur_div,
-               ROUND(sb.hit_div, 1)  AS hit_div,
-               b.source_line
-        FROM subject_branches sb
-        JOIN study_subjects s ON s.subject_id = sb.subject_id
-        JOIN branches b ON b.branch_id = sb.branch_id
-        WHERE {' AND '.join(where)}
-        ORDER BY s.target, s.delta_technique, direction, sb.branch_id
-    """
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
-
-    headers = [
-        "target", "A", "B", "delta", "direction",
-        "subj_id", "branch_id",
-        "file", "function", "line", "col", "side",
-        "A_res", "n_A", "B_res", "n_B",
-        "prob_div", "dur_div", "hit_div",
-        "source_line",
-    ]
-    print("# policy=" + args.policy + ", targets=" + (",".join(args.targets) if args.targets else "all")
-          + ", delta=" + (args.delta or "all") + ", direction=" + (args.direction or "all"))
-    print("\t".join(headers))
-    for r in rows:
-        print("\t".join("" if v is None else str(v) for v in r))
-
-
-# ── candidates-csv: per-edge candidate rows with cross-edge n_edges denorm ─
-
-DEFAULT_CANDIDATES_CSV = REPO_ROOT / "out" / "blocker_candidates.csv"
-
-
-def cmd_candidates_csv(args):
-    """Emit a deterministic CSV that drives hypothesis-generator orchestration.
-
-    One row per (target, A, B, delta, direction, branch_id) where the row
-    classifies into 'wins' or 'loses' (`A_resolved != B_resolved`). Each row
-    carries a denormalized `n_edges` column = how many distinct (A, B) edges
-    within the same (target, delta, direction) show this branch with
-    `|prob_div| >= --replication-threshold` (default 0.5). The threshold makes
-    `n_edges` a soft cross-edge replication signal that survives n=10 strict
-    flakiness — at n=3 it matches strict (prob_div=1.0); at n=10 it admits
-    near-strict cases (e.g. 9/10 vs 0/10 = prob_div=0.9).
-    """
-    conn = open_db(args.db)
-    wins_pred, loses_pred = _direction_predicate(args.policy)
-
-    where = ["1=1"]
-    params = []
-    if args.targets:
-        where.append("s.target IN (" + ",".join("?" * len(args.targets)) + ")")
-        params.extend(args.targets)
-    if args.delta:
-        where.append("s.delta_technique = ?")
-        params.append(args.delta)
-    if args.direction:
-        if args.direction == "wins":
-            where.append(wins_pred)
-        elif args.direction == "loses":
-            where.append(loses_pred)
-    else:
-        where.append(f"({wins_pred} OR {loses_pred})")
-
-    if args.admissible_only:
-        where.append("s.admissible = 1")
-
-    threshold = args.replication_threshold
-
-    sql = f"""
-        WITH classified AS (
-            SELECT s.target, s.A AS fuzzer_a, s.B AS fuzzer_b,
-                   s.delta_technique AS delta,
-                   CASE
-                     WHEN {wins_pred}  THEN 'wins'
-                     WHEN {loses_pred} THEN 'loses'
-                   END AS direction,
-                   sb.branch_id,
-                   sb.prob_div, sb.dur_div, sb.hit_div,
-                   b.file, b.function, b.line, b.col, b.blocked_side AS side,
-                   b.source_line
-            FROM subject_branches sb
-            JOIN study_subjects s ON s.subject_id = sb.subject_id
-            JOIN branches b ON b.branch_id = sb.branch_id
-            WHERE {' AND '.join(where)}
-        )
-        SELECT fuzzer_a, fuzzer_b, delta, direction, target, branch_id,
-               SUM(CASE WHEN ABS(prob_div) >= {threshold} THEN 1 ELSE 0 END)
-                   OVER (PARTITION BY target, delta, direction, branch_id) AS n_edges,
-               ROUND(ABS(prob_div), 3) AS blocking_prob_diff,
-               ROUND(ABS(dur_div),  2) AS duration_diff,
-               ROUND(ABS(hit_div),  1) AS hit_diff,
-               file, function, line, col, side, source_line
-        FROM classified
-        ORDER BY delta, direction, fuzzer_a, fuzzer_b,
-                 n_edges DESC, blocking_prob_diff DESC, duration_diff DESC, hit_diff DESC,
-                 target, branch_id
-    """
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
-
-    headers = [
-        "fuzzer_a", "fuzzer_b", "delta", "direction", "target", "branch_id",
-        "n_edges", "blocking_prob_diff", "duration_diff", "hit_diff",
-        "file", "function", "line", "col", "side", "source_line",
-    ]
-
-    import csv
-    output = args.output
-    if output == "-":
-        writer = csv.writer(sys.stdout)
-        writer.writerow(headers)
-        for r in rows:
-            writer.writerow(["" if v is None else v for v in r])
-    else:
-        out_path = Path(output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(headers)
-            for r in rows:
-                writer.writerow(["" if v is None else v for v in r])
-        print(f"wrote {len(rows)} rows to {out_path}", file=sys.stderr)
-
-
-# ── rank: per-(target, delta, direction) priority queue ───────────────────
-
-def cmd_rank(args):
-    """Per-branch evidence count within one (target, delta, direction) cell.
-    Branches with higher counts have stronger evidence for the technique claim."""
-    conn = open_db(args.db)
-    wins_pred, loses_pred = _direction_predicate(args.policy)
-    pred = wins_pred if args.direction == "wins" else loses_pred
-
-    sql = f"""
-        WITH strict_edges AS (
-            SELECT sb.branch_id, sb.subject_id, s.A, s.B, s.delta_technique,
-                   sb.prob_div, sb.dur_div, sb.hit_div
-            FROM subject_branches sb
-            JOIN study_subjects s ON s.subject_id = sb.subject_id
-            WHERE s.target = ? AND s.delta_technique = ? AND {pred}
-        ),
-        agg AS (
-            SELECT branch_id,
-                   COUNT(*) AS edge_count,
-                   GROUP_CONCAT(subject_id || '(' || A || '>' || B || ')', ', ') AS edges,
-                   AVG(prob_div) AS avg_prob_div,
-                   AVG(dur_div)  AS avg_dur_div,
-                   AVG(hit_div)  AS avg_hit_div
-            FROM strict_edges
-            GROUP BY branch_id
-        )
-        SELECT a.branch_id, a.edge_count,
-               (SELECT COUNT(*) FROM study_subjects
-                WHERE target=? AND delta_technique=?) AS edges_total,
-               a.edges,
-               b.file, b.function, b.line, b.col, b.blocked_side,
-               ROUND(a.avg_prob_div, 3) AS prob_div,
-               ROUND(a.avg_dur_div,  2) AS dur_div,
-               ROUND(a.avg_hit_div,  1) AS hit_div,
-               b.source_line
-        FROM agg a
-        JOIN branches b ON b.branch_id = a.branch_id
-        ORDER BY a.edge_count DESC, a.avg_prob_div DESC, a.avg_dur_div DESC, a.avg_hit_div DESC
-        LIMIT ?
-    """
-    rows = conn.execute(
-        sql,
-        (args.target, args.delta, args.target, args.delta, args.k),
-    ).fetchall()
-    conn.close()
-
-    print(f"# rank: target={args.target} delta={args.delta} direction={args.direction} "
-          f"policy={args.policy} top={args.k}")
-    headers = [
-        "branch_id", "n_edges", "n_total", "edges",
-        "file", "function", "line", "col", "side",
-        "prob_div", "dur_div", "hit_div", "source_line",
-    ]
-    print("\t".join(headers))
-    for r in rows:
-        print("\t".join("" if v is None else str(v) for v in r))
-
-
-# ── evidence: emit structured prompt for feature-hypothesis-generator ─────
+# ── evidence-per-branch: structured prompt for feature-hypothesis-generator ─
 
 import subprocess
 from pathlib import Path as _P
@@ -812,237 +775,6 @@ def _format_seed_block(label, rows, queue_base, target, max_bytes):
     return "\n".join(out) + "\n"
 
 
-def cmd_evidence(args):
-    """Emit the structured prompt for feature-hypothesis-generator,
-    keyed by (target, delta_technique, direction, branch_id).
-
-    Per-branch direction here is independent of the subject's AUC-level direction:
-      direction='wins'  : the augmented fuzzer (A) beats the baseline (B) per-branch
-                          → strict means A_resolved=n_A AND B_resolved=0
-      direction='loses' : the augmented fuzzer (A) loses to the baseline (B) per-branch
-                          → strict means A_resolved=0 AND B_resolved=n_B
-    """
-    conn = open_db(args.db)
-    wins_pred, loses_pred = _direction_predicate(args.policy)
-    pred = wins_pred if args.direction == "wins" else loses_pred
-
-    # Find subjects (edges) flagging this branch in the requested (delta, direction)
-    candidates = conn.execute(
-        f"""SELECT s.subject_id, s.A, s.B, s.n_A, s.n_B,
-                   s.delta_auc, s.p_auc, s.delta_final, s.p_final,
-                   ABS(IFNULL(s.delta_auc, 0)) AS abs_dauc
-            FROM study_subjects s
-            JOIN subject_branches sb ON sb.subject_id = s.subject_id
-            WHERE s.target = ? AND s.delta_technique = ? AND sb.branch_id = ?
-              AND {pred}
-            ORDER BY abs_dauc DESC, s.subject_id""",
-        (args.target, args.delta, args.branch_id),
-    ).fetchall()
-    if not candidates:
-        print(
-            f"no edge in target={args.target} flagging branch {args.branch_id} "
-            f"strict-{args.direction} for delta={args.delta} (policy={args.policy})",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
-    # Total edges available for this target × delta (for strength denominator)
-    total_edges_for_delta = conn.execute(
-        "SELECT COUNT(*) FROM study_subjects WHERE target = ? AND delta_technique = ?",
-        (args.target, args.delta),
-    ).fetchone()[0]
-
-    # Pick the canonical edge — strongest |ΔAUC|. The agent reasons over its evidence.
-    primary_subject_id, primary_A, primary_B, primary_n_A, primary_n_B, \
-        primary_dauc, primary_pauc, primary_dfin, primary_pfin, _ = candidates[0]
-    evidence_count = len(candidates)
-
-    # Per-branch direction: who wins per-branch for THIS edge.
-    # 'wins' direction → A is per-branch winner. 'loses' → B is per-branch winner.
-    if args.direction == "wins":
-        winner, loser = primary_A, primary_B
-    else:
-        winner, loser = primary_B, primary_A
-
-    br = conn.execute(
-        "SELECT file, function, line, col, blocked_side, source_line "
-        "FROM branches WHERE branch_id=?",
-        (args.branch_id,),
-    ).fetchone()
-    if br is None:
-        print(f"no branch with id={args.branch_id}", file=sys.stderr)
-        sys.exit(2)
-    file_path, function, line, col, blocked_side, source_line = br
-
-    sb = conn.execute(
-        """SELECT n_A_resolved, n_A_blocked, n_A_unreached,
-                  n_B_resolved, n_B_blocked, n_B_unreached,
-                  avg_dur_A, avg_dur_B, avg_hits_A, avg_hits_B
-           FROM subject_branches WHERE subject_id=? AND branch_id=?""",
-        (primary_subject_id, args.branch_id),
-    ).fetchone()
-    (n_A_res, n_A_blk, n_A_unr,
-     n_B_res, n_B_blk, n_B_unr,
-     dur_A, dur_B, hits_A, hits_B) = sb
-
-    # Per-branch winner's resolution counts
-    if args.direction == "wins":
-        win_res, win_blk, win_unr = n_A_res, n_A_blk, n_A_unr
-        los_res, los_blk, los_unr = n_B_res, n_B_blk, n_B_unr
-        win_dur, los_dur = dur_A, dur_B
-        win_hits, los_hits = hits_A, hits_B
-        n_winner, n_loser = primary_n_A, primary_n_B
-    else:
-        win_res, win_blk, win_unr = n_B_res, n_B_blk, n_B_unr
-        los_res, los_blk, los_unr = n_A_res, n_A_blk, n_A_unr
-        win_dur, los_dur = dur_B, dur_A
-        win_hits, los_hits = hits_B, hits_A
-        n_winner, n_loser = primary_n_B, primary_n_A
-
-    # Side-A = side the per-branch loser takes (other branch direction)
-    # Side-B = blocked side, the side per-branch winner flips to
-    # `branches.blocked_side` was computed across all 4 fuzzers globally — usually
-    # matches the per-branch winner's resolved-side; for direction='loses' it may
-    # not, so we flag if there's a mismatch.
-    side_b_label = blocked_side
-    side_a_label = "F" if blocked_side == "T" else "T"
-    side_a_branch = "false branch" if side_a_label == "F" else "true branch"
-    side_b_branch = "false branch" if side_b_label == "F" else "true branch"
-
-    side_b_seeds = conn.execute(
-        """SELECT fuzzer, trial, seed_id, mutation_op, discovery_time_s
-           FROM resolving_seeds
-           WHERE branch_id=? AND fuzzer=?
-           ORDER BY discovery_time_s ASC, seed_id ASC
-           LIMIT ?""",
-        (args.branch_id, winner, args.seeds_per_side),
-    ).fetchall()
-    side_a_seeds = conn.execute(
-        """SELECT fuzzer, trial, seed_id, mutation_op, discovery_time_s
-           FROM blocking_seeds
-           WHERE branch_id=? AND fuzzer=?
-           ORDER BY discovery_time_s ASC, seed_id ASC
-           LIMIT ?""",
-        (args.branch_id, loser, args.seeds_per_side),
-    ).fetchall()
-
-    conn.close()
-
-    library_path = _P(args.mechanism_library)
-    mech_winner = _mechanism_for(library_path, winner)
-    mech_loser = _mechanism_for(library_path, loser)
-
-    queue_base = _P(args.queue_base)
-    source_window = _read_source_window(args.target, file_path, line, args.source_lines)
-
-    out = []
-    out.append("==== FUZZER PAIR ====")
-    out.append(f"Fuzzer A: {primary_A}  (augmented; carries delta_{args.delta})")
-    out.append(f"Fuzzer B: {primary_B}  (baseline; without delta_{args.delta})")
-    out.append(f"Direction (per-branch): {args.direction}  (target {args.target}, "
-               f"branch {args.branch_id}, delta {args.delta})")
-    out.append(f"  → 'wins'  = augmented A beats baseline B per-branch (delta helps)")
-    out.append(f"  → 'loses' = augmented A loses to baseline B per-branch (delta hurts)")
-    out.append(f"Subject-level (this edge): ΔAUC={primary_dauc}  p_AUC={primary_pauc}  "
-               f"ΔFinal={primary_dfin}  p_final={primary_pfin}  "
-               f"n_A={primary_n_A} n_B={primary_n_B}")
-    out.append("")
-    out.append(f"Mechanism — {winner} (per-branch winner):")
-    out.append(mech_winner)
-    out.append("")
-    out.append(f"Mechanism — {loser} (per-branch loser):")
-    out.append(mech_loser)
-    out.append("")
-
-    out.append("==== EVIDENCE STRENGTH ====")
-    out.append(
-        f"This branch is strict-{args.direction} on {evidence_count} of "
-        f"{total_edges_for_delta} edges labeled '{args.delta}' for target {args.target}."
-    )
-    if evidence_count >= 2:
-        out.append(
-            f"→ The {args.delta} delta-{args.direction} claim REPLICATES across multiple edges."
-        )
-    elif total_edges_for_delta >= 2:
-        out.append(
-            f"→ The {args.delta} delta-{args.direction} claim is partial: only one of "
-            f"{total_edges_for_delta} edges flags this branch. Consider whether this is "
-            f"context-dependent (the technique helps in one fuzzer-position but not another)."
-        )
-    out.append("Edges flagging this branch:")
-    for sid, ca, cb, _, _, dauc, _, _, _, _ in candidates:
-        out.append(f"  subject {sid}: edge ({ca} vs {cb}), ΔAUC={dauc}")
-    out.append("")
-
-    out.append("==== BLOCKER ====")
-    out.append(f"Location: {file_path}:{line}:{col}")
-    out.append(f"Enclosing function: {function}")
-    out.append(f"Blocked side (globally): {blocked_side}")
-    out.append(f"Source line: {source_line}")
-    out.append("")
-    out.append(f"Trial outcomes (this edge):")
-    out.append(f"  winner ({winner}) resolved={win_res}/{n_winner}, "
-               f"blocked={win_blk}, unreached={win_unr}")
-    out.append(f"  loser  ({loser}) resolved={los_res}/{n_loser}, "
-               f"blocked={los_blk}, unreached={los_unr}")
-    if win_dur is not None and los_dur is not None:
-        out.append(f"Avg duration blocked: winner={win_dur:.2f}h  loser={los_dur:.2f}h")
-    if win_hits is not None and los_hits is not None:
-        out.append(f"Avg hitcount on branch: winner={win_hits:.0f}  loser={los_hits:.0f}")
-    out.append("")
-
-    out.append("==== SOURCE CONTEXT ====")
-    out.append(f"# {file_path} (lines {max(1, line-args.source_lines)}–{line+args.source_lines}, "
-               f"blocker at line {line})")
-    out.append(source_window)
-    out.append("")
-
-    out.append(_format_seed_block(
-        f"SIDE-A SEEDS (reach blocker, take {side_a_branch})",
-        side_a_seeds, queue_base, args.target, args.seed_bytes,
-    ))
-    out.append(_format_seed_block(
-        f"SIDE-B SEEDS (reach blocker, take {side_b_branch} — produced by {winner})",
-        side_b_seeds, queue_base, args.target, args.seed_bytes,
-    ))
-
-    out.append("==== TASK ====")
-    if args.direction == "wins":
-        task = (
-            f"Produce a single program-feature hypothesis that explains why "
-            f"{winner} resolves this branch while {loser} does not, attributable "
-            f"to the {args.delta} technique delta. Then emit the parameterized "
-            "synthetic that verifies it (templates/<feature_id>/{template.c, "
-            "params.json, feature_spec.json}). Match the pilot at "
-            "templates/i2s_corpus_pollution/. Reason over Side-A vs Side-B byte "
-            "diffs at constraining offsets to identify the program-feature knob. "
-            "Search prior templates for falsification before building. Predict "
-            "the dose-response shape per scan value."
-        )
-    else:
-        task = (
-            f"Produce a single program-feature hypothesis that explains why ADDING "
-            f"the {args.delta} technique HURTS performance at this branch — i.e., "
-            f"why {primary_A} (augmented) loses to {primary_B} (baseline) here. "
-            "Then emit the parameterized synthetic that demonstrates the limitation. "
-            "Match the pilot at templates/i2s_corpus_pollution/ in shape, but the "
-            "harness should produce a dose-response curve where the augmented fuzzer "
-            "underperforms the baseline at the chosen scan values. Reason over "
-            "Side-A vs Side-B byte diffs and the source CMP shape to identify "
-            "what about this branch makes the technique counterproductive. "
-            "Search prior templates for falsification before building."
-        )
-    out.append(task)
-
-    text = "\n".join(out)
-    if args.output == "-":
-        sys.stdout.write(text)
-    else:
-        _P(args.output).write_text(text)
-        print(f"wrote evidence prompt to {args.output} ({len(text)} chars)",
-              file=sys.stderr)
-
-
 def cmd_evidence_per_branch(args):
     """Per-branch structured prompt for feature-hypothesis-generator.
 
@@ -1132,14 +864,23 @@ def cmd_evidence_per_branch(args):
     involved_fuzzers = sorted({fz for p in pairs for fz in (p["winner"], p["loser"])})
     reference_fuzzers = [fz for fz in CANONICAL_FUZZERS_LIST if fz not in involved_fuzzers]
 
+    # Per-fuzzer counts at this branch, derived from subject_branches.
+    # Each canonical fuzzer is in 2 subjects; whichever admitted the branch
+    # has the counts. Reference fuzzers (no admitting subject) are absent.
     counts = {}
     for fz, R, B_, U in conn.execute(
-        """SELECT fuzzer,
-                  SUM(CASE WHEN hit_status= 1 THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN hit_status= 0 THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN hit_status=-1 THEN 1 ELSE 0 END)
-           FROM trial_coverage WHERE branch_id=? GROUP BY fuzzer""",
-        (args.branch_id,),
+        """
+        SELECT s.A, sb.n_A_resolved, sb.n_A_blocked, sb.n_A_unreached
+          FROM subject_branches sb
+          JOIN study_subjects s ON sb.subject_id = s.subject_id
+         WHERE sb.branch_id = ?
+        UNION
+        SELECT s.B, sb.n_B_resolved, sb.n_B_blocked, sb.n_B_unreached
+          FROM subject_branches sb
+          JOIN study_subjects s ON sb.subject_id = s.subject_id
+         WHERE sb.branch_id = ?
+        """,
+        (args.branch_id, args.branch_id),
     ).fetchall():
         counts[fz] = (R, B_, U)
 
@@ -1327,98 +1068,6 @@ def main():
     s.add_argument("--policy", choices=["strict", "majority", "all"],
                    default="strict")
     s.set_defaults(func=cmd_top)
-
-    s = sub.add_parser(
-        "candidates",
-        help="emit dictionary `(target, A, B, delta, direction) → branches` "
-             "as a flat table",
-    )
-    s.add_argument("--targets", nargs="+",
-                   help=f"default: all (canonical: {' '.join(CANONICAL_TARGETS)})")
-    s.add_argument("--delta", choices=["I2S", "value_profile"],
-                   help="filter to one technique label (default: both)")
-    s.add_argument("--direction", choices=["wins", "loses"],
-                   help="filter to one direction (default: both)")
-    s.add_argument("--policy", choices=["strict", "majority", "all"],
-                   default="strict")
-    s.set_defaults(func=cmd_candidates)
-
-    s = sub.add_parser(
-        "candidates-csv",
-        help="emit deterministic CSV `(fuzzer_a, fuzzer_b, delta, direction, "
-             "target, branch_id, n_edges, blocking_prob_diff, duration_diff, "
-             "hit_diff, ...)` to drive hypothesis-generator orchestration. "
-             "All diff columns are absolute magnitudes; the `direction` "
-             "column tells you who wins.",
-    )
-    s.add_argument("--targets", nargs="+",
-                   help=f"default: all (canonical: {' '.join(CANONICAL_TARGETS)})")
-    s.add_argument("--delta", choices=["I2S", "value_profile"],
-                   help="filter to one technique label (default: both)")
-    s.add_argument("--direction", choices=["wins", "loses"],
-                   help="filter to one direction (default: both)")
-    s.add_argument("--policy", choices=["strict", "majority", "all"],
-                   default="all",
-                   help="how to classify a row into wins/loses (default 'all': "
-                        "any A_res != B_res). Strict and majority filter rows; "
-                        "ranking by (n_edges, blocking_prob_diff) usually does "
-                        "the work without the filter.")
-    s.add_argument("--admissible-only", action="store_true", default=True,
-                   help="restrict to admissible subjects (default ON; "
-                        "use --no-admissible-only to disable)")
-    s.add_argument("--no-admissible-only", action="store_false",
-                   dest="admissible_only",
-                   help="include all subjects regardless of admissibility")
-    s.add_argument("--replication-threshold", type=float, default=0.5,
-                   help="|prob_div| >= THIS counts as 'flagged' for n_edges. "
-                        "n_edges = number of same-(delta, direction) edges that "
-                        "flag this branch. Default 0.5 — flexible to n=10 "
-                        "near-strict cases (e.g. 9/10 vs 0/10 = 0.9).")
-    s.add_argument("--output", default=str(DEFAULT_CANDIDATES_CSV),
-                   help=f"output CSV path or - for stdout "
-                        f"(default {DEFAULT_CANDIDATES_CSV})")
-    s.set_defaults(func=cmd_candidates_csv)
-
-    s = sub.add_parser(
-        "rank",
-        help="per-(target, delta, direction) priority queue: branches sorted "
-             "by evidence count (how many edges flag them strict)",
-    )
-    s.add_argument("--target", required=True)
-    s.add_argument("--delta", required=True, choices=["I2S", "value_profile"])
-    s.add_argument("--direction", required=True, choices=["wins", "loses"])
-    s.add_argument("--k", type=int, default=20)
-    s.add_argument("--policy", choices=["strict", "majority", "all"],
-                   default="strict")
-    s.set_defaults(func=cmd_rank)
-
-    s = sub.add_parser(
-        "evidence",
-        help="emit structured prompt for feature-hypothesis-generator "
-             "for ONE (target, delta, direction, branch_id) cell",
-    )
-    s.add_argument("--target", required=True)
-    s.add_argument("--delta", required=True, choices=["I2S", "value_profile"])
-    s.add_argument("--direction", required=True, choices=["wins", "loses"])
-    s.add_argument("--branch-id", required=True, type=int)
-    s.add_argument("--policy", choices=["strict", "majority", "all"],
-                   default="all",
-                   help="how strictly to interpret 'wins'/'loses' (default 'all'; "
-                        "matches candidates-csv default. Use 'strict' to require "
-                        "10/10 vs 0/10 type cleanness, dropping near-strict cases.")
-    s.add_argument("--mechanism-library", default=str(DEFAULT_MECHANISM_LIB),
-                   help=f"default {DEFAULT_MECHANISM_LIB}")
-    s.add_argument("--queue-base", default=str(DEFAULT_QUEUE_BASE),
-                   help=f"default {DEFAULT_QUEUE_BASE} (where LibAFL queue dirs live)")
-    s.add_argument("--source-lines", type=int, default=30,
-                   help="±N lines of source context (default 30)")
-    s.add_argument("--seeds-per-side", type=int, default=5,
-                   help="how many Side-A and Side-B seeds to include (default 5)")
-    s.add_argument("--seed-bytes", type=int, default=64,
-                   help="bytes per seed in the hex dump (default 64)")
-    s.add_argument("--output", default="-",
-                   help="output path or - for stdout (default)")
-    s.set_defaults(func=cmd_evidence)
 
     s = sub.add_parser(
         "evidence-per-branch",

@@ -28,27 +28,39 @@ Within each (shape, region) group, highest priority wins:
 
 Outputs
 -------
-- out/blocker_representatives.csv  — one row per rep (full candidate row +
-  shape, region_id, group_size).
-- out/blocker_dedup_map.csv        — every input branch mapped to its rep:
-  target, branch_id, rep_branch_id, shape, region_id, group_size, is_rep.
-  Non-rep branches inherit the rep's template assignment after the agent
-  fan-out completes (recovers the corroboration record at no agent cost).
+- csvs/blocker_representatives[_<targets>].csv  — one row per rep (full
+  candidate row + shape, region_id, group_size).
+- csvs/blocker_dedup_map[_<targets>].csv        — every input branch mapped
+  to its rep: target, branch_id, rep_branch_id, shape, region_id,
+  group_size, is_rep. Non-rep branches inherit the rep's template
+  assignment after the agent fan-out completes (recovers the corroboration
+  record at no agent cost).
+
+Output naming: if --reps-output / --map-output aren't given, the suffix on
+the input filename is mirrored. E.g. `blocker_candidates_curl.csv` →
+`blocker_representatives_curl.csv` + `blocker_dedup_map_curl.csv`.
 """
 
 import argparse
 import csv
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_INPUT     = REPO_ROOT / "out" / "blocker_candidates.csv"
-DEFAULT_REPS_OUT  = REPO_ROOT / "out" / "blocker_representatives.csv"
-DEFAULT_MAP_OUT   = REPO_ROOT / "out" / "blocker_dedup_map.csv"
+DEFAULT_CSV_DIR   = REPO_ROOT / "csvs"
+DEFAULT_INPUT     = DEFAULT_CSV_DIR / "blocker_candidates.csv"
 
 CANONICAL_FUZZERS = ["naive", "cmplog", "value_profile", "value_profile_cmplog"]
+
+
+def _suffix_from(input_path: Path) -> str:
+    """Extract the '_<targets>' suffix from a blocker_candidates filename.
+    blocker_candidates_curl.csv → '_curl'; blocker_candidates.csv → ''."""
+    m = re.match(r"blocker_candidates(_.+)?\.csv$", input_path.name)
+    return (m.group(1) or "") if m else ""
 
 
 def decisive_shape(row, winner_thr=7, loser_thr=7):
@@ -92,10 +104,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--input", default=str(DEFAULT_INPUT),
                     help=f"per-branch candidate CSV (default {DEFAULT_INPUT})")
-    ap.add_argument("--reps-output", default=str(DEFAULT_REPS_OUT),
-                    help=f"representatives CSV (default {DEFAULT_REPS_OUT})")
-    ap.add_argument("--map-output", default=str(DEFAULT_MAP_OUT),
-                    help=f"dedup map CSV (default {DEFAULT_MAP_OUT})")
+    ap.add_argument("--reps-output", default=None,
+                    help="representatives CSV (default: csvs/blocker_representatives"
+                         "<_targets>.csv, suffix mirrors --input)")
+    ap.add_argument("--map-output", default=None,
+                    help="dedup map CSV (default: csvs/blocker_dedup_map"
+                         "<_targets>.csv, suffix mirrors --input)")
     ap.add_argument("--line-bucket", type=int, default=50,
                     help="lines per region bucket (default 50)")
     ap.add_argument("--winner-threshold", type=int, default=7)
@@ -106,6 +120,13 @@ def main():
     if not in_path.is_file():
         print(f"ERROR: input CSV not found: {in_path}", file=sys.stderr)
         sys.exit(1)
+    suffix = _suffix_from(in_path)
+    reps_out = Path(args.reps_output) if args.reps_output else (
+        DEFAULT_CSV_DIR / f"blocker_representatives{suffix}.csv"
+    )
+    map_out = Path(args.map_output) if args.map_output else (
+        DEFAULT_CSV_DIR / f"blocker_dedup_map{suffix}.csv"
+    )
 
     with open(in_path) as f:
         rows = list(csv.DictReader(f))
@@ -129,8 +150,8 @@ def main():
               file=sys.stderr)
 
     rep_headers = list(rows[0].keys()) + ["shape", "region_id", "group_size"]
-    Path(args.reps_output).parent.mkdir(parents=True, exist_ok=True)
-    with open(args.reps_output, "w", newline="") as f:
+    reps_out.parent.mkdir(parents=True, exist_ok=True)
+    with reps_out.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=rep_headers)
         w.writeheader()
         for key, rep in reps.items():
@@ -142,7 +163,8 @@ def main():
 
     map_headers = ["target", "branch_id", "rep_branch_id", "shape",
                    "region_id", "group_size", "is_rep"]
-    with open(args.map_output, "w", newline="") as f:
+    map_out.parent.mkdir(parents=True, exist_ok=True)
+    with map_out.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=map_headers)
         w.writeheader()
         for key, grp in groups.items():
@@ -189,8 +211,8 @@ def main():
     for sz in sorted(sizes):
         print(f"  size {sz:>2}: {sizes[sz]} groups", file=sys.stderr)
 
-    print(f"\nwrote reps to {args.reps_output}", file=sys.stderr)
-    print(f"wrote dedup map to {args.map_output}", file=sys.stderr)
+    print(f"\nwrote reps to {reps_out}", file=sys.stderr)
+    print(f"wrote dedup map to {map_out}", file=sys.stderr)
 
 
 if __name__ == "__main__":
