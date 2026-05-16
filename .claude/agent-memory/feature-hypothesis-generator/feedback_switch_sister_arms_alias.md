@@ -1,0 +1,11 @@
+---
+name: switch sister-arm aliases collapse to one template
+description: case-arms of the same switch dispatcher are dose-point aliases of the same CHAIN_DEPTH=K vp_gradient_derived_operand mechanism, not separate templates
+type: feedback
+---
+
+When two branches are different `case X:` arms of the SAME switch dispatcher (same switched expression, same source function), they are **aliases of the same dose point** in `vp_gradient_derived_operand` (CHAIN_DEPTH=K with K = number of arms). Do NOT emit separate templates — extend with a corroboration entry.
+
+**Why:** A switch on a 4-byte signature lowers to K parallel `trace_const_cmp4` calls. VP retains an independent CMP_MAP Hamming bucket per arm; the gradient is **case-arm invariant** — VP resolves 10/10 at every sister arm. cmplog logs every case constant into the I2S dictionary; per-input I2SRandReplace draws ONE candidate uniformly from the K dictionary entries, so cmp's per-arm resolution rate is **stochastic in dictionary roulette** (e.g., br65 'abst' arm: cmp 1/10; br63 'link' arm: cmp 8/10). The roulette variance is observational within the same axis, not a new mechanism.
+
+**How to apply:** When the source line is `case <SIG>:` and the enclosing switch has been seen at a sister arm in `vp_gradient_derived_operand` corroborations, classify as extension #N+1 with note pattern: "SISTER ARM of br<X> (#<prior>)... STEP 1 collapse: ONE feature — same K-arm switch mechanism." The lcms cmsio0.c:744-758 `validDeviceClass()` 7-arm switch is the canonical exemplar: case_arms ('scnr', 'mntr', 'prtr', 'link', 'abst', 'spac', 'nmcl') all map to the same template at distinct branch_ids. Three sister arms now logged as corroborations: br65 (#12 cmsSigAbstractClass, cmp 1/10), br63 (#14 cmsSigLinkClass, cmp 8/10), br62 (#15 cmsSigOutputClass 'prtr', cmp 5/10) — VP is invariant 10/10 across all three; cmplog's per-arm rate is stochastic in dictionary roulette. Per-arm cmp variance is expected and does NOT split into a separate `i2s_dictionary_roulette_position` axis (effective parameter is still K, the same as CHAIN_DEPTH). The decisive-pair set may be just `{vp>naive}` (br62) or `{vp>naive, cmp>naive}` (br63) — the alias rule applies regardless of how many decisive pairs the fan-out surfaces, because the underlying mechanism is the same K-arm switch CMP instrumentation.

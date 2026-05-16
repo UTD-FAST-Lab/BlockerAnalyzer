@@ -210,6 +210,60 @@ fields — a single dictionary entry would resolve 5 clusters / 180 branches">
 this target? What capability is counterproductive?>
 ```
 
+## Synthesis Validation (optional follow-up)
+
+After producing a root cause finding for a cluster, a causal claim is **only fully verified** when a minimal synthetic harness reproduces the same fuzzer divergence pattern (R/B/P per fuzzer) on a target that contains *only* the proposed mechanism. Synthesis verification is the gold standard — it isolates the causal mechanism from confounders in the real target.
+
+Use this when the user asks for synthetic test cases, presentation/teaching benchmarks, or when validating a novel root cause hypothesis.
+
+### Iteration policy (3-attempt limit)
+
+For each target pattern selected for synthesis:
+
+1. **Attempt 1** — Design a minimal C harness implementing the proposed mechanism. Build and run a 4-fuzzer × 3-trial × 2h experiment using `libafl_fuzzbench`. Predict the R/B/P matrix in advance based on the mechanism.
+
+2. **Compare** observed vs predicted R/B/P:
+   - **Match** → ✅ accept as benchmark, document as validated synthetic, move on
+   - **Mismatch** → diagnose the divergence: which fuzzer behaved unexpectedly, and what property of the toy harness caused it? Common pitfalls:
+     - **Corpus starvation** — toy harness lacks intermediate coverage surface; cmplog/I2S derivatives are discarded as coverage-equivalent. Fix: add per-case sub-handlers with distinct edges.
+     - **Gradient over-directness** — toy CMP_MAP lets vp climb too easily because the search space is small. Fix: add decoy comparisons or widen the search space.
+     - **Scale-dependence** — the real mechanism (e.g., autotoken monopoly) only emerges at parser scale. Fix: usually unfixable in synthetic form → mark as failed.
+     - **Autotoken leakage** — constants stored in `.rodata` as bytes get extracted by autotokens, helping naive. Fix: use integer immediates instead of byte strings.
+   - Revise the harness, run **Attempt 2**.
+
+3. **Attempt 3** is the last. If the synthetic still fails to match the predicted R/B/P after attempt 3, mark the synthetic ❌ FAILED and fall back to citing the real-world cluster evidence in the report. Do not keep iterating beyond 3 attempts — at that point the mechanism is likely scale-dependent or has confounders that can't be isolated.
+
+4. **Interesting orthogonal finding rule:** if a failed attempt reveals a *new* fuzzer-divergence mechanism not in the existing taxonomy, that finding is only promotable to a benchmark if BOTH conditions hold:
+   - It is **reproducible across all 3 trials** of the synthetic
+   - It can also be pointed to in **at least one real-world cluster**
+   Otherwise it remains a noted artifact, not a claimed discovery. Toy-only patterns must not be presented as workflow findings.
+
+### Attempt log format
+
+Maintain a log per synthetic target in the report or as a sidecar file:
+
+```markdown
+## blocker_<N> attempt log
+
+### Attempt 1 (date)
+- **Design:** <one-line summary of mechanism>
+- **Predicted R/B/P:** naive=B, cmplog=R, vp=B, vpc=R
+- **Observed R/B/P:** naive=B, cmplog=B, vp=B, vpc=R
+- **Verdict:** ❌ mismatch on cmplog
+- **Diagnosis:** corpus starvation — single-cmp harness gives I2S derivatives no new coverage
+- **Revision for attempt 2:** add per-case handlers with distinct edges
+
+### Attempt 2 (date)
+- **Design:** <revised>
+- **Predicted R/B/P:** ...
+- **Observed R/B/P:** ...
+- **Verdict:** ✅/❌
+```
+
+### Validated synthetic benchmarks (current state)
+
+This is a project-memory item — keep it updated as benchmarks pass or fail validation. Save updates to `.claude/agent-memory/fuzzing-root-cause-analyzer/project_synthetic_blockers.md`.
+
 ## Important Guidelines
 
 1. **Evidence-first reasoning.** Every claim about "why fuzzer X fails" must cite concrete seed data, lineage, or coverage counts. Do not speculate.

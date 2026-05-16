@@ -8,7 +8,8 @@ for every branch. At each checkpoint:
 
 1. Parse all (fuzzer, trial) coverage reports
 2. Identify asymmetric branches (one side >0, other =0)
-3. Apply 3-level input-dependency confirmation (L1/L2/L3)
+3. Apply input-dependency rule: at final checkpoint, >=1 trial across any
+   fuzzer must resolve the branch AND >=1 trial must block it
 4. Accumulate duration only while hit_status=0
 
 Writes final state directly to the DB (branches + trial_coverage tables),
@@ -212,72 +213,39 @@ def extract_blockers_ts(target, ts_base, fuzzers, n_trials, step_s, db_path=None
             print(f"  T={cp_h:.1f}h: {len(branch_state)} branch sides tracked, "
                   f"{n_asymmetric} with at least one blocked trial", file=sys.stderr)
 
-    # --- Pass 2: 3-Level confirmation ---
-    # For each branch side, check if it's input-dependent (not structurally dead)
-    confirmed = {}  # bkey -> ft_states (only confirmed blockers)
-    stats = {'l1': 0, 'l2': 0, 'l3': 0, 'discarded': 0}
+    # --- Pass 2: input-dependence filter ---
+    # A branch side is input-dependent (and admitted to the `branches` table)
+    # iff, across all (fuzzer, trial) at the final checkpoint:
+    #   - at least one (fuzzer, trial) blocks it (hit_status == 0), AND
+    #   - at least one (fuzzer, trial) resolves it (hit_status == 1).
+    #
+    # This replaces the legacy 3-level confirmation (L1 cross-trial /
+    # L2 same-fuzzer-final / L3 cross-fuzzer). At n=10 the multi-level
+    # filter is redundant given downstream admissibility gating in
+    # study_units.py. The previous L1/L2/L3 column is preserved as
+    # confirmation_level=3 for compatibility but no longer carries semantic
+    # meaning — every confirmed branch is "cross-fuzzer" by construction
+    # of this rule.
+    confirmed = {}
+    stats = {'admitted': 0, 'never_blocked': 0, 'never_resolved': 0}
 
     for bkey, ft_states in branch_state.items():
-        # A branch side is a candidate if at least one (fuzzer, trial) has hit_status=0
-        has_blocked = any(s['hit_status'] == 0 for s in ft_states.values())
-        if not has_blocked:
-            continue
-
-        # Check if any (fuzzer, trial) resolved it (hit_status=1)
+        has_blocked  = any(s['hit_status'] == 0 for s in ft_states.values())
         has_resolved = any(s['hit_status'] == 1 for s in ft_states.values())
+        if not has_blocked:
+            stats['never_blocked'] += 1
+            continue
         if not has_resolved:
-            # Falls through all levels — structurally unreachable
-            stats['discarded'] += 1
+            # Blocked by everyone at final → either structurally unreachable
+            # or beyond every fuzzer's budget. Drop.
+            stats['never_resolved'] += 1
             continue
+        stats['admitted'] += 1
+        confirmed[bkey] = (ft_states, 3)  # legacy column always 3
 
-        # Determine confirmation level
-        # Group by fuzzer
-        by_fuzzer = defaultdict(dict)
-        for (fz, trial), state in ft_states.items():
-            by_fuzzer[fz][trial] = state
-
-        level = None
-
-        # L1: Any trial of same fuzzer resolves it at same time?
-        # (We check final state since coverage is cumulative — if resolved at any T,
-        #  it's resolved at final T too)
-        for fz, trial_states in by_fuzzer.items():
-            has_blocked_trial = any(s['hit_status'] == 0 for s in trial_states.values())
-            has_resolved_trial = any(s['hit_status'] == 1 for s in trial_states.values())
-            if has_blocked_trial and has_resolved_trial:
-                level = 'l1'
-                break
-
-        # L2: Same fuzzer resolves at final T (same as L1 since we use final state)
-        if level is None:
-            for fz, trial_states in by_fuzzer.items():
-                has_blocked_trial = any(s['hit_status'] == 0 for s in trial_states.values())
-                has_resolved_trial = any(s['hit_status'] == 1 for s in trial_states.values())
-                if has_blocked_trial and has_resolved_trial:
-                    level = 'l2'
-                    break
-
-        # L3: Any other fuzzer resolves at final T
-        if level is None:
-            blocked_fuzzers = {fz for fz, ts in by_fuzzer.items()
-                               if all(s['hit_status'] != 1 for s in ts.values())}
-            resolved_fuzzers = {fz for fz, ts in by_fuzzer.items()
-                                if any(s['hit_status'] == 1 for s in ts.values())}
-            if blocked_fuzzers and resolved_fuzzers:
-                level = 'l3'
-
-        if level is None:
-            stats['discarded'] += 1
-            continue
-
-        stats[level] += 1
-        level_int = {'l1': 1, 'l2': 2, 'l3': 3}[level]
-        confirmed[bkey] = (ft_states, level_int)
-
-    total = stats['l1'] + stats['l2'] + stats['l3']
-    print(f"\nConfirmed: {total} input-dependent blockers "
-          f"(L1={stats['l1']}, L2={stats['l2']}, L3={stats['l3']}, "
-          f"discarded={stats['discarded']})", file=sys.stderr)
+    print(f"\nConfirmed: {stats['admitted']} input-dependent blockers "
+          f"(never_blocked={stats['never_blocked']}, "
+          f"never_resolved={stats['never_resolved']})", file=sys.stderr)
 
     # --- Pass 3: Write to DB ---
     conn = get_db(db_path)

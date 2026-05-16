@@ -164,7 +164,16 @@ def insert_seeds_and_lineage(branch_id, fuzzer, trial, queue_dir, seed_names,
 # Orchestration
 # ---------------------------------------------------------------------------
 
-def get_branches_to_process(target, branch_id=None, db_path=None):
+def get_branches_to_process(target, branch_id=None, db_path=None,
+                            branch_ids=None):
+    """Pull branch metadata + resolving/blocking trials from DB.
+
+    Args:
+        target: target name (e.g. "lcms").
+        branch_id: single branch id, or None.
+        branch_ids: iterable of branch ids to scope work, or None for ALL
+                    branches in the target. Mutually exclusive with branch_id.
+    """
     conn = get_db(db_path)
     conn.executescript(SCHEMA_SQL)
 
@@ -173,6 +182,16 @@ def get_branches_to_process(target, branch_id=None, db_path=None):
             SELECT branch_id, file, function, line, col, blocked_side
             FROM branches WHERE target = ? AND branch_id = ?
         """, (target, branch_id)).fetchall()
+    elif branch_ids:
+        ids = list(branch_ids)
+        if not ids:
+            conn.close()
+            return []
+        placeholders = ",".join("?" * len(ids))
+        branches = conn.execute(f"""
+            SELECT branch_id, file, function, line, col, blocked_side
+            FROM branches WHERE target = ? AND branch_id IN ({placeholders})
+        """, [target, *ids]).fetchall()
     else:
         branches = conn.execute("""
             SELECT branch_id, file, function, line, col, blocked_side
@@ -181,14 +200,24 @@ def get_branches_to_process(target, branch_id=None, db_path=None):
 
     result = []
     for b in branches:
+        # Pick exactly ONE (fuzzer, trial) per direction. The bisection
+        # only needs one queue's worth of evidence per side; scanning
+        # every (fuzzer, trial) that resolved/blocked the branch wastes
+        # bisection time on huge queues (sqlite3/bloaty have millions
+        # of seeds). Lexicographic min keeps the choice deterministic
+        # and tends to cluster jobs on shared queues across branches.
         resolving = conn.execute("""
-            SELECT fuzzer, MIN(trial) as trial FROM trial_coverage
-            WHERE branch_id = ? AND hit_status = 1 GROUP BY fuzzer
+            SELECT fuzzer, trial FROM trial_coverage
+            WHERE branch_id = ? AND hit_status = 1
+            ORDER BY fuzzer, trial
+            LIMIT 1
         """, (b['branch_id'],)).fetchall()
 
         blocking = conn.execute("""
-            SELECT fuzzer, MIN(trial) as trial FROM trial_coverage
-            WHERE branch_id = ? AND hit_status = 0 GROUP BY fuzzer
+            SELECT fuzzer, trial FROM trial_coverage
+            WHERE branch_id = ? AND hit_status = 0
+            ORDER BY fuzzer, trial
+            LIMIT 1
         """, (b['branch_id'],)).fetchall()
 
         if resolving:
@@ -247,9 +276,45 @@ def build_jobs(branches, queue_base, target):
 RESULTS_DIR = PROJECT_DIR / 'db' / 'bisect_results'
 
 
+def _build_sampled_queue_mirror(queue_target_dir, queue_subdirs,
+                                sample_size, tmpdir):
+    """Create a temp dir mirroring the queue layout but with at most
+    sample_size symlinks per queue (random sample). Returns the mirror
+    path. If sample_size is 0 or None, returns the original path."""
+    if not sample_size:
+        return os.path.abspath(queue_target_dir)
+    import random
+    mirror = os.path.join(tmpdir, 'sampled_queues')
+    os.makedirs(mirror, exist_ok=True)
+    for subdir in queue_subdirs:
+        src = os.path.join(queue_target_dir, subdir)
+        if not os.path.isdir(src):
+            continue
+        dst = os.path.join(mirror, subdir)
+        os.makedirs(dst, exist_ok=True)
+        seeds = [f for f in os.listdir(src)
+                 if not f.startswith('.') and os.path.isfile(os.path.join(src, f))]
+        if len(seeds) > sample_size:
+            seeds = random.sample(seeds, sample_size)
+        for s in seeds:
+            try:
+                os.symlink(os.path.join(os.path.abspath(src), s),
+                           os.path.join(dst, s))
+            except FileExistsError:
+                pass
+    return mirror
+
+
 def scan_bisection(target, queue_base, branch_id=None,
-                   max_seeds=50, batch_size=500, db_path=None):
-    """Run Docker bisection only — write results.json, no DB writes."""
+                   max_seeds=50, batch_size=500, db_path=None,
+                   branch_ids=None, queue_sample_size=None):
+    """Run Docker bisection only — write results.json, no DB writes.
+
+    queue_sample_size: if set, randomly sample at most this many seeds per
+    queue before bisection. Massively speeds up scans on huge queues
+    (sqlite3/bloaty have ~100K+ seeds per queue at n=10) at the cost of
+    possibly missing rare hits. Insert phase reads from the original (full)
+    queue, so metadata + lineage tracing is unaffected."""
     db_path = db_path or str(DB_PATH)
     docker_image = DOCKER_TARGET_IMAGE_FMT.format(target=target)
 
@@ -262,7 +327,7 @@ def scan_bisection(target, queue_base, branch_id=None,
               file=sys.stderr)
         sys.exit(1)
 
-    branches = get_branches_to_process(target, branch_id, db_path)
+    branches = get_branches_to_process(target, branch_id, db_path, branch_ids)
     if not branches:
         print(f"No branches with resolving trials for '{target}'", file=sys.stderr)
         return
@@ -271,6 +336,9 @@ def scan_bisection(target, queue_base, branch_id=None,
     total_jobs = sum(len(v) for v in queue_jobs.values())
     print(f"Target {target}: {len(branches)} branches, {len(queue_jobs)} queues, "
           f"{total_jobs} branch-jobs", file=sys.stderr)
+    if queue_sample_size:
+        print(f"  queue sample size: {queue_sample_size} seeds/queue",
+              file=sys.stderr)
 
     # Write jobs file
     tmpdir = tempfile.mkdtemp(prefix='bisect_batch_')
@@ -285,12 +353,25 @@ def scan_bisection(target, queue_base, branch_id=None,
         json.dump(jobs_data, f)
 
     queue_target_dir = os.path.join(queue_base, target)
+    queues_mount = _build_sampled_queue_mirror(
+        queue_target_dir, list(queue_jobs.keys()), queue_sample_size, tmpdir,
+    )
     tmp_results_file = os.path.join(outdir, 'results.json')
+
+    # Build the mount list. When sampling is on, the symlink mirror points
+    # to absolute host paths (e.g., /20TB/...); the container needs that
+    # path bind-mounted at the SAME path so symlinks resolve.
+    mounts = [
+        '-v', f'{queues_mount}:/queues:ro',
+        '-v', f'{os.path.abspath(tmpdir)}:/work',
+    ]
+    if queue_sample_size:
+        host_queue_abs = os.path.abspath(queue_target_dir)
+        mounts.extend(['-v', f'{host_queue_abs}:{host_queue_abs}:ro'])
 
     cmd = [
         'docker', 'run', '--rm', '--entrypoint', '',
-        '-v', f'{os.path.abspath(queue_target_dir)}:/queues:ro',
-        '-v', f'{os.path.abspath(tmpdir)}:/work',
+        *mounts,
         docker_image,
         '/bin/bash', '-c',
         f'python3 /seed_scanner.py'
@@ -369,10 +450,12 @@ def insert_results(target, results_path, queue_base, db_path=None):
 
 
 def run_bisection(target, queue_base, branch_id=None, parallel=8,
-                  max_seeds=50, batch_size=500, timeout=0, db_path=None):
+                  max_seeds=50, batch_size=500, timeout=0, db_path=None,
+                  branch_ids=None, queue_sample_size=None):
     """Convenience: scan + insert in one step."""
     scan_bisection(target, queue_base, branch_id=branch_id,
-                   max_seeds=max_seeds, batch_size=batch_size, db_path=db_path)
+                   max_seeds=max_seeds, batch_size=batch_size, db_path=db_path,
+                   branch_ids=branch_ids, queue_sample_size=queue_sample_size)
 
     suffix = f'_{branch_id}' if branch_id else ''
     results_path = RESULTS_DIR / f'{target}{suffix}_results.json'
@@ -380,9 +463,10 @@ def run_bisection(target, queue_base, branch_id=None, parallel=8,
         insert_results(target, str(results_path), queue_base, db_path=db_path)
 
 
-def plan_bisection(target, queue_base, branch_id=None, db_path=None):
+def plan_bisection(target, queue_base, branch_id=None, db_path=None,
+                   branch_ids=None):
     db_path = db_path or str(DB_PATH)
-    branches = get_branches_to_process(target, branch_id, db_path)
+    branches = get_branches_to_process(target, branch_id, db_path, branch_ids)
     if not branches:
         print(f"No branches for '{target}'")
         return
@@ -417,9 +501,19 @@ def main():
     p_scan.add_argument('--target', required=True)
     p_scan.add_argument('--queue-base', required=True)
     p_scan.add_argument('--branch-id', type=int)
-    p_scan.add_argument('--max-seeds', type=int, default=50)
+    p_scan.add_argument('--branches-from-csv',
+                        help='CSV with target,branch_id columns (e.g. '
+                             'out/blocker_selected.csv); scopes scan to '
+                             'rows whose target column matches --target')
+    p_scan.add_argument('--max-seeds', type=int, default=5)
     p_scan.add_argument('--batch-size', type=int, default=500,
                         help='Seeds per fuzz_bin invocation (default: 500)')
+    p_scan.add_argument('--queue-sample-size', type=int, default=0,
+                        help='If >0, randomly sample at most N seeds per '
+                             'queue before bisection. Speeds up scans on '
+                             'huge queues (sqlite3/bloaty ~100K+) at the '
+                             'cost of possibly missing rare hits. 0 = no '
+                             'sampling (use full queue).')
     p_scan.add_argument('--db')
 
     p_insert = sub.add_parser('insert', help='Insert results.json into DB')
@@ -432,18 +526,43 @@ def main():
     p_run.add_argument('--target', required=True)
     p_run.add_argument('--queue-base', required=True)
     p_run.add_argument('--branch-id', type=int)
-    p_run.add_argument('--max-seeds', type=int, default=50)
+    p_run.add_argument('--branches-from-csv',
+                       help='CSV with target,branch_id columns; scopes work '
+                            'to rows whose target matches --target')
+    p_run.add_argument('--max-seeds', type=int, default=5)
     p_run.add_argument('--batch-size', type=int, default=500,
                        help='Seeds per fuzz_bin invocation (default: 500)')
+    p_run.add_argument('--queue-sample-size', type=int, default=0,
+                       help='If >0, randomly sample at most N seeds per '
+                            'queue before bisection. 0 = no sampling.')
     p_run.add_argument('--db')
 
     p_plan = sub.add_parser('plan', help='Dry-run: show queues and branch counts')
     p_plan.add_argument('--target', required=True)
     p_plan.add_argument('--queue-base', required=True)
     p_plan.add_argument('--branch-id', type=int)
+    p_plan.add_argument('--branches-from-csv',
+                        help='CSV with target,branch_id columns')
     p_plan.add_argument('--db')
 
     args = parser.parse_args()
+
+    branch_ids = None
+    if getattr(args, 'branches_from_csv', None):
+        import csv
+        with open(args.branches_from_csv) as f:
+            branch_ids = [
+                int(r['branch_id'])
+                for r in csv.DictReader(f)
+                if r.get('target') == args.target
+            ]
+        print(f"loaded {len(branch_ids)} branch ids from "
+              f"{args.branches_from_csv} (target={args.target})",
+              file=sys.stderr)
+        if not branch_ids:
+            print(f"  no rows for target={args.target}; nothing to do",
+                  file=sys.stderr)
+            return
 
     if args.command == 'build':
         build_base_image()
@@ -455,6 +574,8 @@ def main():
             max_seeds=args.max_seeds,
             batch_size=args.batch_size,
             db_path=args.db,
+            branch_ids=branch_ids,
+            queue_sample_size=args.queue_sample_size,
         )
     elif args.command == 'insert':
         insert_results(args.target, args.results, args.queue_base,
@@ -466,10 +587,13 @@ def main():
             max_seeds=args.max_seeds,
             batch_size=args.batch_size,
             db_path=args.db,
+            branch_ids=branch_ids,
+            queue_sample_size=args.queue_sample_size,
         )
     elif args.command == 'plan':
         plan_bisection(args.target, args.queue_base,
-                       branch_id=args.branch_id, db_path=args.db)
+                       branch_id=args.branch_id, db_path=args.db,
+                       branch_ids=branch_ids)
     else:
         parser.print_help()
 

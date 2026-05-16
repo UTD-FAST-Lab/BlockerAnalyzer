@@ -1,0 +1,3 @@
+- [cmsIsTag tag-table-scan FOURCC pattern](feedback_cmsistag_tag_table_scan_pattern.md) — runtime-selected literal at parsed-input offset, still MAGIC_BYTES=4 mechanism
+- [Switch sister-arm aliases](feedback_switch_sister_arms_alias.md) — case-arms of the same switch are dose-point aliases of vp_gradient_derived_operand CHAIN_DEPTH=K, not separate templates
+- [Switch dispatcher Pattern A/B duality](feedback_switch_dispatcher_dual_template.md) — same K-arm switch maps to i2s_magic_number_gate on (cmp,naive) but i2s_anchored_seed_deviation_trap sub-type C on (vp,vpc); strict-2-fuzzer rule preserves both
