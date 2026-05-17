@@ -10,8 +10,18 @@ detail than the prompt embeds. Two queries today:
   - `lineage`     ancestor chain of a specific seed (mutation ops walked
                   back from the leaf via the {resolving,blocking}_seed_lineage
                   table). Useful for mechanism attribution — e.g., did
-                  `I2SRandReplace` appear in the ancestor chain of a
+                  an I2S substitution appear in the ancestor chain of a
                   cmplog-winning seed.
+                  TODO(i2s-logging-bug): the LibAFL fuzzbench cmplog
+                  build does not wrap I2SRandReplace in
+                  LogMutationMetadata, so the literal "I2SRandReplace"
+                  never lands in `.metadata`. Until that is fixed we
+                  use ParentInfo-only entries (rendered as
+                  `mutation_op = -`, stored as SQL NULL) as the I2S
+                  floor signal — exclusive to cmplog/vpc in the
+                  current data. When the logging fix lands, prefer the
+                  literal mutator name and demote the dash signal back
+                  to a sanity check.
 
   - `more-seeds`  beyond the 5 seeds per direction the prompt shows. Pulls
                   from {resolving,blocking}_seeds with optional fuzzer
@@ -104,10 +114,33 @@ def cmd_lineage(args):
         return
 
     print(f"{'depth':>5}  {'ancestor_id':<20}  mutation_op")
+    i2s_floor_depths = []
     for depth, ancestor_id, mut in lineage:
         print(f"{depth:>5}  {ancestor_id:<20}  {mut or '-'}")
+        if mut is None and depth > 0:
+            i2s_floor_depths.append(depth)
     print()
     print(f"# {len(lineage)} ancestor levels (max recorded = 50)")
+    # TODO(i2s-logging-bug): see module docstring. When the LibAFL
+    # cmplog harness logs `I2SRandReplace` into seed metadata, drop the
+    # dash-row summary below and key the agent off the literal mutator
+    # name instead (or keep both, but flip which one is the primary).
+    leaf_dash = (leaf is not None and (leaf[1] is None))
+    if i2s_floor_depths or leaf_dash:
+        parts = []
+        if leaf_dash:
+            parts.append("leaf is ParentInfo-only")
+        if i2s_floor_depths:
+            depths_s = ", ".join(str(d) for d in i2s_floor_depths)
+            parts.append(f"{len(i2s_floor_depths)} ancestor dash row(s) at depth {depths_s}")
+        print(f"# I2S-floor signal: {' + '.join(parts)}.")
+        print("# `mutation_op = -` (NULL) means the seed's metadata had ParentInfo")
+        print("# but no LogMutationMetadata list — characteristic of an unwrapped")
+        print("# I2SRandReplace find in cmplog/vpc under the current build.")
+        print("# This is a LOWER BOUND: some I2S finds leak into the havoc bucket.")
+    else:
+        print("# No I2S-floor rows in this chain (all ancestors have a mutator list).")
+        print("# Note: floor is a lower bound — absence does not rule out I2S contribution.")
 
 
 def cmd_more_seeds(args):

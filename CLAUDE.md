@@ -27,6 +27,7 @@ BlockerAnalyzer/
 │   ├── study_units.py            # Per-target coverage walk + per-subject admission + CLI dispatch. Schema + population only — prompt assembly lives in evidence_prompt.py
 │   ├── evidence_prompt.py        # Per-branch structured prompt assembly (SOURCE CONTEXT overlay, HIT-COUNT DIVERGENCE, DIVERGENT BRANCHES, BRANCH SEEDS + byte diff, MECHANISM CONTEXT, TASK). Registers `evidence-per-branch` subcommand into study_units' CLI.
 │   ├── seed_utils.py             # Dependency-free helpers: parse_count, hex_dump, read_seed_bytes, format_seed_block, byte_diff_section. Imported by evidence_prompt.py and db_query.py.
+│   ├── check_analysis.py         # Validates agent .analysis.json against sibling .prompt.md — schema completeness + exact_quote hallucination filter + mechanism-attribution self-consistency check.
 │   ├── build_candidates.py       # Per-branch ≥8/≥8 aggregation → blocker_candidates.csv
 │   ├── select_representatives.py # Shape × region dedup → blocker_representatives.csv + dedup_map
 │   ├── run_hypothesis_fanout.py  # Manifest builder; reads reps, calls evidence-per-branch
@@ -72,10 +73,21 @@ name → list of (caller, file, line, c_start, c_end). Used by both
 per_role_coverage (to include caller files in the cov dump) and the
 overlay builder (to render cross-file 1-hop callers + call chain).
 
-`prompts/<group>/<NN>_<target>_br<id>.prompt.md` — per-rep agent
-prompts. Default outdir for `tools/run_hypothesis_fanout.py`. The
-`_smoke_v1/` subdir holds hand-picked smoke-test prompts during prompt
-template iteration; otherwise prompts land under shape-named groups.
+`prompts/<group>/<NN>_<target>_<id>.prompt.md` — per-rep agent prompts.
+Default outdir for `tools/run_hypothesis_fanout.py`. Conventional
+subdirs:
+- `prompts/<shape>/` (e.g. `prompts/BRBR/`) — fan-out output grouped by
+  decisive-shape; the canonical home of agent-bound prompts.
+- `prompts/_smoke_v1/` — hand-picked smoke-test prompts used during
+  prompt-template iteration (5 reps spanning shape families).
+- `prompts/_examples/` — GOLD-STANDARD reference pair (prompt +
+  hand-written analysis.json) that passes every check in
+  `tools/check_analysis.py`. Concrete reference of what a high-quality
+  analysis looks like; point agents / contributors here when briefing.
+  See `prompts/_examples/README.md`.
+
+Each agent-produced analysis lives as a sibling `.analysis.json` next
+to its `.prompt.md` (e.g. `prompts/BRBR/00_curl_19.analysis.json`).
 
 ## Coverage Report Format
 
@@ -329,6 +341,45 @@ feed to the agent (one `(target, branch_id)` per agent invocation).
 7. **BRANCH SEEDS (shared across decisive pairs)** — one block per direction: winner-resolving seeds + loser-blocking seeds, each tagged with `(fuzzer, trial)` and shown as size + mutation-op chain + hex+ASCII dump (first `--seed-bytes` bytes). Followed by BYTE DIFF: per-offset W vs L byte-set comparison, filtered to "informative" offsets (sets differ AND ≤4 distinct bytes on at least one side) — surfaces input-byte→gate-operand dataflow hints.
 8. **MECHANISM CONTEXT** — canonical paragraph per **involved** fuzzer from `fuzzer_mechanism_library.md`.
 9. **TASK** — agent instruction (single-pair vs multi-pair phrasing; VERIFICATION SCOPE restricted to involved fuzzers).
+
+### `tools/check_analysis.py` — validate agent analysis.json against the prompt
+
+Per-branch analyses produced by the hypothesis-generator agent must
+follow the structured schema embedded in the prompt's TASK section.
+This script catches hallucination and schema drift before downstream
+classification consumes the data.
+
+```bash
+python3 tools/check_analysis.py prompts/<group>/NN_<target>_<bid>.analysis.json
+python3 tools/check_analysis.py --recursive prompts/         # all analyses
+```
+
+Checks performed:
+1. Required top-level fields present + non-empty (`branch_id`, `target`,
+   `summary_one_line`, `pair_decision`, `hypotheses`, `evidence_trail`,
+   `mechanism_consistency_check`, `falsifiability`,
+   `weakest_evidence_point`, `confidence`).
+2. `evidence_trail` is a non-empty list; each entry carries
+   `claim` + `cited_section` + `cited_locator` + `exact_quote`.
+3. **Every `exact_quote` appears LITERALLY in the sibling .prompt.md**
+   (whitespace-tolerant substring check). This is the core hallucination
+   filter — claims with quotes that aren't actually in the prompt are
+   automatically flagged.
+4. `cited_section` names a real section of the prompt
+   (BLOCKER, TRIAL VECTOR, DECISIVE PAIRS, SOURCE CONTEXT,
+   HIT-COUNT DIVERGENCE, DIVERGENT BRANCHES, BRANCH SEEDS, BYTE DIFF,
+   MECHANISM CONTEXT).
+5. `mechanism_consistency_check`: if `claimed_mechanism` contains
+   "I2S" or "I2SRandReplace", `verified_in_lineage` MUST be `true` —
+   OR `verification_method` must explain (>= 20 chars) why verification
+   was not possible. Forces the agent to invoke `db_query.py lineage`
+   on a winning seed before claiming I2S did the work.
+6. `pair_decision` matches `hypotheses` count: `single_feature` → 1,
+   `multi_feature` → ≥2.
+7. Each `hypotheses[i].covers_pairs` label matches a decisive-pair label
+   from the prompt's DECISIVE PAIRS section (e.g. "cmplog>naive (I2S)").
+
+Exit code: 0 = all clean; 1 = at least one violation; 2 = usage error.
 
 ### `tools/db_query.py` — agent-facing pull queries (lineage, more-seeds)
 
@@ -721,8 +772,11 @@ Step 3b: Pick representatives        (decisive-shape × source-region dedup)
 Step 3.5 (optional): Seed bisection on representatives
 Step 3.6 (optional): Per-target callers index (one-time per target)
 Step 3.7 (optional): Per-role coverage gen for selected branches
-Step 4: Hypothesis fan-out — manifest + per-rep prompts → Claude dispatch
-Step 5: Verification sweep — verdict per template
+Step 4a: Hypothesis fan-out — manifest + per-rep prompts → Claude dispatch
+Step 4b: Per-branch analysis — each agent writes .analysis.json (NO template comparison, NO template.c — those are deferred to step 5+)
+Step 4c: Validate analyses — tools/check_analysis.py catches schema gaps + exact_quote hallucinations
+Step 5a: Cross-branch classification — separate pass aggregates .analysis.json files into template proposals (not implemented yet)
+Step 5b: Verification sweep — verdict per template (not implemented yet)
 Step 6: Lint template-shape consistency (post-agent quality check)
 ```
 
@@ -841,30 +895,51 @@ plus 1-hop caller files (from the callers index). Cached at
 Without this step, evidence prompts fall back to a static ±N source
 window with no per-role overlay.
 
-**Step 4 — hypothesis fan-out** (`tools/run_hypothesis_fanout.py` +
+**Step 4a — hypothesis fan-out** (`tools/run_hypothesis_fanout.py` +
 Claude session):
 
 ```bash
 python3 tools/run_hypothesis_fanout.py
-# → out/hypothesis_fanout/manifest.json + per-rep prompt files
+# → prompts/manifest.json + per-rep .prompt.md files under prompts/<group>/
 # Then: Claude reads manifest, fans out N parallel × M sequential
 # Agent(feature-hypothesis-generator) calls.
-# → templates/<feature_id>/{template.c, params.json, feature_spec.json}
 ```
 
 Default input is `csvs/blocker_representatives.csv`; pass
 `--input csvs/blocker_candidates.csv` for the full candidate set.
-Each agent call receives a per-branch prompt from
-`tools/study_units.py evidence-per-branch` containing the trial vector
-**only for fuzzers in decisive pairs** (winner/loser tags). Reference
-fuzzers (`-` slot in the decisive shape) carry no numeric stats —
-they're indicated only via their position. Each decisive pair's seeds
-are included, plus source context and a TASK section instructing the
-agent to scope verification to `involved_fuzzers` only.
 
-Default grouping is `(target, primary_delta)` — across groups parallel,
-within group sequential so later calls see prior templates. The script
-auto-skips reps already covered (per `templates/branch_index.json`).
+**Step 4b — per-branch analysis (NEW DESIGN, 2026-05-17)**: each agent
+analyzes its assigned branch IN ISOLATION and writes a sibling
+`<NN>_<target>_<bid>.analysis.json` file. Critically: the agent does NOT
+compare against `templates/`, NOT classify into existing categories, and
+NOT emit `template.c` — those are deferred to step 5+ so that
+classification happens AFTER all branches have independent hypotheses,
+avoiding anchoring bias.
+
+Analysis schema (enforced by `tools/check_analysis.py`):
+- `summary_one_line`, `pair_decision` ("single_feature"/"multi_feature"),
+  `hypotheses` (list of 1+ with covers_pairs + what/why_winner/why_loser
+  + mechanism_attribution).
+- `evidence_trail` — every hypothesis sub-claim must be backed by an
+  entry with cited_section + cited_locator + **exact_quote that appears
+  literally in the prompt** (mechanically verified by `check_analysis.py`).
+- `mechanism_consistency_check` — if claimed mechanism is I2S-specific,
+  the agent must invoke `db_query.py lineage` on a winning seed and
+  confirm `I2SRandReplace` appears (or explain why verification failed).
+- `falsifiability.would_be_refuted_by` — one concrete observation that
+  would kill the hypothesis (Popper test).
+- `weakest_evidence_point` + `confidence` — forced self-criticism.
+
+**Step 4c — validate analyses**:
+
+```bash
+python3 tools/check_analysis.py --recursive prompts/
+```
+
+Catches: schema gaps, exact_quote hallucinations (claims with quotes
+that aren't in the prompt), invalid section names, weak mechanism
+attribution, pair-label mismatches. Run before step 5a — bad analyses
+poison downstream classification.
 
 **Step 5 — verification sweep** (not implemented yet):
 

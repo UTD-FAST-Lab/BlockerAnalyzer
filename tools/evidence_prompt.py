@@ -830,63 +830,139 @@ def cmd_evidence_per_branch(args):
         out.append("")
 
     out.append("==== TASK ====")
-    if len(pairs) == 1:
-        p = pairs[0]
-        task = (
-            f"Produce ONE program-feature hypothesis explaining why {p['winner']} resolves "
-            f"this branch while {p['loser']} does not, attributable to the {p['delta']} "
-            f"technique delta. Reason over winner-resolving (Side-B) vs loser-blocking "
-            f"(Side-A) byte diffs at constraining offsets and the source CMP shape.\n\n"
-            f"Search templates/ for existing matches before building a new template; "
-            f"if a template fits, output its template_id and stop. Otherwise emit "
-            f"templates/<feature_id>/{{template.c, params.json, feature_spec.json}}.\n\n"
-            f"VERIFICATION SCOPE: the synthetic experiment MUST run only the involved "
-            f"fuzzers ({involved_fuzzers}). The reference fuzzers ({reference_fuzzers}) "
-            f"are auxiliary context only and do NOT enter the verdict — feel free to "
-            f"comment on whether their trial counts CORROBORATE or COMPLICATE the story, "
-            f"but they are not the test."
+    # Derive the suggested analysis.json output path from the prompt's
+    # --output. Agent can override but should default to the sibling file.
+    if args.output and args.output != "-":
+        suggested_analysis_path = (
+            args.output[:-len(".prompt.md")] + ".analysis.json"
+            if args.output.endswith(".prompt.md")
+            else args.output + ".analysis.json"
         )
     else:
-        deltas = sorted({p["delta"] for p in pairs})
-        task = (
-            f"This branch has {len(pairs)} decisive pairs spanning deltas: {deltas}.\n\n"
-            f"STEP 1 — Decide explicitly: do these pairs collapse to ONE feature (a "
-            f"single mechanism axis explains every decisive pair simultaneously), or do "
-            f"they imply MULTIPLE features (independent axes, one per pair)? Justify in "
-            f"feature_spec.json's hypothesis section.\n\n"
-            f"STEP 2 — Produce one OR more program-feature hypotheses accordingly. For "
-            f"each, reason over the per-pair byte diffs (winner-resolving Side-B vs "
-            f"loser-blocking Side-A) and the source CMP shape.\n\n"
-            f"STEP 3 — Search templates/ for existing matches before building. If "
-            f"templates fit, output their template_ids. Otherwise emit "
-            f"templates/<feature_id>/{{template.c, params.json, feature_spec.json}} per "
-            f"surviving hypothesis.\n\n"
-            f"VERIFICATION SCOPE: synthetic experiments MUST run only the involved "
-            f"fuzzers ({involved_fuzzers}). Reference fuzzers ({reference_fuzzers}) are "
-            f"auxiliary context — they may CORROBORATE the story (e.g., reference fuzzer "
-            f"behaves consistently with the proposed mechanism) but do not enter the verdict."
-        )
-    out.append(task)
+        suggested_analysis_path = "<prompt-path>.analysis.json"
+
+    pair_labels = [f"{p['winner']}>{p['loser']} ({p['delta']})" for p in pairs]
+    pair_label_str = ", ".join(pair_labels)
+
+    out.append(
+        f"ANALYZE THIS BRANCH IN ISOLATION. Do NOT compare against "
+        f"templates/. Naming an existing template here anchors the later "
+        f"cross-branch classification pass.\n"
+    )
+    out.append(
+        f"WRITE EXACTLY ONE FILE:\n  {suggested_analysis_path}\n\n"
+        f"Do NOT produce template.c or params.json — those are the "
+        f"deferred verification phase.\n"
+    )
+    out.append(
+        "SCHEMA (every field is mandatory; missing or empty fields = "
+        "analysis failure). The example below uses `//` comments for "
+        "guidance — REMOVE all `//` lines and inline `//` comments from "
+        "your emitted JSON (standard JSON does not allow comments)."
+    )
     out.append("")
-    out.append("OPTIONAL DEEP-DIVE QUERIES (use only if the embedded evidence "
-               "is insufficient):")
+    schema_lines = [
+        "{",
+        f'  "branch_id": {args.branch_id},',
+        f'  "target": "{target}",',
+        '  "summary_one_line": "string, <=25 words, the input feature required to take the winning side",',
+        '  "pair_decision": "single_feature",',
+        '    // pick EXACTLY ONE of: "single_feature" | "multi_feature"',
+        f'    // decisive pairs at this branch: [{pair_label_str}]',
+        '  "hypotheses": [',
+        '    {',
+        '      "covers_pairs": ["cmplog>naive (I2S)"],',
+        '        // labels MUST match exactly as in DECISIVE PAIRS (e.g. "cmplog>naive (I2S)")',
+        '      "what_input_feature": "concrete description of the bytes/structure required",',
+        '      "why_winner_satisfies": "what about the winner inputs meets the requirement",',
+        '      "why_loser_doesnt": "what is missing in the loser inputs",',
+        '      "mechanism_attribution": "free text — explain which fuzzer technique enables the winner; must agree with claimed_mechanism below"',
+        '    }',
+        '    // pair_decision="single_feature" => exactly 1 hypothesis whose covers_pairs lists ALL decisive pairs',
+        '    // pair_decision="multi_feature"  => 2+ hypotheses, each covers_pairs listing its subset',
+        '  ],',
+        '  "evidence_trail": [',
+        '    {',
+        '      "claim": "atomic factual claim (1 sentence)",',
+        '      "cited_section": "BLOCKER",',
+        '        // pick the canonical short name of the cited section, one of:',
+        '        //   BLOCKER | TRIAL VECTOR | DECISIVE PAIRS | SOURCE CONTEXT |',
+        '        //   HIT-COUNT DIVERGENCE | DIVERGENT BRANCHES | BRANCH SEEDS |',
+        '        //   BYTE DIFF | MECHANISM CONTEXT',
+        '        // validator accepts the full section header too (e.g. "BYTE DIFF (W vs L at common offsets)")',
+        '      "cited_locator": "offsets 0x06-0x0f | L1701 | seed_id ab12... | etc.",',
+        '      "exact_quote": "verbatim substring of the prompt — COPY-PASTE, do not paraphrase"',
+        '    }',
+        '    // at least ONE entry per hypothesis sub-field (what / why_winner / why_loser / mechanism)',
+        '  ],',
+        '  "mechanism_consistency_check": {',
+        '    "claimed_mechanism": "I2SRandReplace",',
+        '      // pick EXACTLY ONE of:',
+        '      //   "I2SRandReplace"     (cmplog / vpc input-to-state substitution)',
+        '      //   "CMP_MAP gradient"   (vp / vpc Hamming/prefix-distance feedback)',
+        '      //   "havoc-only"         (lucky havoc byte mutation, no CMP introspection)',
+        '      //   "token-replace"      (TokenInsert/TokenReplace dictionary mutations)',
+        '      //   "other"              (anything that does not fit the four above)',
+        '    "verified_in_lineage": true,',
+        '      // pick true or false',
+        f'    "verification_method": "ran `python3 tools/db_query.py lineage --branch {args.branch_id} --role W --fuzzer cmplog --trial 1 --seed <ID>` and observed an I2S-floor row (mutation_op = -) at depth 19 of the chain"',
+        '    // TODO(i2s-logging-bug): the LibAFL cmplog harness does NOT log',
+        '    //   the literal "I2SRandReplace" string into seed metadata. Until',
+        '    //   that is fixed, the verification signal is the dash-row floor',
+        '    //   (ParentInfo-only entries; SQL NULL mutation_op). Confirmed',
+        '    //   2026-05-17: dash rows are exclusive to cmplog/vpc in the',
+        '    //   current data (zero occurrences in 6000 naive/vp samples).',
+        '    //   When the logging fix lands, revert this rule to require the',
+        '    //   literal "I2SRandReplace" name and treat the dash signal as',
+        '    //   secondary corroboration.',
+        '    // MANDATORY when claimed_mechanism="I2SRandReplace": invoke db_query.py lineage on >=1 winning seed',
+        '    //   - if you find at least one I2S-floor row in the ancestor chain (mutation_op = -',
+        '    //     for ancestors of a cmplog/vpc-discovered seed): verified_in_lineage=true,',
+        '    //     and cite the depth(s) in verification_method.',
+        '    //   - if the chain is all-havoc (no dash rows): verified_in_lineage=false; note that',
+        '    //     I2S contribution may still exist in the leaked havoc bucket, explain (>=20 chars).',
+        '    //   - if you could not run db_query (data missing, etc.): verified_in_lineage=false; explain what blocked you',
+        '  },',
+        '  "falsifiability": {',
+        '    "would_be_refuted_by": "ONE concrete observation that, if true, would kill this hypothesis (something a synthetic experiment could observe, not a story)"',
+        '  },',
+        '  "weakest_evidence_point": "one sentence naming your single most uncertain claim",',
+        '  "confidence": "medium"',
+        '    // pick EXACTLY ONE of: "high" | "medium" | "low"',
+        "}",
+    ]
+    out.extend(schema_lines)
+    out.append("")
+    out.append(
+        "RULES:\n"
+        " - No reference to templates/ anywhere in your output. Classification is a separate later pass.\n"
+        " - Every hypothesis sub-claim must be supported by >=1 evidence_trail entry.\n"
+        " - exact_quote must be a LITERAL substring of this prompt — COPY-PASTE, do NOT paraphrase, abbreviate, or summarize. A script (tools/check_analysis.py) will reject quotes that do not appear verbatim (whitespace-tolerant).\n"
+        " - cited_section: the validator accepts either the canonical short name (BLOCKER, BYTE DIFF, etc.) or the full section header from the prompt.\n"
+        " - claimed_mechanism and mechanism_attribution must agree on the same technique.\n"
+        " - When claimed_mechanism = \"I2SRandReplace\": you MUST invoke `python3 tools/db_query.py lineage` on >=1 winning seed BEFORE finalizing the analysis. Record what you observed in verification_method.\n"
+    )
+    out.append("")
+    out.append("DEEP-DIVE QUERIES:")
     out.append(
         f"  python3 tools/db_query.py lineage --branch {args.branch_id} "
         "--role W|L --fuzzer <F> --trial <T> --seed <id>"
     )
     out.append(
-        "    ancestor chain for a specific seed (mutation ops walked back "
-        "from the leaf). Useful when mechanism attribution between fuzzers "
-        "is ambiguous and you want to see whether `I2SRandReplace` "
-        "(or other op) appeared upstream."
+        "    MANDATORY when claimed_mechanism=\"I2SRandReplace\" (see RULES). "
+        "Optional otherwise. Returns the ancestor chain (mutation ops walked "
+        "back from the leaf up to 50 levels). The trailing 'I2S-floor signal' "
+        "line summarizes dash rows (mutation_op = -); see "
+        "fuzzer_mechanism_library.md cmplog section for the floor interpretation "
+        "under the current build."
     )
     out.append(
         f"  python3 tools/db_query.py more-seeds --branch {args.branch_id} "
         "--role W|L [--fuzzer <F>] [--limit 20] [--show-bytes 64]"
     )
     out.append(
-        "    additional seeds beyond the 5 shown above (limited by what "
-        "seed_bisect stored; default max_seeds=10 per branch×direction)."
+        "    Optional. Additional seeds beyond the 5 shown above "
+        "(capped by seed_bisect's max_seeds; default 10 per branch x direction)."
     )
 
     text = "\n".join(out)

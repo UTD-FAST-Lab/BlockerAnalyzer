@@ -54,10 +54,26 @@ consumed by the mutator, not by feedback.
 picks a CMP entry, scans the input for byte sequences matching one
 operand, and substitutes the other operand at those offsets.
 
-**Observed `mutation_op` in seed metadata**: havoc/token names plus
-`I2SRandReplace` (`I2SRandReplace` is exclusive to cmplog and
-value_profile_cmplog — its presence in a seed's `mutation_op` is
-direct evidence one of those two fuzzers found it).
+**Observed `mutation_op` in seed metadata**:
+<!-- TODO(i2s-logging-bug): the current LibAFL fuzzbench build does NOT
+     wrap I2SRandReplace in LogMutationMetadata, so the string
+     "I2SRandReplace" never appears in `.metadata`. Instead, I2S finds
+     surface as seeds whose metadata has ParentInfo but NO mutator-name
+     list — these render as `mutation_op = -` in `db_query.py lineage`
+     output and `resolving_seeds.mutation_op IS NULL` in SQL.
+     Confirmed 2026-05-17: naive/vp produce ZERO such seeds in 6000
+     samples; cmplog/vpc produce them at ~0.1–0.3%. This is a LOWER
+     BOUND ("floor") — some I2S finds leak into the havoc bucket
+     because other stages wrap I2S as a sub-mutator and tag the result
+     with their own havoc/token list. When the logging fix lands,
+     revert this caveat and require the literal `I2SRandReplace`
+     string instead. -->
+havoc/token names; **plus** silent ParentInfo-only entries
+(`mutation_op = -` in lineage output) that — in cmplog/vpc only —
+indicate an I2SRandReplace find under the current build. The dash
+rows are exclusive to cmplog and value_profile_cmplog; their
+presence in a winning seed's ancestor chain is direct (lower-bound)
+evidence of I2S contribution.
 
 **Per-execution cost**: edge increment + one callback per intercepted
 CMP per execution + post-execution CMP-buffer processing.
@@ -78,9 +94,15 @@ adds a new CMP_MAP bucket and is preserved as corpus.
 
 **Mutators**: naive's havoc + token stack. No `I2SRandReplace`.
 
-**Observed `mutation_op` in seed metadata**: havoc/token names only.
-Absence of `I2SRandReplace` is direct evidence the seed was found by
-naive or value_profile.
+**Observed `mutation_op` in seed metadata**: havoc/token names only —
+no ParentInfo-only entries (no `mutation_op = -` rows). Absence of
+the dash signal is direct evidence the seed was found by naive or
+value_profile, not by an I2S stage.
+<!-- TODO(i2s-logging-bug): when the I2SRandReplace logging fix lands,
+     this section becomes "Absence of `I2SRandReplace` is direct
+     evidence ..." again. See the cmplog section above for the floor
+     caveat. -->
+
 
 **Per-execution cost**: edge increment + CMP_MAP update per intercepted
 CMP per execution.
@@ -94,8 +116,10 @@ per-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets.
 
 **Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`.
 
-**Observed `mutation_op` in seed metadata**: havoc/token names plus
-`I2SRandReplace`.
+**Observed `mutation_op` in seed metadata**: havoc/token names; **plus**
+silent ParentInfo-only entries (`mutation_op = -` in lineage) — same
+floor signal as cmplog. See the cmplog section's
+`TODO(i2s-logging-bug)` note.
 
 **Per-execution cost**: edge increment + CMP-buffer record + CMP_MAP
 update per intercepted CMP per execution.
