@@ -3,17 +3,17 @@
 run_hypothesis_fanout.py — prompt-prep + manifest builder for the
 feature-hypothesis-generator fan-out (per-branch view).
 
-Reads `out/blocker_representatives.csv` by default (one row per
+Reads `csvs/blocker_representatives.csv` by default (one row per
 (decisive-shape × source-region) representative; produced by
 select_representatives.py from blocker_candidates.csv). Pass
-`--input out/blocker_candidates.csv` to fan out across the full 275
-candidate set instead of the deduped 158 reps. Non-rep branches stay
-in `out/blocker_dedup_map.csv` as the implied-corroboration record;
+`--input csvs/blocker_candidates.csv` to fan out across the full
+candidate set instead of the deduped reps. Non-rep branches stay
+in `csvs/blocker_dedup_map.csv` as the implied-corroboration record;
 they are NOT re-dispatched to the agent.
 
 Generates one structured prompt per row via
 `tools/study_units.py evidence-per-branch`, writes prompts under
-`out/hypothesis_fanout/<group>/`, and emits manifest.json describing
+`prompts/<group>/`, and emits manifest.json describing
 the parallel/sequential dispatch plan.
 
 This script does NOT invoke the agent — feature-hypothesis-generator
@@ -34,7 +34,7 @@ Skipping. By default reads `templates/branch_index.json` and skips any
 `--skip-existing /dev/null` to disable.
 
 Output layout:
-  out/hypothesis_fanout/
+  prompts/
   ├── manifest.json
   └── <group_id>/                       # e.g. lcms__I2S, bloaty__value_profile
       ├── 00_<target>_br<id>.prompt.md  # ordered by CSV ranking
@@ -51,8 +51,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_INPUT = REPO_ROOT / "out" / "blocker_representatives.csv"
-DEFAULT_OUTDIR = REPO_ROOT / "out" / "hypothesis_fanout"
+DEFAULT_INPUT = REPO_ROOT / "csvs" / "blocker_representatives.csv"
+DEFAULT_OUTDIR = REPO_ROOT / "prompts"
 DEFAULT_SKIP_INDEX = REPO_ROOT / "templates" / "branch_index.json"
 STUDY_UNITS = REPO_ROOT / "tools" / "study_units.py"
 
@@ -149,8 +149,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--input", default=str(DEFAULT_INPUT),
                     help=f"per-branch CSV — reps by default; pass "
-                         f"out/blocker_candidates.csv to fan out across "
-                         f"all 275 (default {DEFAULT_INPUT})")
+                         f"csvs/blocker_candidates.csv to fan out across "
+                         f"the full candidate set (default {DEFAULT_INPUT})")
     ap.add_argument("--outdir", default=str(DEFAULT_OUTDIR),
                     help=f"manifest + prompts root (default {DEFAULT_OUTDIR})")
     ap.add_argument("--group-by",
@@ -239,7 +239,7 @@ def main():
                 continue
 
             order = len(ordered_calls)
-            prompt_path = group_dir / f"{order:02d}_{target}_br{branch_id}.prompt.md"
+            prompt_path = group_dir / f"{order:02d}_{target}_{branch_id}.prompt.md"
             wrote = "skipped (exists)"
             if args.force or not prompt_path.is_file():
                 if args.dry_run:

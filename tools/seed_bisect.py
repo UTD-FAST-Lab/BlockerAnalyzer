@@ -8,8 +8,8 @@ Much faster than per-branch bisection.
 
 Usage:
     python3 tools/seed_bisect.py build --target bloaty
-    python3 tools/seed_bisect.py run --target bloaty --queue-base ./out
-    python3 tools/seed_bisect.py run --target bloaty --queue-base ./out --branch-id 5
+    python3 tools/seed_bisect.py run --target bloaty --queue-base ./out \
+        --branches-from-csv csvs/blocker_representatives.csv
     python3 tools/seed_bisect.py plan --target bloaty --queue-base ./out
 """
 
@@ -30,7 +30,7 @@ DB_PATH = PROJECT_DIR / 'db' / 'blockers.sqlite'
 DOCKER_DIR = PROJECT_DIR / 'docker'
 
 sys.path.insert(0, str(TOOLS_DIR))
-from blocker_db import get_db, SCHEMA_SQL
+from blocker_db import get_db
 
 DOCKER_BASE_IMAGE = 'libafl-coverage-base'
 DOCKER_TARGET_IMAGE_FMT = 'libafl-{target}-cov'
@@ -123,7 +123,6 @@ def build_lineage(queue_dir, seed_name, max_depth=50):
 def insert_seeds_and_lineage(branch_id, fuzzer, trial, queue_dir, seed_names,
                              seed_table, lineage_table, db_path=None):
     conn = get_db(db_path)
-    conn.executescript(SCHEMA_SQL)
     sc = lc = 0
 
     for seed_name in seed_names:
@@ -213,11 +212,10 @@ def get_branches_to_process(target, branch_id=None, db_path=None,
     wastes time on huge queues.
     """
     conn = get_db(db_path)
-    conn.executescript(SCHEMA_SQL)
 
     if branch_id:
         branches = conn.execute("""
-            SELECT branch_id, file, function, line, col, blocked_side
+            SELECT branch_id, file, line, col, blocked_side
             FROM branches WHERE target = ? AND branch_id = ?
         """, (target, branch_id)).fetchall()
     elif branch_ids:
@@ -227,12 +225,12 @@ def get_branches_to_process(target, branch_id=None, db_path=None,
             return []
         placeholders = ",".join("?" * len(ids))
         branches = conn.execute(f"""
-            SELECT branch_id, file, function, line, col, blocked_side
+            SELECT branch_id, file, line, col, blocked_side
             FROM branches WHERE target = ? AND branch_id IN ({placeholders})
         """, [target, *ids]).fetchall()
     else:
         branches = conn.execute("""
-            SELECT branch_id, file, function, line, col, blocked_side
+            SELECT branch_id, file, line, col, blocked_side
             FROM branches WHERE target = ?
         """, (target,)).fetchall()
 
@@ -327,7 +325,7 @@ def _build_sampled_queue_mirror(queue_target_dir, queue_subdirs,
 
 
 def scan_bisection(target, queue_base, branch_id=None,
-                   max_seeds=50, batch_size=500, db_path=None,
+                   max_seeds=10, batch_size=500, db_path=None,
                    branch_ids=None, queue_sample_size=None):
     """Run Docker bisection only — write results.json, no DB writes.
 
@@ -475,8 +473,8 @@ def insert_results(target, results_path, queue_base, db_path=None):
           f"for '{target}'", file=sys.stderr)
 
 
-def run_bisection(target, queue_base, branch_id=None, parallel=8,
-                  max_seeds=50, batch_size=500, timeout=0, db_path=None,
+def run_bisection(target, queue_base, branch_id=None,
+                  max_seeds=10, batch_size=500, db_path=None,
                   branch_ids=None, queue_sample_size=None):
     """Convenience: scan + insert in one step."""
     scan_bisection(target, queue_base, branch_id=branch_id,
@@ -529,9 +527,9 @@ def main():
     p_scan.add_argument('--branch-id', type=int)
     p_scan.add_argument('--branches-from-csv',
                         help='CSV with target,branch_id columns (e.g. '
-                             'out/blocker_selected.csv); scopes scan to '
-                             'rows whose target column matches --target')
-    p_scan.add_argument('--max-seeds', type=int, default=5)
+                             'csvs/blocker_representatives.csv); scopes scan '
+                             'to rows whose target column matches --target')
+    p_scan.add_argument('--max-seeds', type=int, default=10)
     p_scan.add_argument('--batch-size', type=int, default=500,
                         help='Seeds per fuzz_bin invocation (default: 500)')
     p_scan.add_argument('--queue-sample-size', type=int, default=0,
@@ -553,9 +551,10 @@ def main():
     p_run.add_argument('--queue-base', required=True)
     p_run.add_argument('--branch-id', type=int)
     p_run.add_argument('--branches-from-csv',
-                       help='CSV with target,branch_id columns; scopes work '
+                       help='CSV with target,branch_id columns (e.g. '
+                            'csvs/blocker_representatives.csv); scopes work '
                             'to rows whose target matches --target')
-    p_run.add_argument('--max-seeds', type=int, default=5)
+    p_run.add_argument('--max-seeds', type=int, default=10)
     p_run.add_argument('--batch-size', type=int, default=500,
                        help='Seeds per fuzz_bin invocation (default: 500)')
     p_run.add_argument('--queue-sample-size', type=int, default=0,
@@ -568,7 +567,8 @@ def main():
     p_plan.add_argument('--queue-base', required=True)
     p_plan.add_argument('--branch-id', type=int)
     p_plan.add_argument('--branches-from-csv',
-                        help='CSV with target,branch_id columns')
+                        help='CSV with target,branch_id columns (e.g. '
+                             'csvs/blocker_representatives.csv)')
     p_plan.add_argument('--db')
 
     args = parser.parse_args()

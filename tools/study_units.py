@@ -55,6 +55,9 @@ from datetime import datetime, timezone
 from math import ceil, floor
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from seed_utils import parse_count as _shared_parse_count  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB = REPO_ROOT / "db" / "blockers.sqlite"
 DEFAULT_TS_BASE = REPO_ROOT / "out" / "coverage_ts"
@@ -131,15 +134,13 @@ _BRANCH_RE = re.compile(
 
 
 def _parse_count(s):
-    """Parse '35.7M', '2.20k', '0', '1,234', '18.4E' into int."""
-    s = s.strip().replace(',', '')
-    mult = {'k': 1_000, 'M': 1_000_000, 'G': 1_000_000_000}
-    if s and s[-1] in mult:
-        return int(float(s[:-1]) * mult[s[-1]])
-    s = s.rstrip('eE')  # llvm-cov-18 sometimes emits truncated '18.4E'
-    if not s:
-        return 0
-    return int(float(s))
+    """Wrapper around seed_utils.parse_count that returns 0 instead of None.
+
+    Legacy callers (the per-target coverage walk) expect an int. Branch
+    counts in llvm-cov output are never empty, so None handling defensively
+    becomes 0.
+    """
+    return _shared_parse_count(s) or 0
 
 
 def _parse_coverage_file(path):
@@ -754,354 +755,11 @@ def cmd_top(args):
         print("\t".join("" if v is None else str(v) for v in r))
 
 
-# ── evidence-per-branch: structured prompt for feature-hypothesis-generator ─
 
-import subprocess
-from pathlib import Path as _P
-
-DEFAULT_QUEUE_BASE = _P("/20TB/miao/fuzz-blocker")
-DEFAULT_MECHANISM_LIB = REPO_ROOT / "fuzzer_mechanism_library.md"
-
-CANONICAL_FUZZERS_LIST = ["naive", "cmplog", "value_profile", "value_profile_cmplog"]
-
-
-def _mechanism_for(library_path, fuzzer):
-    """Pull the fuzzer's section paragraph from the mechanism library.
-    Section header may include a parenthetical, e.g. `## value_profile (CMP_MAP gradient feedback)`.
-    """
-    if not library_path.is_file():
-        return f"[mechanism library not found at {library_path}]"
-    text = library_path.read_text()
-    import re
-    pattern = re.compile(rf"^## {re.escape(fuzzer)}(?:\s|\(|$)", re.MULTILINE)
-    match = pattern.search(text)
-    if not match:
-        return f"[no entry for '{fuzzer}' in {library_path.name}]"
-    body_start = text.find("\n", match.start()) + 1
-    next_section = re.search(r"^## ", text[body_start:], re.MULTILINE)
-    body_end = body_start + next_section.start() if next_section else len(text)
-    return text[body_start:body_end].strip()
-
-
-def _read_source_window(target, container_path, line, n_lines):
-    """Read ±n_lines around `line` from `container_path` inside libafl-<target>-cov."""
-    lo = max(1, line - n_lines)
-    hi = line + n_lines
-    image = f"libafl-{target}-cov"
-    try:
-        proc = subprocess.run(
-            ["docker", "run", "--rm", "--entrypoint", "sed",
-             image, "-n", f"{lo},{hi}p", container_path],
-            capture_output=True, text=True, timeout=30,
-        )
-        if proc.returncode != 0:
-            return f"[failed to read {container_path} from {image}: {proc.stderr.strip()}]"
-        return proc.stdout
-    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
-        return f"[failed to read {container_path}: {exc}]"
-
-
-def _hex_dump(data, max_bytes):
-    """Standard 16-byte-per-row hex+ASCII dump of the first max_bytes."""
-    chunk = data[:max_bytes]
-    rows = []
-    for off in range(0, len(chunk), 16):
-        slice_ = chunk[off:off + 16]
-        hex_part = " ".join(f"{b:02x}" for b in slice_)
-        hex_part = hex_part.ljust(48)
-        ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in slice_)
-        rows.append(f"  {off:04x}: {hex_part}  {ascii_part}")
-    return "\n".join(rows)
-
-
-def _read_seed_bytes(queue_base, target, fuzzer, trial, seed_id, max_bytes):
-    """Read first max_bytes of the seed file, return (size, bytes) or (None, error_msg)."""
-    p = queue_base / target / fuzzer / f"trial{trial}" / "queue" / seed_id
-    try:
-        size = p.stat().st_size
-        with p.open("rb") as f:
-            data = f.read(max_bytes)
-        return size, data
-    except FileNotFoundError:
-        return None, f"[seed file not found: {p}]"
-    except OSError as exc:
-        return None, f"[error reading {p}: {exc}]"
-
-
-def _format_seed_block(label, rows, queue_base, target, max_bytes):
-    """Format one of the SIDE-A / SIDE-B blocks. rows: list of (fuzzer, trial, seed_id, mutation_op, discovery_time_s)."""
-    if not rows:
-        return f"==== {label} ====\n[no seeds available — run seed_bisect.py to populate]\n"
-    out = [f"==== {label} ===="]
-    for i, r in enumerate(rows, 1):
-        fuzzer, trial, seed_id, mutation_op, disc_t = r
-        size, data = _read_seed_bytes(queue_base, target, fuzzer, trial, seed_id, max_bytes)
-        header = f"Seed {i} (size={size if size is not None else '?'} bytes, fuzzer={fuzzer}, trial={trial}"
-        if disc_t is not None and disc_t != -1:
-            header += f", discovered_at={disc_t}s"
-        if mutation_op:
-            header += f", mutation_op={mutation_op}"
-        header += "):"
-        out.append(header)
-        if isinstance(data, bytes):
-            out.append(_hex_dump(data, max_bytes))
-        else:
-            out.append(f"  {data}")
-    return "\n".join(out) + "\n"
-
-
-def cmd_evidence_per_branch(args):
-    """Per-branch structured prompt for feature-hypothesis-generator.
-
-    Keyed on (target, branch_id). Collapses ALL canonical pairs satisfying the
-    >=8/>=8 rule (winner_resolved >= --winner-threshold AND loser_blocked >=
-    --loser-threshold) at this branch into a single prompt. Hypothesis and
-    verification are scoped to those decisive pairs and their fuzzers. The
-    other canonical fuzzers appear as REFERENCE context only.
-    """
-    conn = open_db(args.db)
-
-    br = conn.execute(
-        "SELECT target, file, function, line, col, blocked_side, source_line "
-        "FROM branches WHERE branch_id=?",
-        (args.branch_id,),
-    ).fetchone()
-    if br is None:
-        print(f"no branch with id={args.branch_id}", file=sys.stderr)
-        sys.exit(2)
-    target, file_path, function, line, col, blocked_side, source_line = br
-    if args.target and target != args.target:
-        print(f"branch {args.branch_id} is in target={target}, not {args.target}",
-              file=sys.stderr)
-        sys.exit(2)
-
-    where_extra = " AND s.admissible = 1" if args.admissible_only else ""
-    decisive_rows = conn.execute(
-        f"""SELECT s.subject_id, s.A, s.B, s.delta_technique, s.admissible,
-                   sb.n_A_resolved, sb.n_A_blocked, sb.n_A_unreached,
-                   sb.n_B_resolved, sb.n_B_blocked, sb.n_B_unreached,
-                   sb.avg_dur_A, sb.avg_dur_B, sb.avg_hits_A, sb.avg_hits_B,
-                   sb.prob_div, sb.dur_div, sb.hit_div,
-                   s.delta_auc, s.p_auc, s.delta_final, s.p_final
-            FROM subject_branches sb
-            JOIN study_subjects s USING(subject_id)
-            WHERE sb.branch_id = ?
-              AND ((sb.n_A_resolved >= ? AND sb.n_B_blocked >= ?)
-                OR (sb.n_B_resolved >= ? AND sb.n_A_blocked >= ?))
-                  {where_extra}
-            ORDER BY ABS(IFNULL(sb.prob_div,0)) DESC, s.subject_id""",
-        (args.branch_id,
-         args.winner_threshold, args.loser_threshold,
-         args.winner_threshold, args.loser_threshold),
-    ).fetchall()
-    if not decisive_rows:
-        print(
-            f"no decisive canonical pair at (target={target}, branch={args.branch_id}) "
-            f"under >={args.winner_threshold}/>={args.loser_threshold} rule "
-            f"(admissible_only={args.admissible_only})",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
-    pairs = []
-    for d in decisive_rows:
-        (sid, A, B, delta, adm,
-         A_res, A_blk, A_unr, B_res, B_blk, B_unr,
-         dur_A, dur_B, hits_A, hits_B,
-         prob_div, dur_div, hit_div,
-         dauc, pauc, dfin, pfin) = d
-        if A_res >= args.winner_threshold and B_blk >= args.loser_threshold:
-            direction, winner, loser = "A>B", A, B
-            w_res, w_blk, w_unr = A_res, A_blk, A_unr
-            l_res, l_blk, l_unr = B_res, B_blk, B_unr
-            w_dur, l_dur = dur_A, dur_B
-            w_hits, l_hits = hits_A, hits_B
-        else:
-            direction, winner, loser = "B>A", B, A
-            w_res, w_blk, w_unr = B_res, B_blk, B_unr
-            l_res, l_blk, l_unr = A_res, A_blk, A_unr
-            w_dur, l_dur = dur_B, dur_A
-            w_hits, l_hits = hits_B, hits_A
-        pairs.append({
-            "subject_id": sid, "A": A, "B": B, "delta": delta, "admissible": adm,
-            "direction": direction, "winner": winner, "loser": loser,
-            "w_res": w_res, "w_blk": w_blk, "w_unr": w_unr,
-            "l_res": l_res, "l_blk": l_blk, "l_unr": l_unr,
-            "w_dur": w_dur, "l_dur": l_dur,
-            "w_hits": w_hits, "l_hits": l_hits,
-            "prob_div": abs(prob_div) if prob_div is not None else 0.0,
-            "dur_div":  abs(dur_div)  if dur_div  is not None else 0.0,
-            "hit_div":  abs(hit_div)  if hit_div  is not None else 0.0,
-            "delta_auc": dauc, "p_auc": pauc,
-            "delta_final": dfin, "p_final": pfin,
-        })
-
-    involved_fuzzers = sorted({fz for p in pairs for fz in (p["winner"], p["loser"])})
-    reference_fuzzers = [fz for fz in CANONICAL_FUZZERS_LIST if fz not in involved_fuzzers]
-
-    # Per-fuzzer counts at this branch, derived from subject_branches.
-    # Each canonical fuzzer is in 2 subjects; whichever admitted the branch
-    # has the counts. Reference fuzzers (no admitting subject) are absent.
-    counts = {}
-    for fz, R, B_, U in conn.execute(
-        """
-        SELECT s.A, sb.n_A_resolved, sb.n_A_blocked, sb.n_A_unreached
-          FROM subject_branches sb
-          JOIN study_subjects s ON sb.subject_id = s.subject_id
-         WHERE sb.branch_id = ?
-        UNION
-        SELECT s.B, sb.n_B_resolved, sb.n_B_blocked, sb.n_B_unreached
-          FROM subject_branches sb
-          JOIN study_subjects s ON sb.subject_id = s.subject_id
-         WHERE sb.branch_id = ?
-        """,
-        (args.branch_id, args.branch_id),
-    ).fetchall():
-        counts[fz] = (R, B_, U)
-
-    pair_seeds = []
-    for p in pairs:
-        winner_seeds = conn.execute(
-            """SELECT fuzzer, trial, seed_id, mutation_op, discovery_time_s
-               FROM resolving_seeds
-               WHERE branch_id=? AND fuzzer=?
-               ORDER BY discovery_time_s ASC, seed_id ASC LIMIT ?""",
-            (args.branch_id, p["winner"], args.seeds_per_side),
-        ).fetchall()
-        loser_seeds = conn.execute(
-            """SELECT fuzzer, trial, seed_id, mutation_op, discovery_time_s
-               FROM blocking_seeds
-               WHERE branch_id=? AND fuzzer=?
-               ORDER BY discovery_time_s ASC, seed_id ASC LIMIT ?""",
-            (args.branch_id, p["loser"], args.seeds_per_side),
-        ).fetchall()
-        pair_seeds.append((winner_seeds, loser_seeds))
-
-    conn.close()
-
-    library_path = _P(args.mechanism_library)
-    mechanisms = {fz: _mechanism_for(library_path, fz) for fz in involved_fuzzers}
-    queue_base = _P(args.queue_base)
-    source_window = _read_source_window(target, file_path, line, args.source_lines)
-
-    side_b_label = blocked_side  # T or F (the blocked side, where winner flips to)
-    side_a_label = "F" if blocked_side == "T" else "T"
-    side_a_branch = "false branch" if side_a_label == "F" else "true branch"
-    side_b_branch = "false branch" if side_b_label == "F" else "true branch"
-
-    out = []
-    out.append("==== BLOCKER ====")
-    out.append(f"Target: {target}")
-    out.append(f"Branch ID: {args.branch_id}")
-    out.append(f"Location: {file_path}:{line}:{col}")
-    out.append(f"Enclosing function: {function}")
-    out.append(f"Source line: {source_line}")
-    out.append(f"Globally blocked side: {blocked_side}  ({side_b_branch})")
-    out.append("")
-
-    out.append("==== TRIAL VECTOR (per fuzzer, n=10 trials) ====")
-    out.append(f"{'fuzzer':<24} {'resolved':>9} {'blocked':>8} {'unreached':>10}  role")
-    for fz in CANONICAL_FUZZERS_LIST:
-        c = counts.get(fz)
-        r_, b_, u_ = (c if c else ("?", "?", "?"))
-        roles = []
-        for p in pairs:
-            if p["winner"] == fz:
-                roles.append(f"winner ({p['delta']} vs {p['loser']})")
-            if p["loser"] == fz:
-                roles.append(f"loser ({p['delta']} vs {p['winner']})")
-        role_str = "; ".join(roles) if roles else "REFERENCE"
-        out.append(f"{fz:<24} {str(r_):>9} {str(b_):>8} {str(u_):>10}  {role_str}")
-    out.append("")
-    out.append(f"INVOLVED fuzzers (synthetic-verification scope): {involved_fuzzers}")
-    out.append(f"REFERENCE fuzzers (auxiliary context only):     {reference_fuzzers}")
-    out.append("")
-
-    out.append(f"==== DECISIVE PAIRS ({len(pairs)}) ====")
-    for i, p in enumerate(pairs, 1):
-        adm_tag = "admissible" if p["admissible"] else "NOT admissible"
-        out.append(f"--- Pair {i}: {p['winner']} > {p['loser']}  [delta: {p['delta']}] ---")
-        out.append(f"  subject {p['subject_id']}  ({p['A']} vs {p['B']}, {adm_tag})")
-        out.append(f"  winner: resolved={p['w_res']}/10  blocked={p['w_blk']}  unreached={p['w_unr']}")
-        out.append(f"  loser:  resolved={p['l_res']}/10  blocked={p['l_blk']}  unreached={p['l_unr']}")
-        if p["w_dur"] is not None and p["l_dur"] is not None:
-            out.append(f"  avg duration blocked: winner={p['w_dur']:.2f}h  loser={p['l_dur']:.2f}h")
-        if p["w_hits"] is not None and p["l_hits"] is not None:
-            out.append(f"  avg hitcount on branch: winner={p['w_hits']:.0f}  loser={p['l_hits']:.0f}")
-        out.append(f"  prob_div={p['prob_div']:.2f}  dur_div={p['dur_div']:.2f}h  hit_div={p['hit_div']:.0f}")
-        out.append(f"  subject-level: delta_AUC={p['delta_auc']}  p_AUC={p['p_auc']}  "
-                   f"delta_Final={p['delta_final']}  p_final={p['p_final']}")
-    out.append("")
-
-    out.append("==== SOURCE CONTEXT ====")
-    out.append(f"# {file_path} (lines {max(1, line-args.source_lines)}-"
-               f"{line+args.source_lines}, blocker at line {line})")
-    out.append(source_window)
-    out.append("")
-
-    for i, (p, (winner_seeds, loser_seeds)) in enumerate(zip(pairs, pair_seeds), 1):
-        out.append(f"==== PAIR {i} SEEDS — {p['winner']} > {p['loser']} ({p['delta']}) ====")
-        out.append(_format_seed_block(
-            f"Winner ({p['winner']}) — resolving seeds (take {side_b_branch})",
-            winner_seeds, queue_base, target, args.seed_bytes,
-        ))
-        out.append(_format_seed_block(
-            f"Loser ({p['loser']}) — blocking seeds (take {side_a_branch})",
-            loser_seeds, queue_base, target, args.seed_bytes,
-        ))
-
-    out.append("==== MECHANISM CONTEXT (involved fuzzers only) ====")
-    for fz in involved_fuzzers:
-        out.append(f"--- {fz} ---")
-        out.append(mechanisms.get(fz, f"[no mechanism entry for {fz}]"))
-        out.append("")
-
-    out.append("==== TASK ====")
-    if len(pairs) == 1:
-        p = pairs[0]
-        task = (
-            f"Produce ONE program-feature hypothesis explaining why {p['winner']} resolves "
-            f"this branch while {p['loser']} does not, attributable to the {p['delta']} "
-            f"technique delta. Reason over winner-resolving (Side-B) vs loser-blocking "
-            f"(Side-A) byte diffs at constraining offsets and the source CMP shape.\n\n"
-            f"Search templates/ for existing matches before building a new template; "
-            f"if a template fits, output its template_id and stop. Otherwise emit "
-            f"templates/<feature_id>/{{template.c, params.json, feature_spec.json}}.\n\n"
-            f"VERIFICATION SCOPE: the synthetic experiment MUST run only the involved "
-            f"fuzzers ({involved_fuzzers}). The reference fuzzers ({reference_fuzzers}) "
-            f"are auxiliary context only and do NOT enter the verdict — feel free to "
-            f"comment on whether their trial counts CORROBORATE or COMPLICATE the story, "
-            f"but they are not the test."
-        )
-    else:
-        deltas = sorted({p["delta"] for p in pairs})
-        task = (
-            f"This branch has {len(pairs)} decisive pairs spanning deltas: {deltas}.\n\n"
-            f"STEP 1 — Decide explicitly: do these pairs collapse to ONE feature (a "
-            f"single mechanism axis explains every decisive pair simultaneously), or do "
-            f"they imply MULTIPLE features (independent axes, one per pair)? Justify in "
-            f"feature_spec.json's hypothesis section.\n\n"
-            f"STEP 2 — Produce one OR more program-feature hypotheses accordingly. For "
-            f"each, reason over the per-pair byte diffs (winner-resolving Side-B vs "
-            f"loser-blocking Side-A) and the source CMP shape.\n\n"
-            f"STEP 3 — Search templates/ for existing matches before building. If "
-            f"templates fit, output their template_ids. Otherwise emit "
-            f"templates/<feature_id>/{{template.c, params.json, feature_spec.json}} per "
-            f"surviving hypothesis.\n\n"
-            f"VERIFICATION SCOPE: synthetic experiments MUST run only the involved "
-            f"fuzzers ({involved_fuzzers}). Reference fuzzers ({reference_fuzzers}) are "
-            f"auxiliary context — they may CORROBORATE the story (e.g., reference fuzzer "
-            f"behaves consistently with the proposed mechanism) but do not enter the verdict."
-        )
-    out.append(task)
-
-    text = "\n".join(out)
-    if args.output == "-":
-        sys.stdout.write(text)
-    else:
-        _P(args.output).write_text(text)
-        print(f"wrote evidence prompt to {args.output} ({len(text)} chars)",
-              file=sys.stderr)
+# Evidence-prompt assembly (the `evidence-per-branch` subcommand and
+# its helpers — SOURCE CONTEXT overlay, byte diff, hit-count and
+# branch-divergence sections, etc.) lives in tools/evidence_prompt.py.
+# Its CLI is wired into main() below via evidence_prompt.register_subparser.
 
 
 # ── main ────────────────────────────────────────────────────────────────────
@@ -1144,36 +802,11 @@ def main():
                    default="strict")
     s.set_defaults(func=cmd_top)
 
-    s = sub.add_parser(
-        "evidence-per-branch",
-        help="emit per-branch structured prompt for feature-hypothesis-generator: "
-             "collapses ALL canonical pairs satisfying >=8/>=8 at this branch into "
-             "one prompt; reports the full 4-fuzzer trial vector with role tags. "
-             "Hypothesis and verification are scoped to decisive pairs only.",
-    )
-    s.add_argument("--target", required=True,
-                   help="target name (sanity-checked against branches.target)")
-    s.add_argument("--branch-id", required=True, type=int)
-    s.add_argument("--winner-threshold", type=int, default=8,
-                   help="winner must have n_resolved >= THIS (default 8)")
-    s.add_argument("--loser-threshold", type=int, default=8,
-                   help="loser must have n_blocked >= THIS (default 8)")
-    s.add_argument("--admissible-only", action="store_true", default=True,
-                   help="restrict to admissible subjects (default ON)")
-    s.add_argument("--no-admissible-only", action="store_false",
-                   dest="admissible_only",
-                   help="include all subjects regardless of admissibility")
-    s.add_argument("--mechanism-library", default=str(DEFAULT_MECHANISM_LIB),
-                   help=f"default {DEFAULT_MECHANISM_LIB}")
-    s.add_argument("--queue-base", default=str(DEFAULT_QUEUE_BASE),
-                   help=f"default {DEFAULT_QUEUE_BASE}")
-    s.add_argument("--source-lines", type=int, default=30)
-    s.add_argument("--seeds-per-side", type=int, default=5,
-                   help="winner-resolving + loser-blocking seeds per pair")
-    s.add_argument("--seed-bytes", type=int, default=64)
-    s.add_argument("--output", default="-",
-                   help="output path or - for stdout (default)")
-    s.set_defaults(func=cmd_evidence_per_branch)
+    # evidence-per-branch lives in evidence_prompt.py to keep this file
+    # focused on schema/population concerns; the subparser is installed
+    # via the registration hook so the CLI surface stays identical.
+    import evidence_prompt
+    evidence_prompt.register_subparser(sub)
 
     args = p.parse_args()
     args.func(args)
