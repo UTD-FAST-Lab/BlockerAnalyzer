@@ -1,0 +1,151 @@
+{
+  "feature_id": "i2s_multi_arm_dictionary_roulette_crowds_target",
+  "mechanism_family": "I2S_anti",
+  "mechanism_label": "multi_arm_dictionary_roulette_crowds_target",
+  "definition": "I2S populates its substitution dictionary with constants from all K arms of a multi-way switch simultaneously; uniform draws across the full dictionary lock the corpus into whichever competing arm gains residency first, crowding out the specific target arm.",
+  "n_members": 1,
+  "involved_fuzzers": [
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "harfbuzz_9459",
+      "target": "harfbuzz",
+      "branch_id": 9459,
+      "analysis_path": "prompts/--RB/00_harfbuzz_9459.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shaper-myanmar-machine.hh",
+      "function": "find_syllables_myanmar(hb_buffer_t*)",
+      "line": "518",
+      "source_line": "\tcase 9:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "9",
+        "operand_width_bytes": 1,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2S populates a large dictionary with all Ragel switch case constants; uniform draws from this dictionary lock vpc's corpus into whichever sister arm (3 or 5) gains residency first, crowding out the case-9 target arm.",
+        "one_line": "I2S dictionary roulette across K switch arms crowds out target arm"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input bytes driving the Myanmar Ragel state machine to a transition action whose trans_actions[_trans] dispatches to case 9 (te=p;p--; non_myanmar_cluster).",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "A byte sequence that, when fed into the Myanmar syllable Ragel machine (a switch dispatcher over _myanmar_syllable_machine_trans_actions[_trans] with arms case 3/5/6/4/8/7/9), drives the state machine into a transition whose action index is exactly 9. The winner seeds carry a recurring multi-byte signature (e.g., `00 ff 01 20 49 0c`, `20 4a 0c 00 00 00`, and a `|iahT|||||` byte run at offsets ~0x10-0x23) that maps onto myanmar_category values producing a trans_actions[_trans]==9 dispatch.",
+            "why_winner_satisfies": "value_profile retains an independent CMP_MAP Hamming-distance bucket per case-arm comparison in the Ragel-generated switch and per-state transition comparison. Each input that reduces operand distance against the case-9 constant adds a new bucket, monotonically guiding the corpus toward case 9; resolved 10/10 in 0 unreached trials.",
+            "why_loser_doesnt": "value_profile_cmplog logs ALL of the Ragel case constants and trans-key/targ/action literals into its input-to-state dictionary. The corresponding per-mutation substitution draws uniformly from this dictionary, locking the corpus into whichever sister arm (3 or 5 \u2014 visible as [B] hit in the source overlay at lines 506-512) establishes residency first. This pollutes vpc's queue away from the case-9 target arm: 0/10 resolved, all 10 trials block for an avg 11.95h.",
+            "mechanism_attribution": "value_profile wins via CMP_MAP gradient feedback on the Ragel state-machine CMPs: each input that produces a closer-matching operand pair adds a new CMP_MAP bucket and is preserved as corpus, giving per-arm Hamming-distance gradients that guide the search to case 9. value_profile_cmplog has the same CMP_MAP signal but is dominated by input-to-state dictionary roulette: the K-arm switch populates the I2S dictionary with K case constants and per-state-machine literals, and uniform per-mutation draws across that dictionary make hitting the case-9 target arm a roulette outcome that monocultures vpc's corpus into sister arms (cases 3 and 5 hit in [B] under L). The CMP_MAP gradient mechanism here is direction-asymmetric: against vp's gradient, the added I2S layer in vpc imposes dictionary-roulette overhead on top of a working gradient \u2014 pure loss. Attribution is to CMP_MAP gradient as the win mechanism; the loss mechanism in vpc is the same gradient being overridden by dictionary draws."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is case 9 of a switch dispatcher over _myanmar_syllable_machine_trans_actions[_trans], a Ragel state-machine action table.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L493 and L518",
+            "exact_quote": "switch ( _myanmar_syllable_machine_trans_actions[_trans] ) {"
+          },
+          {
+            "claim": "Case 9 is the unique W-only arm; cases 3 and 5 are hit by both W and L (sister arms reached by both sides).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L506-L520",
+            "exact_quote": "[B]   506  \tcase 3:"
+          },
+          {
+            "claim": "Case 9 lines (518-521) are [W] only \u2014 winner-resolving seeds take this arm; loser-blocking seeds never reach it.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L518-L521",
+            "exact_quote": "[W]   518  \tcase 9: <-- BLOCKER"
+          },
+          {
+            "claim": "At the case-9 branch site, W sees the true side fire (T=14 F=82) while L sees only the false side (T=0 F=160) \u2014 case 9 is L-blocked.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L 518",
+            "exact_quote": "d=1   L 518  T=14 F=82  T=0 F=160  case 9:  <-- BLOCKER"
+          },
+          {
+            "claim": "value_profile resolves 10/10 trials with 0 unreached, value_profile_cmplog resolves 0/10 with 10 blocked at avg 11.95h.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0\n  avg duration blocked: winner=2.70h  loser=11.95h"
+          },
+          {
+            "claim": "The single technique difference between winner (value_profile) and loser (value_profile_cmplog) is I2S \u2014 vpc adds CmpLogObserver + I2SRandReplace on top of vp's CMP_MAP.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 delta",
+            "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "value_profile's mutators do NOT include I2SRandReplace \u2014 it relies on CMP_MAP gradient feedback only.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile_cmplog adds I2SRandReplace on top of vp's CMP_MAP, so the only technique it carries that vp lacks is I2S.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile's feedback adds a new CMP_MAP-distance bucket per closer-matching operand pair, producing per-arm Hamming gradients that guide the corpus to case 9.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "Winner-resolving seeds carry a recurring multi-byte byte-pattern signature at consistent offsets (e.g., 0x14-0x1f) that the loser seeds entirely lack.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x14-0x23",
+            "exact_quote": "0x001a  7c(|)x5 49(I)x1                     1a(.)x3 00(.)x2 b1(.)x1 10(.)x1 +1u  DIFFER"
+          },
+          {
+            "claim": "Loser seeds (e.g. the 'kezh-hant-mo' seed) carry locale-tag-like ASCII payloads that drive the state machine to non-case-9 arms (cases 3/5).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 1",
+            "exact_quote": "68 2d 68 61 6e 74 2d 6d 6f 00 72 6e 20 20 20 20   h-hant-mo.rn    "
+          },
+          {
+            "claim": "Winner seeds repeatedly carry the pattern `00 ff 01 20 49 0c` and the `|iahT|||||` byte run, a signature absent from L.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1 offsets 0x00-0x1f",
+            "exact_quote": "0000: 00 ff 01 20 49 0c 00 00 00 04 20 00 ff 01 20 4a   ... I..... ... J"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic K-arm switch over a multi-byte case constant (vp_gradient_derived_operand-style) where vp resolves and vpc also resolves at the same rate (>=8/10 each) when the case constants are added to vpc's I2S dictionary would refute the dictionary-roulette-trap claim. Equivalently: if a winning vpc seed's ancestor chain shows an I2S-floor row (dash row) at the case-9 substitution depth \u2014 meaning I2S actually substituted the case-9 constant into the input \u2014 vpc would resolve, not block."
+        },
+        "weakest_evidence_point": "The byte-diff alone does not pin down WHICH input bytes flow through buffer->info to produce a myanmar_category sequence that lands on trans_actions[_trans]==9 \u2014 the Ragel-table indirection (info[p].myanmar_category() -> _keys/_inds -> trans_targs -> trans_actions) blocks straightforward dataflow inference, so the case-9 byte signature is inferred from W/L seed-set differences rather than proven by trace.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

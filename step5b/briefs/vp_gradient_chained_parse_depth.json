@@ -1,0 +1,234 @@
+{
+  "feature_id": "vp_gradient_chained_parse_depth",
+  "mechanism_family": "VP_pro",
+  "mechanism_label": "chained_grammar_depth_gradient",
+  "definition": "CMP_MAP gradient accumulates partial-match feedback across many sequential single-byte or string comparisons in a multi-step grammar or state machine, driving corpus depth far beyond what edge-only feedback reaches.",
+  "n_members": 2,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "value_profile"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "value_profile",
+    "has_axis": [
+      "value_profile",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "cmplog",
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libxml2_2313",
+      "target": "libxml2",
+      "branch_id": 2313,
+      "analysis_path": "prompts/-B-R/02_libxml2_2313.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "parser.c:xmlFatalErr",
+      "line": "256",
+      "source_line": "        case XML_ERR_INVALID_HEX_CHARREF:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "XML_ERR_INVALID_HEX_CHARREF",
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "CMP_MAP gradient rewards intermediate parsing progress through chained upstream string comparisons, driving corpus 10x-70x deeper into the XML parsing pipeline than cmplog's unguided I2S substitution reaches.",
+        "one_line": "VP gradient climbs multi-step XML parse chain to reach error enum arm"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "XML input that drives the parser to fire xmlFatalErr with the integer enum value XML_ERR_INVALID_HEX_CHARREF (a malformed &#x... hex character reference inside the parsed document).",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "An XML document body that exercises the entity/character-reference parsing path deeply enough to invoke xmlFatalErr with the specific enum constant XML_ERR_INVALID_HEX_CHARREF \u2014 i.e. an input containing structures like '<?xml' declarations, DTDs, or entity references that lead the parser to scan a malformed hex character reference. The blocking branch is the integer-switch arm 'case XML_ERR_INVALID_HEX_CHARREF:' on the runtime value of the parameter 'error' passed by an upstream caller; the input must drive a caller path that passes that exact enum value.",
+            "why_winner_satisfies": "value_profile_cmplog's CMP_MAP gradient feedback rewards inputs that bring intermediate-stage CMP operands (e.g. the byte-by-byte comparisons inside xmlIsNameChar, xmlParseNCName, xmlParseStartTag2, xmlParseCharData, xmlParseCharDataComplex) closer to their target tokens, letting the corpus climb the multi-step XML parsing pipeline and reach a caller that fires XML_ERR_INVALID_HEX_CHARREF. The HIT-COUNT DIVERGENCE table shows W-side invocations of these upstream parsing functions dominate L by 10x\u201370x (e.g. xmlIsNameChar 560 vs 0; xmlParseNCName 401 vs 29), confirming the winner navigates deeper into the parser. value_profile_cmplog resolved 10/10 trials with avg duration 4.65h.",
+            "why_loser_doesnt": "cmplog has input-to-state substitution (which can substitute the integer constant XML_ERR_INVALID_HEX_CHARREF directly into the input where its bytes appear in a CMP buffer) but lacks the CMP_MAP gradient. Without the gradient feedback on the many intermediate string/byte comparisons in the upstream parsing chain, cmplog only stochastically navigates to the caller that produces this specific error enum \u2014 it resolved only 1/10 trials (in trial 9, after 426s of mutations), while value_profile_cmplog resolved every trial.",
+            "mechanism_attribution": "CMP_MAP gradient. The technique difference between winner (value_profile_cmplog) and loser (cmplog) is value_profile \u2014 i.e., the CMP_MAP/Hamming-similarity feedback. Both fuzzers carry input-to-state substitution, so the integer switch-case substitution capability is shared; what cmplog lacks is the upstream gradient signal that rewards inputs incrementally approaching deeper parsing states. The 10x\u201370x W/L hit-count divergence on upstream NameChar/NCName/StartTag2/CharData functions is the direct fingerprint of CMP_MAP guiding corpus growth along the parsing chain that culminates in firing XML_ERR_INVALID_HEX_CHARREF."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is a switch arm 'case XML_ERR_INVALID_HEX_CHARREF:' inside xmlFatalErr, gating on the integer 'error' parameter.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "parser.c:255-256",
+            "exact_quote": "switch (error) {\n[W]   256          case XML_ERR_INVALID_HEX_CHARREF: <-- BLOCKER"
+          },
+          {
+            "claim": "The decisive pair is value_profile_cmplog > cmplog with delta=value_profile, where vpc resolved 10/10 and cmplog resolved 1/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "--- Pair 1: value_profile_cmplog > cmplog  [delta: value_profile] ---\n  subject 7  (value_profile_cmplog vs cmplog, admissible)\n  winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0"
+          },
+          {
+            "claim": "Winner inputs reach deep XML parsing functions far more than loser inputs, by 10x to 70x on upstream NameChar/NCName/StartTag2/CharData routines.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "xmlIsNameChar / xmlParseNCName / xmlParseStartTag2 rows",
+            "exact_quote": "     560         0  parser.c:xmlIsNameChar  (/src/libxml2/parser.c:3183-3219)\n     401        29  parser.c:xmlParseNCName  (/src/libxml2/parser.c:3489-3535)\n     250        22  parser.c:xmlParseQName  (/src/libxml2/parser.c:8884-8953)\n     219         3  parser.c:xmlParseNCNameComplex  (/src/libxml2/parser.c:3415-3471)\n     209         3  parser.c:xmlIsNameStartChar  (/src/libxml2/parser.c:3152-3180)\n     198        14  parser.c:nameNsPush  (/src/libxml2/parser.c:1820-1860)\n     198        14  parser.c:spacePush  (/src/libxml2/parser.c:1945-1962)\n     198        14  parser.c:xmlParseStartTag2  (/src/libxml2/parser.c:9355-9774)"
+          },
+          {
+            "claim": "Winner seeds carry XML constructs like '<?xml ...' declarations, DTD entity declarations and xlink attributes; loser seeds carry similar XML but never trip the XML_ERR_INVALID_HEX_CHARREF arm.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seeds 1, 3",
+            "exact_quote": "Seed 1 (id=96e84b345c730043, size=584 bytes, fuzzer=cmplog, trial=9, discovered_at=426s, mutation_op=TokenInsert,DwordAddMutator,DwordAddMutator,ByteIncMutator,BytesRandSetMutator,BytesRandSetMutator,DwordInterestingMutator):\n  0000: 69 6d 70 6c 65 27 0a 20 20 20 20 20 20 20 20 20   imple'.         \n  0010: 20 20 20 78 6c 69 6e 6b 3a 68 72 65 66 62 20 28      xlink:hrefb ("
+          },
+          {
+            "claim": "On the branch line itself, winner-side seeds take the true side 17 times across 71 invocations of xmlFatalErr; loser-side seeds take it 0 times across 27 invocations.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 line 256",
+            "exact_quote": "d=1   L 256  T=17 F=54  T=0 F=27  case XML_ERR_INVALID_HEX_CHARREF:  <-- BLOCKER"
+          },
+          {
+            "claim": "value_profile_cmplog's instrumentation adds CMP_MAP gradient buckets on top of cmplog's I2S substitution; both fuzzers share I2SRandReplace, so the technique difference between them is exactly the value_profile feedback.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog block",
+            "exact_quote": "**Instrumentation**: union of cmplog and value_profile \u2014 edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets.\n\n**Feedback**: edge-bucket + CMP_MAP-bucket signals."
+          },
+          {
+            "claim": "cmplog's mutator stack is naive's havoc+token plus I2SRandReplace; it has no CMP_MAP gradient feedback, so it cannot incrementally climb partial-match comparison chains.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog block",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness that exposes the same integer switch-arm shape (multi-case switch on a runtime enum parameter, reachable only via a deep multi-step CMP chain whose intermediate comparisons can be tracked by CMP_MAP) where value_profile and value_profile_cmplog do NOT outperform naive and cmplog at long horizons (e.g. dose-response curves with overlapping medians at all chain depths). That would mean the CMP_MAP gradient confers no advantage at the upstream chain and the observed divergence at this branch must be due to some other factor."
+        },
+        "weakest_evidence_point": "The argument that CMP_MAP gradient (rather than some other byproduct of vpc's larger feedback bucket set) is what drives the 10x-70x upstream hit-count divergence is inferred from the technique-delta and the mechanism library paragraphs, not from a direct CMP_MAP bucket trace.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_2686",
+      "target": "libxml2",
+      "branch_id": 2686,
+      "analysis_path": "prompts/B-R-/01_libxml2_2686.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "parser.c:xmlParseLookupInternalSubset",
+      "line": "11261",
+      "source_line": "        else if (state == ']') {",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "']'",
+        "operand_width_bytes": 1,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "CMP_MAP records per-character proximity buckets at every single-byte state-transition gate in the DOCTYPE state machine, building a gradient through the chained character comparisons that naive's edge-only counter cannot signal.",
+        "one_line": "VP gradient navigates chained single-byte state-machine gates toward bracket sequence"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must drive the DTD-scan state machine to state=']' by containing a complete '<!DOCTYPE ... [...]' internal-subset structure.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>naive (value_profile)"
+            ],
+            "what_input_feature": "A well-formed DOCTYPE prologue followed by an internal-subset opener: the byte stream must traverse the xmlParseLookupInternalSubset state machine through state=0 -> state='\"' (via *cur=='\"' at line 11304) -> back to state=0 -> *cur=='[' (also at line 11304, sets state=']') so that the blocker `else if (state == ']')` evaluates true. Equivalently, the input must contain the literal sequence `<!DOCTYPE <name> ... \"...\" ... [` reaching the state-machine's bracket-tracking arm.",
+            "why_winner_satisfies": "value_profile reaches this branch on every trial (resolved=10/10) and the per-role overlay shows it executing lines 11269-11272 (state=0; start=cur; continue;) exclusively \u2014 meaning value_profile actually enters the state==']' arm, encounters a non-']' non-'>' non-blank byte, and continues the scan. At the L11262 sub-branch the winner has T=0 F=24, i.e. it entered the state==']' block 24 times.",
+            "why_loser_doesnt": "naive blocks 8/10 trials and is unreached on 2/10. Its hitcount on the blocker is 0. The overlay shows lines 11263-11265 (the L-only success-path of state==']' && *cur=='>') reached only by loser-blocking seeds \u2014 i.e. the few times the loser enters the block it immediately exits via return(1), while never producing the broader exploration that the winner does. naive lacks any CMP-distance signal so it cannot build a gradient through the chained single-byte character comparisons (*cur=='<', '\"', '\\'', ']', '>', etc.) that gate every state transition; without that gradient, it spends 6.31h on average blocked here vs the winner's 1.10h.",
+            "mechanism_attribution": "value_profile's CMP_MAP records a (PC, Hamming-distance-bucket) entry on every intercepted character-equality CMP. Each distinct byte at *cur produces a new bucket at PCs like L11262 (*cur=='>'), L11267 (IS_BLANK_CH), L11269 (*cur!=']'), L11293 (*cur=='<'), L11304 (*cur=='\"' || '\\'' || ']'). This per-byte feedback rewards inputs that drive each gate one step closer to the target character, building up the multi-step DOCTYPE/internal-subset grammar that naive cannot stumble onto with edge-only feedback. cmplog (I2S substitution) helps less here because each gate is a 1-byte literal comparison rather than a multi-byte magic \u2014 there is little to substitute, but the CMP_MAP buckets still reward proximity."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The decisive pair at this branch is value_profile>naive on the value_profile technique axis (not I2S).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 header",
+            "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+          },
+          {
+            "claim": "value_profile resolves every trial; naive resolves zero and is blocked 8/10.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "naive row + value_profile row",
+            "exact_quote": "naive                            0        8          2  loser (value_profile vs value_profile)\ncmplog                           2        8          0  REFERENCE\nvalue_profile                   10        0          0  winner (value_profile vs naive)"
+          },
+          {
+            "claim": "The blocker is the chained-else-if test against the literal ']' character in the internal-subset scan state machine.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Source line + enclosing function",
+            "exact_quote": "Source line:         else if (state == ']') {"
+          },
+          {
+            "claim": "state is assigned the value ']' when the scan encounters a '[' or other quote/bracket character at line 11304 \u2014 i.e. the input must literally drive the state machine through a '[' (or quote) before this branch can fire.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L11304",
+            "exact_quote": "else if ((*cur == '\"') || (*cur == '\\'') || (*cur == ']')) {\n[B] 11305              state = *cur;"
+          },
+          {
+            "claim": "The function comment explicitly describes the closing-token sequence the state machine is searching for: \"']' S? '>'\".",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L11236",
+            "exact_quote": "Internal subset ends with \"']' S? '>'\" in an unescaped section and"
+          },
+          {
+            "claim": "Winner-only coverage of lines 11270-11272 inside the state==']' block proves the winner reaches and exercises the blocker's true arm, while loser-only coverage of 11263-11265 shows loser entering the block only via the immediate-exit path.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L11262-11272 overlay tags",
+            "exact_quote": "[L] 11263                  ctxt->checkIndex = 0;\n[L] 11264                  ctxt->endCheckState = 0;\n[L] 11265                  return(1);\n[L] 11266              }\n[B] 11267              if (IS_BLANK_CH(*cur)) {\n[B] 11268                  state = ' ';\n[B] 11269              } else if (*cur != ']') {\n[W] 11270                  state = 0;\n[W] 11271                  start = cur;\n[W] 11272                  continue;"
+          },
+          {
+            "claim": "At line 11262 (*cur == '>'), winner enters the state==']' block 24 times vs loser's 4 times \u2014 a 6x divergence in how often the gate fires.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L11262 row",
+            "exact_quote": "d=1   L11262  T=0 F=24  T=2 F=2  if (*cur == '>') {"
+          },
+          {
+            "claim": "Winner spends 1.10h average on average blocked vs loser's 6.31h, and prob_div=1.00 confirms a clean per-branch separation.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 statistics",
+            "exact_quote": "avg duration blocked: winner=1.10h  loser=6.31h\n  avg hitcount on branch: winner=12  loser=0\n  prob_div=1.00  dur_div=5.21h  hit_div=12"
+          },
+          {
+            "claim": "value_profile's instrumentation adds a CMP_MAP keyed by (PC, operand-distance bucket) on top of naive's edge counters \u2014 direct per-byte gradient feedback at every character comparison.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile paragraph",
+            "exact_quote": "naive's edge counters **plus** integer-CMP\ninterception, but instead of buffering operands per execution (cmplog),\neach CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket)"
+          },
+          {
+            "claim": "naive has only edge-bucket signal from the SanitizerCoverage edge counters and has no CMP introspection of any kind.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive paragraph",
+            "exact_quote": "**Feedback**: per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness that gates entry to its trap behind a chained-character-equality state machine over single-byte literals (like ']', '\"', '[', '<', '>') would show naive >= value_profile resolution rate at every dose. If equivalently, removing the CMP_MAP feedback from value_profile (replacing with edge-only) leaves resolution rates indistinguishable from naive, then the CMP_MAP gradient is not the active mechanism."
+        },
+        "weakest_evidence_point": "The single-byte character CMPs in this state machine are the weakest case for the CMP_MAP-gradient story: a Hamming-distance bucket on a 1-byte operand only distinguishes 8 distance classes, providing less gradient than multi-byte comparisons would \u2014 yet the divergence here is among the cleanest in the dataset (prob_div=1.0). The structural-grammar-via-CMP_MAP story may be incomplete; there could be a secondary feedback path (e.g. CMP_MAP buckets on the multi-byte STARTUP comparisons like the L11553 (cur=='<') && (next=='?') chain) doing most of the work upstream.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

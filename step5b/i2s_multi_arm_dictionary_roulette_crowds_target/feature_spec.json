@@ -1,0 +1,63 @@
+{
+  "id": "i2s_multi_arm_dictionary_roulette_crowds_target",
+  "kind": "local",
+
+  "pair": {
+    "primary": {
+      "A": "value_profile",
+      "B": "value_profile_cmplog",
+      "axis_differ": "I2S"
+    },
+    "involved_fuzzers": ["value_profile", "value_profile_cmplog"],
+    "has_axis": ["value_profile_cmplog"],
+    "lacks_axis": ["value_profile"]
+  },
+
+  "hypothesis": {
+    "mechanism": "This is an ANTI-axis (I2S_anti) feature: the I2S axis HURTS. Both involved fuzzers carry the value_profile CMP_MAP gradient, which records a per-comparison Hamming-distance bucket for the 4-byte selector word and preserves any input that gets the selector closer to the target arm's case constant — a monotone gradient that resolves the K-way switch regardless of K. value_profile_cmplog additionally logs ALL K case constants into its input-to-state (I2S) substitution dictionary; each per-mutation I2S draw splices one of those K constants into the selector bytes, with only ~1/K probability of being the target. The K-1 sister-arm substitutions monoculture vpc's corpus into a non-target arm, overriding the working gradient. Because the I2S axis is the ONLY technique vpc adds on top of vp, the divergence is attributable to I2S, and the harm scales with K (the size of the competing dictionary).",
+    "program_feature_parameter": "ARM_COUNT (compile-time -D) — the number K of competing switch arms / distinct case constants loaded into the I2S dictionary; exactly one arm is the trap target.",
+    "predicted_direction": "lacks_axis fuzzer (value_profile) outperforms has_axis fuzzer (value_profile_cmplog); the value_profile − value_profile_cmplog gap GROWS with ARM_COUNT. NOTE: this is the inverse of the default has_axis>lacks_axis stratification because the axis is anti (I2S harms here).",
+    "predicted_endpoints": {
+      "ARM_COUNT=2": "value_profile resolves fast (gradient). value_profile_cmplog's I2S draw hits the target ~1/2 the time, so the roulette barely competes with its own gradient: vp ≈ vpc.",
+      "ARM_COUNT=16": "value_profile still resolves (gradient is K-independent). value_profile_cmplog's I2S draw hits the target only ~1/16 the time; sister-arm substitutions monoculture its corpus, suppressing crashes — vpc near 0, vp >> vpc."
+    },
+    "expected_curve_per_fuzzer": {
+      "value_profile": "flat-high (resolves at every ARM_COUNT; gradient is independent of K)",
+      "value_profile_cmplog": "monotone-decreasing in ARM_COUNT (I2S dictionary roulette suppresses crashes as K grows)"
+    },
+    "tradeoff_observation": "HONESTY CAVEAT — the vp-vs-vpc roulette dynamic is hard to capture faithfully in a micro-harness. The harness can populate vpc's I2S dictionary with K case constants (the switch makes all K comparisons CmpLog-visible) and gives both fuzzers a per-arm CMP_MAP gradient. But the LOSER mechanism in the brief is an emergent corpus-scheduling effect (sister arms gaining residency first and monoculturing the queue), which depends on the scheduler/feedback interplay over a campaign and may NOT reproduce on a single 4-byte-selector toy. A plausible failure mode is that vpc resolves the target just as fast as vp (its gradient simply ignores the noisy I2S draws), yielding a flat no-gap result. That outcome is a legitimate 'inconclusive' / 'refuted-as-harness-artifact' verdict, not a forced failure — the acceptance.rule is deliberately conservative (requires a gap only at high K). A cross-axis note: under the value_profile axis instead, vpc would be predicted to tie-or-beat vp (it has the same gradient); the anti-I2S harm is the distinguishing claim and is what this template tests."
+  },
+
+  "verification": {
+    "harness": "step5b/i2s_multi_arm_dictionary_roulette_crowds_target/template.c",
+    "params": "step5b/i2s_multi_arm_dictionary_roulette_crowds_target/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [2, 4, 8, 16],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "pending",
+
+    "results_per_trial": {},
+
+    "results_median": {
+      "by_ARM_COUNT": [2, 4, 8, 16],
+      "value_profile": [],
+      "value_profile_cmplog": []
+    },
+
+    "summary": {
+      "headline_finding": "",
+      "stratification_holds": "",
+      "monotone_curves": {
+        "value_profile": "",
+        "value_profile_cmplog": ""
+      }
+    },
+
+    "notes": [
+      "ANTI family: has_axis (value_profile_cmplog) is predicted to LOSE, inverting the usual has_axis>lacks_axis direction. Judge stratification as lacks_axis (vp) >= has_axis (vpc), with the gap widening as ARM_COUNT grows.",
+      "Knob ARM_COUNT changes the number of compiled switch arms (and thus the number of case constants in vpc's I2S dictionary); the min (2) and max (16) scan values compile to different binaries, so the knob is live.",
+      "Harness-faithfulness risk recorded in hypothesis.tradeoff_observation: the monoculture/scheduler-residency half of the mechanism is emergent and may not reproduce in a 4-byte-selector micro-harness. A flat (no-gap) sweep is an honest inconclusive outcome."
+    ]
+  }
+}

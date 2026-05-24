@@ -6,7 +6,7 @@ A research project for analyzing fuzzing "blockers" — branches that coverage-g
 
 ```
 BlockerAnalyzer/
-├── out/                # Symlink → /20TB/miao/fuzz-blocker (shared with libafl_fuzzbench)
+├── out/                # Symlink → shared fuzz-campaign root (see Note below)
 │   ├── coverage_ts/<target>/<fuzzer>/trial<N>/
 │   │   ├── coverage_timeseries.csv      # time_s, branch_covered, branch_total
 │   │   ├── reports/<time_s>/branch_coverage_show.txt
@@ -14,7 +14,8 @@ BlockerAnalyzer/
 │   ├── <target>/<fuzzer>/trial<N>/queue/  # raw LibAFL corpus
 │   └── coverage_curves.png                # plot_coverage_curves.py output
 ├── csvs/               # Analysis CSV outputs (significance, candidates, reps)
-├── templates/          # Feature catalog — created by feature-hypothesis-generator agent (step 4)
+├── step5a/             # Step 5a intermediates — per-family distiller cards + signature JSONs
+├── templates/          # Feature catalog — parameterized hypothesis harnesses (see Feature Catalog section)
 │   ├── feature_spec.template.json    # JSON schema for feature_spec.json
 │   ├── branch_index.json             # Append-only (target, branch_id) → template_id map
 │   ├── <feature_id>/                 # One subdir per surviving hypothesis (template.c + params.json + feature_spec.json)
@@ -48,6 +49,8 @@ BlockerAnalyzer/
 │       ├── Dockerfile.libpng.cov
 │       ├── Dockerfile.libxml2.cov
 │       └── Dockerfile.openthread.cov
+├── docs/
+│   └── TOOLS.md         # Full per-tool CLI reference + DB schema (indexed from the Tools section)
 └── .claude/
     ├── agents/         # Specialized Claude agents for analysis
     └── settings.json   # Project permissions (Bash allowed for all agents)
@@ -56,10 +59,9 @@ BlockerAnalyzer/
 **Note:** `out/` is a symlink to the shared fuzz-campaign root (currently
 `/data/miao/libafl_experiments/`; verify with `readlink out` if a path
 hardcoded somewhere goes stale). All tools default to relative `out/` so
-the symlink target can change without code edits. Coverage Dockerfiles for
-the new canonical targets (jsoncpp, woff2 already present in libafl_fuzzbench;
-libpng, libxml2, openthread, harfbuzz, curl pending) live in
-`libafl_fuzzbench/docker/targets/`, not here.
+the symlink target can change without code edits. The coverage Dockerfiles
+for curl/harfbuzz/libpng/libxml2/openthread live here under `docker/targets/`;
+jsoncpp/woff2 cov Dockerfiles live in `libafl_fuzzbench/docker/targets/`.
 
 `db/per_role_coverage/<target>/<branch_id>/{W,L}/` — per-branch W
 (winner-resolving) and L (loser-blocking) llvm-cov annotated source
@@ -107,12 +109,16 @@ Specialized agents live in `.claude/agents/`:
 
 | Agent | Output | Purpose |
 |-------|--------|---------|
-| **feature-hypothesis-generator** (Opus) | `templates/<feature_id>/{template.c, params.json, feature_spec.json}` | Hypothesis-generation step of the metaphorical-testing pipeline. Receives a structured prompt (push-mode) emitted by `tools/study_units.py evidence-per-branch` for ONE (target, branch). Diffs winner-resolving vs loser-blocking seed bytes at the highest-prob_div decisive pair, reads source CMP shape, searches `templates/` for prior art, decides whether multi-pair evidence collapses to ONE template or splits into multiple, writes the three template files per surviving hypothesis. Modeled after the `i2s_corpus_pollution` pilot. One per-branch prompt per call; designed for parallel fan-out across (target, branch_id) pairs. |
+| **feature-hypothesis-generator** (Opus) | `prompts/<group>/<NN>_<target>_<bid>.analysis.json` (one sibling per prompt) | Per-branch analysis step (step 4b) of the metaphorical-testing pipeline. Receives a structured prompt (push-mode) emitted by `tools/study_units.py evidence-per-branch` for ONE (target, branch). Diffs winner-resolving vs loser-blocking seed bytes at the highest-prob_div decisive pair, reads source CMP shape, and writes ONE `.analysis.json` (hypotheses + evidence_trail + falsifiability). Under the **analysis-only contract (2026-05-17)** it does NOT compare against `templates/`, NOT classify into existing categories, and NOT emit template files — classification + verification are deferred to steps 5a/5b to avoid anchoring bias. One per-branch prompt per call; designed for parallel fan-out across (target, branch_id) pairs. |
+| **hypothesis-signature-distiller** (Sonnet) | `step5a/<family>/signatures.json` (one signature per card) | Pass-A distiller of **step 5a**. Reads ONE hypothesis card (built by `tools/build_signature_cards.py`, family-tagged by `tools/mechanism_family.py`) and normalizes it into ONE structured signature `{gate_structure, operand_kind, operand_literal, operand_width_bytes, byte_signature, mechanism_summary, one_line}` — closed-vocab gate slots plus an **open** `mechanism_summary` (the technique's effect in free text, no fixed taxonomy, so Pass B can *discover* categories rather than have them imposed). Does NOT cluster or read source/DB — **tool-restricted to Read+Write** so per-card isolation is enforced. |
+| **signature-feature-classifier** (Sonnet) | `step5a/<family>/clusters.json` (discovered feature clusters) | Pass-B classifier of **step 5a**. **Discovers** feature categories from a family's signatures — clusters branches by `mechanism_summary` similarity (gate slots secondary; opens member analyses via `analysis_path` when ambiguous), and coins an emergent `mechanism_label` + `feature_id` + definition per cluster. Applies NO pre-defined taxonomy (categories are the output, not an input). Does NOT author templates (that is 5b). Read+Write. |
+| **template-author** (Opus) | `step5b/<feature_id>/{template.c, params.json, feature_spec.json}` (verdict: pending) | **Author** stage of **step 5b**. Reads ONE cluster brief (`step5b/briefs/<feature_id>.json`, built by `tools/build_template_briefs.py`) and generates the synthetic program: ONE parameterized libFuzzer harness isolating the cluster's shared mechanism with exactly ONE compile-time `-D` knob = the program-feature axis. Does NOT run the sweep (`verify_template.py`) or judge verdicts (`verdict-adjudicator`). Read+Write. The macro↔params consistency + live-knob are enforced by `tools/check_template.py`. |
+| **verdict-adjudicator** (Opus) | `step5b/<feature_id>/adjudication.json` | **Adjudicator** stage of **step 5b** — the INDEPENDENT judge invoked only when `verify_template.py` returns refuted / inconclusive(with-crashes) / partially_reproduced. Reads the harness + `verification_run.json` signals + the brief, and rules `harness_artifact` (→ regenerate with feedback, retry budget 2), `genuine_refutation` (→ ACCEPT the verdict, record to `templates/legacy/`, no retry), or `underpowered` (→ bounded rerun). Deliberately separate from the author to block confirmation bias. Read+Write. |
 
 The metaphorical-testing pipeline uses **push-mode**: the orchestrator
 runs `tools/study_units.py evidence-per-branch --target T --branch-id M`
 to assemble the structured prompt (BLOCKER / TRIAL VECTOR / DECISIVE
-PAIRS / SOURCE CONTEXT / PAIR-N SEEDS / MECHANISM CONTEXT / TASK), then
+PAIRS / SOURCE CONTEXT / BRANCH SEEDS / MECHANISM CONTEXT / TASK), then
 feeds that prompt to `feature-hypothesis-generator`. The agent never
 queries the DB itself — the prompt IS the auditable evidence record.
 
@@ -125,90 +131,50 @@ files under `out/coverage_ts/`.
 
 ## Tools
 
-### `tools/blocker_db.py`
+Full CLI, flags, and the DB schema for every tool live in
+[`docs/TOOLS.md`](docs/TOOLS.md). One-line index below, grouped by pipeline
+phase (see "Typical Workflow" further down for the phase ordering):
 
-Schema-management for `db/blockers.sqlite`. Owns the schema definition
-and the `init` command only. Population is handled elsewhere:
-`study_units.py add-canonical` writes `branches` + `study_subjects` +
-`subject_branches`; `seed_bisect.py` writes the 4 seed tables directly.
+**Schema & shared libraries**
+- `blocker_db.py` — `db/blockers.sqlite` schema + `init` (full schema table in docs/TOOLS.md).
+- `extract_functions.py` — `llvm-cov export` → (file, name, start, end) ranges; used at `add-canonical` time.
+- `seed_utils.py` — dependency-free seed/byte helpers (parse_count, hex_dump, byte_diff_section).
 
-```bash
-python3 tools/blocker_db.py init    # Initialize schema (idempotent)
-```
+**Steps 1–2 — significance & DB population**
+- `subject_significance.py` — per-(target, A, B) AUC + final-coverage Mann-Whitney U-test.
+- `study_units.py` — per-target coverage walk + per-subject admission; also hosts `evidence-per-branch` prompt assembly.
+- `evidence_prompt.py` — per-branch structured-prompt assembly; registers the `evidence-per-branch` subcommand.
 
-**Database schema (subject-centric):**
+**Step 3 — candidates & representatives**
+- `build_candidates.py` — per-branch ≥8/≥8 aggregation → `blocker_candidates.csv`.
+- `select_representatives.py` — decisive-shape × region dedup → `blocker_representatives.csv` + dedup map.
 
-| Table | Purpose | Key fields |
-|-------|---------|------------|
-| `branches` | One row per admitted blocker. Admission rule: ≥1 canonical subject admits the branch under the per-subject rule below. Branch identity is `(target, file, line, col, blocked_side)`; `function` is descriptive (real C/C++ name, demangled via c++filt; resolved at `add-canonical` time by `extract_functions.extract`). | `target`, `file`, `function`, `line`, `col`, `blocked_side`, `source_line` |
-| `study_subjects` | One row per (target, A, B) canonical pair. | `target`, `A`, `B`, `delta_technique`, `n_A`/`n_B`, `mean_auc_*`, `delta_auc`, `p_auc`, `auc_dir`, `mean_final_*`, `delta_final`, `p_final`, `final_dir`, `admissible`, `direction`, `n_branches`, `refreshed_at` |
-| `subject_branches` | Per-(subject, branch) row, one per (subject, branch) that meets the **per-subject admission rule**: across the 20 trials of (A, B), ≥1 blocked AND ≥1 resolved at final checkpoint. | `n_A_resolved/_blocked/_unreached`, `n_B_resolved/_blocked/_unreached`, `A_resolved_trials`/`A_blocked_trials`/`B_resolved_trials`/`B_blocked_trials` (JSON arrays of trial numbers), `p_A_blocked`, `p_B_blocked`, `prob_div` (oriented), `avg_dur_A/B`, `dur_div`, `avg_hits_A/B`, `hit_div`, optional `hypothesis_label`, `template_id` |
-| `resolving_seeds` | Seeds hitting the **blocked** side (from resolving fuzzers). | `branch_id`, `fuzzer`, `trial`, `seed_id`, `parent_seed_id`, `mutation_op`, `discovery_time_s` |
-| `resolving_seed_lineage` | Parent chain for resolving seeds. | `branch_id`, `fuzzer`, `trial`, `seed_id`, `depth`, `ancestor_id`, `mutation_op` |
-| `blocking_seeds` | Seeds hitting the **other** side (from blocking fuzzers). | Same schema as `resolving_seeds` |
-| `blocking_seed_lineage` | Parent chain for blocking seeds. | Same schema as `resolving_seed_lineage` |
+**Steps 3.5–3.7 — evidence enrichment**
+- `seed_bisect.py` — 10-bucket Docker bisection: which seeds hit each blocker.
+- `callers_index.py` — one-time per-target source-grep callers index.
+- `per_role_coverage.py` — W (resolving) / L (blocking) llvm-cov dumps powering the SOURCE CONTEXT overlay.
 
-**Trial-list JSON columns:** `A_resolved_trials` etc. store trial numbers
-(1..N) as JSON arrays — e.g., `[1, 3, 4, 5, 7, 8, 9]`. Unreached trials are
-omitted (derive as `{1..N} − resolved ∪ blocked`). `seed_bisect.py` reads
-these to pick a representative resolving/blocking `(fuzzer, trial)` without
-re-introducing a per-trial fact table.
+**Step 4 — fan-out & validation**
+- `run_hypothesis_fanout.py` — prompt-prep + manifest builder (does NOT dispatch agents).
+- `check_analysis.py` — validate agent `.analysis.json` against the sibling prompt (exact_quote hallucination filter).
+- `db_query.py` — agent-facing pull queries (lineage, more-seeds).
 
-**Per-branch divergence tags:** there is no longer a `selection_tags`
-table column — tag derivation is done at candidate-build time from
-`subject_branches.{prob_div, dur_div, hit_div}` using thresholds:
-`prob_div ≥ 1.0`, `dur_div > 8.0` h, `hit_div > 100`.
+**Step 5a — cross-branch classification**
+- `mechanism_family.py` — deterministic `coarse_family(covers_pairs)` → 6 mechanism families; first-pass bucketing + self-test/scan.
+- `build_signature_cards.py` — build per-family distiller cards (family-tagged, with `analysis_path` back-pointers; analysis fields + candidates-CSV locators) for the `hypothesis-signature-distiller` agent. Pass B (the classifier) reads the signatures + cards directly — no group-by tool.
 
-### `tools/seed_bisect.py`
+**Step 5b — author + verify loop**
+- `build_template_briefs.py` — per-cluster authoring brief (cluster def + members' signatures + full analyses incl. the falsifiability harness-blueprint) → `step5b/briefs/<feature_id>.json` for the `template-author` agent.
+- `check_template.py` — deterministic preflight gating the sweep: schema/fuzzer sanity + every `scan_value` compiles + **dead-knob detection** (min vs max scan value must yield different assembly, else the `-D` macro/params drifted). Catches mechanical defects so an author retry isn't spent on a refutation.
+- `verify_template.py` — synthetic-harness sweep runner. Builds `step5b/<feature_id>/template.c` under each involved fuzzer (`<fuzzer>_cc --libafl -D<knob>=<val>` in the `libafl-base` image), sweeps `params.json:scan_values`, counts crashes (`<corpus>/crashes/`), scores a dose-response verdict. **Serial by default (`--jobs 1`) — host runs other campaigns.**
 
-Finds which seeds in each fuzzer's queue hit each confirmed blocker. Runs **one Docker container per target** — inside, scans each unique queue once checking ALL target branches simultaneously.
+**Step 6 + auxiliary**
+- `lint_template_shapes.py` — intra/cross-template decisive-shape consistency.
+- `plot_coverage_curves.py` — coverage-by-time spaghetti plot → `out/coverage_curves.png`.
+- `fuzzer_mechanism_library.md` — canonical per-fuzzer mechanism paragraphs spliced into prompts.
 
-```bash
-python3 tools/seed_bisect.py build --target <name>      # Build Docker image (one-time)
-python3 tools/seed_bisect.py scan --target <name> --queue-base ./out \
-        [--branches-from-csv csvs/blocker_representatives.csv] \
-        [--queue-sample-size 10000]                     # Docker scan only → results.json
-python3 tools/seed_bisect.py insert --target <name> --results <path> --queue-base ./out
-python3 tools/seed_bisect.py run --target <name> --queue-base ./out \
-        [--branches-from-csv csvs/blocker_representatives.csv]  # scan + insert in one step
-python3 tools/seed_bisect.py plan --target <name> --queue-base ./out
-```
 
-`scan` and `insert` are separated so multiple targets can scan in parallel (Docker containers) and insert sequentially (no DB contention). Results are saved to `db/bisect_results/<target>_results.json`.
-
-**End-to-end flow:**
-
-1. **Select branches and trials** (`get_branches_to_process`): For each branch, pick **exactly ONE** resolving `(fuzzer, trial)` and ONE blocking `(fuzzer, trial)` (lexicographic min). One queue per direction is enough evidence; scanning every resolving/blocking trial wasted bisection time on huge queues. With `--branches-from-csv PATH`, only the branches listed in the CSV are processed (used after `select_candidates.py` to scope work to the 100–200 selected branches).
-
-2. **Build jobs** (`build_jobs`): Group work by queue directory. For each branch:
-   - The chosen resolving `(fuzzer, trial)` → job searching for seeds that hit the **blocked side** → `resolving_seeds`
-   - The chosen blocking `(fuzzer, trial)` → job searching for seeds that hit the **other side** → `blocking_seeds`
-   - Jobs sharing the same queue path are scanned together in one pass.
-
-3. **Optional sampling** (`--queue-sample-size N`): if set and a queue has more than N seeds, randomly sample N seeds via a temp dir of symlinks; the sampled mirror is mounted into the container as `/queues`. Insert phase reads the original (full) queue for `.metadata` lookup, so lineage tracing is unaffected. Use 10000 for sqlite3/bloaty (~100K+ seeds per queue at n=10).
-
-4. **Container scan** (`seed_scanner.py` baked into image): One Docker container per target. For each queue:
-   - **10-bucket bisection**: split seeds into 10 buckets, run each bucket as a batch through `FUZZ_BIN` (many seeds per invocation, one profraw), merge → one `llvm-cov show` per bucket checking ALL active branches at once.
-   - For branches hit in a bucket, recurse (split into 10 again). At ≤10 seeds, test individually.
-   - **Early-stop per branch** at `max_seeds` hits — removes completed branches from active specs so deeper buckets skip them.
-   - Output: `results.json` with `{branch_id: [seed_name, ...]}` per queue.
-
-5. **Insert into DB** (`insert_seeds_and_lineage`): For each hitting seed, parse its `.metadata` file for parent + mutation ops, insert into seed table, walk parent chain (up to 50 depth) for lineage table.
-
-**`max_seeds` semantics:** The limit is per **(branch, queue)**. With one queue per direction (after step 1), a branch accumulates at most `max_seeds` resolving + `max_seeds` blocking seeds.
-
-**Options:** `--max-seeds N` (default 10; was 5, then 50 — 10 keeps byte-diff stable while bounding scan time), `--batch-size N` (seeds per `FUZZ_BIN` invocation, default 500), `--branches-from-csv PATH` (scope branches), `--queue-sample-size N` (per-queue sample cap, default 0 = no sampling).
-
-**Existing data caveat:** the 2026-05-16 5-target bisect was populated at the old default `max_seeds=5`. The bytes per direction in the smoke-test prompts therefore come from up to 5 seeds, not 10. When scaling to the 50-rep pilot (or beyond), re-run seed_bisect with the new default to refresh those branches; old branches outside the pilot retain max=5 data until refreshed.
-
-**Docker images:** Named `libafl-{target}-cov`, built from `docker/Dockerfile.coverage-base` + `docker/targets/Dockerfile.{target}.cov`.
-
-**LibAFL metadata format:** Each seed `HASH` has a `.HASH.metadata` JSON file containing:
-- Parent info: `parent_id`, `parent_file` (hex hash of parent seed), `execs`, `elapsed_ms`
-- Coverage map: list of coverage index IDs
-- Mutation ops: list like `["ByteRandMutator", "BytesDeleteMutator"]`
-
-### LibAFL Fuzzers
+## Fuzzer Variants
 
 The LibAFL FuzzBench experiment uses 4 fuzzer variants:
 
@@ -221,445 +187,10 @@ The LibAFL FuzzBench experiment uses 4 fuzzer variants:
 
 Time-series coverage snapshots:
 ```
-/home/miao/BlockerAnalyzer/out/coverage_ts/<target>/<fuzzer>/trial<N>/reports/<time_s>/branch_coverage_show.txt
+out/coverage_ts/<target>/<fuzzer>/trial<N>/reports/<time_s>/branch_coverage_show.txt
 ```
 
-### `tools/subject_significance.py`
-
-Per-subject coverage-curve scalars + Mann-Whitney U-test for the
-metaphorical-testing pipeline. Reads `out/coverage_ts/<target>/<fuzzer>/trial<N>/coverage_timeseries.csv`
-(produced upstream by `libafl_fuzzbench/docker/run_coverage_timeseries.sh`).
-
-```bash
-python3 tools/subject_significance.py per-trial \
-    [--targets curl harfbuzz ...] [--fuzzers naive cmplog ...] \
-    [--output csvs/subject_per_trial.csv]
-
-python3 tools/subject_significance.py pair \
-    [--targets curl harfbuzz ...] [--alpha 0.05] \
-    [--output csvs/subject_pair_significance.csv]
-```
-
-Defaults write to `csvs/subject_per_trial[_<targets>].csv` and
-`csvs/subject_pair_significance[_<targets>].csv`. When `--targets` is
-explicit, the target list is appended to the filename so per-target runs
-don't overwrite each other.
-
-`per-trial` emits one row per (target, fuzzer, trial) with
-`auc_branch_seconds` (trapezoidal AUC of the coverage-over-time curve),
-`auc_normalized`, `final_branches`, plus data-quality columns.
-
-`pair` emits one row per canonical (target, A, B) subject with `delta_auc`,
-`p_auc`, `delta_final`, `p_final`, and an advisory `admissible` flag.
-**Important:** at n=3 vs n=3 the smallest two-sided MW p-value is 0.10, so
-`admissible` is structurally False until trials per arm reach ≥5. Use the
-delta columns as ranking signals at low n.
-
-`CANONICAL_PAIRS` is locked to the four one-technique-delta pairs:
-`(cmplog, naive, I2S)`, `(value_profile, naive, value_profile)`,
-`(value_profile_cmplog, cmplog, value_profile)`,
-`(value_profile_cmplog, value_profile, I2S)`.
-
-### `tools/study_units.py`
-
-Per-subject blocker tables for the metaphorical-testing pipeline. Adds
-two tables to `db/blockers.sqlite`:
-
-- `study_subjects` — one row per (target, A, B) with significance stats
-  (delegated to `subject_significance.pair_significance`) plus a `direction`
-  column ('A>B' / 'B>A' / 'tie') used to orient divergences.
-- `subject_branches` — one row per (subject, branch) for branches that
-  were *input-dependent within the subject* (resolved by ≥1 A or B trial).
-  Stores per-fuzzer per-status counts, per-fuzzer p_blocked/avg_dur/avg_hits,
-  and **direction-oriented** divergences `prob_div`, `dur_div`, `hit_div`
-  (positive ⇒ the loser is worse than the winner at this branch).
-
-```bash
-python3 tools/study_units.py init                           # Idempotent — preserves data
-python3 tools/study_units.py add --target lcms \
-        --A value_profile_cmplog --B value_profile          # Register/refresh ONE subject
-python3 tools/study_units.py add-canonical                  # All 4 canonical pairs × all targets
-python3 tools/study_units.py list                           # Tab-sep summary of all subjects
-python3 tools/study_units.py top --subject-id N --k 20 \
-        [--policy strict|majority|all]                      # Ranked candidate B-unique blockers
-```
-
-**Policy semantics:** `strict` requires winner resolved every trial AND
-loser resolved zero trials (default — clean attribution). `majority` relaxes
-to ≥⌈n/2⌉ vs ≤⌊n/2⌋. `all` disables filtering and shows raw ranking.
-
-**Ranking** sorts by `prob_div DESC, dur_div DESC, hit_div DESC` — three
-interpretable columns instead of one opaque weighted score.
-
-**`evidence-per-branch` subcommand** assembles the structured prompt for
-`feature-hypothesis-generator` (push-mode). Emits sections: BLOCKER /
-TRIAL VECTOR / DECISIVE PAIRS / SOURCE CONTEXT / PAIR-N SEEDS /
-MECHANISM CONTEXT / TASK. Collapses ALL canonical pairs satisfying ≥8/≥8
-at this branch into a single prompt; verification is scoped to the
-decisive fuzzers only.
-
-```bash
-python3 tools/study_units.py evidence-per-branch \
-    --target curl --branch-id 26 \
-    [--winner-threshold 7] [--loser-threshold 7] \
-    [--admissible-only | --no-admissible-only] \
-    [--mechanism-library fuzzer_mechanism_library.md] \
-    [--queue-base out] \
-    [--source-lines 30] [--seeds-per-side 5] [--seed-bytes 64] \
-    [--per-role-cache db/per_role_coverage] \
-    [--callers-index db/callers_index] \
-    [--trace-callers 1] [--caller-context 10] [--full-body-threshold 40] \
-    [--call-chain-depth 8] [--call-chain-per-hop 2] \
-    [--hit-divergence-rows 15] [--hit-divergence-min-ratio 3.0] \
-    [--output -]
-```
-
-Reads `study_subjects` + `branches` + `subject_branches` for trial counts
-and decisive-pair classification; the per-fuzzer trial vector is
-assembled by cross-subject join on `subject_branches` (reference fuzzers
-with no admitting subject get blank stats and `-` shape character); reads
-`resolving_seeds` + `blocking_seeds` for branch-shared winner-resolving and
-loser-blocking seed examples (one section per branch, not per pair —
-seeds are tagged with the actual `(fuzzer, trial)` that found them);
-reads the per-role cov reports from `db/per_role_coverage/` (when
-present) to render the SOURCE CONTEXT overlay, HIT-COUNT DIVERGENCE, and
-DIVERGENT BRANCHES sections; reads `db/callers_index/<target>.json`
-for the cross-file 1-hop caller block and the call-chain signatures;
-splices the per-fuzzer mechanism paragraphs from
-`fuzzer_mechanism_library.md`. Falls back to a static ±N source window
-when the per-role cov cache is missing. The output prompt is what you
-feed to the agent (one `(target, branch_id)` per agent invocation).
-
-**Prompt section layout (in emission order):**
-
-1. **BLOCKER** — branch identity (target, branch_id, file:line:col, enclosing function, source line, blocked side).
-2. **TRIAL VECTOR** — per-fuzzer (n=10) resolved/blocked/unreached counts with role tags (winner/loser/REFERENCE).
-3. **DECISIVE PAIRS (n)** — per pair satisfying ≥winner/loser thresholds: subject id, counts, avg duration blocked, avg hits, divergences (prob/dur/hit), subject-level Δ_AUC / p_AUC / Δ_Final / p_final.
-4. **SOURCE CONTEXT (per-role coverage overlay)** — per-line `[W]`/`[L]`/`[B]`/`[ ]` hit diff over the enclosing function (full body, signature padded) + 1-hop caller block (full body if ≤ `--full-body-threshold` lines, else ±`--caller-context` around the call site). Plus call-chain signatures for depths 2..`--call-chain-depth` (no overlay, just `caller_func (file:start-end, calls X at line Y)`).
-5. **HIT-COUNT DIVERGENCE** — per-function W vs L invocation counts (entry-line count as proxy), filtered to functions with ≥`--hit-divergence-min-ratio` ratio or one side zero. Sorted by absolute count diff.
-6. **DIVERGENT BRANCHES (on call chain, rough order)** — per-branch W/L T/F direction counts for branches in chain functions only (enclosing + 1-hop + chain). Ordered by call-chain depth (descending) then source line (ascending) to approximate execution chronology. Off-chain divergences summarized as a single count line.
-7. **BRANCH SEEDS (shared across decisive pairs)** — one block per direction: winner-resolving seeds + loser-blocking seeds, each tagged with `(fuzzer, trial)` and shown as size + mutation-op chain + hex+ASCII dump (first `--seed-bytes` bytes). Followed by BYTE DIFF: per-offset W vs L byte-set comparison, filtered to "informative" offsets (sets differ AND ≤4 distinct bytes on at least one side) — surfaces input-byte→gate-operand dataflow hints.
-8. **MECHANISM CONTEXT** — canonical paragraph per **involved** fuzzer from `fuzzer_mechanism_library.md`.
-9. **TASK** — agent instruction (single-pair vs multi-pair phrasing; VERIFICATION SCOPE restricted to involved fuzzers).
-
-### `tools/check_analysis.py` — validate agent analysis.json against the prompt
-
-Per-branch analyses produced by the hypothesis-generator agent must
-follow the structured schema embedded in the prompt's TASK section.
-This script catches hallucination and schema drift before downstream
-classification consumes the data.
-
-```bash
-python3 tools/check_analysis.py prompts/<group>/NN_<target>_<bid>.analysis.json
-python3 tools/check_analysis.py --recursive prompts/         # all analyses
-```
-
-Checks performed:
-1. Required top-level fields present + non-empty (`branch_id`, `target`,
-   `summary_one_line`, `pair_decision`, `hypotheses`, `evidence_trail`,
-   `mechanism_consistency_check`, `falsifiability`,
-   `weakest_evidence_point`, `confidence`).
-2. `evidence_trail` is a non-empty list; each entry carries
-   `claim` + `cited_section` + `cited_locator` + `exact_quote`.
-3. **Every `exact_quote` appears LITERALLY in the sibling .prompt.md**
-   (whitespace-tolerant substring check). This is the core hallucination
-   filter — claims with quotes that aren't actually in the prompt are
-   automatically flagged.
-4. `cited_section` names a real section of the prompt
-   (BLOCKER, TRIAL VECTOR, DECISIVE PAIRS, SOURCE CONTEXT,
-   HIT-COUNT DIVERGENCE, DIVERGENT BRANCHES, BRANCH SEEDS, BYTE DIFF,
-   MECHANISM CONTEXT).
-5. `mechanism_consistency_check`: if `claimed_mechanism` contains
-   "I2S" or "I2SRandReplace", `verified_in_lineage` MUST be `true` —
-   OR `verification_method` must explain (>= 20 chars) why verification
-   was not possible. Forces the agent to invoke `db_query.py lineage`
-   on a winning seed before claiming I2S did the work.
-6. `pair_decision` matches `hypotheses` count: `single_feature` → 1,
-   `multi_feature` → ≥2.
-7. Each `hypotheses[i].covers_pairs` label matches a decisive-pair label
-   from the prompt's DECISIVE PAIRS section (e.g. "cmplog>naive (I2S)").
-
-Exit code: 0 = all clean; 1 = at least one violation; 2 = usage error.
-
-### `tools/db_query.py` — agent-facing pull queries (lineage, more-seeds)
-
-Companion to the push-mode prompts. The prompt carries the core
-evidence for the common case; this CLI is the **escape hatch** when
-the agent needs more detail than the prompt embeds. The prompt's TASK
-section ends with an explicit pointer to this tool.
-
-```bash
-python3 tools/db_query.py lineage \
-    --branch 19 --role W --fuzzer cmplog --trial 1 \
-    --seed 006459fd40731a4e
-    # ancestor chain for a specific seed (up to 50 levels). Useful for
-    # mechanism attribution — was `I2SRandReplace` in the chain that
-    # produced this cmplog-winning seed?
-
-python3 tools/db_query.py more-seeds \
-    --branch 19 --role W [--fuzzer cmplog] [--limit 20] \
-    [--show-bytes 64] [--queue-base out]
-    # additional seeds beyond the 5 the prompt shows. Capped by what
-    # seed_bisect actually stored (max_seeds default is now 10 per branch ×
-    # direction, but the 5-target DB was populated at the old default 5
-    # — re-run seed_bisect with the new default if you
-    # need more raw material).
-```
-
-`--role W` = winner-resolving (`resolving_seeds` / `resolving_seed_lineage`).
-`--role L` = loser-blocking (`blocking_seeds` / `blocking_seed_lineage`).
-
-Both subcommands are read-only. Designed to be invoked by the
-hypothesis-generator agent during analysis (the agent has `Bash(*)`
-in `.claude/settings.json`). The push-mode prompt remains the canonical
-audit record; queries are unlogged — if reproducibility matters for a
-particular verdict, copy the query's output into the templates'
-`feature_spec.json` evidence trail manually.
-
-### `tools/per_role_coverage.py` — W vs L cov dumps per branch
-
-Per-branch coverage runner that produces the source dumps powering the
-SOURCE CONTEXT overlay (§4 above). For each branch with decisive pairs,
-unions all seeds in `resolving_seeds` as the **W** set and all seeds in
-`blocking_seeds` as the **L** set (any fuzzer — the seed-bisect fuzzer
-tag is provenance only; the side a seed took is what matters), then
-runs each set through `libafl-<target>-cov` and dumps llvm-cov show
-annotated source for the blocker's file plus any 1-hop caller files
-from the callers index. Output cached at
-`db/per_role_coverage/<target>/<branch_id>/{W,L}/branch_coverage_show.txt`
-with `cache_key.txt` = sha1(sorted seed_ids + sorted file list).
-
-```bash
-python3 tools/per_role_coverage.py plan     --target curl
-python3 tools/per_role_coverage.py generate --target curl \
-    [--branches-from-csv csvs/blocker_representatives.csv] \
-    [--branch-id 19] [--queue-base out] [--force]
-python3 tools/per_role_coverage.py status   --target curl
-```
-
-One docker run per target processes all requested branches sequentially
-inside. Cache hits are skipped; pass `--force` to regenerate.
-
-### `tools/callers_index.py` — per-target source-grep callers index
-
-One-time per-target source-grep that builds
-`db/callers_index/<target>.json` mapping demangled callee name → list
-of caller records. Used by `per_role_coverage.py` (to know which caller
-files to add to the cov dump) and by the SOURCE CONTEXT overlay (to
-render the cross-file 1-hop caller block and the call-chain section).
-
-```bash
-python3 tools/callers_index.py build   --target curl \
-    [--source-root /src/curl]
-python3 tools/callers_index.py inspect --target curl --func Curl_unencode_cleanup
-python3 tools/callers_index.py status  --target curl
-```
-
-`extract_functions.extract` provides all function ranges; `short_name`
-extracts the call-site identifier (last `::` segment, then last `:`
-segment to strip the `<basename>:<name>` disambiguator extract_functions
-emits for static C functions). One `grep -F -f tokens.txt` per target
-inside docker; ~3–30s depending on codebase size.
-
-### Known limits of the source-grep callers index (v1)
-
-- **Function-pointer dispatch breaks the call chain.** curl's
-  `handler->done = Curl_http_done` style wiring is not detected; for
-  curl/libxml2/openthread the chain typically stops 2–4 hops up rather
-  than reaching `LLVMFuzzerTestOneInput`.
-- **C++ template / vtable polymorphism not detected.** harfbuzz uses
-  templated accelerator structs and operator overloads; the chain
-  often only walks a class's own destructor/wrapper.
-- **Short-name overlap creates noisy edges in C++ codebases.** For
-  harfbuzz, ~1M edges total — many false positives where common
-  method names (`init`, `fini`, `sanitize`) match across unrelated
-  classes. The "filter to callers whose call_site_line fired in W"
-  rule in the overlay reduces noise to a few candidates per branch.
-- **Same-file declaration matches.** Destructor or forward-declaration
-  lines like `~Foo()` can match the `Foo(` pattern when the class
-  name is the same as a constructor; harmless but occasionally
-  surfaces a "caller" that is really a declaration site.
-- **Execution order in DIVERGENT BRANCHES is rough.** Within a
-  function we use source-line order, which is wrong inside loops or
-  with gotos. Across functions we use call-chain depth, which is
-  correct under non-recursive assumptions.
-- **No dataflow / no real CFG.** The BYTE DIFF section is the
-  cheap-proxy for "which input bytes flow to the gate". For
-  blockers where the operand is computed via a hash, checksum, or
-  state machine, the BYTE DIFF will show divergence but not
-  necessarily the right bytes to mutate. A real taint analysis
-  is the right long-term answer but out of scope for v1.
-
-A real `opt -callgraph` build per target would resolve fn-pointer
-dispatch but requires per-target Dockerfile mods and a callgraph
-extractor. Considered and deferred: the agent's task is "which
-input bytes clear this gate", and a precise call chain to entry
-contributes less to that question than the per-role overlay +
-BYTE DIFF already do.
-
-### `tools/build_candidates.py` (per-branch, ≥8/≥8 rule)
-
-Reads `study_subjects` + `subject_branches` + `branches` and writes
-`csvs/blocker_candidates[_<target>].csv` — **one row per (target, branch_id)**
-with all canonical pair-edges satisfying the ≥8/≥8 rule collapsed into a
-single record.
-
-```bash
-python3 tools/build_candidates.py \
-    [--admissible-only | --no-admissible-only] \
-    [--winner-threshold 7] [--loser-threshold 7] \
-    [--output csvs/blocker_candidates.csv]
-```
-
-**Decisive-pair rule (per canonical pair at a branch):**
-- `winner_resolved >= --winner-threshold` AND `loser_blocked >= --loser-threshold`.
-  Default 7/7 (80% at n=10).
-- Per-subject admission already eliminates the (all-unreached, navigation-gap)
-  pathology — branches reach `subject_branches` only if some trial blocked AND
-  some resolved within the subject. ≥8/≥8 then keeps the strong-signal subset.
-
-A branch is emitted iff it has ≥1 decisive pair (under `--admissible-only`,
-the pair's subject must also be admissible).
-
-**Output schema (one row per branch):**
-```
-target, branch_id, file, function, line, col, side, source_line,
-n_decisive_pairs,
-decisive_pairs   -- JSON array; each element:
-                    {A, B, delta, direction, winner, loser,
-                     winner_resolved, loser_blocked, prob_div, dur_div, hit_div}
-involved_fuzzers -- JSON array; union across decisive pairs.
-                    Synthetic verification scope.
-<fuzzer>_resolved/_blocked/_unreached  -- per-fuzzer (4 cols × ≤4 fuzzers),
-                                          assembled by cross-subject join on
-                                          subject_branches. ONLY fuzzers
-                                          appearing in some subject that
-                                          admits this branch are populated.
-                                          Reference fuzzers (no admitting
-                                          subject) are absent — represented
-                                          as '-' in the decisive shape.
-max_prob_div, max_dur_div, max_hit_div  -- magnitudes across decisive pairs.
-```
-
-### `tools/select_representatives.py` (shape × region dedup)
-
-Reads `csvs/blocker_candidates.csv` and writes `csvs/blocker_representatives.csv`
-(one rep per group) + `csvs/blocker_dedup_map.csv` (full mapping).
-
-```bash
-python3 tools/select_representatives.py \
-    [--input csvs/blocker_candidates.csv] \
-    [--reps-output csvs/blocker_representatives.csv] \
-    [--map-output  csvs/blocker_dedup_map.csv] \
-    [--line-bucket 50]
-```
-
-**Decisive-only shape** (4-char string, fixed order naive/cmp/vp/vpc):
-- `R` — fuzzer is winner in ≥1 decisive pair (`n_resolved ≥ 8`)
-- `B` — fuzzer is loser  in ≥1 decisive pair (`n_blocked  ≥ 7`)
-- `-` — fuzzer is NOT in any decisive pair at this branch (reference context)
-
-By construction (n=10 + ≥8/≥8), every decisive fuzzer is unambiguously R or B
-(≥8R AND ≥8B requires n≥16).
-
-**Group key**: `(decisive_shape, file, function, line // bucket)`. Default
-bucket=50 lines. Pick rep per group: highest `(max_prob_div, max_dur_div,
-max_hit_div)`, ties by branch_id.
-
-**Mechanism taxonomy**: 11 distinct shapes across the canonical-target candidates.
-Top shapes read directly as mechanism families:
-
-| Shape | Reading |
-|---|---|
-| `BRBR` | Pure I2S — cmp & vpc resolve, naive & vp block |
-| `BRR-` | Both techniques individually resolve; vpc non-decisive |
-| `--BR` | Narrow VP-controlled — only vpc-vs-vp decisive |
-| `B-R-` | vp wins over naive only |
-| `BR--` | cmp wins over naive only |
-| `-BBR` | Synergy required (i2s_corpus_pollution shape) |
-| `RBRB` | I2S *hurts* — vpc loses to vp |
-| `BBRR` | I2S doesn't help, only VP works |
-
-**Corroboration honesty (locked 2026-05-06):** non-rep branches stay in
-`blocker_dedup_map.csv` as the auditable "implied corroboration" record.
-There is NO automatic inheritance into `branch_index.json` — corroboration
-count per template = agent-verified count, not group-size-weighted.
-
-### `tools/run_hypothesis_fanout.py`
-
-Prompt-prep + manifest builder. Reads `csvs/blocker_representatives.csv`
-**by default** (158 reps); pass `--input csvs/blocker_candidates.csv` to fan
-out across all 275. Generates one structured prompt per row via
-`tools/study_units.py evidence-per-branch`, writes prompts under
-`out/hypothesis_fanout/<group_id>/`, and emits manifest.json.
-
-```bash
-python3 tools/run_hypothesis_fanout.py \
-    [--input csvs/blocker_representatives.csv] \
-    [--outdir out/hypothesis_fanout] \
-    [--group-by target-delta | target] \
-    [--skip-existing templates/branch_index.json] \
-    [--dry-run] [--force]
-```
-
-**This script does NOT invoke agents** — `feature-hypothesis-generator`
-is a Claude Code subagent dispatched from a Claude session. The manifest
-is the dispatch contract:
-- Across groups: parallel (one Agent batch per `(target, primary_delta)` group).
-- Within group: sequential (each agent sees prior templates on disk and
-  can match-existing rather than re-create).
-
-**Grouping**: default `target-delta` (e.g., `lcms__I2S`, `bloaty__value_profile`).
-`primary_delta` per branch = delta of the highest-prob_div decisive pair.
-Use `--group-by target` to merge all deltas per target (fewer parallel
-groups, longer sequential chains).
-
-**Skip behavior**: by default reads `templates/branch_index.json` and
-omits any (target, branch_id) already covered. Pass `--skip-existing
-/dev/null` to disable.
-
-### `tools/lint_template_shapes.py`
-
-Verifies the agent's per-rep template assignments are consistent with the
-decisive-shape × region equivalence rule. Two checks:
-1. **Intra-template**: reps assigned to the same template should share a
-   single decisive shape. ≥2 distinct shapes per template hints at overlumping.
-2. **Cross-template**: a given decisive shape should NOT span ≥2 templates.
-   A split shape hints at a missed merge.
-
-```bash
-python3 tools/lint_template_shapes.py \
-    [--index templates/branch_index.json] \
-    [--reps  csvs/blocker_representatives.csv] \
-    [--map   csvs/blocker_dedup_map.csv] \
-    [--include-legacy] [--show-clean] [--output -]
-```
-
-Exit codes: 0=clean, 1=intra-only warnings, 2=cross-template warnings.
-
-### `tools/plot_coverage_curves.py`
-
-Coverage-by-time plot for canonical targets × 4 fuzzers, n=10 trials each.
-Each panel shows per-fuzzer thin spaghetti lines (one per trial) plus a
-bold mean line, so distributional separation is visible at a glance —
-two fuzzers with overlapping means but cleanly displaced per-trial bands
-are significant under MW, two with heavy per-trial overlap are not. Reads
-`out/coverage_ts/<target>/<fuzzer>/trial<N>/coverage_timeseries.csv`.
-
-```bash
-python3 tools/plot_coverage_curves.py
-# → out/coverage_curves.png
-```
-
-### `fuzzer_mechanism_library.md`
-
-Stable canonical paragraphs describing each canonical fuzzer's mechanism
-(naive / cmplog / value_profile / value_profile_cmplog). Used by
-`study_units.py evidence-per-branch` to fill the `Mechanism — <fuzzer>:` blocks of
-the structured prompt. Edits should be deliberate — the prompt-record
-needs to be reproducible across sessions.
-
-### Canonical 10-target set (paper scope, locked 2026-05-02)
+## Canonical 10-target set (paper scope, locked 2026-05-02)
 
 ```
 lcms, bloaty, jsoncpp, libpng, libxml2, openthread, sqlite3, woff2, harfbuzz, curl
@@ -679,43 +210,23 @@ SQL VM, color management).
   checkpoint (cmplog 3/3 single-checkpoint, vp 3/3, naive 2/3, vpc 0/3).
   Trials died before the 30-min checkpoint, making AUC degenerate.
 
-**Setup status (as of 2026-05-02):**
-- Ready: `lcms`, `bloaty`, `sqlite3` (3 trials each in `out/coverage_ts/`;
-  trials 4–10 fuzzed but not yet extracted for lcms/sqlite3, in flight for
-  bloaty extras)
-- `Dockerfile.cov` exists but no campaign yet: `jsoncpp`, `woff2`
-- Need full plumbing (Dockerfile + Dockerfile.cov + harness wiring):
-  `libpng`, `libxml2`, `openthread`, `harfbuzz`, `curl`. Oss-fuzz harnesses
-  exist for all of them at `/home/miao/oss-fuzz/projects/<target>/`.
-
-**Per-target divergence assessment** lives in
-`.claude/projects/-home-miao-BlockerAnalyzer/memory/project_target_set.md`
-— includes domain × format × expected-divergence-driver table and design-space
-coverage axes (I2S magic / fixed-keyword / checksum / state / network / font / image).
-
-#### Function-name resolution
-
-`branches.function` is populated at `add-canonical` time:
-`study_units.py.build_function_index(target)` imports
-`extract_functions.extract(target)`, which runs `llvm-cov export` inside
-`libafl-<target>-cov` Docker (~1–2s per target), then batch-demangles the
-names via `c++filt`. The result is held in memory and used at upsert time —
-no on-disk sidecar.
-
-If Docker is unavailable or the coverage image is missing, the lookup falls
-back to `basename(file)` with a stderr warning, and the run still succeeds.
-The schema's UNIQUE constraint excludes `function` (branch identity is
-`(target, file, line, col, blocked_side)`), so a subsequent run with the
-function index available will refresh in place via `ON CONFLICT … DO UPDATE
-SET function = COALESCE(excluded.function, branches.function)`.
-
+**Setup status:** full pipeline plumbing (Dockerfile.cov + n=10 campaign)
+exists for curl, harfbuzz, libpng, libxml2, openthread (the 50-rep pilot
+set) plus lcms, bloaty, sqlite3 from prior runs. jsoncpp/woff2 have
+`Dockerfile.cov` but no campaign yet. See `TODO.md` (P2 — Scope expansion)
+for the remaining 5-→10-target work.
 
 ## Feature Catalog (templates/)
 
-Output of the `feature-hypothesis-generator` agent (step 4). Each entry
-`templates/<feature_id>/` is a falsifiable hypothesis about ONE
-program-side parameter controlling ONE fuzzer-pair divergence, with three
-files:
+Falsifiable hypothesis harnesses, one per surviving program-feature
+hypothesis. Under the analysis-only contract (2026-05-17) these are
+produced by the **step 5a Pass B classifier** (not yet
+implemented) from the per-branch `.analysis.json` files — NOT directly by
+the `feature-hypothesis-generator` agent. The existing entries below
+predate the contract (prior template-writing era) and are kept as the
+verified/refuted methodology record. Each entry `templates/<feature_id>/`
+is a falsifiable hypothesis about ONE program-side parameter controlling
+ONE fuzzer-pair divergence, with three files:
 
 | File | Purpose |
 |------|---------|
@@ -775,8 +286,8 @@ Step 3.7 (optional): Per-role coverage gen for selected branches
 Step 4a: Hypothesis fan-out — manifest + per-rep prompts → Claude dispatch
 Step 4b: Per-branch analysis — each agent writes .analysis.json (NO template comparison, NO template.c — those are deferred to step 5+)
 Step 4c: Validate analyses — tools/check_analysis.py catches schema gaps + exact_quote hallucinations
-Step 5a: Cross-branch classification — separate pass aggregates .analysis.json files into template proposals (not implemented yet)
-Step 5b: Verification sweep — verdict per template (not implemented yet)
+Step 5a: Cross-branch classification — coarse family (mechanism_family.py) → Pass A distill (hypothesis-signature-distiller → open mechanism_summary signatures) → Pass B discover (signature-feature-classifier clusters by mechanism + coins categories) → clusters.json
+Step 5b: Author→preflight→verify→adjudicate loop (build_template_briefs → template-author → check_template → verify_template → verdict-adjudicator). Built + validated 2026-05-24. Retry twice on artifacts; record genuine refutations.
 Step 6: Lint template-shape consistency (post-agent quality check)
 ```
 
@@ -941,18 +452,102 @@ that aren't in the prompt), invalid section names, weak mechanism
 attribution, pair-label mismatches. Run before step 5a — bad analyses
 poison downstream classification.
 
-**Step 5 — verification sweep** (not implemented yet):
+**Step 5a — cross-branch classification**:
 
-For each `templates/<feature_id>/` produced in step 4, build the
-parameterized harness across `params.json:scan_values`, run the
-`involved_fuzzers` for `trials_per_point` × `duration_s`, then fill the
-`feature_spec.json` verification block: per-trial results, medians,
-summary, verdict ∈ {reproduced, reproduced-in-median,
-partially-reproduced, refuted, inconclusive}.
+Aggregates the per-branch `.analysis.json` files into **discovered** feature
+clusters, in three stages so the feature taxonomy is found in the data rather
+than imposed:
 
-Synthetic verification runs **only the involved fuzzers** (decisive
-winners + losers). Reference fuzzers are auxiliary context in the prompt,
-not part of the verdict.
+1. **Coarse family** — deterministic (`tools/mechanism_family.py`).
+   `coarse_family(covers_pairs)` maps each hypothesis to one of six mechanism
+   families (`I2S_pro`, `I2S_anti`, `VP_pro`, `VP_anti`, `synergy`,
+   `independent`; plus a `mixed` escape) from the technique + direction in
+   `covers_pairs` — robust to the ≥8/8 cutoff wobble that flips the fine
+   decisive-shape. Families are hard buckets; clustering never crosses them.
+2. **Pass A — distill** (`hypothesis-signature-distiller` agent, per family).
+   `build_signature_cards.py --family F` builds per-hypothesis cards (with
+   `analysis_path` back-pointers); each card → one signature `{gate_structure,
+   operand_kind, operand_literal, operand_width_bytes, byte_signature,
+   mechanism_summary, one_line}`, derived in isolation (Read+Write only). The
+   gate slots use a closed vocabulary; **`mechanism_summary` is OPEN free text**
+   — the technique's effect in the distiller's own words, no fixed taxonomy.
+3. **Pass B — discover** (`signature-feature-classifier` agent, per family).
+   Reads the family's `signatures.json` + `<family>.cards.json`, **clusters
+   branches by `mechanism_summary` similarity** (gate slots secondary; opens
+   member analyses via `analysis_path` when ambiguous), and coins an emergent
+   `mechanism_label` + `feature_id` + definition per cluster →
+   `step5a/<family>/clusters.json`. Each cluster = one proposed feature/template
+   for 5b; members carry `analysis_path` so 5b authors from the full analyses.
+
+**Why discovery, not a fixed mechanism vocabulary:** an earlier closed
+`technique_effect` taxonomy was *induced from the pilot then applied back to it*
+— circular, and it would anchor every future run. Keeping `mechanism_summary`
+open and clustering it in Pass B makes the categories an output (discovered),
+preserving the no-anchoring property of the analysis-only contract. The gate
+slots stay closed — they describe structure, not the feature, so they don't bias
+discovery. (Once a taxonomy is stable, a future *application*-mode distiller
+could emit a closed mechanism label for reproducibility at scale.)
+
+```bash
+python3 tools/mechanism_family.py                                   # family distribution + self-test
+for fam in I2S_pro I2S_anti VP_pro synergy independent; do
+  python3 tools/build_signature_cards.py --family $fam --out step5a/$fam.cards.json
+  # dispatch hypothesis-signature-distiller over $fam.cards.json -> step5a/$fam/signatures.json
+  # dispatch signature-feature-classifier on signatures.json + cards -> step5a/$fam/clusters.json
+done
+```
+
+**Step 5b — author → preflight → verify → adjudicate loop**
+(built + end-to-end validated 2026-05-24):
+
+The loop turns each step-5a cluster into a verified-or-refuted template. Two
+agents (author, adjudicator) bracket two deterministic tools (preflight, runner).
+**Retry policy (locked): two regenerations on a harness artifact; a genuine
+refutation is recorded, never retried** (no re-clustering back to 5a).
+
+```
+build_template_briefs.py  → step5b/briefs/<id>.json   (cluster + members' analyses)
+  └─ template-author agent → step5b/<id>/{template.c, params.json, feature_spec.json}  (verdict: pending)
+       └─ check_template.py (preflight) ──FAIL──────────────┐ mechanical → regenerate
+            └─ PASS → verify_template.py (sweep)             │  (budget 2)
+                 ├─ reproduced / reproduced_in_median → ACCEPT → promote to templates/<id>/
+                 ├─ build_fail / execs=0 / all-zero ─────────┘ mechanical → regenerate
+                 └─ refuted / inconclusive(w/crashes) / partially
+                      └─ verdict-adjudicator agent →
+                           harness_artifact   → regenerate w/ feedback (budget 2)
+                           genuine_refutation → record to templates/legacy/<id>/
+                           underpowered       → rerun (more trials / wider scan)
+```
+
+```bash
+python3 tools/build_template_briefs.py --family all          # step5b/briefs/*.json (13)
+# dispatch template-author over a brief -> step5b/<id>/{template.c, params.json, feature_spec.json}
+python3 tools/check_template.py  --template step5b/<id>      # preflight (cheap; gates the sweep)
+python3 tools/verify_template.py --template step5b/<id>      # full sweep -> verification_run.json
+python3 tools/verify_template.py --template step5b/<id> --trials 2 --duration-s 15 \
+    --fuzzers naive,cmplog --scan-values 1,8                 # smoke (decisive pair, tiny budget)
+# if non-reproduced: dispatch verdict-adjudicator over step5b/<id>/ -> adjudication.json
+```
+
+Build model: each variant ships a `<fuzzer>_cc` LibAFL wrapper on PATH in the
+`libafl-base` image (`../libafl_fuzzbench`); `<fuzzer>_cc --libafl -D<knob>=<val>
+template.c` → libFuzzer-compat binary; `__builtin_trap()` objectives land in
+`<corpus>/crashes/`; `crash_count` = files there. `verify_template.py` writes a
+standalone `verification_run.json` (per-trial counts + medians + verdict signals);
+verdict ∈ {reproduced, reproduced_in_median, partially_reproduced, refuted,
+inconclusive}, judged from `params.json:expected_direction` (auditable heuristic,
+`verdict_provenance: auto`). `--write-spec` patches the `feature_spec.json`
+verification block in place.
+
+Runs **only the involved fuzzers** (decisive winners + losers). Reference
+fuzzers are auxiliary context, not part of the verdict.
+
+**Staging vs catalog:** authored templates land in `step5b/<id>/` (proposals).
+On `reproduced` they promote to `templates/<id>/`; on `genuine_refutation` to
+`templates/legacy/<id>/` — keeping `templates/` the verified catalog. (Promotion
+is currently manual.) **Validated 2026-05-24:** the loop ran end-to-end on
+`opaque_exact_literal_dispatch_gate` (author → preflight PASS → smoke verify
+`reproduced`).
 
 **Step 6 — lint template-shape consistency**:
 

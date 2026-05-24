@@ -1,0 +1,51 @@
+{
+  "id": "vp_gradient_direct_literal",
+  "kind": "local",
+
+  "pair": {
+    "primary": {
+      "A": "value_profile",
+      "B": "naive",
+      "axis_differ": "value_profile"
+    },
+    "involved_fuzzers": ["naive", "cmplog", "value_profile", "value_profile_cmplog"],
+    "has_axis": ["value_profile", "value_profile_cmplog"],
+    "lacks_axis": ["naive", "cmplog"]
+  },
+
+  "hypothesis": {
+    "mechanism": "value_profile instruments every integer comparison so each CMP callback writes a (PC, Hamming-distance) bucket into the CMP_MAP. On a single integer == against one fixed goal, every input whose candidate word gets bit-by-bit closer to the goal opens a new bucket and is preserved as corpus, giving value_profile and value_profile_cmplog a monotone gradient toward the exact match. naive has only per-edge hit-count feedback, so the comparison is one all-or-nothing edge with no partial-match reward. cmplog adds I2S substitution but no distance feedback; here the compared operands are XORed with a per-execution mask derived from a separate input region, so the CMP pair moves every execution and there is no stable literal for cmplog to paste — the Hamming distance to the goal is mask-invariant, so the CMP_MAP gradient is the only fitness signal that survives, and only the has_axis (value_profile) fuzzers can climb it.",
+    "program_feature_parameter": "OPERAND_WIDTH (compile-time -D): number of bytes of the candidate integer word the Hamming gradient must climb toward the goal constant (1..8).",
+    "predicted_direction": "has_axis fuzzers {value_profile, value_profile_cmplog} outperform lacks_axis fuzzers {naive, cmplog}; the ratio grows with OPERAND_WIDTH",
+    "predicted_endpoints": {
+      "OPERAND_WIDTH=1": "1-byte (256-value) space: all four fuzzers near parity — naive havoc and the VP gradient both find it quickly; cmplog gains nothing but also loses little.",
+      "OPERAND_WIDTH=8": "64-bit space: lacks_axis cluster fails — naive=0 (blind 1/256^8 search) and cmplog=0 (mask defeats I2S paste); has_axis cluster still reaches the trap by climbing the CMP_MAP gradient."
+    },
+    "expected_curve_per_fuzzer": {
+      "naive": "monotone-decreasing (resolves at OPERAND_WIDTH=1, drops to 0 by width 4-8 as blind search collapses 1/256^W)",
+      "cmplog": "monotone-decreasing, tracking naive (no distance feedback and no stable literal to substitute under the per-execution mask)",
+      "value_profile": "flat-high relative to lacks_axis (gradient climb degrades only slowly with width; reaches the trap at every dose)",
+      "value_profile_cmplog": "flat-high relative to lacks_axis (same CMP_MAP gradient as value_profile; I2S adds no help because the masked operand is unsubstitutable)"
+    },
+    "tradeoff_observation": "The cluster's defining divergence is value_profile_cmplog > cmplog (member harfbuzz_9584): VP beats an I2S-equipped fuzzer. The per-execution mask on the compared operands is what makes that honest in the synthetic — without it, cmplog could log and paste the goal literal and the cmplog/naive gap would vanish. The mask preserves the candidate's Hamming distance to the goal (it cancels in the XOR) so VP's gradient is undisturbed, while the operands cmplog observes move every execution so no stable substitution target exists."
+  },
+
+  "verification": {
+    "harness": "step5b/vp_gradient_direct_literal/template.c",
+    "params": "step5b/vp_gradient_direct_literal/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [1, 2, 4, 8],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "pending",
+
+    "results_per_trial": {},
+    "results_median": {},
+    "summary": {},
+    "notes": [
+      "I2S-unsubstitutability is implemented by XORing both compared operands with a per-execution mask read from input[OPERAND_WIDTH..OPERAND_WIDTH+8); the candidate-to-goal Hamming distance is mask-invariant so VP's gradient is intact, but cmplog sees a moving CMP pair with no fixed literal to paste.",
+      "cmplog tracking naive (not value_profile) at high OPERAND_WIDTH is the load-bearing check for the value_profile_cmplog>cmplog member: it isolates the CMP_MAP gradient from I2S substitution.",
+      "Goal constant GOAL_FULL=0x0A85 is truncated to OPERAND_WIDTH bytes so every scan value stays satisfiable; the gate is a single integer == (no memcmp ladder, no incremental per-byte if-chain) so the only rewarded progress is the VP-specific Hamming bucket."
+    ]
+  }
+}

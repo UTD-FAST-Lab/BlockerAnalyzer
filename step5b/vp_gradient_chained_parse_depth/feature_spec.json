@@ -1,0 +1,58 @@
+{
+  "id": "vp_gradient_chained_parse_depth",
+  "kind": "local",
+
+  "pair": {
+    "primary": {
+      "A": "value_profile",
+      "B": "naive",
+      "axis_differ": "value_profile"
+    },
+    "involved_fuzzers": ["naive", "cmplog", "value_profile", "value_profile_cmplog"],
+    "has_axis": ["value_profile", "value_profile_cmplog"],
+    "lacks_axis": ["naive", "cmplog"]
+  },
+
+  "hypothesis": {
+    "mechanism": "The objective sits behind a chain of CHAIN_DEPTH sequential single-byte equality gates: each gate must match its own distinct constant before the next gate is reached. value_profile (and value_profile_cmplog) write a (PC, operand-distance bucket) entry into the CMP_MAP on every intercepted byte comparison, so the corpus accumulates partial-match reward one gate at a time — a per-stage gradient that lets these fuzzers climb the chain incrementally. naive has only edge-bucket feedback and must satisfy all CHAIN_DEPTH bytes blindly (~1/256^CHAIN_DEPTH per execution); cmplog has I2S substitution but no CMP_MAP gradient, so between gates it has nothing to ride — the per-gate constants are single bytes with little to substitute. Both has_axis fuzzers share the CMP_MAP gradient, hence the same predicted curve shape.",
+    "program_feature_parameter": "CHAIN_DEPTH (compile-time -D flag) — the number of sequential single-byte gates in the parse chain; each gate compares one input byte to a distinct constant and must pass before the next is checked.",
+    "predicted_direction": "has_axis fuzzers (value_profile, value_profile_cmplog) outperform lacks_axis fuzzers (naive, cmplog); ratio grows with CHAIN_DEPTH",
+    "predicted_endpoints": {
+      "CHAIN_DEPTH=2": "Shallow chain; all four fuzzers can blindly satisfy 2 bytes within the budget, so crash counts are comparable and stratification is minimal.",
+      "CHAIN_DEPTH=16": "lacks_axis cluster (naive, cmplog) cannot reach the trap — blind 1/256^16 is unreachable and cmplog has no inter-gate gradient — while has_axis cluster still climbs the longer gradient gate-by-gate and produces crashes (fewer than at shallow depth, but > 0)."
+    },
+    "expected_curve_per_fuzzer": {
+      "naive": "monotone-decreasing (exponential collapse as CHAIN_DEPTH grows; ~0 by depth 8)",
+      "cmplog": "monotone-decreasing (no per-gate gradient; collapses toward 0 like naive, possibly marginally later)",
+      "value_profile": "gentle decline but stays > 0 (climbs the gradient at every depth; crash rate slows as the chain lengthens)",
+      "value_profile_cmplog": "gentle decline but stays > 0 (same CMP_MAP gradient as value_profile; absolute count may sit at or above value_profile)"
+    },
+    "tradeoff_observation": "The two source members are decisive on different fuzzer pairs but the SAME value_profile axis: libxml2_2686 is value_profile > naive (prob_div=1.00, the cleanest case, used as the anchor) and libxml2_2313 is value_profile_cmplog > cmplog. Both reduce to 'CMP_MAP gradient present vs absent', which the has_axis / lacks_axis partition captures uniformly; no cross-axis inversion is expected."
+  },
+
+  "verification": {
+    "harness": "step5b/vp_gradient_chained_parse_depth/template.c",
+    "params": "step5b/vp_gradient_chained_parse_depth/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [2, 4, 8, 16],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "pending",
+
+    "results_per_trial": {},
+
+    "results_median": {},
+
+    "summary": {
+      "headline_finding": "",
+      "stratification_holds": "",
+      "monotone_curves": {}
+    },
+
+    "notes": [
+      "Per-gate edges are INTENDED here (VP family): the CMP_MAP bucketing of each single-byte gate IS the mechanism under test, not a forbidden partial-match ladder.",
+      "Honesty caveat: source member libxml2_2686's own weakest_evidence_point notes that a Hamming bucket over a 1-byte operand distinguishes only ~8 distance classes, so the per-gate gradient is weaker than a multi-byte comparison would give. If has_axis does not separate from lacks_axis at high CHAIN_DEPTH, the honest outcome is that single-byte chained gates provide too little gradient and the verdict is inconclusive/refuted, not a forced reproduction.",
+      "naive crash counts may be bimodal at low depth; report median alongside mean."
+    ]
+  }
+}

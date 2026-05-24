@@ -1,0 +1,57 @@
+{
+  "id": "curl_multi_literal_transfer_enablement",
+  "kind": "local",
+
+  "pair": {
+    "primary": {
+      "A": "cmplog",
+      "B": "naive",
+      "axis_differ": "I2S"
+    },
+    "involved_fuzzers": ["cmplog", "naive", "value_profile", "value_profile_cmplog"],
+    "has_axis": ["cmplog", "value_profile_cmplog"],
+    "lacks_axis": ["naive", "value_profile"]
+  },
+
+  "hypothesis": {
+    "mechanism": "The cluster's blockers are downstream derived-state conditions in curl's URL/HTTP parsers (byte/header-line counters, linked-list head pointers, socket revents flags) that only become nonzero/non-null after the input clears a CHAIN of sequential opaque multi-byte literal CMPs (scheme 'pop3+-', host '127.0.0.1', 'HTTP/' framing, header tokens). I2S (cmplog and value_profile_cmplog, both carrying I2SRandReplace) logs each literal operand from the CmpLogObserver and substitutes it into the input one gate at a time, so it clears the chain in roughly a number of mutations linear in the chain length. naive and value_profile lack I2SRandReplace: naive has only blind havoc, and value_profile's CMP_MAP rewards Hamming progress per single CMP but cannot climb an exact multi-byte equality nor stack independent sequential equalities, so both must land every literal byte by chance. The has_axis advantage is therefore identical across cmplog and value_profile_cmplog (same substitution mutator) and grows as more sequential literal gates are chained before the downstream trap.",
+    "program_feature_parameter": "LITERAL_CHAIN_LEN (compile-time -D) — the number of sequential opaque 4-byte literal gates the input must clear, in order, before the downstream derived-state trap fires.",
+    "predicted_direction": "has_axis fuzzers (cmplog, value_profile_cmplog) outperform lacks_axis fuzzers (naive, value_profile); the crash-count gap grows with LITERAL_CHAIN_LEN",
+    "predicted_endpoints": {
+      "LITERAL_CHAIN_LEN=1": "Single 4-byte literal gate. has_axis resolves quickly via one I2S substitution; lacks_axis may land a small number of crashes by blind chance (~1/256^4 per exec), so the gap is modest.",
+      "LITERAL_CHAIN_LEN=8": "Eight sequential 4-byte literal gates (~1/256^32 for blind search). lacks_axis expected at zero crashes with certainty; has_axis still reaches the trap via per-gate substitution, so the gap is maximal."
+    },
+    "expected_curve_per_fuzzer": {
+      "cmplog": "flat-high then gently declining (resolves at every chain length; time-to-trap rises slowly with LITERAL_CHAIN_LEN as more substitutions are needed)",
+      "value_profile_cmplog": "flat-high, tracking cmplog (same I2SRandReplace substitution); may equal or slightly exceed cmplog via the added VP feedback",
+      "naive": "monotone-decreasing to zero (crash count collapses as ~1/256^(4*LITERAL_CHAIN_LEN); zero by chain length 2)",
+      "value_profile": "monotone-decreasing to zero (no operand substitution; CMP_MAP cannot climb stacked exact equalities)"
+    },
+    "tradeoff_observation": "None expected: this is a pure I2S_pro cluster, all seven members show only the I2S technique with cmplog>naive and value_profile_cmplog>value_profile on the same axis. value_profile_cmplog may post a higher absolute crash count than cmplog at a given chain length because it also carries VP feedback, but that is a within-has_axis offset difference and does not invert the stratification."
+  },
+
+  "verification": {
+    "harness": "step5b/curl_multi_literal_transfer_enablement/template.c",
+    "params": "step5b/curl_multi_literal_transfer_enablement/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [1, 2, 4, 8],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "pending",
+
+    "results_per_trial": {},
+
+    "results_median": {},
+
+    "summary": {
+      "headline_finding": "",
+      "stratification_holds": "",
+      "monotone_curves": {}
+    },
+
+    "notes": [
+      "Knob is chain length (number of sequential opaque 4-byte literal gates), not constant width, per the cluster definition: the real blocker is a downstream derived-state condition reached only after several sequential literal CMPs are satisfied, so the I2S advantage scales with how many gates must be cleared in sequence.",
+      "Each gate is a single exact 4-byte memcmp equality with no partial-match coverage edge; the trap fires only on full-chain success, so naive/value_profile are given no gradient to climb."
+    ]
+  }
+}

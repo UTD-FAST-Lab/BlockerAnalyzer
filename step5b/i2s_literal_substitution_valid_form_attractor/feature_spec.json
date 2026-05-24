@@ -1,0 +1,58 @@
+{
+  "id": "i2s_literal_substitution_valid_form_attractor",
+  "kind": "local",
+
+  "pair": {
+    "primary": {
+      "A": "value_profile",
+      "B": "value_profile_cmplog",
+      "axis_differ": "I2S"
+    },
+    "involved_fuzzers": ["naive", "cmplog", "value_profile", "value_profile_cmplog"],
+    "has_axis": ["cmplog", "value_profile_cmplog"],
+    "lacks_axis": ["naive", "value_profile"]
+  },
+
+  "hypothesis": {
+    "mechanism": "At this gate a contiguous CMP literal (the 'valid form') sits adjacent to a branch that only fires on a DEVIATION from that literal. I2SRandReplace observes the per-position equality CMPs against the literal bytes and substitutes those operands back into the input, steering the corpus toward the all-matching/well-formed state and 'repairing' any mutation that would break the literal at the trap position. The I2S-lacking arm keeps random byte diversity at the deviating position and trips the trap freely. Because both arms of the decisive pair (value_profile vs value_profile_cmplog) share identical edge/CMP_MAP gradient feedback and differ ONLY in I2SRandReplace, the divergence is attributable to the I2S substitution direction alone — this is a Pattern-B inversion where I2S HURTS, so the has_axis fuzzers are the predicted LOSERS.",
+    "program_feature_parameter": "ATTRACT_BYTES (-D compile-time knob): width in bytes of the contiguous valid-form literal that I2S observes via per-position equality CMPs and re-substitutes. Wider literal = stronger one-way attractor competing against the single deviating byte the trap requires.",
+    "predicted_direction": "lacks_axis fuzzers (naive, value_profile) outperform has_axis fuzzers (cmplog, value_profile_cmplog); the I2S-hurts gap grows with ATTRACT_BYTES",
+    "predicted_endpoints": {
+      "ATTRACT_BYTES=1": "No anchor chain and no literal at the trap position for I2S to re-paste: ~255/256 of inputs trip the trap. has_axis ≈ lacks_axis (both crash readily); no attractor present.",
+      "ATTRACT_BYTES=8": "A 7-byte anchor must be matched then the 8th byte must deviate; I2S re-pastes the whole 8-byte literal window, repeatedly fixing the deviating byte back. value_profile_cmplog (and cmplog) near 0 crashes; value_profile and naive keep the deviation and crash."
+    },
+    "expected_curve_per_fuzzer": {
+      "naive": "flat-high (no I2S, random diversity holds the deviation at every dose)",
+      "value_profile": "flat-high (no I2S; CMP_MAP gradient helps reach the anchor but does not pin the trap byte)",
+      "cmplog": "monotone-decreasing (I2S re-pastes the literal; suppression grows with ATTRACT_BYTES)",
+      "value_profile_cmplog": "monotone-decreasing (same I2S suppression; drops toward 0 at high ATTRACT_BYTES)"
+    },
+    "tradeoff_observation": "HONESTY CAVEAT ON HARNESS FAITHFULNESS: the real cluster mechanism is a CORPUS-pollution dynamic — I2S substitutions accumulate over many seeds and the scheduler keeps re-selecting the matching/well-formed seeds, so the deviating state is starved over generations. A single-input micro-harness cannot fully reproduce that multi-seed, multi-generation feedback loop: here I2S only suppresses the deviation per-exec, competing against havoc's per-exec diversity rather than against an accumulated corpus bias. It is therefore possible that at the sweep no clean separation appears (havoc's diversity dominates the single per-exec I2S substitution), in which case INCONCLUSIVE is the honest verdict — not a forced reproduction. The acceptance rule is kept conservative for this reason. Note also the opposite axis is not in play here (no value_profile-helps inversion); this template isolates the I2S axis only."
+  },
+
+  "verification": {
+    "harness": "step5b/i2s_literal_substitution_valid_form_attractor/template.c",
+    "params": "step5b/i2s_literal_substitution_valid_form_attractor/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [1, 2, 4, 8],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "pending",
+
+    "results_per_trial": {},
+
+    "results_median": {},
+
+    "summary": {
+      "headline_finding": "",
+      "stratification_holds": "",
+      "monotone_curves": {}
+    },
+
+    "notes": [
+      "Anti-family (I2S-hurts): has_axis fuzzers are the predicted LOSERS, lacks_axis fuzzers the predicted WINNERS.",
+      "Decisive pair value_profile > value_profile_cmplog chosen as the primary anchor because vp and vpc differ ONLY in I2SRandReplace, isolating the I2S axis cleanly (2 of 4 cluster members; the curl/libpng-iTXt members give naive > cmplog, the same axis direction).",
+      "Micro-harness caveat: corpus-pollution dynamic may not survive reduction to a single-input gate; an inconclusive sweep is an expected honest outcome."
+    ]
+  }
+}

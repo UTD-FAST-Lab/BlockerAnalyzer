@@ -1,0 +1,57 @@
+{
+  "id": "vp_gradient_mask_threshold_rescue",
+  "kind": "local",
+
+  "pair": {
+    "primary": {
+      "A": "value_profile_cmplog",
+      "B": "cmplog",
+      "axis_differ": "value_profile"
+    },
+    "involved_fuzzers": ["naive", "cmplog", "value_profile", "value_profile_cmplog"],
+    "has_axis": ["value_profile", "value_profile_cmplog"],
+    "lacks_axis": ["naive", "cmplog"]
+  },
+
+  "hypothesis": {
+    "mechanism": "The gate is a numeric-threshold comparison `x >= K` where x is an input-derived unsigned integer of width THRESHOLD_BYTES and K = RANGE_MAX-1 (one unit below the top of x's range). value_profile's CMP_MAP records the operand distance for this CMP and rewards every input whose x climbs closer to K, producing a monotone fitness gradient that is the only guiding signal at the gate. Both has_axis fuzzers carry that CMP_MAP gradient and therefore share the same advantage. The lacks_axis fuzzers have no gradient: naive must blind-search the 2^(8*N) operand space, and cmplog's I2S substitution is structurally inapplicable because the winning side is a two-value range ({K, K+1}) rather than a single magic constant — there is no recognizable multi-byte literal in a low-distance input for I2SRandReplace to anchor an overwrite on, so cmplog performs no better than naive.",
+    "program_feature_parameter": "THRESHOLD_BYTES (-D compile-time knob) — width in bytes of the input-derived integer, which sets both the threshold magnitude K and the size of the blind-search operand space.",
+    "predicted_direction": "has_axis fuzzers (value_profile, value_profile_cmplog) outperform lacks_axis fuzzers (naive, cmplog); the ratio grows with THRESHOLD_BYTES",
+    "predicted_endpoints": {
+      "THRESHOLD_BYTES=1": "Operand space is only 256 with two winning values; all four fuzzers brute-force the threshold almost immediately. Little or no stratification — has_axis and lacks_axis crash at comparable rates.",
+      "THRESHOLD_BYTES=8": "Operand space is 2^64 with no exact literal to substitute. naive and cmplog produce 0 crashes (no gradient, I2S inapplicable). value_profile and value_profile_cmplog climb the CMP_MAP distance gradient toward K and resolve."
+    },
+    "expected_curve_per_fuzzer": {
+      "naive": "monotone-decreasing in THRESHOLD_BYTES (high at 1-byte, collapses to 0 by 4-byte as blind search becomes infeasible)",
+      "cmplog": "monotone-decreasing in THRESHOLD_BYTES, tracking naive — I2S adds nothing because there is no substitutable literal",
+      "value_profile": "flat-high (CMP_MAP gradient resolves at every dose; mild slowing at the widest knob as the climb lengthens)",
+      "value_profile_cmplog": "flat-high (inherits the CMP_MAP gradient; resolves at every dose)"
+    },
+    "tradeoff_observation": "No cross-axis inversion is expected here: I2S confers no benefit at this gate by construction (the threshold is a value range, not a substitutable magic constant), so cmplog collapses onto naive while both value_profile-bearing fuzzers track the gradient. The cluster's two source members differ in surface form (a `bit_depth < 16` threshold and a `(color_type & 0x02) != 0` bitmask), but both reduce to the same CMP-distance gradient that I2S cannot exploit; this harness isolates the threshold form, which provides the live width knob (a 1-bit mask has no width to sweep)."
+  },
+
+  "verification": {
+    "harness": "step5b/vp_gradient_mask_threshold_rescue/template.c",
+    "params": "step5b/vp_gradient_mask_threshold_rescue/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [1, 2, 4, 8],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "pending",
+
+    "results_per_trial": {},
+
+    "results_median": {},
+
+    "summary": {
+      "headline_finding": "",
+      "stratification_holds": "",
+      "monotone_curves": {}
+    },
+
+    "notes": [
+      "Honesty caveat: the cluster has only 2 members (n=2), both libpng, and both source analyses flag the CMP_MAP-gradient attribution as partly inferred (libpng_7332 weakest_evidence_point: the vp win may partly stem from upstream chunk-size/CRC gates rather than the L1216 bitmask CMP itself). This synthetic harness removes those upstream confounders by exposing the threshold CMP as the sole objective, so an inconclusive or refuted outcome here would be an honest correction, not a forced failure.",
+      "Harness design: the winning side is a two-value range {K, K+1} rather than an exact constant precisely so that I2S has nothing to substitute; if cmplog matches the value_profile fuzzers at high THRESHOLD_BYTES, the cluster's 'I2S structurally inapplicable' claim is refuted (matches both members' would_be_refuted_by sketches)."
+    ]
+  }
+}

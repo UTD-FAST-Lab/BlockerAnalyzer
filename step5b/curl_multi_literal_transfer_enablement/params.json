@@ -1,0 +1,45 @@
+{
+  "template_id": "curl_multi_literal_transfer_enablement",
+  "parameter": "LITERAL_CHAIN_LEN",
+  "scan_values": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "cmplog > naive",
+  "expected_curve": "monotone increasing separation in LITERAL_CHAIN_LEN",
+  "acceptance": {
+    "metric": "crash_count",
+    "rule": "has_axis (cmplog, value_profile_cmplog) >= lacks_axis (naive, value_profile) at every chain length; naive >> 0 at LITERAL_CHAIN_LEN=1 (single 4-byte gate occasionally landed), naive=0 while cmplog>0 at LITERAL_CHAIN_LEN>=2; separation grows monotonically with chain length"
+  },
+  "design_basis": "Each chain step is one opaque 4-byte exact-literal gate that must clear before the next is reachable; the trap fires only on full-chain success. I2S substitutes each logged literal operand one gate at a time so cmplog/vpc time-to-clear scales ~linearly in chain length, while blind search must land all 4*LITERAL_CHAIN_LEN literal bytes by chance (~1/256^(4*N) collapse). Increasing LITERAL_CHAIN_LEN therefore widens the I2S-vs-blind-search advantage with no partial-match ladder offered to naive.",
+  "notes": [
+    "LITERAL_CHAIN_LEN=1: single 4-byte literal gate (1/256^4 per exec for blind). cmplog/vpc resolve fast; naive may land a handful in 600s, value_profile likewise.",
+    "LITERAL_CHAIN_LEN=2: two sequential 4-byte gates (1/256^8 for blind). cmplog/vpc clear both via two I2S substitutions; naive/value_profile expected ~0.",
+    "LITERAL_CHAIN_LEN=4: four sequential gates; blind search infeasible (1/256^16); has_axis still resolves via per-gate substitution.",
+    "LITERAL_CHAIN_LEN=8: eight sequential gates; lacks_axis=0 with certainty; has_axis time-to-trap grows but stays tractable, exercising the full literal pool."
+  ],
+  "screen": {
+    "scan_values": [
+      1,
+      2,
+      3
+    ],
+    "duration_s": 120,
+    "trials": 2,
+    "fuzzers": [
+      "cmplog",
+      "naive"
+    ],
+    "_note": "screen-tuning experiment (2026-05-24): override for the fast re-screen; honest grid stays in scan_values above"
+  }
+}

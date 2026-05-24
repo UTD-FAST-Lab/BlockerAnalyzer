@@ -1,0 +1,202 @@
+[
+  {
+    "id": "harfbuzz_9459",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 9459,
+    "analysis_path": "prompts/--RB/00_harfbuzz_9459.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-myanmar-machine.hh",
+    "function": "find_syllables_myanmar(hb_buffer_t*)",
+    "line": "518",
+    "source_line": "\tcase 9:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A byte sequence that, when fed into the Myanmar syllable Ragel machine (a switch dispatcher over _myanmar_syllable_machine_trans_actions[_trans] with arms case 3/5/6/4/8/7/9), drives the state machine into a transition whose action index is exactly 9. The winner seeds carry a recurring multi-byte signature (e.g., `00 ff 01 20 49 0c`, `20 4a 0c 00 00 00`, and a `|iahT|||||` byte run at offsets ~0x10-0x23) that maps onto myanmar_category values producing a trans_actions[_trans]==9 dispatch.",
+    "why_winner_satisfies": "value_profile retains an independent CMP_MAP Hamming-distance bucket per case-arm comparison in the Ragel-generated switch and per-state transition comparison. Each input that reduces operand distance against the case-9 constant adds a new bucket, monotonically guiding the corpus toward case 9; resolved 10/10 in 0 unreached trials.",
+    "why_loser_doesnt": "value_profile_cmplog logs ALL of the Ragel case constants and trans-key/targ/action literals into its input-to-state dictionary. The corresponding per-mutation substitution draws uniformly from this dictionary, locking the corpus into whichever sister arm (3 or 5 \u2014 visible as [B] hit in the source overlay at lines 506-512) establishes residency first. This pollutes vpc's queue away from the case-9 target arm: 0/10 resolved, all 10 trials block for an avg 11.95h.",
+    "mechanism_attribution": "value_profile wins via CMP_MAP gradient feedback on the Ragel state-machine CMPs: each input that produces a closer-matching operand pair adds a new CMP_MAP bucket and is preserved as corpus, giving per-arm Hamming-distance gradients that guide the search to case 9. value_profile_cmplog has the same CMP_MAP signal but is dominated by input-to-state dictionary roulette: the K-arm switch populates the I2S dictionary with K case constants and per-state-machine literals, and uniform per-mutation draws across that dictionary make hitting the case-9 target arm a roulette outcome that monocultures vpc's corpus into sister arms (cases 3 and 5 hit in [B] under L). The CMP_MAP gradient mechanism here is direction-asymmetric: against vp's gradient, the added I2S layer in vpc imposes dictionary-roulette overhead on top of a working gradient \u2014 pure loss. Attribution is to CMP_MAP gradient as the win mechanism; the loss mechanism in vpc is the same gradient being overridden by dictionary draws."
+  },
+  {
+    "id": "libpng_7375",
+    "family": "I2S_anti",
+    "target": "libpng",
+    "branch_id": 7375,
+    "analysis_path": "prompts/--RB/01_libpng_7375.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_handle_bKGD",
+    "line": "2018",
+    "source_line": "         if (buf[0] != 0 || buf[2] != 0 || buf[4] != 0)",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A PNG stream that reaches png_handle_bKGD via the non-palette, color RGB path (color_type with PNG_COLOR_MASK_COLOR set, not PALETTE) with bit_depth<=8, and supplies a 6-byte bKGD payload in which at least one of buf[0], buf[2], or buf[4] is non-zero so the disjunction (buf[0] != 0 || buf[2] != 0 || buf[4] != 0) evaluates true and the function returns via the 'invalid color' chunk-error path.",
+    "why_winner_satisfies": "value_profile reaches this branch with the TRUE side resolved 9/10 trials. With no I2SRandReplace mutator it does not pre-load the bKGD payload bytes with the literal 0 the CMP compares against; havoc + CMP_MAP gradient feedback over the three independent !=0 compares preserves intermediate inputs whose buf[0]/buf[2]/buf[4] still hold non-zero bytes (e.g. arbitrary scratch bytes from havoc that have not been zeroed), so the disjunction trivially fires on the TRUE side.",
+    "why_loser_doesnt": "value_profile_cmplog is identical to value_profile except for I2SRandReplace. Its cmplog observer logs the three (buf[i], 0) compares at line 2018 and the I2SRandReplace mutator substitutes the right-hand constant 0 directly into the bKGD payload positions, driving inputs toward buf[0]==0 && buf[2]==0 && buf[4]==0 \u2014 precisely the FALSE side. The blocker is FALSE (loser=8/10 blocked); I2S actively pushes payload bytes into the unique zero configuration that satisfies all three compares simultaneously, which is the harder side.",
+    "mechanism_attribution": "Pattern B 'I2S hurts': the only technique delta between value_profile (winner) and value_profile_cmplog (loser) is I2SRandReplace. The branch's CMP shape is a 3-way disjunction of byte!=0 tests; I2S sees the constant 0 and substitutes it into the operand bytes, biasing vpc inputs toward the FALSE (blocked) side. vp, lacking I2S, retains random byte content at those offsets and trivially takes the TRUE side. The integer-distance CMP feedback that both fuzzers share is identical here, so the divergence is attributable to the I2SRandReplace substitution direction alone."
+  },
+  {
+    "id": "libxml2_2727",
+    "family": "I2S_anti",
+    "target": "libxml2",
+    "branch_id": 2727,
+    "analysis_path": "prompts/--RB/02_libxml2_2727.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "parser.c:xmlParseTryOrFinish",
+    "line": "11750",
+    "source_line": "\t\t    (ctxt->input->cur[4] == 'D') &&",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "Inputs whose XML_PARSER_CONTENT byte stream reaches `<![C` (cur[0..3] = '<','!','[','C') but whose 5th byte (cur[4]) is anything other than ASCII 'D' (0x44), so the AND-chain breaks at line 11750 and the parser falls through to the avail<9 / cur=='<' fallback branches instead of entering XML_PARSER_CDATA_SECTION.",
+    "why_winner_satisfies": "value_profile's mutator stack is havoc + tokens only (no I2SRandReplace), so when its corpus contains seeds with `<![C?` style content (or any byte sequence near the gate), random byte mutations on the 5th position have P(non-'D') = 255/256 \u2014 they freely break the 'D' byte and take the F branch. DIVERGENT BRANCHES at L11750 records W: T=0 F=38 and L: T=19 F=0, confirming the winner reaches the gate site 38 times and always falls through F while the loser always matches T.",
+    "why_loser_doesnt": "value_profile_cmplog adds I2SRandReplace, which observes the runtime CMP `cur[4] == 0x44` (and the surrounding `cur[2]=='[', cur[3]=='C', cur[5]=='A', cur[6]=='T', cur[7]=='A', cur[8]='['` chain) and writes operand 0x44 plus the full `<![CDATA[` literal into its substitution dictionary. Once a seed in the corpus matches the CDATA prefix and takes T, I2SRandReplace keeps re-substituting these literals into mutated children \u2014 corpus drifts toward CDATA-matching inputs, and any havoc mutation that would break the 'D' byte is repeatedly 'fixed' back. The loser then descends into XML_PARSER_CDATA_SECTION (lines 11755-11757, all marked [L]) and gets stuck there processing CDATA content, never returning to encounter a non-'D' 5th byte at this gate.",
+    "mechanism_attribution": "This is a Pattern-B / I2S-hurts divergence with the I2SRandReplace mutator as the technique axis. The loser (value_profile_cmplog) carries I2SRandReplace, which observes the runtime equality CMPs against the literal bytes of `<![CDATA[` and pollutes the corpus with seeds matching that prefix; once seeds matching T accumulate, mutations that would break the 'D' byte are repeatedly re-substituted back, creating a one-way attractor. The winner (value_profile) lacks I2SRandReplace, so its corpus retains diversity at offset cur[4]; havoc/token mutations on any seed reaching the `<![C` prefix have P(non-'D') = 255/256 per byte, and the F branch is taken naturally. The technique axis IS I2S; the direction of effect is reversed compared to the canonical 'I2S-helps' Pattern-A case."
+  },
+  {
+    "id": "openthread_8518",
+    "family": "I2S_anti",
+    "target": "openthread",
+    "branch_id": 8518,
+    "analysis_path": "prompts/--RB/03_openthread_8518.analysis.json",
+    "file": "/src/openthread/src/core/thread/mesh_forwarder.cpp",
+    "function": "ot::MeshForwarder::UpdateEcnOrDrop(ot::Message&, bool)",
+    "line": "273",
+    "source_line": "            case Ip6::kEcnCapable1:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "An IPv6 packet whose first-2-byte version/traffic-class field encodes ECN == kEcnCapable1 (the 2-bit ECN sub-field of the TC byte equals 01), passed to UpdateEcnOrDrop with a queue time >= kTimeInQueueMarkEcn so the switch is entered. The ECN sub-field is the only constrained input feature (2 bits, 4 possible values: NotCapable=0, Capable1=1, Capable0=2, Marked=3).",
+    "why_winner_satisfies": "value_profile's CMP_MAP gradient bucket bumps when an input nudges the ECN sub-field closer to the kEcnCapable1 constant (Hamming distance over the 2-bit field), preserving the seed as new-bucket corpus; combined with havoc/token byte mutations exploring the IPv6 header version/TC byte, the 4-value 2-bit space is exhausted cheaply (~9/10 trials resolve). The W seeds share a near-identical 92-byte template with byte 0 cycling across 0x32/0x33/0x72/0x32/0x32 \u2014 direct evidence of cheap byte-level exploration on the header byte holding the ECN bits.",
+    "why_loser_doesnt": "value_profile_cmplog runs the same CMP_MAP gradient instrumentation but its augmented mutation stage (the input-to-state substitution stage that constitutes the I2S delta between vp and vpc) spends budget rewriting bytes at the many unrelated CMP sites the cmplog buffer captures across the OpenThread codepath (link-layer addresses, mesh-header constants, fragment offsets). That displaces CMP_MAP-driven havoc exploration of the IPv6 header byte. Only 2/10 vpc trials resolve and 8/10 stay blocked, with avg blocking duration 8.75h vs 3.80h for vp.",
+    "mechanism_attribution": "The winner side (value_profile) reaches the kEcnCapable1 arm via CMP_MAP gradient bucketing on the 2-bit ECN equality CMP plus naive havoc on the IPv6 header byte. This is Pattern B (technique-hurts) on the I2S axis: vp lacks the input-to-state substitution stage while vpc has it; the 2-bit ECN gate is too narrow for that substitution stage to contribute (no multi-byte literal to substitute), so vpc pays the overhead via corpus pollution at unrelated CMP sites without compensating gain on this gate. The claimed winner technique is CMP_MAP gradient, consistent with vp's instrumentation."
+  },
+  {
+    "id": "curl_430",
+    "family": "I2S_anti",
+    "target": "curl",
+    "branch_id": 430,
+    "analysis_path": "prompts/RB--/00_curl_430.analysis.json",
+    "file": "/src/curl/lib/url.c",
+    "function": "url.c:parseurlandfillconn",
+    "line": "2102",
+    "source_line": "      if(result)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "After the 6-byte fixed header the input must carry a scheme tag (e.g. 'SM' for SMTP, 'pop3') that selects a handler with PROTOPT_USERPWDCTRL or similar strict decode mode, AND a USER subfield containing a malformed percent-escape (e.g. '%&', '%F', '%00' under REJECT_ZERO, or a control-byte after %-decode) so that Curl_urldecode returns non-zero and result becomes truthy at line 2102.",
+    "why_winner_satisfies": "Naive (winner) seeds carry 'SM' and 'pop3' scheme bytes at offsets 0x06-0x09 followed by user fields packed with raw '%' literals and ASCII filler that occasionally decode to a rejected sequence (e.g. '%&%' or '%00000000'); pure random havoc on bytes 0x08-0x1f routinely produces the required malformed percent pattern because no operand-guided substitution pulls those bytes toward well-formed hex.",
+    "why_loser_doesnt": "Cmplog (loser) executes the same havoc stack but its I2SRandReplace pass intercepts the cascade of scheme/header strcasecompare CMPs (http, ftp, ...) and substitutes those operands into the input, biasing offsets 0x06-0x0f toward well-formed scheme literals and percent-encoded operand fragments that Curl_urldecode accepts; cmplog therefore steers seeds AWAY from the brittle decode-failure state \u2014 confirmed by the loser-blocking seeds dominating offsets 0x07-0x1c with '%' literals interleaved with valid hex digits and '@'/'.' tokens characteristic of CMP-table substitution.",
+    "mechanism_attribution": "havoc-only \u2014 pure random byte mutation (naive's havoc/token stack) is more effective than cmplog at producing the malformed-percent decode-failure state because I2S substitution actively REPAIRS percent-escapes by replacing them with intercepted CMP operands; this is a Pattern-B inversion where the I2S technique hurts the search."
+  },
+  {
+    "id": "harfbuzz_9523",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 9523,
+    "analysis_path": "prompts/RB--/01_harfbuzz_9523.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-use.cc",
+    "function": "hb-ot-shaper-use.cc:reorder_syllable_use(hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "394",
+    "source_line": "  if (info[start].use_category() == USE(R) && end - start > 1)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "Bytes that, after harfbuzz's harness parses them as a shaping job (font/lang/script + text), produce a buffer where info[start].use_category() == USE(R) (the Repha category) AND end - start > 1, i.e. a syllable cluster of length >=2 whose leading glyph is classified as Repha. The winner seeds contain readable language/script tag fragments (e.g. 'zo-hans', 'zo-', 'ker', 'n', 'h', 'p') and structured 16-byte header prefixes like '46 1d 01 00 00 01 0e 00 00 fe ...' that route input through the Indic/USE shaper category-assignment path.",
+    "why_winner_satisfies": "naive's broad havoc + token + crossover mutator stack repeatedly produces structured header bytes plus short ASCII tag fragments. Seeds 1-2 share an identical 11-byte prefix '46 1d 01 00 00 01 0e 00 00 fe 00' and only flip a few trailing bytes, and seeds 4-5 add language-tag-like ASCII ('zo-hans', 'ker', '---' filler) that flow into the USE shaper's category-assignment path; this gives the buffer a USE(R)-tagged leading glyph with at least one trailing glyph (the W column shows lines 377-391 of POST_BASE_FLAGS64 and the reorder loop 398-417 all firing).",
+    "why_loser_doesnt": "cmplog's corpus is dominated by seeds whose payload looks like recycled CMP operands (Seed 1: '9e 9e 9e 90 90 90 90 90 9e 9e 9e 9f', Seed 2: '20 20 ... 04 00 72 6e 20 20', Seed 4: 'be be be be d7 be 6d 6a ... be be be be d7 be be') -- repeating-byte patterns characteristic of I2SRandReplace overwriting input slices with one operand observed at unrelated CMP sites in the harfbuzz shaper. These payloads satisfy unrelated comparisons but never produce a parsed glyph at start with use_category() == USE(R); the branch fires T=15/F=125 in the W set and T=0/F=132 in the L set.",
+    "mechanism_attribution": "Pattern B (technique hurts). The winning fuzzer is naive (no I2S); it wins via plain havoc/token/crossover finding language/script tag fragments and header byte sequences that drive the harfbuzz parser into the USE category-assignment path that yields a Repha glyph. The loser is cmplog, whose input-to-state mutator pollutes the corpus with repeating operand bytes copied from the many integer/memcmp CMPs in the harfbuzz shaper (vtable dispatch, glyph property masks, FLAG64 checks). That corpus pollution starves the cmplog scheduler of the kind of structured ASCII+header inputs naive's pure-havoc lineage retains, so cmplog never reaches a buffer state where info[start].use_category() == USE(R)."
+  },
+  {
+    "id": "libpng_7424",
+    "family": "I2S_anti",
+    "target": "libpng",
+    "branch_id": 7424,
+    "analysis_path": "prompts/RB--/02_libpng_7424.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_handle_iTXt",
+    "line": "2767",
+    "source_line": "   if (prefix_length > 79 || prefix_length < 1)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A PNG input that reaches an iTXt chunk in which the keyword prefix scan computes prefix_length > 79 OR prefix_length < 1. Concretely: an iTXt chunk payload whose first byte is 0x00 (empty keyword) or whose first 80+ bytes contain no 0x00 terminator (over-long keyword).",
+    "why_winner_satisfies": "Naive uses pure random byte mutation (byte/word/dword random/interesting/flip/inc, bytes insert/delete). Random byte placement makes it easy to either set the first iTXt payload byte to 0 (length=0) or to fill 80+ bytes of the iTXt payload with non-zero bytes (length>79). Naive resolves the branch in 8/10 trials.",
+    "why_loser_doesnt": "Cmplog's I2SRandReplace substitutes input bytes with operands seen at intercepted CMPs (PNG chunk-type magic numbers like 'IHDR'/'iTXt', length fields, CRC operands). These substitutions push the input toward well-formed PNG keyword structures (printable ASCII followed by a NUL within 1-79 bytes), keeping prefix_length inside the valid 1..79 range. Cmplog reaches png_handle_iTXt MUCH more often than naive (HIT-COUNT DIVERGENCE shows ~10-20x more invocations) yet resolves the branch in only 1/10 trials \u2014 the I2S bias steers AROUND the malformed-keyword condition rather than toward it.",
+    "mechanism_attribution": "Pattern-B: I2SRandReplace (cmplog's distinguishing technique vs naive) HURTS here. The branch operand prefix_length is a runtime-computed loop-count, not a literal that any CMP records, so I2S has no direct lever to set it. Meanwhile the CMPs I2S DOES see (chunk magic 'IHDR'/'iTXt', CRC, fixed-format header fields) are constraints whose satisfaction produces well-formed keywords, which fall in the [1,79] range the branch checks AGAINST. Naive's unbiased random mutation explores the malformed boundary cases more readily."
+  },
+  {
+    "id": "libxml2_3121",
+    "family": "I2S_anti",
+    "target": "libxml2",
+    "branch_id": 3121,
+    "analysis_path": "prompts/RB--/03_libxml2_3121.analysis.json",
+    "file": "/src/libxml2/xmlreader.c",
+    "function": "xmlreader.c:xmlTextReaderFreeNodeList",
+    "line": "356",
+    "source_line": "\t\t(reader->ctxt->freeElemsNr < MAX_FREE_NODES)) {",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "An XML document that, when read by the textreader, produces enough element/text node frees within a single parse such that the cumulative freeElemsNr counter reaches MAX_FREE_NODES \u2014 typically achieved by a deep or wide tree of element/text nodes (many sibling tags, nested children, or repeated parse cycles) so xmlTextReaderFreeNodeList's inner while-loop iterates many tens of times. The branch condition compares a runtime accumulator against a compile-time constant, so no single input byte can be substituted to flip it; the input must instead exercise the parse path enough times.",
+    "why_winner_satisfies": "Naive's pure havoc mutator pool (BytesExpand, Crossover, Token*, Byte*Mutator) produces a structurally diverse corpus, and at line 312-315 (the descend-into-children while loop) the winner takes the children-non-null branch 158/0 times vs the loser's 66/0 \u2014 i.e. each winner invocation walks the node tree more than twice as deeply, so freeElemsNr accumulates past the cap within one run.",
+    "why_loser_doesnt": "cmplog's loser seeds are all anchored on the '127772.xml' SYSTEM-URL byte sequence (visible across loser seeds 1-5 at offsets ~0x04..0x0d), which is the I2SRandReplace substitution target from the DOCTYPE/SYSTEM parser CMPs. This pulls the cmplog corpus toward shallow parser-stage inputs that get rejected before producing deep element trees, so the freeElemsNr counter never accumulates: the loser reaches the blocker line 50/0 (T/F) \u2014 never the F side \u2014 vs winner 100/20.",
+    "mechanism_attribution": "The winner is naive, which has no CMP introspection at all (no input-to-state mutator, no CMP_MAP). Its advantage here is the absence of I2S-driven corpus pollution: cmplog's substitution operator concentrates the corpus around inputs that satisfy literal parser CMPs (file-extension/keyword tokens), starving exploration of the deeper-tree state space that this runtime-counter gate actually needs. The differentiating mechanism is therefore plain havoc \u2014 diversity-by-randomness rather than diversity-by-substitution."
+  },
+  {
+    "id": "openthread_8448",
+    "family": "I2S_anti",
+    "target": "openthread",
+    "branch_id": 8448,
+    "analysis_path": "prompts/RB--/04_openthread_8448.analysis.json",
+    "file": "/src/openthread/src/core/common/linked_list.hpp",
+    "function": "ot::LinkedList<ot::AddressResolver::CacheEntry>::PopAfter(ot::AddressResolver::CacheEntry*)",
+    "line": "218",
+    "source_line": "        if (aPrevEntry == nullptr)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "An input byte sequence that, when fed through the ip6_send fuzzer harness, causes openthread to add at least two entries to a LinkedList<T> (e.g. AddressResolver cache, Netif external unicast/multicast addresses) and then trigger Remove() on a non-head entry, so that LinkedList::Find succeeds with a non-null prev pointer and PopAfter is invoked with aPrevEntry != nullptr.",
+    "why_winner_satisfies": "naive (10/10 resolved) explores the input space with plain havoc and reaches the multi-entry list-removal sequence within the budget; reference fuzzer value_profile also resolves 10/10, confirming the requirement is reachable without I2S help.",
+    "why_loser_doesnt": "cmplog (2/10 resolved, 8/10 blocked at avg 9.60h) spends mutation budget on I2SRandReplace substitutions driven by the pointer/null and address-equality CMPs that flood the cmplog buffer along the LinkedList-heavy openthread call chain; these substitutions inject pointer-shaped bytes into the input that are wasted relative to the protocol-level sequencing required to populate-then-remove a list entry.",
+    "mechanism_attribution": "The winning side is naive's pure havoc mutator stack (ByteFlip/ByteInc/Bytes*/Crossover*/Token*) operating without CMP introspection. The blocker is a runtime pointer-vs-nullptr comparison (aPrevEntry == nullptr) whose operand is not derived from input bytes, so input-to-state substitution cannot help; instead, the saturated CMP buffer from surrounding LinkedList traversals biases cmplog's mutator toward irrelevant pointer-shaped byte substitutions, taxing its exploration budget. naive avoids this tax and wins."
+  },
+  {
+    "id": "harfbuzz_9463",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 9463,
+    "analysis_path": "prompts/RBRB/00_harfbuzz_9463.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-myanmar.cc",
+    "function": "hb-ot-shaper-myanmar.cc:initial_reordering_consonant_syllable(hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "217",
+    "source_line": "    for (; i < base; i++)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)",
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A harfbuzz fuzz buffer whose script/language selection routes execution into initial_reordering_consonant_syllable AND whose syllable layout has a non-consonant byte before the first consonant, so that base = i (i > start) at line 206 and the loop at line 217 enters the true branch (i < base).",
+    "why_winner_satisfies": "Winner inputs (resolved by naive and value_profile in 10/10 trials) explore harfbuzz's input space without being anchored to I2S-suggested literal byte sequences; their havoc/CMP_MAP-gradient mutations produce buffers where the consonant scan at line 204 advances limit so base != start, then line 217's i<base condition holds and the T side executes \u2014 visible as the [W]-only line 218 'info[i].myanmar_position() = POS_PRE_C;' in the per-role overlay.",
+    "why_loser_doesnt": "Loser inputs (cmplog/vpc, 9/10 blocked) are polluted by I2S substitutions of font/script/language literals from other CMP sites across harfbuzz (visible as font-tag-like ASCII 'kezh-hant-mo', 'mosi', 'tpxn', 'tpx-' in the L seeds). These literals satisfy gates upstream of the Myanmar shaper or shape into the Myanmar path but always place a consonant at position start, so DIVERGENT BRANCHES shows L204 T=21 F=0 \u2014 consonant always found at first iteration, making base=start, and L217 T=0 F=21 \u2014 the loop never enters its true branch.",
+    "mechanism_attribution": "Not one of the four canonical mechanisms \u2014 the salient delta is the ABSENCE of I2S-driven corpus pollution. cmplog and vpc harvest CMP operands from harfbuzz's many script/language/feature tag comparisons and substitute those literals into inputs via their I2S substitution stage. This biases the corpus toward inputs that satisfy unrelated string gates (locale tags like 'kezh-hant-mo') rather than toward inputs that satisfy the structural precondition of this Myanmar reordering branch (a non-consonant-then-consonant syllable layout). Naive and value_profile, lacking the I2S substitution stage, mutate more uniformly and stumble onto the structural shape that naive havoc + edge feedback alone can find. The dash-row floor signal appears in BOTH a W and an L lineage we sampled, confirming I2S fires for both directions \u2014 but the FRACTION of I2S energy that lands on a productive (vs distracting) literal is what differs. Hence claimed_mechanism = 'other' (a pollution/distraction failure mode rather than a winning technique)."
+  },
+  {
+    "id": "libxml2_2203",
+    "family": "I2S_anti",
+    "target": "libxml2",
+    "branch_id": 2203,
+    "analysis_path": "prompts/RBRB/01_libxml2_2203.analysis.json",
+    "file": "/src/libxml2/dict.c",
+    "function": "xmlDictQLookup",
+    "line": "1167",
+    "source_line": "    if ((nbi > MAX_HASH_LEN) &&",
+    "covers_pairs": [
+      "naive>cmplog (I2S)",
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "Input must drive xmlDictQLookup so many times with distinct (prefix, name) string pairs that the same dict bucket accumulates a collision chain longer than MAX_HASH_LEN before insert (nbi increments at line 1110 inside the for-loop at 1105).",
+    "why_winner_satisfies": "Winner seeds invoke xmlDictQLookup 87 times (vs 28 for losers) and produce malformed/diverse XML fragments like `<ink:Xr`, `<ink:h`, `<b ><ink href` plus a runtime path through xmlDictComputeBigKey (234 W hits vs 0 L hits), inflating the collision chain so nbi exceeds MAX_HASH_LEN on at least one insertion.",
+    "why_loser_doesnt": "Loser seeds carry well-formed XML preambles (`<?xml version=\"1`, `<!DOCTYPE a SYSTEM \"dtds/1`) and reach xmlDictQLookup only 28 times, never accumulating enough distinct same-bucket collisions; line 1167 evaluates with nbi <= MAX_HASH_LEN (T=0 F=28).",
+    "mechanism_attribution": "Anti-I2S corpus pollution (Pattern B, I2S HURTS here): cmplog and vpc carry the input-to-state substitution mutator which rewrites seed bytes with canonical XML literals (xml, version, DOCTYPE, SYSTEM, etc.) drawn from the CMP buffer, anchoring those fuzzers' corpora on well-formed/canonical names and starving the dict of the diverse per-insertion (prefix, name) pairs needed to grow one bucket past MAX_HASH_LEN. naive and value_profile lack that substitution stage, so havoc/token mutations drift seeds into many distinct namespace prefixes that happen to collide into the same bucket. The winning side wins by NOT having corpus pollution from CMP-operand substitution, not by exercising any positive technique \u2014 this is the 'other' category (anti-substitution / corpus diversity preserved by absence of CMP-driven anchoring)."
+  }
+]

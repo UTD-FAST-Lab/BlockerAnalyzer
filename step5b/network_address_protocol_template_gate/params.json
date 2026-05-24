@@ -1,0 +1,22 @@
+{
+  "template_id": "network_address_protocol_template_gate",
+  "parameter": "TEMPLATE_BYTES",
+  "scan_values": [2, 4, 8, 16],
+  "fuzzers": ["naive", "cmplog", "value_profile", "value_profile_cmplog"],
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "cmplog > naive",
+  "expected_curve": "monotone increasing in TEMPLATE_BYTES",
+  "acceptance": {
+    "metric": "crash_count",
+    "rule": "naive ≈ cmplog at TEMPLATE_BYTES=2; naive << cmplog at TEMPLATE_BYTES=8; naive=value_profile=0 while cmplog=value_profile_cmplog>0 at TEMPLATE_BYTES=16 (has_axis {cmplog, value_profile_cmplog} beats lacks_axis {naive, value_profile})"
+  },
+  "design_basis": "The cluster's mechanism is I2SRandReplace pasting a contiguous multi-byte protocol/address template from the CMP buffer into the input in one mutation. The I2S-vs-blind-search gap scales as ~1/256^N with the matched literal width, so the contiguous template width is the program-feature axis: at small width any fuzzer brute-forces the gate; at large width only I2S-equipped fuzzers reach it. value_profile lacks I2SRandReplace, and a single memcmp gives its CMP_MAP no per-byte gradient it can climb, so it tracks naive (lacks_axis), not the I2S winners.",
+  "notes": [
+    "TEMPLATE_BYTES=2: ~1/65536 per exec; naive and value_profile expected to crash often, cmplog/vpc instant — little separation",
+    "TEMPLATE_BYTES=4: ~1/4G per exec; naive/value_profile expected ~0-1 crash per 600s, cmplog/vpc instant — separation opens",
+    "TEMPLATE_BYTES=8: naive/value_profile expected 0 crashes; cmplog/vpc resolve via I2S substitution",
+    "TEMPLATE_BYTES=16: naive/value_profile expected 0 crashes (full-width address template, like the 16-byte multicast/IID constants in members); cmplog/vpc still resolve — clean has_axis vs lacks_axis stratification",
+    "Scan caps at 16 (within the cluster's 6-32 byte range): widths >=8 already drive naive/vp to 0, so 16 confirms the plateau without unnecessary cost"
+  ]
+}

@@ -1,0 +1,355 @@
+{
+  "feature_id": "vp_gradient_direct_literal",
+  "mechanism_family": "VP_pro",
+  "mechanism_label": "direct_gradient_to_single_literal",
+  "definition": "CMP_MAP Hamming-distance gradient rewards bit-by-bit progress toward one specific compile-time integer/byte constant in a single CMP; naive or cmplog lacks any fitness signal for partial matches.",
+  "n_members": 3,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "value_profile"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "value_profile",
+    "has_axis": [
+      "value_profile",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "cmplog",
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "harfbuzz_9584",
+      "target": "harfbuzz",
+      "branch_id": 9584,
+      "analysis_path": "prompts/-B-R/00_harfbuzz_9584.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+      "function": "_hb_preprocess_text_vowel_constraints(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+      "line": "172",
+      "source_line": "\t  case 0x0A85u:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x0A85",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "Hamming gradient in CMP_MAP rewards each bit-step of the 32-bit codepoint toward 0x0A85, preserving intermediate seeds; cmplog has no such distance signal.",
+        "one_line": "VP gradient climbs 32-bit codepoint toward Gujarati literal 0x0A85"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must produce a glyph stream whose current codepoint equals 0x0A85 inside the HB_SCRIPT_GUJARATI per-character switch.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "After font/cmap parsing routes the buffer to HB_SCRIPT_GUJARATI, the current glyph's codepoint (a 32-bit value compared inside a switch) must equal the literal 0x0A85u. The CMP at line 172 is `buffer->cur().codepoint == 0x0A85u`; loser inputs do reach the Gujarati per-glyph loop (line 167 F=0 W=45, F=0 L=150) but their codepoints fall through to the default arm.",
+            "why_winner_satisfies": "Winning seeds contain the literal little-endian bytes `85 0a` adjacent in the payload (e.g. seed 07e89a36cf4fe8ee begins `85 0a 00 00`, and seed 33370b3cd9a8dde4 has `85 0a` at offset 0x2a). At line 172 the W overlay shows T=3 F=42 \u2014 the true branch fires only under W, confirming a codepoint==0x0A85 outcome.",
+            "why_loser_doesnt": "Loser inputs reach HB_SCRIPT_GUJARATI (line 166 T=10 F=0 under L) and iterate the loop 150 times (line 167 T=150) but never produce codepoint 0x0A85 \u2014 at line 172 L shows T=0 F=150, so every glyph falls through to the 0x0AC5 arm or default. None of the five loser seeds carry the byte pair `85 0a` together.",
+            "mechanism_attribution": "The decisive delta between vpc (winner) and cmplog (loser) is value_profile, i.e. the CMP_MAP gradient bucket. cmplog has the input-to-state mutator and naive havoc but no Hamming/prefix-distance feedback, so it gets no gradient credit for getting closer to 0x0A85; vpc has the same comparison-substitution kit plus CMP_MAP, so every approach toward the constant (e.g. flipping one byte from 0x0B to 0x0A or from 0x84 to 0x85) is rewarded as new feedback and survives in the corpus. The mechanism enabling vpc here is the CMP_MAP gradient feedback signal, not input-to-state byte substitution."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The decisive pair at this branch is value_profile_cmplog>cmplog with delta value_profile.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 header",
+            "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "The branch under analysis is a switch case comparing the current glyph codepoint against the literal 0x0A85u.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L172",
+            "exact_quote": "case 0x0A85u: <-- BLOCKER"
+          },
+          {
+            "claim": "The enclosing case fires only after the buffer's script is HB_SCRIPT_GUJARATI.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L166",
+            "exact_quote": "case HB_SCRIPT_GUJARATI:"
+          },
+          {
+            "claim": "Loser inputs do reach the Gujarati case and iterate the per-glyph loop but never fire the 0x0A85 arm.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L172 row",
+            "exact_quote": "d=1   L 172  T=3 F=42  T=0 F=150  case 0x0A85u:  <-- BLOCKER"
+          },
+          {
+            "claim": "Winning seed 07e89a36cf4fe8ee begins with the little-endian byte pair 85 0a (encoding codepoint 0x0A85).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 2",
+            "exact_quote": "0000: 85 0a 00 00 e8 03 20 20 20 20 20 20 20 20 20 df"
+          },
+          {
+            "claim": "Winning seed 33370b3cd9a8dde4 also embeds the byte pair 85 0a in its payload.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1 offset 0x20",
+            "exact_quote": "0020: 20 1a 1a 20 70 20 20 0a 20 20 85 0a 00 00 e8 03"
+          },
+          {
+            "claim": "Loser seeds reach the Gujarati per-glyph loop the expected number of times (150 iterations).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L167",
+            "exact_quote": "d=1   L 167  T=45 F=3  T=150 F=10  for (buffer->idx = 0; buffer->idx + 1 < count && buffer->..."
+          },
+          {
+            "claim": "value_profile_cmplog adds CMP_MAP gradient buckets on top of cmplog's I2S kit.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Instrumentation",
+            "exact_quote": "**Instrumentation**: union of cmplog and value_profile \u2014 edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+          },
+          {
+            "claim": "cmplog (the loser) has I2SRandReplace and naive havoc/token mutators but no CMP_MAP gradient feedback.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Feedback",
+            "exact_quote": "**Feedback**: same edge-bucket signal as naive. The CMP buffer is\nconsumed by the mutator, not by feedback."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with a single `if (read_u32_le(input) == 0x0A85u) trap();` gate run for the same duration showing cmplog reaching the trap at the same rate as value_profile_cmplog (i.e., no separation between the I2S-only fuzzer and the I2S+CMP_MAP fuzzer on a single direct equality gate against this constant)."
+        },
+        "weakest_evidence_point": "The mapping from raw input bytes to `buffer->cur().codepoint` goes through harfbuzz's font/cmap parser, so the literal `85 0a` bytes in winning seeds may be load-bearing for an upstream cmap CMP rather than the line-172 comparison; the CMP_MAP gradient attribution stands on the value_profile technique-delta alone, not on a verified taint path.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_10156",
+      "target": "harfbuzz",
+      "branch_id": 10156,
+      "analysis_path": "prompts/B-R-/00_harfbuzz_10156.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+      "function": "_hb_preprocess_text_vowel_constraints(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+      "line": "309",
+      "source_line": "\t  case 0x0D91u:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "0x0D91",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "CMP_MAP Hamming-distance bucket preserves seeds whose 32-bit first word gets numerically closer to 0x0D91, yielding a monotone gradient naive's edge-only feedback cannot construct.",
+        "one_line": "VP gradient walks 4-byte input word toward Sinhala codepoint 0x0D91"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must encode codepoint 0x0D91 (bytes 91 0d 00 00 little-endian) at the start so the Sinhala switch lands on case 0x0D91u.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>naive (value_profile)"
+            ],
+            "what_input_feature": "The first four bytes of the input must equal the 32-bit little-endian encoding of codepoint 0x0D91 (i.e., 0x91 0x0D 0x00 0x00). After a single decoding hop into buffer->cur().codepoint, the Sinhala switch at line 309 then takes the case 0x0D91u arm (true side of the case-label branch).",
+            "why_winner_satisfies": "Every value_profile winner-resolving seed shown begins with the exact 4-byte little-endian encoding of 0x0D91 (91 0d 00 00); the BYTE DIFF section confirms offset 0x0000 is byte 0x91 in 8/8 W seeds and offset 0x0001 is byte 0x0d in 8/8 W seeds, while loser seeds show those bytes only sporadically.",
+            "why_loser_doesnt": "naive uses only edge-counter feedback with havoc/token mutators; it has no signal to grind a 4-byte integer toward equality with the literal 0x0D91, so the loser seeds rarely produce the magic 4-byte prefix and instead carry unrelated 16-bit/32-bit values at offsets 0x00-0x03 (e.g. 00 01 00 00, 6a 0c ff 00, af 93 76 af).",
+            "mechanism_attribution": "value_profile's CMP_MAP gradient. Each integer CMP that compares buffer->cur().codepoint against a switch-case literal (0x0D85, 0x0D8B, ..., 0x0D91, ...) writes a Hamming-distance bucket into CMP_MAP keyed by (PC, distance). An input whose first 32-bit word is numerically closer to 0x0D91 than any previously-seen input adds a new CMP_MAP bucket and is preserved \u2014 giving value_profile a monotone gradient toward the exact match. naive lacks any CMP feedback and must rely on havoc luck to set 4 specific bytes simultaneously."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The branch is the Sinhala case-label switch arm for codepoint 0x0D91 inside _hb_preprocess_text_vowel_constraints.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Location and source line",
+            "exact_quote": "Location: /src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc:309:4"
+          },
+          {
+            "claim": "The exact source line at the blocker is the 0x0D91u case label.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Source line",
+            "exact_quote": "Source line: \t  case 0x0D91u:"
+          },
+          {
+            "claim": "The blocker sits inside the HB_SCRIPT_SINHALA switch over buffer->cur().codepoint at line 293; the case label fires only when codepoint == 0x0D91.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 289-309",
+            "exact_quote": "[B]   309  \t  case 0x0D91u: <-- BLOCKER"
+          },
+          {
+            "claim": "The decisive pair is value_profile > naive under the value_profile delta (single decisive pair at this branch).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 header",
+            "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+          },
+          {
+            "claim": "value_profile resolves the branch in 9/10 trials while naive blocks in 10/10 trials, a 0.90 probability divergence.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 stats",
+            "exact_quote": "prob_div=0.90  dur_div=7.30h  hit_div=3"
+          },
+          {
+            "claim": "All five winner-resolving seeds begin with the byte sequence 91 0d at offsets 0x00-0x01.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seeds 1-5, offset 0x0000",
+            "exact_quote": "  0000: 91 0d 00 00 00 0c 00 00 00 00 ff 2d 1b df 00 6e   ...........-...n"
+          },
+          {
+            "claim": "Across the 8 winner seeds tallied in BYTE DIFF, offset 0x0000 is 0x91 in all 8, and offset 0x0001 is 0x0d in all 8, while loser bytes at these offsets are mostly 0x00 and 0x01 respectively.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0000 and 0x0001",
+            "exact_quote": "   0x0000  91(.)x8                             00(.)x7 af(.)x1 91(.)x1 6a(j)x1     PARTIAL"
+          },
+          {
+            "claim": "Winner offset 0x0001 is uniformly 0x0d across 8 seeds, while losers are dominated by 0x01 with a single 0x0d outlier.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0001",
+            "exact_quote": "   0x0001  0d(.)x8                             01(.)x7 93(.)x1 0d(.)x1 0c(.)x1     PARTIAL"
+          },
+          {
+            "claim": "Loser-blocking seeds (from cmplog/trial=1) carry unrelated prefixes such as 00 01 00 00 or 6a 0c ff 00 \u2014 they fail to hit the 0x0D91 magic value.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser seed 3 and 4, offset 0x0000",
+            "exact_quote": "  0000: 6a 0c ff 00 ff 00 00 00 00 0c 00 00 db 5e 5e db   j............^^."
+          },
+          {
+            "claim": "value_profile's mechanism is CMP_MAP keyed by (PC, operand-distance bucket); an input whose CMP operand pair is closer to matching than any seen before adds a new bucket and is preserved as corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile section",
+            "exact_quote": "each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket). The distance bucket is a coarse encoding of how close the two\noperands were (Hamming distance bucket for `trace_cmp*`; matching-prefix\nlength for string/memory CMPs)."
+          },
+          {
+            "claim": "naive has only edge-counter feedback and havoc/token mutators \u2014 no CMP introspection \u2014 so it cannot get a gradient toward a specific 32-bit literal.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive section",
+            "exact_quote": "**Feedback**: per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+          },
+          {
+            "claim": "value_profile's mutators do not include I2SRandReplace; only havoc and token mutators are observed in its mutation_op metadata.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile section, Mutators line",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "Within the enclosing function, the executed switch arm under W is the HB_SCRIPT_SINHALA dispatch starting at line 289; W reaches the case 0x0D91 label at line 309.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "depth=1, line 310 T/F counts",
+            "exact_quote": "  d=1   L 310  T=8 F=0  T=2 F=0  switch (buffer->cur (1).codepoint)"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A controlled run in which value_profile, deprived of its CMP_MAP feedback (edge counters only, same mutator stack), still resolves a synthetic switch-case-on-32-bit-literal gate at significantly higher rate than naive within the same budget \u2014 that would show CMP_MAP is not the load-bearing component and some other value_profile-specific factor explains the win."
+        },
+        "weakest_evidence_point": "The Hamming-distance gradient is plausible but unverified \u2014 I have no direct trace showing CMP_MAP buckets accumulating monotonically toward 0x0D91; the structural argument relies on the published mechanism description rather than runtime evidence at this branch.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libxml2_2692",
+      "target": "libxml2",
+      "branch_id": 2692,
+      "analysis_path": "prompts/B-R-/02_libxml2_2692.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "parser.c:xmlParseLookupInternalSubset",
+      "line": "11304",
+      "source_line": "        else if ((*cur == '\"') || (*cur == '\\'') || (*cur == ']')) {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x5D",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "CMP_MAP Hamming-distance feedback rewards bytes at the scanned offset that are bit-closer to 0x5D, building a corpus gradient toward the ']' match that naive's binary edge feedback cannot provide.",
+        "one_line": "VP gradient rewards bit-proximity to literal 0x5D at scanned offset"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must contain a ']' byte (0x5D) at the cur pointer while state==0 to set state=']' and progress to internal-subset close.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>naive (value_profile)"
+            ],
+            "what_input_feature": "A literal ']' byte (0x5D) must appear at a cur position while the state machine is in state==0 (outside a quoted string, not inside a comment). Reaching this gate's true side specifically requires the third disjunct `*cur == ']'` to match \u2014 i.e. byte 0x5D at the scanned offset.",
+            "why_winner_satisfies": "value_profile's CMP_MAP records a Hamming-distance bucket for the integer compare `*cur == ']'`. Inputs whose byte at the cur offset gets bit-closer to 0x5D enter a new CMP_MAP bucket and are preserved as corpus, providing a gradient that culminates in an actual ']' byte landing at the right position. Winner saw avg hitcount=9 (true side fired ~9 times per trial).",
+            "why_loser_doesnt": "naive has only edge-counter feedback \u2014 the integer comparison `*cur == ']'` is just one edge that either fires the true side or doesn't, with no partial-match gradient. Without CMP_MAP, naive never gets a reward signal for bytes that are close-but-not-equal to 0x5D, so it must stumble onto a 0x5D placement by chance and never does within 10 trials (loser blocked=8/10, resolved=0/10, hitcount=0).",
+            "mechanism_attribution": "CMP_MAP gradient feedback in value_profile's CMP-interception instrumentation rewards Hamming-distance progress toward the literal 0x5D operand of the equality compare on line 11304, building a corpus gradient that naive's pure edge feedback cannot construct."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The branch under analysis tests `*cur == ']'` as the third disjunct at parser.c:11304 col 53; the true side enables `state = *cur` which is the only path to setting state=']'.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "parser.c:11304-11305",
+            "exact_quote": "else if ((*cur == '\"') || (*cur == '\\'') || (*cur == ']')) { <-- BLOCKER\n[B] 11305              state = *cur;"
+          },
+          {
+            "claim": "value_profile resolved this branch in all 10 trials with avg hitcount=9; naive resolved in 0/10 trials with hitcount=0, and blocked in 8/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 winner/loser counts",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=0/10  blocked=8  unreached=2\n  avg duration blocked: winner=1.10h  loser=6.31h\n  avg hitcount on branch: winner=9  loser=0"
+          },
+          {
+            "claim": "The single technique difference between value_profile and naive is the CMP_MAP per-PC Hamming-distance bucket that rewards getting close to a CMP operand value.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile paragraph",
+            "exact_quote": "each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket). The distance bucket is a coarse encoding of how close the two\noperands were (Hamming distance bucket for `trace_cmp*`; matching-prefix\nlength for string/memory CMPs)."
+          },
+          {
+            "claim": "naive's feedback is only per-edge hit-count bucketing \u2014 no operand-distance signal \u2014 so it cannot reward partial-match progress toward 0x5D.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive paragraph",
+            "exact_quote": "**Feedback**: per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+          },
+          {
+            "claim": "Within xmlParseLookupInternalSubset, the W role reaches state==']' transitions (lines 11270-11272) and the state==' '+'>' success path (11277-11279), while L only reaches the state==']'+'>' return path (11263-11265) \u2014 consistent with L sometimes setting state=']' from a quote/apostrophe arm but never via the `*cur=='\\]'` disjunct that powers W.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "parser.c:11262-11280",
+            "exact_quote": "[B] 11262              if (*cur == '>') {\n[L] 11263                  ctxt->checkIndex = 0;\n[L] 11264                  ctxt->endCheckState = 0;\n[L] 11265                  return(1);\n[L] 11266              }\n[B] 11267              if (IS_BLANK_CH(*cur)) {\n[B] 11268                  state = ' ';\n[B] 11269              } else if (*cur != ']') {\n[W] 11270                  state = 0;\n[W] 11271                  start = cur;\n[W] 11272                  continue;\n[W] 11273              }\n[B] 11274          }\n[B] 11275          else if (state == ' ') {\n[B] 11276              if (*cur == '>') {\n[W] 11277                  ctxt->checkIndex = 0;\n[W] 11278                  ctxt->endCheckState = 0;\n[W] 11279                  return(1);"
+          },
+          {
+            "claim": "The branch-1 (d=1) divergence shows W explores the `*cur != ']'` branch heavily (T=12 F=0) while L never enters it (T=0 F=0), consistent with W's state machine actually visiting state==']' from the disjunct under analysis.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L11269 row",
+            "exact_quote": "d=1   L11269  T=12 F=0  T=0 F=0  } else if (*cur != ']') {"
+          },
+          {
+            "claim": "Loser seeds carry DOCTYPE prefixes ending in patterns without a ']' at the scanned cur offsets (e.g. `a SYSTEM \"dtds/...`), whereas winner seeds have richer byte variation around DOCTYPE that lands a 0x5D-byte at a scan offset.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser-blocking Seed 2 (id=09c1dd84699b5feb)",
+            "exact_quote": "Seed 2 (id=09c1dd84699b5feb, size=376 bytes, fuzzer=cmplog, trial=1, discovered_at=7s, mutation_op=DwordAddMutator,WordInterestingMutator,BytesSetMutator,BytesInsertMutator,DwordInterestingMutator):\n  0000: 06 00 00 00 31 32 37 37 37 32 2e 78 6d 6c 5c 0a   ....127772.xml\\.\n  0010: 3c 3f 78 6d 6c 20 76 65 72 73 69 6f 6e 3d 22 31   <?xml version=\"1\n  0020: 2e 30 22 3f 3e 0a 3c 21 44 4f 43 54 59 50 45 20   .0\"?>.<!DOCTYPE \n  0030: 61 20 53 59 53 54 45 4d 20 22 64 74 64 73 2f 31   a SYSTEM \"dtds/1"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "If a synthetic harness gating execution on an equality compare against a single fixed byte constant (e.g. `if (*p == 0x5D) trap()`) were run for matching budget and value_profile DID NOT reproduce the win over naive at the same N=10 trial scale (e.g. p_resolve_vp <= p_resolve_naive within MW noise), the CMP_MAP-gradient mechanism would be refuted as the dominant cause of this branch's divergence."
+        },
+        "weakest_evidence_point": "The byte-diff section shows broad divergence across many DOCTYPE-region offsets rather than a clean concentration at one offset where ']' lands in W and is absent in L, so the exact cur position where 0x5D appears in winner inputs is not pinpointed.",
+        "confidence": "high"
+      }
+    }
+  ]
+}

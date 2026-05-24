@@ -1,0 +1,432 @@
+{
+  "feature_id": "vpc_literal_gate_plus_gradient_navigation",
+  "mechanism_family": "synergy",
+  "mechanism_label": "i2s_literal_substitution_with_vp_upstream_gradient",
+  "definition": "vpc resolves branches that require both I2S literal substitution for a terminal gate-byte/literal AND VP gradient feedback to navigate upstream multi-byte or sequential equality gates; neither technique alone suffices within budget.",
+  "n_members": 3,
+  "involved_fuzzers": [
+    "cmplog",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S",
+    "value_profile"
+  ],
+  "suggested_axis_partition": {},
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "harfbuzz_10652",
+      "target": "harfbuzz",
+      "branch_id": 10652,
+      "analysis_path": "prompts/-BBR/00_harfbuzz_10652.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-cff2-table.hh",
+      "function": "OT::cff2::accelerator_templ_t<CFF::cff2_private_dict_opset_t, CFF::cff2_private_dict_values_base_t<CFF::dict_val_t> >::accelerator_templ_t(hb_face_t*)",
+      "line": "411",
+      "source_line": "      if (cff2 == &Null (OT::cff2))",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "CFF2",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2S substitutes the 4-byte 'CFF2' table-tag literal from intercepted CMP operands; VP gradient preserves seeds making incremental progress toward a sanitizable CFF2 top-dict; only their union clears both tag and header stages within budget.",
+        "one_line": "I2S plants CFF2 tag; VP gradient scaffolds multi-byte header validation"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must form a valid TTF wrapper carrying a CFF2-tagged subtable whose blob survives hb_blob_t::as<cff2>() sanitization.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A TTF/OpenType container with the 'CFF2' four-byte table tag at offset 0x0c-0x0f, a sfnt header magic '00 01 00 00' at offset 0x00-0x03, a one-entry table directory (numTables=1) and a CFF2 subtable whose header bytes ('01 00 02 0c ...' starting around offset 0x18) parse as a valid CFF2 top-dict so that hb_blob_t::as<OT::cff2>() returns a non-Null pointer at line 409.",
+            "why_winner_satisfies": "All five W seeds carry the exact byte pattern '00 01 00 00 00 01 ... CFF2 ... 00 00 00 1a 01 00 02 0c' in the first 0x1c bytes, giving a sfnt header with numTables=1, a CFF2 tag, and a CFF2 top-dict that sanitizes; the W-side overlay shows execution proceeding past line 411 into the topDict parsing block at lines 414-420.",
+            "why_loser_doesnt": "L seeds are scattered at the magic-byte offsets (offset 0x0c-0x0f shows 00/20/56/56 'VV', 'VA', 'GS', 'GP' table tags instead of 'CFF2'; offset 0x05 ranges across 04/20/1f/03 instead of 01); the L-side overlay shows control flow hits line 412 'goto fail' for 9/10 trials, so the cff2 pointer compared equal to &Null and the constructor aborts before topDict.init.",
+            "mechanism_attribution": "Synergy of I2SRandReplace (cmplog/vpc) substituting the literal 'CFF2' four-byte tag into the input from intercepted CMPs against the table-directory iterator, AND the CMP_MAP Hamming-distance gradient (vp/vpc) preserving intermediate seeds that get progressively closer to a sanitizable CFF2 top-dict structure. cmplog alone can plant 'CFF2' but cannot incrementally satisfy the multi-byte CFF2 header validation; value_profile alone has the gradient but no literal substitution for the tag \u2014 only their union (vpc) clears both stages within the 12h budget."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is an equality comparison of cff2 against the sentinel &Null(OT::cff2) at line 411 in the cff2 accelerator constructor.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "/src/harfbuzz/src/hb-ot-cff2-table.hh:411",
+            "exact_quote": "Source line:       if (cff2 == &Null (OT::cff2))"
+          },
+          {
+            "claim": "The winner-resolving seeds share an identical 16-byte prefix containing a sfnt header and the 'CFF2' table tag.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seeds 1-3 offsets 0x00-0x0f",
+            "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 43 46 46 32   ......      CFF2"
+          },
+          {
+            "claim": "The 'CFF2' tag bytes at offsets 0x0c-0x0f are fully concentrated in W (all 10 reads = 43 46 46 32) but diverge in L (mostly 'VV', 'VA', 'GS', 'GP' or 00/20).",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0c-0x0f",
+            "exact_quote": "0x000c  43(C)x10                            20( )x6 ff(.)x2 00(.)x1 e0(.)x1     DIFFER"
+          },
+          {
+            "claim": "Offset 0x0f is uniformly '32' (ASCII '2') in W seeds but '56' (V) or 00 in L seeds.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0f",
+            "exact_quote": "0x000f  32(2)x10                            56(V)x8 00(.)x2                     DIFFER"
+          },
+          {
+            "claim": "Loser seeds branch into line 412 'goto fail' (9 of 10 L trials reach line 411 True) whereas winner seeds skip that goto and execute the topDict parsing block (W hits lines 414-420 exclusively).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 line 411",
+            "exact_quote": "d=1   L 411  T=0 F=10  T=9 F=0  if (cff2 == &Null (OT::cff2))  <-- BLOCKER"
+          },
+          {
+            "claim": "OT::cff2::sanitize is invoked 10 times by W seeds and 0 times by L seeds \u2014 only W seeds reach the CFF2 sanitization codepath that gates the as<cff2>() success.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "OT::cff2::sanitize",
+            "exact_quote": "10         0  OT::cff2::sanitize(hb_sanitize_context_t*) const  (/src/harfbuzz/src/hb-ot-cff2-table.hh:388-392)"
+          },
+          {
+            "claim": "Both decisive pairs at this branch are synergy losses \u2014 neither cmplog (with I2S) nor value_profile (with CMP_MAP) resolves any of 10 trials within the campaign, while value_profile_cmplog (with both) resolves 10/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 + Pair 2 counts",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace works by scanning the input for one CMP operand and substituting the other \u2014 the mechanism that can plant the 'CFF2' four-byte literal into the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile's CMP_MAP bucket signal preserves seeds whose CMP operands are coming progressively closer to matching \u2014 the gradient mechanism that helps stage-by-stage past CFF2 header sub-checks.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness in which the gate is `memcmp(input+12, \"CFF2\", 4) == 0` followed by an inequality check on a small computed length field, where cmplog alone resolves at the same rate as value_profile_cmplog \u2014 this would show I2S substitution by itself is sufficient and the value_profile gradient is not a co-requisite, refuting the synergy claim."
+        },
+        "weakest_evidence_point": "The 'CMP_MAP gradient is a co-requisite' half of the synergy claim is the weakest leg \u2014 the prompt shows cmplog losing 10/10 but does not directly demonstrate which downstream sub-CMP (e.g., topDictSize, FDSelect offset) is the gradient-friendly stage that vp+I2S clears together, so the gradient contribution is inferred from the BBR shape rather than observed in seed bytes.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_7397",
+      "target": "libpng",
+      "branch_id": 7397,
+      "analysis_path": "prompts/-BBR/01_libpng_7397.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_pCAL",
+      "line": "2322",
+      "source_line": "       (type == PNG_EQUATION_ARBITRARY && nparams != 3) ||",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "PNG_EQUATION_ARBITRARY",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2S plants the small equation-type integer constants (0\u20134) into the single pCAL type byte; VP gradient navigates upstream chunk and CRC gates to reach the pCAL handler; only vpc combining both avoids the ARBITRARY+mismatched-nparams early-return.",
+        "one_line": "I2S lands equation-type byte; VP gradient reaches pCAL handler"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "PNG file reaching the pCAL handler with a type byte whose value is not PNG_EQUATION_ARBITRARY (commonly type>=PNG_EQUATION_LAST so the whole nparams-mismatch OR-chain evaluates false).",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A PNG stream containing a syntactically valid pCAL chunk that survives CRC and length checks, where the equation type byte at pCAL_payload+9 satisfies the OR-chain's false branch \u2014 i.e. type is not PNG_EQUATION_ARBITRARY (2) and not one of the other recognized values with mismatched nparams. In the winner seeds, the type byte additionally satisfies type >= PNG_EQUATION_LAST (4), which is why the else-if at L2329 only fires in W.",
+            "why_winner_satisfies": "value_profile_cmplog seeds reach OSS_FUZZ_png_handle_pCAL (entry-line counts diverge sharply in W vs L) and at the type byte the W cohort never matches PNG_EQUATION_ARBITRARY (DIVERGENT BRANCHES L2322 shows W T=0 F=22 for type==ARBITRARY) and proceeds into the else-if at L2329 that is hit only in W. vpc combines CMP_MAP gradient feedback (which guides toward valid chunk structure / past CRC/length gates) with I2SRandReplace substitution that can plant the small literal constants compared against type (0,1,2,3,4) directly into pCAL_payload+9, so vpc finds both the navigation and the gate-byte in one strategy.",
+            "why_loser_doesnt": "cmplog has I2SRandReplace but lacks CMP_MAP gradient, so it explores the upstream PNG chunk soup more sparsely and tends to land on pCAL payloads with type==PNG_EQUATION_ARBITRARY (DIVERGENT BRANCHES L2322 shows L T=11 F=0 for type==ARBITRARY combined with nparams!=3, triggering the L2325 'invalid parameter count' early-return). value_profile has CMP_MAP gradient and can navigate to the pCAL handler but without I2SRandReplace it cannot cheaply substitute the equation-type constants into the type byte, so it spends time on the same ARBITRARY+mismatched-nparams pattern and times out. naive lacks both and barely reaches the chunk (REFERENCE, 1/10).",
+            "mechanism_attribution": "I2SRandReplace is the proximate technique that lands the pCAL type byte on a value satisfying the OR-chain's false side. The cmplog/vpc CmpLogObserver buffer captures the equation-type literal operands at the L2320-2323 comparisons and I2SRandReplace substitutes them into the input at the byte that flows into 'type = buf[9]'. The synergy that distinguishes vpc from cmplog (Pair 1's value_profile delta) is the value-profile distance-bucket feedback that preserves seeds making incremental progress through upstream byte-equality gates so that pCAL is reached often enough for I2SRandReplace to fire on the right offsets. Lineage of winner seed 04527fb15010de2b shows an I2S-floor (mutation_op=-) ancestor at depth 20, consistent with I2SRandReplace being on the path."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the OR-chained equation-type/nparams check at pngrutil.c:2322 inside OSS_FUZZ_png_handle_pCAL with globally blocked side False.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "lines 4-7",
+            "exact_quote": "Location: /src/libpng/pngrutil.c:2322:43\nEnclosing function: OSS_FUZZ_png_handle_pCAL\nSource line:        (type == PNG_EQUATION_ARBITRARY && nparams != 3) ||\nGlobally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "value_profile_cmplog is the sole winner; it beats both cmplog (delta value_profile) and value_profile (delta I2S), while naive is a reference fuzzer.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "lines 11-14",
+            "exact_quote": "naive                            1        9          0  REFERENCE\ncmplog                           2        8          0  loser (value_profile vs value_profile_cmplog)\nvalue_profile                    2        8          0  loser (I2S vs value_profile_cmplog)\nvalue_profile_cmplog             8        2          0  winner (value_profile vs cmplog); winner (I2S vs value_profile)"
+          },
+          {
+            "claim": "Both decisive pairs are admissible and both have vpc as winner \u2014 Pair 1 (vpc>cmplog, value_profile) and Pair 2 (vpc>value_profile, I2S).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "lines 20-35",
+            "exact_quote": "--- Pair 1: value_profile_cmplog > cmplog  [delta: value_profile] ---\n  subject 11  (value_profile_cmplog vs cmplog, admissible)"
+          },
+          {
+            "claim": "Pair 2 (vpc>value_profile, delta I2S) is admissible with strong subject-level significance.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "lines 28-35",
+            "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---\n  subject 12  (value_profile_cmplog vs value_profile, admissible)"
+          },
+          {
+            "claim": "The source at the blocker is one disjunct of a 4-way OR-chain comparing the parsed type byte against PNG_EQUATION_* literal constants.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 115-118",
+            "exact_quote": "[B]  2320     if ((type == PNG_EQUATION_LINEAR && nparams != 2) ||\n[B]  2321         (type == PNG_EQUATION_BASE_E && nparams != 3) ||\n[B]  2322         (type == PNG_EQUATION_ARBITRARY && nparams != 3) || <-- BLOCKER\n[B]  2323         (type == PNG_EQUATION_HYPERBOLIC && nparams != 4))"
+          },
+          {
+            "claim": "The type byte is read from pCAL chunk payload offset 9 (and nparams from offset 10); these are 1-byte fields directly read from the input.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 105-108",
+            "exact_quote": "[B]  2310     X0 = png_get_int_32((png_bytep)buf+1);\n[B]  2311     X1 = png_get_int_32((png_bytep)buf+5);\n[B]  2312     type = buf[9];\n[B]  2313     nparams = buf[10];"
+          },
+          {
+            "claim": "The else-if at L2329 testing type>=PNG_EQUATION_LAST is hit only in winner-resolving seeds \u2014 i.e., W seeds drive the type byte into the >=LAST regime.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "line 124",
+            "exact_quote": "[W]  2329     else if (type >= PNG_EQUATION_LAST)"
+          },
+          {
+            "claim": "DIVERGENT BRANCHES shows W seeds never match type==PNG_EQUATION_ARBITRARY (W T=0 F=22) while L seeds always match it (L T=11 F=0).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "lines 197-198",
+            "exact_quote": "d=1   L2322  T=0 F=22  T=11 F=0  (type == PNG_EQUATION_ARBITRARY && nparams != 3) ||  <-- BLOCKER\n  d=1   L2322  T=22 F=0  T=11 F=0  (type == PNG_EQUATION_ARBITRARY && nparams != 3) ||  <-- BLOCKER"
+          },
+          {
+            "claim": "L seeds never reach the post-error code (the for-loop at L2334, the params malloc at L2342, the nparams loop at L2349); W seeds do \u2014 the loser's pCAL handler returns early at the invalid-parameter-count error at L2325.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "lines 201-203",
+            "exact_quote": "d=1   L2334  T=118 F=22  T=0 F=0  for (buf = units; *buf; buf++)\n  d=1   L2342  T=0 F=22  T=0 F=0  if (params == NULL)\n  d=1   L2349  T=66 F=22  T=0 F=0  for (i = 0; i < nparams; i++)"
+          },
+          {
+            "claim": "Winner seeds were discovered by cmplog (the seed_bisect-picked direction); their mutation_op chains include I2S-floor parents in lineage, supporting I2SRandReplace contribution.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "lines 214-238",
+            "exact_quote": "Seed 1 (id=04527fb15010de2b, size=3152 bytes, fuzzer=cmplog, trial=1, discovered_at=1599s, mutation_op=BytesInsertCopyMutator,ByteFlipMutator,BitFlipMutator,BytesDeleteMutator)"
+          },
+          {
+            "claim": "cmplog's mutator stack includes I2SRandReplace, which scans input bytes for an intercepted CMP operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "lines 289-292",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace; it has only CMP_MAP gradient feedback over havoc/token mutations.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "lines 331-332",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile_cmplog's mutator stack is the union \u2014 it carries both CMP_MAP gradient feedback and I2SRandReplace.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "lines 350-352",
+            "exact_quote": "**Feedback**: edge-bucket + CMP_MAP-bucket signals.\n\n**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile's CMP_MAP gradient produces distance-bucketed feedback over CMPs so an input closer to matching is preserved as corpus, which helps navigate upstream byte-equality gates.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "lines 326-329",
+            "exact_quote": "**Feedback**: edge-bucket signal **plus** new-CMP_MAP-bucket signal\n(both via `MaxMapFeedback`-style coverage). An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "Hit-count divergence shows L heavily exercises downstream IDAT/row-read paths (W=0) while W exercises code reachable from the pCAL handler past the error (PLTE, iCCP, zTXt), consistent with the L vs W split being 'L returned early from the pCAL invalid-parameter-count error vs W continued through'.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "lines 174-188",
+            "exact_quote": "       0      2160  OSS_FUZZ_png_read_finish_row  (/src/libpng/pngrutil.c:4328-4388)\n       0       338  OSS_FUZZ_png_read_IDAT_data  (/src/libpng/pngrutil.c:4152-4276)"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic experiment where the pCAL type-byte gate is preserved but every upstream equality CMP (PNG signature, IHDR magic, chunk-type FOURCCs, CRC) is replaced with a memcmp-free / non-instrumentable check shows cmplog catching up to vpc (closing the value_profile-delta gap). That would mean the value_profile component was carrying navigation rather than the gate itself, but the gate was solvable by cmplog alone \u2014 i.e., the synergy is not real and the shape collapses to a single-technique story."
+        },
+        "weakest_evidence_point": "The BYTE DIFF section only covers the first 64 bytes of each seed (PNG header + IHDR/gAMA/sRGB area) and does not include the pCAL chunk payload where the type byte at payload+9 actually sits, so direct byte-level evidence that the type byte differs in the predicted way (W: type>=4, L: type==2) is not present in this prompt \u2014 the type/nparams claim is inferred from DIVERGENT BRANCHES counts and the SOURCE CONTEXT overlay rather than visible in the hex dumps.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_3939",
+      "target": "libxml2",
+      "branch_id": 3939,
+      "analysis_path": "prompts/-BBR/02_libxml2_3939.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "parser.c:xmlParseTryOrFinish",
+      "line": "11831",
+      "source_line": "\t\tif (term == NULL) {",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "]]>",
+        "operand_width_bytes": 3,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2S substitutes both the 9-byte '<![CDATA[' opener and the 3-byte ']]>' terminator from CMP operands; VP gradient retains partial-prefix progress through the byte-equality cascade gating CDATA state entry; neither technique alone suffices.",
+        "one_line": "I2S supplies CDATA literals; VP gradient holds partial cascade progress"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must contain both the 9-byte '<![CDATA[' opener and a '<' / structural prefix so the parser enters CDATA state and finds the ']]>' terminator.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "Input must (a) navigate the push-parser through XML_PARSER_CONTENT to the 9-byte equality cascade '<![CDATA[' on lines 11747-11754, which sets ctxt->instate = XML_PARSER_CDATA_SECTION; AND (b) include a subsequent ']]>' 3-byte literal so that xmlParseLookupString / strstr at lines 11825-11828 returns a non-NULL pointer, taking the False branch of `if (term == NULL)`.",
+            "why_winner_satisfies": "value_profile_cmplog produces inputs in which both '<![CDATA[' and ']]>' appear at corpus-discovery time. Synergy: only the fuzzer carrying BOTH I2SRandReplace (for substituting multi-byte literal operands like the 9-byte CDATA opener and the 3-byte ']]>') AND CMP_MAP gradient (for incrementally navigating preceding multi-byte equality cascades that gate state entry) clears the gate; the W seed's body confirms presence of these substrings.",
+            "why_loser_doesnt": "cmplog (loser of pair 1) has I2SRandReplace but no CMP_MAP gradient, so it cannot retain partial-prefix progress on the long byte cascades that gate entry into CDATA state \u2014 it blocks 10/10 trials. value_profile (loser of pair 2) has CMP_MAP gradient but lacks I2SRandReplace, so even when its gradient navigates into the CDATA section, it cannot synthesize the literal ']]>' terminator from CMP operands \u2014 it blocks 8/10 trials.",
+            "mechanism_attribution": "Joint mechanism (synergy / 'other'): the multi-byte equality cascade gating XML_PARSER_CDATA_SECTION state plus the literal-terminator search both demand I2S-style operand substitution AND CMP_MAP-style partial-match feedback. Neither single technique suffices \u2014 only their union (value_profile_cmplog) resolves the branch."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "Blocker is `if (term == NULL)` at parser.c:11831 inside the XML_PARSER_CDATA_SECTION case of xmlParseTryOrFinish, and the winner takes the False branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Location, Source line, Globally blocked side",
+            "exact_quote": "Source line: \t\tif (term == NULL) {\nGlobally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "Reaching the CDATA case requires the 9-byte equality cascade '<![CDATA[' to fire in XML_PARSER_CONTENT.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 11747-11756",
+            "exact_quote": "[B] 11747  \t\t} else if ((cur == '<') && (ctxt->input->cur[1] == '!') &&\n[B] 11748  \t\t    (ctxt->input->cur[2] == '[') &&\n[B] 11749  \t\t    (ctxt->input->cur[3] == 'C') &&\n[B] 11750  \t\t    (ctxt->input->cur[4] == 'D') &&\n[B] 11751  \t\t    (ctxt->input->cur[5] == 'A') &&\n[B] 11752  \t\t    (ctxt->input->cur[6] == 'T') &&\n[B] 11753  \t\t    (ctxt->input->cur[7] == 'A') &&\n[B] 11754  \t\t    (ctxt->input->cur[8] == '[')) {\n[B] 11755  \t\t    SKIP(9);\n[B] 11756  \t\t    ctxt->instate = XML_PARSER_CDATA_SECTION;"
+          },
+          {
+            "claim": "Inside the CDATA case, term is set by strstr(...,\"]]>\") (terminate) or xmlParseLookupString(...,\"]]>\",3) (push), so the False branch requires the literal three-byte ']]>' to be present.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 11825-11831",
+            "exact_quote": "term = BAD_CAST strstr((const char *) ctxt->input->cur,\n[B] 11826                                       \"]]>\");\n[B] 11827                  } else {\n[B] 11828  \t\t    term = xmlParseLookupString(ctxt, 0, \"]]>\", 3);\n[B] 11829                  }"
+          },
+          {
+            "claim": "Two decisive pairs share the same winner value_profile_cmplog: one delta is value_profile (vs cmplog), the other delta is I2S (vs value_profile) \u2014 implying both techniques are required.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 headers",
+            "exact_quote": "--- Pair 1: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+          },
+          {
+            "claim": "Pair 2 is the I2S delta: vpc resolves 10/10 while value_profile resolves only 2/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 stats",
+            "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+          },
+          {
+            "claim": "cmplog blocks all 10 trials (winner of NO pair, loser of pair 1).",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "cmplog row",
+            "exact_quote": "cmplog                           0       10          0  loser (value_profile vs value_profile_cmplog)"
+          },
+          {
+            "claim": "value_profile blocks 8/10 trials with only 2 resolutions, losing the I2S-delta pair to vpc.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "value_profile row",
+            "exact_quote": "value_profile                    2        8          0  loser (I2S vs value_profile_cmplog)"
+          },
+          {
+            "claim": "vpc resolves 10/10 trials.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "value_profile_cmplog row",
+            "exact_quote": "value_profile_cmplog            10        0          0  winner (value_profile vs cmplog); winner (I2S vs value_profile)"
+          },
+          {
+            "claim": "Loser trials hit xmlParseTryOrFinish many more times (57) than winner trials (6), suggesting they re-enter the parser loop without ever transitioning past the CDATA gate.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "row for xmlParseTryOrFinish",
+            "exact_quote": "       6        57  parser.c:xmlParseTryOrFinish  (/src/libxml2/parser.c:11404-12120)  <-- enclosing"
+          },
+          {
+            "claim": "At the blocker line, losers take the True branch 44 times and the False branch 0 times (never find ']]>'), while winners take True 5 / False 1 (find ']]>' at least once).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "depth-1 row at L11831",
+            "exact_quote": "d=1   L11831  T=5 F=1  T=44 F=0  if (term == NULL) {  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace mutator substitutes byte sequences matching one operand of a CMP with the other operand, which is the canonical mechanism for synthesizing literal byte runs such as the 9-byte CDATA opener and 3-byte ']]>' terminator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators paragraph",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile's CMP_MAP gradient rewards inputs whose CMP operands are closer to matching, providing the partial-prefix feedback that helps drive bytewise convergence on long equality cascades.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile feedback paragraph",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile_cmplog combines both techniques into a single fuzzer, which is the only configuration that resolves the branch.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog summary",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "Even the winning W seed body contains the literal '<![CDATA[' opener and ']]>' terminator (and so satisfies the source-line gates).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "winner-resolving seed 24a170e885c303ff (first 64 bytes shown; full payload visible via db_query more-seeds)",
+            "exact_quote": "Seed 1 (id=24a170e885c303ff, size=638 bytes, fuzzer=value_profile, trial=5, discovered_at=13194s, mutation_op=TokenReplace):"
+          },
+          {
+            "claim": "The W seed's first 64 bytes are mangled into a run of '=' bytes between '<!DO' and 'CTYPE', showing the mutator stream has been heavily perturbed in the prefix yet still yields a corpus-resolving input \u2014 consistent with multi-stage mutation accumulating downstream CDATA tokens.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "first 64 bytes of winner seed",
+            "exact_quote": "0000: 31 2e 30 22 3f 3e 0a 3c 21 44 4f 3d 3d 3d 3d 3d   1.0\"?>.<!DO====="
+          },
+          {
+            "claim": "BYTE DIFF shows W and L differ across the entire visible 64-byte prefix, with W constant on each offset (W bytes set has size 1 everywhere) but L containing the literal token '<?xml version=\"1' / 'DOCTYPE' \u2014 i.e., the L corpus is converging on document-prolog content while W has carried forward a CDATA-bearing payload at a later offset.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0000-0x0027",
+            "exact_quote": "0x0009  44(D)x1                             32(2)x2 3f(?)x2 70(p)x1 72(r)x1 +4u  DIFFER"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "If a synthetic harness gating on a `<![CDATA[ ... ]]>` literal cascade (9-byte opener + 3-byte terminator) shows cmplog OR value_profile (alone) resolving at parity with vpc \u2014 i.e., either single technique suffices on the isolated pattern \u2014 then the joint-mechanism / synergy story is wrong and the branch must depend on additional state machinery upstream rather than on the dual-token requirement."
+        },
+        "weakest_evidence_point": "Only ONE winner-resolving seed is recorded in the DB, and it is tagged value_profile (not vpc), even though vpc resolves 10/10 and value_profile only 2/10 \u2014 seed_bisect's lex-min picker happened to land on a vp trial here, so the byte-diff and lineage evidence is necessarily one-sided and cannot directly demonstrate which mutator chain vpc used.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

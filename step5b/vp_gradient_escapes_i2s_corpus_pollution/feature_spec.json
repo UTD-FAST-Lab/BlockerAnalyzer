@@ -1,0 +1,57 @@
+{
+  "id": "vp_gradient_escapes_i2s_corpus_pollution",
+  "kind": "local",
+
+  "pair": {
+    "primary": {
+      "A": "value_profile_cmplog",
+      "B": "cmplog",
+      "axis_differ": "value_profile"
+    },
+    "involved_fuzzers": ["naive", "cmplog", "value_profile_cmplog"],
+    "has_axis": ["value_profile_cmplog"],
+    "lacks_axis": ["naive", "cmplog"]
+  },
+
+  "hypothesis": {
+    "mechanism": "The objective is a single full-width comparison (acc == TARGET) on a field derived from the input. value_profile's CMP_MAP buckets the Hamming distance of that comparison, so value_profile_cmplog always has a climbable gradient toward the target and retains seeds that are making progress. cmplog (I2S only) lacks that gradient and is instead actively misdirected: a bank of DECOY_COUNT decoy equality gates over the input window populate the CmpLogObserver with competing literals, and I2SRandReplace harvests them and substitutes them into the input, re-triggering the decoy gates and XOR-corrupting the derived field away from TARGET. This is the cmplog-as-loser pattern: I2S substitution pollutes the corpus away from the objective, while value_profile_cmplog escapes via the gradient it shares with value_profile. naive carries no I2S substitution, so it is not dragged toward the decoys and behaves as a non-misdirected baseline.",
+    "program_feature_parameter": "DECOY_COUNT (compile-time -D) — number of LIVE competing decoy literals over the input window; each is a distinct CMP operand I2S can harvest, so the knob is the strength of the I2S misdirection.",
+    "predicted_direction": "value_profile_cmplog outperforms cmplog; the gap (value_profile_cmplog - cmplog) grows with DECOY_COUNT, and naive sits between them (no I2S misdirection but also no VP gradient).",
+    "predicted_endpoints": {
+      "DECOY_COUNT=1": "Weak misdirection: one decoy literal gives I2S little to latch onto, so cmplog ≈ naive ≈ value_profile_cmplog (small or no gap).",
+      "DECOY_COUNT=8": "Maximal misdirection: I2S floods the corpus with substituted decoys and XOR-corrupts the derived field, suppressing cmplog; value_profile_cmplog still climbs the unchanged target gradient (highest crashes) and naive (no I2S) is unperturbed by CMP-directed substitution."
+    },
+    "expected_curve_per_fuzzer": {
+      "value_profile_cmplog": "flat-high (CMP_MAP gradient resolves the target at every dose, unaffected by the knob)",
+      "cmplog": "monotone-decreasing (degrades as DECOY_COUNT grows and I2S pollution intensifies)",
+      "naive": "approximately flat (no I2S to misdirect, no VP gradient to climb; resolves only by chance on the final compare)"
+    },
+    "tradeoff_observation": "HARNESS-FAITHFULNESS CAVEAT (flagged per contract). This is a composite cluster: VP helps AND I2S hurts simultaneously. In the real targets the misdirection is opaque — harfbuzz's I2S substitutes competing script-codepoint literals so the DERIVED buffer->props.script lands on DEVANAGARI/TELUGU/MALAYALAM/TAKRI instead of MODI, and libpng's I2S pulls the 4-byte iTXt length field back toward plausible recorded values, undoing the oversized length that triggers the NULL-allocation path. A micro-harness cannot reproduce a real font/PNG parser's input->derived-field map, so the decoy-XOR bank is an explicit STAND-IN for that derived-field corruption: it forces the same causal structure (I2S harvests competing literals -> substitution drags a derived value away from the objective; VP's gradient on the objective survives the pollution) without the opaque parser. Risks: (1) the XOR perturbation is a coarse proxy for 'steered toward a non-target enum/value', and its magnitude may not match real-corpus drift; (2) naive's position relative to cmplog depends on how strongly I2S substitution actually re-triggers the decoy in this harness — if it does not, naive≈cmplog and only the value_profile_cmplog>cmplog pair carries the verdict; (3) the value_profile gradient here is over a single 32-bit compare, which VP buckets cleanly, possibly OVER-favoring value_profile_cmplog relative to the multi-stage real gradient. The acceptance rule is therefore conservative and anchored on the VP_pro-defining pair (value_profile_cmplog > cmplog); an 'inconclusive' on this composite is an honest outcome, not a forced failure. A separate I2S_anti template would better isolate the naive>cmplog leg."
+  },
+
+  "verification": {
+    "harness": "step5b/vp_gradient_escapes_i2s_corpus_pollution/template.c",
+    "params": "step5b/vp_gradient_escapes_i2s_corpus_pollution/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [1, 2, 4, 8],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "pending",
+
+    "results_per_trial": {},
+
+    "results_median": {},
+
+    "summary": {
+      "headline_finding": "",
+      "stratification_holds": "",
+      "monotone_curves": {}
+    },
+
+    "notes": [
+      "Axis = value_profile (the VP_pro-defining decisive pair value_profile_cmplog > cmplog). The naive > cmplog (I2S) leg of the cluster is the I2S-anti side of the same composite and would be more cleanly isolated by a dedicated I2S_anti template.",
+      "DECOY_COUNT changes the number of live decoy CMP gates, so min (1) vs max (8) scan values compile to materially different code (different live CMP operand count) — the knob is not dead.",
+      "Conservative acceptance: judged primarily on the value_profile_cmplog > cmplog gap widening with DECOY_COUNT. See hypothesis.tradeoff_observation for the harness-faithfulness caveat on this composite cluster."
+    ]
+  }
+}

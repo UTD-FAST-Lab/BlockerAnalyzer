@@ -1,0 +1,271 @@
+{
+  "feature_id": "vp_gradient_mask_threshold_rescue",
+  "mechanism_family": "VP_pro",
+  "mechanism_label": "mask_or_threshold_gradient_where_i2s_inapplicable",
+  "definition": "CMP_MAP gradient climbs a bitmask-and or numeric-threshold comparison that I2S substitution structurally cannot handle (no multi-byte magic constant to substitute), giving VP a monotone fitness signal where I2S is uninformative.",
+  "n_members": 2,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "value_profile"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "value_profile",
+    "has_axis": [
+      "value_profile",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "cmplog",
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libpng_7482",
+      "target": "libpng",
+      "branch_id": 7482,
+      "analysis_path": "prompts/-B-R/01_libpng_7482.analysis.json",
+      "file": "/src/libpng/pngset.c",
+      "function": "OSS_FUZZ_png_set_tRNS",
+      "line": "1032",
+      "source_line": "      if (info_ptr->bit_depth < 16)",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "16",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "CMP_MAP distance feedback rewards each upward step of the 1-byte bit_depth field toward threshold 16, giving a monotone gradient that cmplog's unanchored I2S substitution lacks.",
+        "one_line": "VP gradient walks 1-byte bit_depth field up to threshold 16"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "PNG IHDR bit_depth byte at file offset 0x18 must be >=16 (i.e. 0x10) to take the false side of the < 16 gate",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "The byte at PNG file offset 0x18 (the IHDR bit_depth field) must be >= 16, with 0x10 (decimal 16) being the canonical winning value. The byte must reach pngset.c via a parsed IHDR chunk so info_ptr->bit_depth carries that value at the tRNS-handling site.",
+            "why_winner_satisfies": "value_profile_cmplog resolves 10/10 trials and the one winner-resolving seed carries 0x10 at offset 0x18 \u2014 exactly the threshold value 16 that flips `info_ptr->bit_depth < 16` to false. CMP_MAP/value-profile feedback rewards inputs whose bit_depth field byte moves toward 16 along the 1-byte CMP gradient, so vpc gets a continuous signal during the climb from typical values (0x01/0x08) to 0x10.",
+            "why_loser_doesnt": "cmplog resolves only 1/10 trials and blocks 9/10. Its loser seeds carry 0x08 or 0x01 at offset 0x18, both <16. cmplog has I2S but lacks the CMP_MAP gradient: I2SRandReplace can record CMP(bit_depth, 16) and try byte substitution, but with 8-bit operands the I2S substitution offset is essentially random across the input \u2014 without the value-profile distance reward there is no monotone signal to anchor the substitution at offset 0x18 specifically, so resolution depends on luck.",
+            "mechanism_attribution": "The technique delta between value_profile_cmplog and cmplog is value_profile, i.e. the CMP_MAP gradient. For the 1-byte comparison `info_ptr->bit_depth < 16` the CMP_MAP records the Hamming/distance between the runtime operand and the constant 16, giving vpc a smooth gradient signal that selects intermediate seeds whose bit_depth byte is closer to 16; this reliably converges to 0x10. cmplog has no such gradient \u2014 its I2S substitution is unguided about which offset to overwrite, which explains the 10/10 vs 1/10 split."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The decisive pair at this branch is value_profile_cmplog>cmplog with delta=value_profile.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 header",
+            "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "value_profile_cmplog resolves 10/10 trials while cmplog blocks 9/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 counts",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0"
+          },
+          {
+            "claim": "The blocker compares the parsed bit_depth field against the literal 16.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Source line",
+            "exact_quote": "if (info_ptr->bit_depth < 16)"
+          },
+          {
+            "claim": "The winner takes the false side of the comparison.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Globally blocked side",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "At file offset 0x18 the winner byte is 0x10 (=16) and the loser bytes are 0x08 (9 of 10) or 0x01 (1 of 10).",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0018",
+            "exact_quote": "0x0018  10(.)x1                             08(.)x9 01(.)x1                     DIFFER"
+          },
+          {
+            "claim": "The winner-resolving seed begins with the canonical PNG signature followed by an IHDR chunk header, so byte 0x18 lies inside the IHDR payload where bit_depth resides.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1 first row",
+            "exact_quote": "0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR"
+          },
+          {
+            "claim": "cmplog's mutator stack is naive's havoc/token plus I2SRandReplace, which substitutes one CMP operand for the other at byte sequences matching the recorded operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators paragraph",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile_cmplog adds CMP_MAP gradient bucket feedback on top of cmplog's I2S.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Instrumentation paragraph",
+            "exact_quote": "**Instrumentation**: union of cmplog and value_profile \u2014 edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+          },
+          {
+            "claim": "value_profile_cmplog's feedback adds CMP_MAP buckets that cmplog does not have.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Feedback paragraph",
+            "exact_quote": "**Feedback**: edge-bucket + CMP_MAP-bucket signals."
+          },
+          {
+            "claim": "The duration-blocked gap is enormous (vpc averages 0.05h vs cmplog 11.35h), consistent with vpc's gradient reaching the threshold quickly while cmplog spins.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "avg duration row",
+            "exact_quote": "avg duration blocked: winner=0.05h  loser=11.35h"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness exposing a 1-byte CMP `x < K` where K is a literal and x is derived from one parsed input byte, run with cmplog vs value_profile_cmplog at multiple K values, where cmplog matches or exceeds vpc's resolution rate at all K. That would mean CMP_MAP gradient is NOT the differentiator and the win must come from something else."
+        },
+        "weakest_evidence_point": "Only one winner-resolving seed is available, so the claim that 0x10 is the canonical winning byte at offset 0x18 (vs other values >=16 like 0x18, 0x20, 0xff) rests on a single observation; cmplog's I2S could in principle pick any operand-matching offset for substitution, and the structural mapping (offset 0x18 = bit_depth) is inferred from the PNG IHDR layout rather than from libpng parsing code shown in the prompt.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_7332",
+      "target": "libpng",
+      "branch_id": 7332,
+      "analysis_path": "prompts/BBRR/00_libpng_7332.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_sBIT",
+      "line": "1216",
+      "source_line": "   if ((png_ptr->color_type & PNG_COLOR_MASK_COLOR) != 0)",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x02",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "CMP_MAP gradient distinguishes the bitwise-AND result against 0x02 bit, rewarding inputs that flip the color_type bitmask bit toward zero; cmplog's I2S cannot treat a 1-bit mask as a substitutable magic constant.",
+        "one_line": "VP gradient flips color_type bitmask bit 0x02 toward zero"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "PNG IHDR color_type byte at file offset 0x19 must have bit 0x02 (PNG_COLOR_MASK_COLOR) cleared, i.e. a grayscale color_type",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>naive (value_profile)",
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "The PNG IHDR color_type byte (file offset 0x19) must not carry bit 0x02 (PNG_COLOR_MASK_COLOR). Concretely color_type in {0, 3, 4}; the winner-resolving seeds use 0x00 (grayscale), while loser-blocking seeds use 0x06 (RGB+alpha). Correlated IHDR fields at 0x13 (width LSB), 0x18 (bit_depth), and 0x1c (interlace) must also remain self-consistent so the chunk reaches the gate.",
+            "why_winner_satisfies": "Winner-resolving seeds put 0x00 at offset 0x19 (grayscale color_type). The expression (color_type & 0x02) then evaluates to 0, so the gate at L1216 takes the false (winning) branch reaching the else arm at L1224-L1230.",
+            "why_loser_doesnt": "Loser-blocking seeds put 0x06 at offset 0x19 (RGB+alpha color_type). (0x06 & 0x02) = 0x02 != 0, so the gate at L1216 takes the true (blocked) branch into L1217-L1222. All 10 loser-blocking seeds have 0x06 at this offset; only color_type values lacking the 0x02 bit clear the gate.",
+            "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs that come closer to satisfying integer comparisons. The bitwise-AND-with-literal gate at L1216 emits a trace_cmp with one operand being (color_type & 0x02) and the other being 0; CMP_MAP-bucket feedback distinguishes color_type=0x06 (bit set) from color_type=0x00 (bit clear), so inputs flipping the 0x02 bit toward zero are preserved as corpus. naive and cmplog lack this gradient: naive has only edge feedback, and cmplog's input-to-state substitution mutator cannot meaningfully substitute a 1-bit bitmask literal as if it were a multi-byte magic constant. cmplog therefore performs no better than naive here (both are losers; pair shape BBRR), while value_profile_cmplog inherits the CMP_MAP gradient and resolves at the same rate as value_profile."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "Both decisive pairs at this branch carry the value_profile technique delta, not I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 headers",
+            "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+          },
+          {
+            "claim": "The second decisive pair is value_profile_cmplog > cmplog with the same value_profile delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 header",
+            "exact_quote": "--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+          },
+          {
+            "claim": "The blocker source line is a bitwise-AND test of png_ptr->color_type against PNG_COLOR_MASK_COLOR.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Source line",
+            "exact_quote": "if ((png_ptr->color_type & PNG_COLOR_MASK_COLOR) != 0)"
+          },
+          {
+            "claim": "The globally blocked side is the false branch, so the winning side is the false arm (else branch at L1224).",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Globally blocked side",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "Winner-resolving seeds carry 0x00 at file offset 0x19 while loser-blocking seeds carry 0x06.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  00(.)x2                             06(.)x10                            DIFFER"
+          },
+          {
+            "claim": "Per-role coverage confirms the winner set took the L1224 else arm and the loser set took the L1217 true arm.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1217-L1230",
+            "exact_quote": "[L]  1217     {\n[L]  1218        png_ptr->sig_bit.red = buf[0];"
+          },
+          {
+            "claim": "The W-only else arm at L1224 sets sig_bit.gray, consistent with grayscale color_type taking the false branch.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1224-L1226",
+            "exact_quote": "[W]  1224     else\n[W]  1225     {\n[W]  1226        png_ptr->sig_bit.gray = buf[0];"
+          },
+          {
+            "claim": "DIVERGENT BRANCHES at the blocker line confirm W took F (10 times across the seed pool) while L took T.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1216",
+            "exact_quote": "d=1   L1216  T=0 F=2  T=10 F=0  if ((png_ptr->color_type & PNG_COLOR_MASK_COLOR) != 0)  <-- BLOCKER"
+          },
+          {
+            "claim": "value_profile installs CMP_MAP gradient buckets on integer CMPs so inputs whose operands move closer to matching are preserved.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile section",
+            "exact_quote": "each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket)"
+          },
+          {
+            "claim": "value_profile preserves an input that brings a CMP-operand pair closer to matching than previously seen.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile feedback paragraph",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "cmplog's mutator addition is I2SRandReplace, which substitutes captured CMP operands at matching byte sequences in the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators paragraph",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive provides no I2S substitution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with a single `if ((input[OFF] & 0x02) != 0) <blocker>` gate (no other constraints), swept across fuzzers, in which cmplog matches value_profile's resolution probability \u2014 that would refute the claim that the 1-bit bitmask gate is specifically a CMP_MAP-gradient feature and not just a generic easy-to-flip byte."
+        },
+        "weakest_evidence_point": "Whether the >=8/10 vp resolution truly comes from CMP_MAP gradient on the bitmask CMP at L1216 itself versus from CMP_MAP gradient on upstream PNG-chunk size/CRC gates (e.g. L1194 length check, png_crc_finish at L1204) that vp clears more reliably, with the L1216 outcome being a downstream byproduct of which chunks vp manages to reach.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "id": "vpc_literal_gate_plus_gradient_navigation",
+  "kind": "local",
+
+  "pair": {
+    "primary": {
+      "A": "value_profile_cmplog",
+      "B": "cmplog",
+      "axis_differ": "value_profile"
+    },
+    "involved_fuzzers": ["cmplog", "value_profile", "value_profile_cmplog"],
+    "has_axis": ["value_profile", "value_profile_cmplog"],
+    "lacks_axis": ["cmplog"]
+  },
+
+  "hypothesis": {
+    "mechanism": "This branch requires solving a two-component structure within budget: an UPSTREAM chain of sequential single-byte equality gates whose CMP operands the value-profile CMP_MAP can bucket by closeness (so a VP fuzzer retains seeds that match a longer prefix and climbs gate-by-gate), followed by a TERMINAL contiguous multi-byte literal that I2SRandReplace can substitute from intercepted CMP operands. value_profile and value_profile_cmplog share the named axis (value_profile / CMP_MAP gradient), which is what lets them navigate the deepening upstream chain; cmplog lacks the gradient and must blindly reproduce the whole chain head, whose success probability collapses as CHAIN_DEPTH grows, so it stalls before ever reaching the terminal gate. The full synergy story (observed in the source branches as vpc beating BOTH single-technique fuzzers) is that the terminal literal also needs I2S — value_profile alone climbs the chain but cannot synthesize the wide literal — so only value_profile_cmplog clears both stages; that cross-axis half is recorded in tradeoff_observation and warrants its own I2S-axis template.",
+    "program_feature_parameter": "CHAIN_DEPTH (compile-time -D) — the number of sequential upstream single-byte equality gates that gate entry to the terminal literal; the terminal literal width TERM_BYTES is held fixed and wide.",
+    "predicted_direction": "has_axis fuzzers outperform the lacks_axis fuzzer; the value_profile_cmplog-over-cmplog ratio grows with CHAIN_DEPTH",
+    "predicted_endpoints": {
+      "CHAIN_DEPTH=1": "Shallow 1-byte chain; the terminal I2S literal dominates, so value_profile_cmplog crashes fastest and cmplog still crashes (it has I2S for the literal and can brute the 1-byte chain); value_profile lags on the terminal literal. has_axis vs lacks_axis gap is small here because the chain is trivial.",
+      "CHAIN_DEPTH=8": "8-byte blind chain; cmplog (lacks_axis) cannot reproduce the chain head and stalls -> ~0 crashes; value_profile_cmplog (has_axis) climbs the chain via the CMP_MAP gradient and plants the terminal literal via I2S -> still > 0. value_profile climbs the chain but stalls on the terminal literal."
+    },
+    "expected_curve_per_fuzzer": {
+      "cmplog": "monotone-decreasing in CHAIN_DEPTH (crashes readily at depth 1, collapses to ~0 by depth 8 as the blind chain widens)",
+      "value_profile": "decreasing but gradient-buffered through the chain; limited throughout because it lacks I2S for the terminal literal",
+      "value_profile_cmplog": "flat-high to gently-decreasing (resolves at every dose; climbs the chain via gradient and plants the terminal literal via I2S, so it stays > 0 across the whole sweep)"
+    },
+    "tradeoff_observation": "This is a SYNERGY (two-component) template: the resolving fuzzer needs BOTH the value_profile CMP_MAP gradient (to navigate the deepening upstream chain) AND I2S literal substitution (to plant the terminal multi-byte literal). The named axis here is value_profile (the component that separates value_profile_cmplog from the cmplog loser as CHAIN_DEPTH grows); the I2S axis is the orthogonal component that separates value_profile_cmplog from the value_profile loser at the terminal literal. The brief's source branches show value_profile_cmplog beating BOTH single-technique fuzzers — neither alone suffices. The cross-axis I2S half (value_profile_cmplog > value_profile) is observational here and warrants its own I2S-axis template; in this harness it manifests as value_profile staying below value_profile_cmplog at all depths because value_profile cannot synthesize the fixed-width terminal literal."
+  },
+
+  "verification": {
+    "harness": "step5b/vpc_literal_gate_plus_gradient_navigation/template.c",
+    "params": "step5b/vpc_literal_gate_plus_gradient_navigation/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [1, 2, 4, 8],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "pending",
+
+    "results_per_trial": {},
+
+    "results_median": {},
+
+    "summary": {
+      "headline_finding": "",
+      "stratification_holds": "",
+      "monotone_curves": {}
+    },
+
+    "notes": [
+      "Synergy template: the trap needs both the upstream VP-climbable chain (knob: CHAIN_DEPTH) and the fixed-width terminal I2S literal (TERM_BYTES). The named axis is value_profile; the I2S terminal-gate half is held fixed so the swept axis is purely the gradient-navigable chain depth.",
+      "TERM_BYTES is a fixed (non-swept) structural constant, not the knob; it is held wide enough that value_profile alone stalls on the terminal literal at every CHAIN_DEPTH, isolating the value_profile-axis advantage of value_profile_cmplog over cmplog as the swept effect."
+    ]
+  }
+}

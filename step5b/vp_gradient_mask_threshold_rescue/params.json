@@ -1,0 +1,45 @@
+{
+  "template_id": "vp_gradient_mask_threshold_rescue",
+  "parameter": "THRESHOLD_BYTES",
+  "scan_values": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "fuzzers": [
+    "naive",
+    "cmplog",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "value_profile_cmplog > cmplog",
+  "expected_curve": "monotone increasing in THRESHOLD_BYTES",
+  "acceptance": {
+    "metric": "crash_count",
+    "rule": "value_profile_cmplog \u2248 cmplog at THRESHOLD_BYTES=1 (1-byte operand, trivially brute-forced by all); value_profile_cmplog >> cmplog at THRESHOLD_BYTES=4; cmplog\u2248naive=0, value_profile/value_profile_cmplog>0 at THRESHOLD_BYTES=8"
+  },
+  "design_basis": "The gate is x >= K where K = RANGE_MAX-1 for an N-byte input-derived integer. There is NO substitutable magic literal (winning side is a 2-value range, not an exact constant), so I2S/cmplog gain nothing over naive. value_profile's CMP_MAP distance bucket gives a monotone gradient toward K; that gradient is the only guiding signal. Larger THRESHOLD_BYTES lengthens the climb and widens the blind-search space (1/2^(8*N) for naive/cmplog), so VP's advantage grows with the knob.",
+  "notes": [
+    "THRESHOLD_BYTES=1: operand space 256, winning values {0xFE,0xFF}. All fuzzers brute-force it almost instantly; little separation expected.",
+    "THRESHOLD_BYTES=2: operand space 65536, winning values {0xFFFE,0xFFFF}. naive/cmplog start to lag; VP climbs the distance gradient quickly.",
+    "THRESHOLD_BYTES=4: operand space ~4.3e9. naive/cmplog expected ~0 crashes in 600s (no gradient, no exact literal to substitute); value_profile/value_profile_cmplog climb the gradient and resolve.",
+    "THRESHOLD_BYTES=8: operand space 2^64. naive=cmplog=0; only the value_profile-bearing fuzzers reach K via the CMP_MAP gradient."
+  ],
+  "screen": {
+    "scan_values": [
+      2,
+      4,
+      6
+    ],
+    "duration_s": 90,
+    "trials": 3,
+    "fuzzers": [
+      "value_profile_cmplog",
+      "cmplog"
+    ],
+    "_note": "screen-tuning experiment (2026-05-24): override for the fast re-screen; honest grid stays in scan_values above"
+  }
+}

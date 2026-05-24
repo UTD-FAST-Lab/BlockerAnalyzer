@@ -1,0 +1,45 @@
+{
+  "template_id": "vp_gradient_chained_parse_depth",
+  "parameter": "CHAIN_DEPTH",
+  "scan_values": [
+    2,
+    4,
+    8,
+    16
+  ],
+  "fuzzers": [
+    "naive",
+    "cmplog",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "trials_per_point": 5,
+  "duration_s": 600,
+  "expected_direction": "value_profile > naive",
+  "expected_curve": "monotone increasing in CHAIN_DEPTH",
+  "acceptance": {
+    "metric": "crash_count",
+    "rule": "all fuzzers \u2248 at CHAIN_DEPTH=2; has_axis (value_profile, value_profile_cmplog) >> lacks_axis (naive, cmplog) at CHAIN_DEPTH=8; lacks_axis \u2248 0, has_axis > 0 at CHAIN_DEPTH=16"
+  },
+  "design_basis": "VP advantage scales with chain depth: the CMP_MAP buckets per-gate progress, so value_profile climbs CHAIN_DEPTH sequential single-byte gates one stage at a time (linear-ish in depth), while naive's edge-only search must satisfy all gates blindly (~1/256^CHAIN_DEPTH) and cmplog's I2S substitution has no gradient to ride between gates. Deeper chain => larger has_axis/lacks_axis separation.",
+  "notes": [
+    "CHAIN_DEPTH=2: shallow chain; even naive's edge-only search can blindly satisfy 2 bytes (~1/65536/exec), so all fuzzers crash, separation minimal",
+    "CHAIN_DEPTH=4: naive's blind probability ~1/4G per exec drops it sharply; value_profile/value_profile_cmplog climb the 4-stage gradient and still crash; cmplog has no per-stage gradient so it lags has_axis",
+    "CHAIN_DEPTH=8: lacks_axis (naive, cmplog) near 0; has_axis crashes via accumulated CMP_MAP buckets \u2014 clean stratification",
+    "CHAIN_DEPTH=16: lacks_axis = 0 (blind 1/256^16 is unreachable, cmplog has no gradient); has_axis still climbs the longer gradient, crash count lower than at depth 8 but > 0"
+  ],
+  "screen": {
+    "scan_values": [
+      8,
+      12,
+      16
+    ],
+    "duration_s": 20,
+    "trials": 3,
+    "fuzzers": [
+      "value_profile",
+      "naive"
+    ],
+    "_note": "screen-tuning experiment (2026-05-24): override for the fast re-screen; honest grid stays in scan_values above"
+  }
+}

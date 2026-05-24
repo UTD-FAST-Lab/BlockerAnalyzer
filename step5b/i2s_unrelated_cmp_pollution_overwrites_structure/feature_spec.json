@@ -1,0 +1,57 @@
+{
+  "id": "i2s_unrelated_cmp_pollution_overwrites_structure",
+  "kind": "local",
+
+  "pair": {
+    "primary": {
+      "A": "naive",
+      "B": "cmplog",
+      "axis_differ": "I2S"
+    },
+    "involved_fuzzers": ["naive", "cmplog", "value_profile", "value_profile_cmplog"],
+    "has_axis": ["cmplog", "value_profile_cmplog"],
+    "lacks_axis": ["naive", "value_profile"]
+  },
+
+  "hypothesis": {
+    "mechanism": "This is an anti-family feature: the I2S axis HURTS. The target objective is a precise 8-byte structural window that must equal a fixed reference; reaching it is pure byte search, equally available to every fuzzer. The harness surrounds that gate with POLLUTION_SOURCES unrelated exact-equality comparisons over disjoint operands whose only effect is to flood the CmpLogObserver with distinct short literals. The I2S-carrying fuzzers (cmplog, value_profile_cmplog) run I2SRandReplace, which scans the whole input for byte runs matching a logged operand and splices the paired operand in — frequently landing inside the structural window and overwriting bytes the objective needs. The I2S-lacking fuzzers (naive, value_profile) never run that substitution stage, so their havoc / CMP_MAP exploration of the window is undisturbed. Both has_axis fuzzers share I2SRandReplace, so they share the same predicted degradation; value_profile_cmplog may sit slightly above cmplog because its VP gradient still helps the structural search, but it still pays the same pollution tax relative to value_profile.",
+    "program_feature_parameter": "POLLUTION_SOURCES (compile-time -D) — the number of unrelated 2-byte literal comparisons competing for the same input bytes, i.e. the count of I2S pollution sources whose operands can be spliced over the structural window.",
+    "predicted_direction": "lacks_axis fuzzers (naive, value_profile) outperform has_axis fuzzers (cmplog, value_profile_cmplog); the gap grows with POLLUTION_SOURCES",
+    "predicted_endpoints": {
+      "POLLUTION_SOURCES=0": "Pollution loop compiled out — no operand source for I2S. All four fuzzers comparable on the bare 8-byte structural gate (null dose). naive ≈ cmplog and value_profile ≈ value_profile_cmplog.",
+      "POLLUTION_SOURCES=16": "Maximum competing operands. I2S splices corrupt the structural window often per execution, so cmplog and value_profile_cmplog crash far less than naive and value_profile respectively; widest lacks_axis − has_axis gap."
+    },
+    "expected_curve_per_fuzzer": {
+      "naive": "flat-high (no I2S; structural window search undisturbed at every dose)",
+      "value_profile": "flat-high (no I2S; VP gradient on the window, undisturbed at every dose)",
+      "cmplog": "monotone-decreasing (crash count drops as POLLUTION_SOURCES grows and I2S corrupts the window more often)",
+      "value_profile_cmplog": "monotone-decreasing (same I2S tax; may sit above cmplog because VP still aids the window search, but still below value_profile)"
+    },
+    "tradeoff_observation": "HONESTY CAVEAT — harness faithfulness is limited. The real cluster is a CORPUS-pollution / scheduler-starvation dynamic observed over a 12h campaign: I2S substitutions accumulate across the population of saved seeds so the scheduler is starved of structurally-intact parents (harfbuzz_9523, harfbuzz_9463), and in the openthread members the loss is budget displacement / pointer-shaped substitution rather than direct overwrite of one window. A single-input micro-harness cannot reproduce population-level corpus starvation; this harness instead isolates the closest mechanistically-honest proxy: PER-EXECUTION I2S splice corruption of a structural window driven by unrelated logged operands. The structural gate is also a single exact 8-byte equality, which I2S could in principle help if its operand were logged — but here only UNRELATED operands are logged (the structural reference is never compared via a CMP whose operand I2S could harvest; it is reached through memcmp on a memcpy'd window), so I2S has nothing useful to substitute and only harmful operands to splice. Even so, whether the per-execution splice rate is high enough to produce a measurable gap at 600s is uncertain — a flat/identical result across the grid should be read as INCONCLUSIVE (the proxy was too weak), not as a refutation of the corpus-pollution cluster. The acceptance rule is deliberately conservative for this reason."
+  },
+
+  "verification": {
+    "harness": "step5b/i2s_unrelated_cmp_pollution_overwrites_structure/template.c",
+    "params": "step5b/i2s_unrelated_cmp_pollution_overwrites_structure/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [0, 2, 8, 16],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "pending",
+
+    "results_per_trial": {},
+
+    "results_median": {},
+
+    "summary": {
+      "headline_finding": "",
+      "stratification_holds": "",
+      "monotone_curves": {}
+    },
+
+    "notes": [
+      "Anti-family proxy: per-execution I2S splice corruption stands in for the cluster's true population-level corpus-starvation dynamic; see hypothesis.tradeoff_observation.",
+      "A flat or identical result across POLLUTION_SOURCES should be adjudicated inconclusive (weak proxy), not refuted."
+    ]
+  }
+}

@@ -1,0 +1,485 @@
+[
+  {
+    "id": "curl_225",
+    "family": "I2S_pro",
+    "target": "curl",
+    "branch_id": 225,
+    "analysis_path": "prompts/--BR/00_curl_225.analysis.json",
+    "file": "/src/curl/lib/mime.c",
+    "function": "mime.c:search_header",
+    "line": "350",
+    "source_line": "  for(; !value && hdrlist; hdrlist = hdrlist->next)",
+    "covers_pairs": [
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "Input must contain the literal protocol selector bytes that route the fuzz harness into the mime/SMTP-userheader code path (e.g. the `pop3` token at offsets 0x06-0x09 plus the framing/length fields at 0x00-0x05 and 0x1c-0x20), so the caller Curl_mime_prepare_headers receives a non-NULL part->userheaders list and the for-loop body at line 350 actually executes.",
+    "why_winner_satisfies": "All five winner-resolving seeds carry the exact 4-byte literal `pop3` at offsets 0x06-0x09 and consistent framing bytes (00 01 00 00 00 19 at 0x00-0x05; 0x47 = 'G' at offset 0x24), and the per-role overlay shows line 351 (match_header call) hit only by W with 48 invocations of match_header in W vs 0 in L.",
+    "why_loser_doesnt": "Loser-blocking seeds (all from naive) have scrambled bytes at the same offsets (no concentrated `pop3` literal; offset 0x06 has 70(p)x7 6f(o)x1 2d(-)x1 64(d)x1 and offset 0x09 has 33(3)x6 plus three other values), so the protocol-selection CMPs in the harness reject these inputs and the mime/userheader chain is never reached; consequently hdrlist is NULL at line 350 and the loop body never runs (T=0 hits in L at the blocker).",
+    "mechanism_attribution": "The pair delta is I2SRandReplace: value_profile_cmplog adds the cmplog CMP buffer and the I2SRandReplace mutator on top of value_profile's existing instrumentation. The harness compares the input prefix against fixed protocol literals like `pop3`; I2SRandReplace reads those operands out of the CMP buffer and substitutes them into the input verbatim, materializing the multi-byte literal in a single mutation. Without I2SRandReplace, value_profile must synthesize the 4-byte equality match by blind havoc, since prefix-distance feedback is all-or-nothing on the literal."
+  },
+  {
+    "id": "harfbuzz_9067",
+    "family": "I2S_pro",
+    "target": "harfbuzz",
+    "branch_id": 9067,
+    "analysis_path": "prompts/--BR/01_harfbuzz_9067.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-layout-common.hh",
+    "function": "OT::ClassDef::get_class(unsigned int) const",
+    "line": "2002",
+    "source_line": "    default:return 0;",
+    "covers_pairs": [
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "A 4-byte FOURCC table tag 'GDEF' (0x47 0x44 0x45 0x46) embedded at the right offset to make the OpenType parser navigate into the GDEF table, plus a ClassDef format field whose value equals one of {1,2,3,4} (the explicit case arms at L1996/L1997/L1999/L2000); when both conditions hold, the switch on u.format at L1995 falls into a case arm instead of the default return-0.",
+    "why_winner_satisfies": "All 5 winner-resolving seeds carry the literal bytes 'GDEF' (47 44 45 46) at offsets 0x1c-0x1f, and the BYTE DIFF shows W has '44(D)x10 / 45(E)x10 / 46(F)x10' at offsets 0x1d/0x1e/0x1f. The decisive winner value_profile_cmplog has I2SRandReplace which can substitute the 4-byte CMP literal 'GDEF' (the table-tag comparison inside the OpenType sanitizer) directly into the input from the CmpLogObserver buffer in a single mutation step.",
+    "why_loser_doesnt": "value_profile only has the CMP_MAP gradient (Hamming/prefix-distance feedback) and naive havoc mutators; the loser_blocking seeds at offsets 0x1d-0x1f show 50(P)/53(S)/4f(O)/55(U)/53(S)/42(B) \u2014 they reached 'GPOS' or 'GSUB' but never 'GDEF', because a 4-byte equality on an opaque magic word is not progressively guidable by Hamming distance (every single-byte mismatch is equally far from match in the prefix-bucket model). With 0 of 10 vp trials resolving in 12h, the random-byte search space for the exact 4-byte tag is intractable without I2S substitution.",
+    "mechanism_attribution": "I2SRandReplace inside value_profile_cmplog: the cmplog observer captures the 4-byte comparison against the 'GDEF' magic tag in harfbuzz's OpenType table-walk, then I2SRandReplace splices that literal into a seed at the right offset in one mutation. value_profile lacks the I2SRandReplace mutator entirely, so it can only stumble on the 4-byte magic via blind havoc."
+  },
+  {
+    "id": "libpng_7376",
+    "family": "I2S_pro",
+    "target": "libpng",
+    "branch_id": 7376,
+    "analysis_path": "prompts/--BR/02_libpng_7376.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_handle_eXIf",
+    "line": "2047",
+    "source_line": "   if (length < 2)",
+    "covers_pairs": [
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "A PNG chunk-type field (4 bytes at the chunk header) equal to the ASCII literal 'eXIf' (0x65 0x58 0x49 0x66) followed by a length-prefix < 2, so the dispatcher routes to png_handle_eXIf and the (length < 2) true side fires.",
+    "why_winner_satisfies": "value_profile_cmplog seeds carry the 4-byte 'eXIf' literal at the chunk-type offset (e.g. bytes '65 58 49 66' at offset 0x35-0x38 in 5 of 6 W seeds), so OSS_FUZZ_png_handle_eXIf is actually invoked and the (length < 2) branch is reached and taken true 6 times.",
+    "why_loser_doesnt": "value_profile seeds never plant the 4-byte 'eXIf' chunk-type literal; at the corresponding chunk-type offset all 10 L seeds carry 'sRGB' (0x73 0x52 0x47 0x42), so the eXIf handler is never entered and the (length<2) branch's true side is taken 0 times by L (avg hitcount on branch loser=0).",
+    "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile. The CMP that gates dispatch to png_handle_eXIf is an equality check of the parsed chunk-type word against the constant 0x66495865 ('eXIf'); cmplog logs that CMP's operand pair, then I2SRandReplace substitutes the 4-byte constant directly into a corpus seed at the byte position the CMP read from. value_profile alone has only the CMP_MAP Hamming-distance gradient \u2014 a 4-byte equality on an arbitrary FOURCC offers a flat gradient (any of 2^32 wrong values is equidistant), so VP cannot climb to the exact match within budget."
+  },
+  {
+    "id": "libxml2_2983",
+    "family": "I2S_pro",
+    "target": "libxml2",
+    "branch_id": 2983,
+    "analysis_path": "prompts/--BR/03_libxml2_2983.analysis.json",
+    "file": "/src/libxml2/valid.c",
+    "function": "xmlAddAttributeDecl",
+    "line": "2134",
+    "source_line": "\tif ((xmlStrEqual(ret->name, BAD_CAST \"xmlns\")) ||",
+    "covers_pairs": [
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "Input must declare an attribute whose post-xmlSplitQName local name equals the 5-byte literal \"xmlns\" exactly (e.g. <!ATTLIST elem xmlns CDATA ...>), so that the equality CMP at valid.c:2134 (xmlStrEqual(ret->name, BAD_CAST \"xmlns\")) returns true and the branch's true side is taken.",
+    "why_winner_satisfies": "value_profile_cmplog winner seeds include declarations whose attribute local-name is literally \"xmlns\" \u2014 e.g. Seed 3 at offset 0xd0 shows '<!ATTLIST b xmlns        CDATA' and Seed 1 contains 'xmlns%xlink' that after xmlSplitQName yields ret->name == \"xmlns\". The DIVERGENT BRANCHES tally at L2134 shows the winner reaches the true side 30 times vs the loser's 0.",
+    "why_loser_doesnt": "value_profile loser seeds only carry the namespaced form 'xmlns:xlink' where the local-name after QName split is \"xlink\" and the prefix is \"xmlns\"; ret->name never equals \"xmlns\" so the first clause at line 2134 is always false (L T=0 F=60). vp has CMP_MAP Hamming feedback but no I2SRandReplace stage to bulk-substitute the literal token into the local-name position.",
+    "mechanism_attribution": "I2SRandReplace in value_profile_cmplog logs the runtime CMP operand BAD_CAST \"xmlns\" via cmplog instrumentation and substitutes it directly into the byte position that becomes ret->name. value_profile lacks the I2S mutator and must rely on Hamming-distance gradient + havoc, which can reach the prefix-form 'xmlns:...' but does not produce the unprefixed local-name form within the budget."
+  },
+  {
+    "id": "openthread_8453",
+    "family": "I2S_pro",
+    "target": "openthread",
+    "branch_id": 8453,
+    "analysis_path": "prompts/--BR/04_openthread_8453.analysis.json",
+    "file": "/src/openthread/src/core/common/message.cpp",
+    "function": "ot::Message::GetFirstChunk(unsigned short, unsigned short&, ot::Message::Chunk&) const",
+    "line": "523",
+    "source_line": "        if (aOffset < kBufferDataSize)",
+    "covers_pairs": [
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "Input bytes at offsets 0x00-0x1f must match a fixed multi-byte literal sequence (the 5 winner seeds share `78 66 65 5c 78` at 0x00-0x04 and dozens of single-valued offsets through 0x1f) so that upstream IP6 datagram parsing / checksum validation accepts the packet and feeds it into GetFirstChunk with an aOffset that, after subtracting kHeadBufferDataSize at line 513, still exceeds kBufferDataSize \u2014 forcing the loop to subtract `aOffset -= kBufferDataSize` (lines 529-530, hit only by W) before the branch ever evaluates true.",
+    "why_winner_satisfies": "All five winner-resolving seeds carry the exact same first-32-bytes template (BYTE DIFF shows offsets 0x00-0x07, 0x0d-0x11, 0x16-0x1f each concentrated to a single byte value xN10), demonstrating they share a fixed protocol-header literal. The per-role overlay marks lines 529-530 (`aOffset -= kBufferDataSize`) as [W]-only \u2014 direct evidence the winner traverses the multi-buffer subtract path and reaches the false branch, while the loser never does.",
+    "why_loser_doesnt": "Loser-blocking seeds (all from naive) have heterogeneous bytes at the same offsets (e.g. offset 0x02 shows 24($)x3 23(#)x3 10(.)x2 2e(.)x2 in L vs 65(e)x10 in W; offset 0x1a shows 53(S)x10 in L vs de(.)x10 in W) \u2014 no concentrated multi-byte literal. The DIVERGENT BRANCHES table shows L hits the blocker line with T=176 F=0: every L invocation takes the TRUE branch (aOffset fits in one buffer) because the message never has enough bytes to push aOffset past kBufferDataSize after the head subtraction. Value_profile's CMP_MAP gradient is Hamming-bucketed and cannot collapse a multi-byte equality match in one step; it must accumulate byte-by-byte.",
+    "mechanism_attribution": "The pair delta is I2SRandReplace: value_profile_cmplog adds the cmplog CMP buffer and the I2SRandReplace mutator on top of value_profile's existing instrumentation. The upstream IP6/checksum parser performs multi-byte equality CMPs against fixed header literals; I2SRandReplace reads those operands out of the CMP buffer and substitutes them into the input verbatim, materializing the multi-byte template in a single mutation. Without I2SRandReplace, value_profile must synthesize the multi-byte literal via blind havoc + token mutators, and the absolute search cost for a 32-byte concentrated pattern is what produces the 0/10 resolve rate."
+  },
+  {
+    "id": "curl_313",
+    "family": "I2S_pro",
+    "target": "curl",
+    "branch_id": 313,
+    "analysis_path": "prompts/BR--/00_curl_313.analysis.json",
+    "file": "/src/curl/lib/select.c",
+    "function": "Curl_socket_check",
+    "line": "231",
+    "source_line": "    if(pfd[num].revents & (POLLRDNORM|POLLIN|POLLERR|POLLHUP))",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "A structured fuzz-input whose protocol-scheme bytes spell 'pop3' at offsets 0x06-0x09 and whose subsequent bytes form a host:port URL (e.g. '127.0.0.1:9001') plus an HTTP-style request line ('GHTTP/' at 0x24-0x29) \u2014 i.e. the input matches curl's expected protocol/URL string CMPs so the fuzzer harness drives curl into the upload/connect path where Curl_socket_check is invoked with a writefd socket whose revents come back WITHOUT (POLLRDNORM|POLLIN|POLLERR|POLLHUP), taking the false side of the readfd0 revents mask test.",
+    "why_winner_satisfies": "Every winner-resolving seed contains the literal ASCII 'pop3' (70 6f 70 33) at offsets 0x06-0x09 and a CRLF-terminated URL+HTTP-header payload (`127.0.0.1:9001`, `GHTTP/`, `mewhere\\r\\n`). HIT-COUNT DIVERGENCE confirms the winners enter the upload path (Curl_get_upload_buffer 20 hits, ossl_seed/ossl_random 20 hits, Curl_fillreadbuffer 10, Curl_done_sending 10, readwrite_upload 10) \u2014 all zero for the loser. At branch L231 the winner takes both T (14) and F (10); the loser only ever takes T (10) and never F.",
+    "why_loser_doesnt": "Loser-blocking seeds are 32-38 bytes of garbled bytes with no 'pop3' magic at 0x06-0x09 (offsets show 1Z`Gee^, p3:0/12, A22%e8, +-k7%E, %AAA \u2014 random havoc). They never satisfy curl's scheme strcmp, so the harness never wires up the upload path; Curl_socket_check is only ever called on a readfd path where revents arrives with POLLIN/POLLRDNORM set (true side), never on the writefd path where the false side becomes reachable.",
+    "mechanism_attribution": "cmplog's I2SRandReplace observes the strcmp/memcmp CMP_MAP entries when curl parses the scheme ('pop3', 'http://', host, port) and substitutes those literal operands into the input at the matching offsets. Naive lacks CMP interception entirely (per MECHANISM CONTEXT, 'No I2S'), so it must brute-force every byte of the protocol header by havoc, which is statistically infeasible inside the 12h budget \u2014 naive blocks 10/10 trials while cmplog resolves 10/10 within ~66-3064s. The lineage of two winning seeds (1abae053b6f68107, 06c4f49e154580bb) both terminate in I2S-floor dash rows (depth 7-8 and 16-17 respectively), directly confirming I2SRandReplace contribution."
+  },
+  {
+    "id": "harfbuzz_9255",
+    "family": "I2S_pro",
+    "target": "harfbuzz",
+    "branch_id": 9255,
+    "analysis_path": "prompts/BR--/01_harfbuzz_9255.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shape.cc",
+    "function": "hb_ot_shape_plan_t::position(hb_font_t*, hb_buffer_t*) const",
+    "line": "274",
+    "source_line": "  else if (this->apply_fallback_kern)",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "A valid OpenType font header (sfnt magic 00 01 00 00 at offset 0x00) whose table directory entry contains the literal ASCII tag 'GPOS' (47 50 4f 53). When harfbuzz parses this, it locates a GPOS table and sets this->apply_gpos=true, which causes the if (this->apply_gpos) branch at line 263 to take the true side and route positioning through map.position(), making apply_fallback_kern irrelevant (and apply_kern undefined enough that the false branch of the else-if at line 274 is taken).",
+    "why_winner_satisfies": "All 5 cmplog-winning seeds carry the exact 4-byte sequence 47 50 4f 53 ('GPOS') at offsets 0x1c-0x1f together with the constant 00 01 00 00 OpenType sfnt prefix at offsets 0x00-0x03 and constant magic bytes 56 56 41 51 (VVAQ) at 0x0e-0x11 plus b9 b9 at 0x12-0x13. These are stable across all 5 W seeds despite differing havoc mutation chains, indicating the bytes were inserted/substituted as a unit rather than evolved byte-by-byte. The presence of the GPOS tag drives the per-role overlay to show line 263 'if (this->apply_gpos)' hit by W only ([W] at 264 map.position) while line 274 'else if (this->apply_fallback_kern)' takes the false branch (W: T=0 F=210).",
+    "why_loser_doesnt": "The 5 naive-blocking seeds carry no GPOS tag at all \u2014 instead they hold near-miss strings like 'frn', 'kern', 'ern' and arbitrary bytes from havoc mutation. Without the literal 4-byte 'GPOS' match in the input, harfbuzz's table-directory walk does not locate a GPOS table, so this->apply_gpos stays false, the else-if chain advances, and apply_fallback_kern is set to true (line 274 T=131 F=0 in the L cov). Naive's mutators (havoc + token stack only) have probability ~1/(256^4) of constructing the 4-byte 'GPOS' literal at the right offset by random byte mutation, so naive blocks 9/10 trials.",
+    "mechanism_attribution": "cmplog's I2SRandReplace mutator captures the 4-byte equality CMP that compares the input's table tag bytes against the constant HB_TAG('G','P','O','S')=0x47504f53 inside harfbuzz's GPOS-lookup code path. After one execution, the CmpLogObserver buffer contains both operands; I2SRandReplace then scans the input for the input-side operand and substitutes the constant 'GPOS' at that offset. Naive has no CMP interception and must hit the 4-byte literal by chance. Lineage of W seed 001af94af95ed053 shows an I2S-floor ancestor (mutation_op = -) at depth 33 in its 34-deep chain, consistent with an I2SRandReplace find followed by ~33 havoc generations refining the rest of the input. Seed 000abbc88e443f45 shows the same I2S-floor ancestor at depth 34."
+  },
+  {
+    "id": "libpng_7252",
+    "family": "I2S_pro",
+    "target": "libpng",
+    "branch_id": 7252,
+    "analysis_path": "prompts/BR--/02_libpng_7252.analysis.json",
+    "file": "/src/libpng/pngread.c",
+    "function": "OSS_FUZZ_png_read_info",
+    "line": "189",
+    "source_line": "      else if (chunk_name == png_hIST)",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "A well-formed PNG chunk whose 4-byte chunk_name field (read as png_uint_32) equals the constant png_hIST ('hIST' = 0x68 0x49 0x53 0x54). The chunk must be reached after the PNG signature + IHDR so the chunk-dispatch loop in png_read_info evaluates the chunk_name against png_hIST.",
+    "why_winner_satisfies": "Cmplog winners (e.g. seed 0efff458ec8ef5fb at 3s) start with the PNG signature and IHDR then place subsequent chunk-name fields (gAMA/zTXt etc.) that pass earlier checks \u2014 by I2S substituting the 32-bit constant png_hIST into one of those chunk-name slots, the equality CMP at line 189 fires true. The winner side shows T=12 hits at the blocker line in W coverage.",
+    "why_loser_doesnt": "Naive trials never synthesize the 4-byte literal 'hIST' inside a valid chunk header \u2014 random havoc + tokens have ~2^-32 chance of producing the exact FOURCC. Loser hits the blocker line many times (F=134) but the true side is taken zero times (T=0), so the gate at line 189 never opens.",
+    "mechanism_attribution": "cmplog's I2SRandReplace intercepts the 32-bit integer comparison `chunk_name == png_hIST` via __sanitizer_cov_trace_cmp4, records the runtime constant png_hIST in the CmpLogObserver buffer, then substitutes that literal at the chunk_name byte offset of an input that has otherwise reached the dispatch loop. Naive has no such substitution and must rely on havoc/token to guess the FOURCC."
+  },
+  {
+    "id": "libxml2_2243",
+    "family": "I2S_pro",
+    "target": "libxml2",
+    "branch_id": 2243,
+    "analysis_path": "prompts/BR--/03_libxml2_2243.analysis.json",
+    "file": "/src/libxml2/encoding.c",
+    "function": "xmlDetectCharEncoding",
+    "line": "987",
+    "source_line": "\tif ((in[0] == 0xEF) && (in[1] == 0xBB) &&",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "First three input bytes must equal the UTF-8 BOM literal 0xEF, 0xBB, 0xBF (checked by a chain of equality comparisons against constants in xmlDetectCharEncoding at encoding.c:987-988), with len>=3.",
+    "why_winner_satisfies": "cmplog intercepts the byte-CMPs against 0xEF/0xBB/0xBF and feeds those literals to I2SRandReplace, which substitutes the constants at the matching input offsets in one mutation step; cmplog resolves the branch 10/10 trials (avg 227 hits on the true side).",
+    "why_loser_doesnt": "naive has no CMP introspection \u2014 it can only land all three magic bytes by chance via havoc byte mutations (probability ~1/2^24 per attempt), so it blocks 9/10 trials with zero hits on the true side at line 987.",
+    "mechanism_attribution": "I2SRandReplace in cmplog reads the post-execution CmpLogObserver buffer and substitutes the captured CMP operands (0xEF, 0xBB, 0xBF) into the input at locations matching the other operand; an I2S-floor (dash) row at depth 4 of a winning seed's lineage corroborates I2S participation in the chain that produced the resolving seed."
+  },
+  {
+    "id": "libxml2_2274",
+    "family": "I2S_pro",
+    "target": "libxml2",
+    "branch_id": 2274,
+    "analysis_path": "prompts/BR--/04_libxml2_2274.analysis.json",
+    "file": "/src/libxml2/entities.c",
+    "function": "xmlGetPredefinedEntity",
+    "line": "313",
+    "source_line": "        case 'q':",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "The input must parse as XML containing an entity reference of the form &q...; so xmlGetPredefinedEntity is called with a name whose first byte equals 'q' (0x71), causing the switch(name[0]) at entities.c:313 to dispatch to the 'q' arm.",
+    "why_winner_satisfies": "Winner seeds (cmplog) contain the literal byte sequence '&q;' / '&q...' inside their XML body (e.g. Seed 1 has '&q;*' at offset 0x20), so when the parser reaches xmlParseEntityRef the resolved entity name starts with 'q' and the case 'q' arm fires (W shows hits T=168 F=165 on line 313 while L shows T=0 F=98).",
+    "why_loser_doesnt": "Loser seeds (naive) reach xmlGetPredefinedEntity (entry-line hit 98 times in L) but every call has name[0] != 'q' \u2014 their entity references use other letters (e.g. '&TTLI;' in Seed 3, '&...' patterns elsewhere) so case 'q' is never taken (L shows T=0 on line 313).",
+    "mechanism_attribution": "cmplog's I2SRandReplace observes the byte-wide CMP between name[0] and the constant 'q' inside the switch jump table, captures 'q' as a CMP operand, then substitutes 'q' into the input at offsets matching name[0]. Naive's havoc/token stack has no such CMP-operand source so reaching the exact byte 'q' as the first character of an entity name is left to chance."
+  },
+  {
+    "id": "openthread_8529",
+    "family": "I2S_pro",
+    "target": "openthread",
+    "branch_id": 8529,
+    "analysis_path": "prompts/BR--/05_openthread_8529.analysis.json",
+    "file": "/src/openthread/src/core/thread/mesh_forwarder_ftd.cpp",
+    "function": "ot::MeshForwarder::SendMessage(ot::Message&)",
+    "line": "81",
+    "source_line": "                if (ip6Header.GetDestination() == mle.GetLinkLocalAllThreadNodesAddress() ||",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "The IPv6 header destination field (16 bytes) must compare-equal to one of two well-known Thread multicast addresses: LinkLocalAllThreadNodes (ff32:...:0001) or RealmLocalAllThreadNodes (ff33:...:0001). The seeds must first encode a Type=Ip6 message with a multicast destination not larger than realm-local and not MPL-retransmission subtype, then place the 16-byte multicast address literal at the destination offset of the embedded IPv6 header.",
+    "why_winner_satisfies": "Winner-resolving seeds carry the 16-byte FF32-prefixed multicast address literal verbatim \u2014 e.g. seed dfad99a60a0fc48e contains 'ff 32 00 40 fd de ad 00 be ef 00 00 00 00 00 01' at offsets 0x18-0x27 and seed ca90f41f741f4e23 contains the same pattern at 0x19-0x28, exactly matching the operand returned by mle.GetLinkLocalAllThreadNodesAddress().",
+    "why_loser_doesnt": "Loser-blocking seeds reach the same site (line 81 fires T=0 F=67 in L) but the destination bytes do not match either fixed multicast address; their payloads after the header offset are dominated by zero runs or unrelated bytes (e.g. seed 009333ba20c255f4 is mostly NULs at the address position), so both 16-byte equality comparisons fail and control flows to the unicast-else / for-loop path at lines 96-103.",
+    "mechanism_attribution": "cmplog's CMP instrumentation intercepts the 16-byte address equality (a memcmp / Address::operator== chain). I2SRandReplace then reads the per-execution CMP buffer, locates the runtime operand (the well-known multicast address constant retrieved from mle), and substitutes it into matching offsets of the input, planting the literal address bytes naive cannot synthesize from blind havoc."
+  },
+  {
+    "id": "curl_69",
+    "family": "I2S_pro",
+    "target": "curl",
+    "branch_id": 69,
+    "analysis_path": "prompts/BRBR/00_curl_69.analysis.json",
+    "file": "/src/curl/lib/headers.c",
+    "function": "Curl_headers_cleanup",
+    "line": "348",
+    "source_line": "  for(e = data->state.httphdrs.head; e; e = n) {",
+    "covers_pairs": [
+      "cmplog>naive (I2S)",
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "Input must contain literal HTTP framing bytes (e.g. 'HTTP/' at the response position and CRLF '\\r\\n' line terminators) so Curl's header parser pushes entries onto data->state.httphdrs.head, making the head pointer non-NULL when Curl_headers_cleanup walks it.",
+    "why_winner_satisfies": "All five winner seeds carry the literal byte sequence 47 48 54 54 50 2f ('HTTP/') at offsets 0x24-0x29 followed by header text terminated by 0d 0a (CRLF); the W-only coverage of Curl_headers_push (12 hits) and namevalue (10 hits) confirms the parser actually populated the headers linked-list on the winner side, so the for-loop initializer e=httphdrs.head sees a non-NULL head.",
+    "why_loser_doesnt": "Loser seeds have random bytes at offsets 0x06-0x2c (no concentrated values; mostly %-characters, repeated 'e'/'Z', or short truncations); none of them carries 'HTTP/' literally or CRLF in the right positions, so Curl_headers_push and namevalue receive zero invocations on the L side and httphdrs.head stays NULL \u2014 the for-loop's first conditional evaluates false and the true branch is never taken.",
+    "mechanism_attribution": "The curl harness invokes integer/string CMPs against the literal 'HTTP/' (and the CRLF token) while parsing the synthetic response; cmplog's CmpLogObserver captures those operands and I2SRandReplace substitutes them into the input at matching offsets, planting the required literals far faster than naive's blind havoc; vpc inherits the same I2SRandReplace mutator, so it wins over plain value_profile for the same reason."
+  },
+  {
+    "id": "curl_103",
+    "family": "I2S_pro",
+    "target": "curl",
+    "branch_id": 103,
+    "analysis_path": "prompts/BRBR/01_curl_103.analysis.json",
+    "file": "/src/curl/lib/http.c",
+    "function": "Curl_http_done",
+    "line": "1708",
+    "source_line": "     (data->req.bytecount +",
+    "covers_pairs": [
+      "cmplog>naive (I2S)",
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "A multi-field harness preamble whose bytes at fixed offsets spell scheme/host/port/HTTP literals \u2014 specifically bytes 0x06-0x0b = 'pop3+-', bytes 0x0c-0x14 forming '127.0.0.1', bytes 0x24-0x29 spelling 'GHTTP/' \u2014 so the harness opens an HTTP-over-pop3 transfer that delivers a non-empty body, making (bytecount + headerbytecount - deductheadercount) > 0.",
+    "why_winner_satisfies": "Every cmplog-winning seed carries the exact literal byte sequences at the constrained offsets (0x06-0x0b='pop3+-' x10, 0x09='3' x10, 0x0a='+' x10, 0x0b='-' x10, 0x24-0x29='GHTTP/' x10), so the harness drives a real HTTP exchange whose byte counters become positive, taking the false branch at line 1708 into the return CURLE_OK path.",
+    "why_loser_doesnt": "Naive/value_profile seeds at the same offsets show heavily scattered byte sets (e.g. 0x06: 43/31/33/41 +5 unique; 0x09: 25/47/2f/37 +4 unique; 0x24: 6f/41/4b/dc all singletons), no concentration on the literals \u2014 the harness rejects them, no bytes are read, bytecount stays 0, the (<=0) test holds, and execution enters the 'Empty reply from server' arm (lines 1714-1717) which is the L-only region.",
+    "mechanism_attribution": "cmplog's I2SRandReplace intercepts the harness's memcmp/strcmp against the scheme/host/port literals at fixed PCs, records (input_bytes, expected_constant) pairs into the CmpLogObserver buffer, then substitutes the expected constants at the matching input offsets in one mutation step. value_profile_cmplog inherits the same I2SRandReplace mutator and the same advantage over plain value_profile, which has only CMP_MAP distance gradients and no operand-substitution mutator and so cannot synthesize the multi-byte literals reliably within 12h."
+  },
+  {
+    "id": "curl_190",
+    "family": "I2S_pro",
+    "target": "curl",
+    "branch_id": 190,
+    "analysis_path": "prompts/BRBR/02_curl_190.analysis.json",
+    "file": "/src/curl/lib/http.c",
+    "function": "Curl_http_readwrite_headers",
+    "line": "3932",
+    "source_line": "      if(!k->headerline) {",
+    "covers_pairs": [
+      "cmplog>naive (I2S)",
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "The buffer must contain a newline byte (0x0a) AND the accumulated first header line must begin with a recognizable protocol prefix (literally the ASCII string 'HTTP/' or 'RTSP/') so that checkprotoprefix/checkhttpprefix returns non-STATUS_BAD, then sscanf(\" HTTP/%1d.%1d%c%3d%c\", ...) parses it and k->headerline is post-incremented at line 4298 (`if(!k->headerline++)`). Once headerline becomes non-zero, subsequent iterations take the false branch of `if(!k->headerline)` at line 3932 (the blocker).",
+    "why_winner_satisfies": "Every winner-resolving seed carries the literal ASCII bytes 'GHTTP/' at offsets 0x24-0x29 followed by ' ' and a status-line tail; the prefix 'HTTP/' starting at offset 0x25 matches the sscanf format string ' HTTP/%1d.%1d%c%3d%c' that sets nc>=4 and lets Curl_http_statusline succeed, after which headerline is incremented. The W set also exhibits a stable network/URL preamble (e.g. '127.0.0.1:9021') and trailing '\\r\\n' separators that produce well-formed header lines.",
+    "why_loser_doesnt": "Loser-blocking seeds (naive) lack the literal 'HTTP/' / 'RTSP/' substring at any aligned offset \u2014 at offset 0x24-0x29 W has 47 48 54 54 50 2f ('GHTTP/') while L shows a scatter of unrelated bytes (6f, 41, 4b, dc, ...). Without that 5-byte literal, checkprotoprefix returns STATUS_BAD on the first complete line and k->headerline is never incremented, so the (!k->headerline) test at line 3932 stays true on every subsequent partial-line iteration.",
+    "mechanism_attribution": "cmplog's CmpLogObserver records the literal 'HTTP/' (and the related multi-byte tokens inside sscanf / strcmp inside checkprotoprefix) as a CMP operand pair when the harness drives the parser; I2SRandReplace then substitutes that literal at random offsets in the input, manufacturing seeds that satisfy the protocol-prefix gate. value_profile_cmplog wins for the same reason \u2014 it has I2SRandReplace too. naive and value_profile have only havoc/token mutators with no I2S substitution, so finding the exact 5-byte 'HTTP/' literal at the right alignment is left to blind byte mutation."
+  },
+  {
+    "id": "curl_192",
+    "family": "I2S_pro",
+    "target": "curl",
+    "branch_id": 192,
+    "analysis_path": "prompts/BRBR/03_curl_192.analysis.json",
+    "file": "/src/curl/lib/http.c",
+    "function": "Curl_http_readwrite_headers",
+    "line": "3971",
+    "source_line": "    if(!k->headerline) {",
+    "covers_pairs": [
+      "cmplog>naive (I2S)",
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "A complete first header line that begins with the 5-byte ASCII literal 'HTTP/' (0x48 0x54 0x54 0x50 0x2f) so that sscanf(HEADER1, \" HTTP/%1d.%1d%c%3d%c\", ...) at line 4318 returns nc>=4 and Curl_http_statusline() is called, which causes k->headerline to be incremented past 0 by the !k->headerline++ branch at line 4298. Subsequent iterations then take the FALSE side of the blocker at line 3971.",
+    "why_winner_satisfies": "All five winner-resolving seeds contain the exact byte sequence 'HTTP/' at offsets 0x25-0x29 (47 48 54 54 50 2f / 'GHTTP/'), so the sscanf at line 4318 matches the HTTP version pattern, nc>=4, k->httpcode is parsed, and the !k->headerline++ branch at line 4298 fires the first time, leaving k->headerline=1 for the second pass \u2014 flipping the line-3971 test to FALSE.",
+    "why_loser_doesnt": "All five loser-blocking seeds carry 'From:' (46 72 6f 6d 3a) at offsets 0x25-0x29 instead of 'HTTP/', so sscanf returns nc=0 (no HTTP/ prefix), the else-if(!nc) checkhttpprefix path also fails (no 'HTTP' anywhere usable), and on subsequent loop iterations k->headerline remains 0, so the line-3971 test stays TRUE and the false branch is never taken.",
+    "mechanism_attribution": "cmplog/vpc's I2SRandReplace mutator reads the runtime CMP operands logged when sscanf's internal byte comparisons (and the Curl_dyn_addn / strcmp callbacks) compare an input span against the literal 'HTTP/', then substitutes that 5-byte literal directly into the input. naive and value_profile lack I2SRandReplace, so they would have to land all five bytes 'H','T','T','P','/' contiguously by havoc \u2014 a ~1/2^40 random-byte event per offset \u2014 which neither achieved in 10/10 trials over ~12h. The value_profile-only path has no equivalent single-step substitution and cannot synthesize the 5-byte literal in one shot; only I2SRandReplace does."
+  },
+  {
+    "id": "curl_252",
+    "family": "I2S_pro",
+    "target": "curl",
+    "branch_id": 252,
+    "analysis_path": "prompts/BRBR/04_curl_252.analysis.json",
+    "file": "/src/curl/lib/multi.c",
+    "function": "multi.c:multi_done",
+    "line": "654",
+    "source_line": "    if(!result && rc)",
+    "covers_pairs": [
+      "value_profile_cmplog>value_profile (I2S)",
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "A structured byte sequence containing several literal multi-byte tokens at fixed offsets: a protocol scheme prefix 'pop3+-' at 0x06-0x0b, a dotted-quad host 0x0c-0x14 ('127.0.0.1' / '.0.0.1:'), an ASCII port string near 0x15-0x1a ('9021' or similar), and an HTTP request-line/header fragment from 0x24 onwards containing 'HTTP/' and recognised header names like 'Retry-A' or 'TranSfe'. All five winner seeds share these literal strings; together they drive the harness through scheme parsing, connect, HTTP transfer, and into multi_done with result==CURLE_OK while Curl_pgrsDone returns non-zero, satisfying '!result && rc'.",
+    "why_winner_satisfies": "Every winner-resolving seed carries the literal byte runs 'pop3+-' at 0x06-0x0b, '127.0.0.1' at 0x0c-0x14, ':9021'/'9021' at 0x16-0x1a, 'GHTTP/' at 0x24-0x29 and header keywords (e.g. 'Retry-A', 'TranSfe') at 0x2f+. Cmplog/vpc's I2SRandReplace observes these constants in curl's strcmp/memcmp/strncmp calls during URL/protocol/header parsing and pastes them into the input, unblocking each successive gate so execution reaches multi.c:654 and exercises the true branch (winner W(T/F)=10/0).",
+    "why_loser_doesnt": "The loser-blocking seeds are short (35-47 bytes) random-byte / percent-encoding garbage at the same offsets (e.g. 0x06=%, 0x08-0x0a=random bytes, no 'pop3', no '127.0.0.1', no 'HTTP/'). Without the multi-byte literal scheme/host/HTTP tokens at the gates upstream of multi_done, naive's and value_profile's havoc mutators cannot synthesise the exact constants in tractable time: naive has no CMP introspection, and value_profile's CMP_MAP only rewards Hamming-distance progress per-CMP, which scales poorly across multiple independent multi-byte equality gates that must all be satisfied in sequence to reach multi_done.",
+    "mechanism_attribution": "I2SRandReplace. Cmplog and value_profile_cmplog intercept the integer/string CMPs in curl's URL parser, scheme dispatch, hostname resolver, port parser, and HTTP header tokenizer; I2SRandReplace then copies those concrete constants into the seed at offsets where the input byte appeared as one CMP operand. value_profile alone cannot perform substitution (it only buckets Hamming distance), so it stays blocked just like naive."
+  },
+  {
+    "id": "curl_422",
+    "family": "I2S_pro",
+    "target": "curl",
+    "branch_id": 422,
+    "analysis_path": "prompts/BRBR/05_curl_422.analysis.json",
+    "file": "/src/curl/lib/transfer.c",
+    "function": "Curl_retry_request",
+    "line": "1866",
+    "source_line": "  if((data->req.bytecount + data->req.headerbytecount == 0) &&",
+    "covers_pairs": [
+      "cmplog>naive (I2S)",
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "Input must contain (a) a recognized URL-scheme literal at the front (winners carry 'pop3+-' at offsets 0x06-0x0b, an extended pop3 form curl's URL parser accepts) followed by a host:port spec like '127.0.0.1:9021', AND (b) a synthetic server-response payload at offsets 0x20-0x2b that begins with the literal 'HTTP/' so curl's response parser accepts framing bytes and increments data->req.bytecount/headerbytecount, making the sum at line 1866 non-zero (the FALSE side).",
+    "why_winner_satisfies": "All five winner seeds share the literal byte sequence 70 6f 70 33 2b 2d ('pop3+-') at offsets 0x06-0x0b and 47 48 54 54 50 2f ('GHTTP/') at offsets 0x24-0x29, which drives the request through the read/write data path: HIT-COUNT DIVERGENCE shows readwrite_upload, Curl_fillreadbuffer, Curl_done_sending, and Curl_http2_done_sending all fire on W with zero L hits, and DIVERGENT BRANCHES confirms W takes the FALSE side ten times at L1866 (T=0 F=10), meaning bytecount+headerbytecount evaluated > 0.",
+    "why_loser_doesnt": "Loser seeds are short and unstructured (32-38 bytes for four of five) with no concentrated bytes at 0x06-0x0b (variants 31 5a 2b 25 41, no 'pop3+-' literal) and no 'HTTP/' literal anywhere in 0x24-0x29 (L bytes there are 6f/41/4b/dc \u2014 random havoc residue), so the URL never resolves to a valid connection and no response bytes are read; DIVERGENT BRANCHES shows L takes TRUE every time at L1866 (T=10 F=0) because bytecount+headerbytecount stays at zero, and HIT-COUNT DIVERGENCE shows zero L invocations of Curl_fillreadbuffer and readwrite_upload.",
+    "mechanism_attribution": "curl's URL parser performs literal string CMPs against scheme names ('pop3', '+', '-' suffix characters) and its response parser performs a literal CMP against 'HTTP/' at the start of an incoming buffer; cmplog's CmpLogObserver captures both pairs of operands and I2SRandReplace substitutes them into the input at matching offsets, planting 'pop3+-' at 0x06 and 'HTTP/' at 0x24 in one mutation rather than blindly stumbling onto 11 consecutive ASCII bytes. value_profile_cmplog inherits the same I2SRandReplace mutator on top of value_profile's CMP_MAP feedback, which is why both vpc>vp and cmplog>naive are decisive on the I2S axis."
+  },
+  {
+    "id": "curl_506",
+    "family": "I2S_pro",
+    "target": "curl",
+    "branch_id": 506,
+    "analysis_path": "prompts/BRBR/06_curl_506.analysis.json",
+    "file": "/src/curl/lib/urlapi.c",
+    "function": "urlapi.c:parseurl",
+    "line": "946",
+    "source_line": "  if(schemelen && !strcmp(schemebuf, \"file\")) {",
+    "covers_pairs": [
+      "value_profile_cmplog>value_profile (I2S)",
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "A 4-byte ASCII substring '66 69 6c 65' (\"file\") aligned at the URL-scheme offset so that Curl_is_absolute_url copies it into schemebuf with schemelen=4, and the subsequent strcmp(schemebuf, \"file\") returns 0 \u2014 flipping the true branch into the file: scheme handler.",
+    "why_winner_satisfies": "Winner-resolving seeds carry the literal 'file' at offset 0x06-0x09 (e.g. seed 1: '66 69 6c 65 3a 2f 2f' = 'file://') so schemebuf is parsed as \"file\" and strcmp succeeds; the W coverage overlay shows lines 947\u20131054 (the file: handler body) executed only on the W side.",
+    "why_loser_doesnt": "Loser-blocking seeds contain a different scheme literal at those offsets \u2014 '70 6f 70 33' (\"pop3\") in four of five samples \u2014 so strcmp(\"pop3\", \"file\") is non-zero and execution falls into the else branch at line 1055; the L-side reaches the generic-scheme path (lines 1061-1130) but never the file: body, confirming the gate is decided by exactly those four bytes.",
+    "mechanism_attribution": "Fuzzers with cmplog (cmplog and value_profile_cmplog) intercept strcmp through __sanitizer_weak_hook_strcmp; the desired operand \"file\" is recorded in the CmpLogObserver and the I2SRandReplace mutator substitutes it into the corpus seed at the scheme offset in a single mutation step. naive and value_profile lack I2SRandReplace and must blindly mutate to the exact 4-byte sequence, which is improbable under random havoc; value_profile's CMP_MAP Hamming-distance feedback does not help here because strcmp interception in vp records prefix-match length but cannot substitute the operand, so vp also blocks."
+  },
+  {
+    "id": "harfbuzz_9107",
+    "family": "I2S_pro",
+    "target": "harfbuzz",
+    "branch_id": 9107,
+    "analysis_path": "prompts/BRBR/07_harfbuzz_9107.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-layout-gsubgpos.hh",
+    "function": "OT::GSUBGPOS::get_script_list() const",
+    "line": "4243",
+    "source_line": "    default: return Null (ScriptList);",
+    "covers_pairs": [
+      "cmplog>naive (I2S)",
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "The input must embed the 4-byte ASCII table tag 'GSUB' (47 53 55 42) or 'GPOS' (47 50 4f 53) at the position where harfbuzz's font-directory parser equality-compares against those tag literals, so that the parser walks into OT::GSUBGPOS::get_script_list() and the switch on u.version.major falls through case 1 (and case 2) into the default arm returning Null(ScriptList).",
+    "why_winner_satisfies": "All five winner-resolving seeds carry the literal four-byte tag at offsets 0x1c-0x1f \u2014 six show 'GSUB' (47 53 55 42), four show 'GPOS' (47 50 4f 53) \u2014 together with an OpenType-like header prefix (00 01 00 00 sfnt_version) at offsets 0x00-0x03, which is what walks the parser into the GSUBGPOS table.",
+    "why_loser_doesnt": "None of the five loser-blocking seeds contain the 'GSUB' or 'GPOS' four-byte literal at any concentrated offset \u2014 at offsets 0x1c-0x1f the loser byte sets are scattered (e.g. {00, 1a, 56, 0c, ...}, {00, 20, 55, 0c, ...}) with no occurrences of the 47 53 55 42 / 47 50 4f 53 ASCII run, so the font-directory walk never reaches the GSUBGPOS dispatch.",
+    "mechanism_attribution": "cmplog and value_profile_cmplog intercept the 4-byte memcmp / integer-CMP that harfbuzz uses to match the table tag during directory lookup, record the 'GSUB'/'GPOS' literal in the CmpLogObserver buffer, and the I2SRandReplace mutator substitutes that literal into the candidate input at the matching byte offsets in a single step. naive and value_profile lack I2SRandReplace; naive must synthesize the four-byte ASCII tag through random havoc (probability ~1/2^32 per attempt), and value_profile's per-byte distance feedback gives at best a per-byte nudge that did not bridge the four-byte literal within the 12-hour budget."
+  },
+  {
+    "id": "libpng_7294",
+    "family": "I2S_pro",
+    "target": "libpng",
+    "branch_id": 7294,
+    "analysis_path": "prompts/BRBR/08_libpng_7294.analysis.json",
+    "file": "/src/libpng/pngrtran.c",
+    "function": "OSS_FUZZ_png_do_read_transformations",
+    "line": "4792",
+    "source_line": "         if (png_ptr->num_trans != 0 &&",
+    "covers_pairs": [
+      "cmplog>naive (I2S)",
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "A PNG whose IHDR color_type byte at file offset 0x19 is 0x02 (truecolor RGB, non-palette) AND which carries a tRNS chunk (so png_ptr->num_trans becomes non-zero and libpng turns on PNG_EXPAND_tRNS). The blocker is inside the else-branch at line 4790, so PNG_COLOR_TYPE_PALETTE is excluded; the surrounding gates also require PNG_EXPAND to be active. Color_type 0x02 reaches the else and tRNS sets num_trans, simultaneously satisfying both CMP operands of the &&.",
+    "why_winner_satisfies": "All five winner-resolving seeds carry IHDR color_type=0x02 at offset 0x19 and reach line 4794 (the W-only true-side body). Their ancestry includes a ParentInfo-only dash row, the I2S-floor signal that I2SRandReplace produced an input matching the const-byte/const-mask compares in this gate.",
+    "why_loser_doesnt": "The naive loser seeds vary color_type at 0x19 across {0x00 grayscale, 0x06 RGBA, 0x04 gray+alpha} and never lock onto 0x02; they take the else-false path at line 4797 (L-only line), and their grayscale low-bit-depth inputs are pulled into png_do_unpack (199 invocations W=0). Naive has no I2S/CMP introspection, only blind havoc on the color_type byte.",
+    "mechanism_attribution": "Both winners (cmplog and value_profile_cmplog) carry I2SRandReplace in their mutator stack. The blocker is a conjunction of two equality/mask CMPs against compile-time constants (num_trans!=0 and a fixed bitmask PNG_EXPAND_tRNS), and the upstream IHDR color_type check at line 4772 is also a constant-equality CMP. cmplog logs those operands during execution and I2SRandReplace substitutes the matching constant directly at the dataflow offset, while naive and pure value_profile must stumble onto color_type=0x02 plus tRNS-chunk via havoc \u2014 a low-probability joint event that explains the 0/10 and 2/10 resolve rates respectively."
+  },
+  {
+    "id": "openthread_8469",
+    "family": "I2S_pro",
+    "target": "openthread",
+    "branch_id": 8469,
+    "analysis_path": "prompts/BRBR/09_openthread_8469.analysis.json",
+    "file": "/src/openthread/src/core/net/ip6.cpp",
+    "function": "ot::Ip6::Ip6::HandlePayload(ot::Ip6::Header&, ot::Message&, ot::Ip6::MessageInfo&, unsigned char, ot::Message::Ownership)",
+    "line": "937",
+    "source_line": "    case kProtoUdp:",
+    "covers_pairs": [
+      "cmplog>naive (I2S)",
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "Input bytes that survive IPv6 header parsing and arrive at HandlePayload with aIpProto != kProtoUdp (i.e. resolve to kProtoTcp, kProtoIcmp6, or an unknown protocol that falls into the default branch). Concretely this requires specific magic byte sequences in the protocol/next-header fields that route away from UDP rather than into the extension-header chain that ultimately unwinds to UDP.",
+    "why_winner_satisfies": "Winner seeds reach the kProtoTcp case and the default arm (DIVERGENT BRANCHES shows W F=10 at L937, plus W=4 hits on the default ExitNow path at L944); they skip the heavy HopOpts/extension-header processing (HandleOptions W=5 vs L=95) and never engage fragment reassembly (HandleFragment W=7 L=0 means W only reaches that function, but more importantly L never does and L still always lands on kProtoUdp).",
+    "why_loser_doesnt": "Loser seeds always take the True side of `case kProtoUdp` (L937 T=20 F=0); they pack many extension-header bytes (HandleOptions L=95) and that chain consistently unwinds to next-header == kProtoUdp, so they never explore the false side. Naive/value_profile lack a way to discover the specific protocol-field byte values that route to non-UDP cases.",
+    "mechanism_attribution": "cmplog's I2SRandReplace reads the per-execution CmpLogObserver buffer, finds the switch/CMP entries that test aIpProto against the literal kProto* constants (and the upstream extension-header walk's equality tests on next-header values), and substitutes those exact constants into the input bytes at offsets matching the other operand. Naive and value_profile have no I2S stage and must blindly mutate bytes to hit the right protocol value; without I2S substitution, the only path to discover the right protocol byte is random havoc, which is what keeps both losers blocked for 12h."
+  },
+  {
+    "id": "openthread_8477",
+    "family": "I2S_pro",
+    "target": "openthread",
+    "branch_id": 8477,
+    "analysis_path": "prompts/BRBR/10_openthread_8477.analysis.json",
+    "file": "/src/openthread/src/core/net/ip6.cpp",
+    "function": "ot::Ip6::Ip6::HandlePayload(ot::Ip6::Header&, ot::Message&, ot::Ip6::MessageInfo&, unsigned char, ot::Message::Ownership)",
+    "line": "981",
+    "source_line": "    if (error != kErrorNone)",
+    "covers_pairs": [
+      "cmplog>naive (I2S)",
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "A fixed multi-byte IPv6-header prefix at offsets 0x00-0x07 (W seeds share `78 66 65 5c 7[7-8] 00 10 11`, where 0x11 = kProtoUdp at the next-header byte) that lets HandlePayload reach the UDP/ICMP6 dispatch and have the chosen handler return a non-kErrorNone status so `if (error != kErrorNone)` takes the true branch at ip6.cpp:981.",
+    "why_winner_satisfies": "W seeds all carry the constant 8-byte header prefix (offsets 0x00-0x07 collapse to one or two values), routing the message into `case kProtoUdp` or `case kProtoIcmp6` and exclusively reaching the ICMP6 handler at line 972-973 and the UDP error-drop branch at line 966, which produces error != kErrorNone (winner takes T=10 at line 981, loser takes T=0).",
+    "why_loser_doesnt": "L seeds have widely varied bytes at offsets 0x00-0x07 (e.g. byte 0 spans 80/81/7f, byte 6 spans 64/29, byte 7 spans 00/29) so the IPv6 header is malformed before HandlePayload; the loser only reaches `case kProtoUdp` with successful UDP processing (error stays kErrorNone) and never exercises the ICMP6 case (line 972-973 is W-only [W] in the per-role overlay), so error remains kErrorNone and line 981 never takes the true branch in 10/10 loser trials.",
+    "mechanism_attribution": "cmplog's I2SRandReplace intercepts the multi-byte equality CMPs that parse the IPv6 header (next-header/length fields), reads the literal protocol constants from the per-execution CmpLogObserver buffer, and substitutes them into the input in one mutation step. naive and value_profile lack I2SRandReplace, so they cannot perform input-to-state substitution and must rely on havoc mutation to randomly hit a multi-byte exact prefix, which is exponentially unlikely within budget. The asymmetry is between I2S-equipped fuzzers (cmplog, vpc) and the rest, exactly matching the [delta: I2S] axis of both decisive pairs."
+  },
+  {
+    "id": "openthread_8494",
+    "family": "I2S_pro",
+    "target": "openthread",
+    "branch_id": 8494,
+    "analysis_path": "prompts/BRBR/11_openthread_8494.analysis.json",
+    "file": "/src/openthread/src/core/net/ip6_address.cpp",
+    "function": "ot::Ip6::InterfaceIdentifier::IsRoutingLocator() const",
+    "line": "256",
+    "source_line": "    return (IsLocator() && (mFields.m8[6] < kAloc16Mask) && ((mFields.m8[6] & kRloc16ReservedBitMask) == 0));",
+    "covers_pairs": [
+      "value_profile_cmplog>value_profile (I2S)",
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "A 7-byte magic constant sequence 00 00 00 ff fe 00 fc placed at the input offsets that map to the InterfaceIdentifier (here 0x21-0x27). The first four bytes satisfy m32[0] == HostSwap32(0x000000ff) and bytes 4-5 satisfy m16[2] == HostSwap16(0xfe00) (the IsLocator() equality CMPs), then byte 6 == 0xfc satisfies m8[6] >= kAloc16Mask (the blocked F side at line 256:28) while still clearing the reserved-bit mask at line 256:61.",
+    "why_winner_satisfies": "All five cmplog winner seeds carry the literal byte run 00 00 00 00 ff fe 00 fc at offset 0x20 (so the locator IID bytes land at 0x21-0x27). The BYTE DIFF section quantifies this: offset 0x24 is ff x10 in W, 0x25 is fe x10, 0x26 is 00 x10, 0x27 is fc x9 / ff x1 \u2014 i.e. every winner-resolving seed has the magic locator prefix and an m8[6] value >= 0xfc.",
+    "why_loser_doesnt": "All five naive-blocking seeds have unrelated bytes at the same offsets: at 0x24 the L set is 00x3 c4x2 16x2 30x1 ..., at 0x25 it is 20x3 00x3 16x2 ..., at 0x26 it is 00x7 16x2 5cx1, at 0x27 it is 00x5 16x2 78x1 6dx1 \u2014 none of the 5 L seeds reconstruct the required ff fe 00 fc tail, so IsLocator() returns false and the chain short-circuits.",
+    "mechanism_attribution": "cmplog/value_profile_cmplog instrument the integer CMPs inside IsLocator() (m32[0] == 0x000000ff and m16[2] == 0xfe00) and the m8[6] < 0xfc test at line 256:28. The post-execution CmpLogObserver buffer hands those constants to I2SRandReplace, which scans the input for the current operand bytes and substitutes the expected constant. naive and value_profile lack I2SRandReplace (value_profile only widens edge feedback with CMP_MAP buckets, no operand substitution), so they must reconstruct seven specific bytes via blind havoc and almost never succeed within 12 h."
+  },
+  {
+    "id": "openthread_8526",
+    "family": "I2S_pro",
+    "target": "openthread",
+    "branch_id": 8526,
+    "analysis_path": "prompts/BRBR/12_openthread_8526.analysis.json",
+    "file": "/src/openthread/src/core/thread/mesh_forwarder.cpp",
+    "function": "ot::MeshForwarder::PrepareNextDirectTransmission()",
+    "line": "582",
+    "source_line": "        default:",
+    "covers_pairs": [
+      "value_profile_cmplog>value_profile (I2S)",
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "An IPv6 message payload whose header fields drive UpdateIp6Route() to return an error code that is neither kErrorNone nor kErrorAddressQuery (e.g. kErrorDrop / kErrorNoRoute / kErrorInvalidArgs). Concretely, the W seeds carry a fixed multi-byte literal at offsets 0x19-0x1f equal to `fd de ad 00 be ef 00` (a fd00::dead:beef-style IPv6 ULA prefix block) plus an early-offset header signature (`66 65 5c` = `fe\\` at 0x01-0x03) \u2014 these bytes are constant across all 10 W seeds.",
+    "why_winner_satisfies": "cmplog/vpc winners contain the exact 7-byte run `fd de ad 00 be ef 00` at offsets 0x19-0x1f in 10/10 seeds, and the `66 65` (`fe`) signature at offsets 0x01-0x02 in 10/10 seeds. With these constants in place, switch(error) at line 571 falls through case kErrorNone and case kErrorAddressQuery and reaches `default:` at line 582.",
+    "why_loser_doesnt": "naive/vp blocking seeds never produce the `fd de ad 00 be ef 00` run (loser bytes at 0x19-0x1f are dominated by `ff ff ff 00 00 00 00` or other random patterns) and lack the `fe\\` header signature. Without these literal byte runs, UpdateIp6Route returns kErrorNone (the dominant case at line 573 in the loser cov dump: T=105 F=0) and ExitNow() fires before reaching the default arm.",
+    "mechanism_attribution": "I2SRandReplace in cmplog/vpc reads operands from the CmpLogObserver buffer populated by trace_cmp* callbacks inside UpdateIp6Route() and Ip6 header parsing; the integer/memory comparisons against the ULA prefix constants (0xfd 0xde 0xad 0xbe 0xef) and the header magic are captured and substituted into the input via I2SRandReplace. naive/vp lack I2SRandReplace and therefore cannot synthesize these multi-byte literal constants within budget \u2014 chaining 4-7 byte runs together at fixed offsets requires direct operand substitution, which only cmplog/vpc provide through I2SRandReplace."
+  },
+  {
+    "id": "openthread_8534",
+    "family": "I2S_pro",
+    "target": "openthread",
+    "branch_id": 8534,
+    "analysis_path": "prompts/BRBR/13_openthread_8534.analysis.json",
+    "file": "/src/openthread/src/core/thread/mle.cpp",
+    "function": "ot::Mle::Mle::IsRoutingLocator(ot::Ip6::Address const&) const",
+    "line": "3835",
+    "source_line": "    return IsMeshLocalAddress(aAddress) && aAddress.GetIid().IsRoutingLocator();",
+    "covers_pairs": [
+      "value_profile_cmplog>value_profile (I2S)",
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "An IPv6 address whose lower 64 bits (IID) match the routing-locator anchor pattern 0x0000:00FF:FE00:XXXX (the modified EUI-64 with the fixed 'FF FE' middle marker and zero high-IID bytes) AND whose upper bits satisfy IsMeshLocalAddress. Concretely the winner seeds carry a 4-byte equality-gated run '00 00 00 00 ff fe 00' at offsets 0x1f-0x25 plus the 'be ef' / mesh-local prefix bytes at offsets 0x08-0x09 and 0x1d-0x1e.",
+    "why_winner_satisfies": "All five cmplog winner seeds have the identical concentrated multi-byte run '00 be ef 00 00 00 00 00 ff fe 00' across offsets 0x1c-0x26 (W shows that pattern with count 10/10 at offsets 0x19-0x26), which is the literal anchor compared inside the IsMeshLocalAddress and IsRoutingLocator predicate.",
+    "why_loser_doesnt": "Naive/value_profile loser seeds at the same offsets 0x19-0x26 carry varied bytes dominated by 'ff' and ')' (0x29) padding with no occurrence of the 'ff fe 00' middle marker \u2014 without that 16-bit anchor and the mesh-local prefix, the && short-circuits at IsMeshLocalAddress(aAddress) returning false. The aggregate hitcount of the true branch is 134/167 for winners and 0 for losers.",
+    "mechanism_attribution": "cmplog's I2SRandReplace reads the per-execution CMP buffer recorded by integer-CMP interception when IsMeshLocalAddress and IsRoutingLocator perform their address-prefix and IID equality comparisons, then substitutes the literal mesh-local prefix and the 0xFFFE IID anchor into the input at the offsets where the loser carried random havoc bytes. Naive and value_profile lack I2SRandReplace; value_profile's CMP_MAP Hamming-distance gradient on a wide multi-byte address compare provides no clean gradient because the anchor is a fixed concatenation of constants spanning 8+ bytes, so even VP fails to drive the input to the exact pattern within budget."
+  },
+  {
+    "id": "openthread_8538",
+    "family": "I2S_pro",
+    "target": "openthread",
+    "branch_id": 8538,
+    "analysis_path": "prompts/BRBR/14_openthread_8538.analysis.json",
+    "file": "/src/openthread/src/core/thread/network_data_leader.cpp",
+    "function": "ot::NetworkData::LeaderBase::GetContext(unsigned char, ot::Lowpan::Context&) const",
+    "line": "177",
+    "source_line": "    if (aContextId == Mle::kMeshLocalPrefixContextId)",
+    "covers_pairs": [
+      "cmplog>naive (I2S)",
+      "value_profile_cmplog>value_profile (I2S)"
+    ],
+    "what_input_feature": "Bytes that pass an upstream chain of equality CMPs against Thread-protocol fixed literals (notably the mesh-local IPv6 prefix bytes fd de ad 00 be ef at offsets 0x19-0x1e and IID anchor ff fe 00 fc at 0x24-0x27) so the parser reaches Lowpan::FindContextToCompressAddress and calls LeaderBase::GetContext with a non-zero aContextId, taking the false branch at line 177.",
+    "why_winner_satisfies": "All five winner-resolving seeds share a stable byte signature at the same offsets: 0x19-0x1e = fd de ad 00 be ef (100% concentration across the 10 seeds shown in BYTE DIFF) and 0x24-0x27 = ff fe 00 fc (100%). cmplog's I2S substitutes these multi-byte protocol literals directly from the intercepted CMP buffer, so the parser reaches the GetContext call site and the contextId byte derived from the input is non-zero (offset 0x28 shows 01/40/43/0b in winners).",
+    "why_loser_doesnt": "naive and value_profile lack I2SRandReplace; their havoc-only mutation stack cannot synthesize the multi-byte protocol literals (fd de ad 00 be ef, ff fe 00 fc) needed to clear the upstream parser chain. Loser seeds show dispersed random bytes at the same offsets (ff/87/29/random) and never reach the GetContext call with a non-zero contextId \u2014 all 10 trials block for 12.00h and never resolve.",
+    "mechanism_attribution": "cmplog (and vpc) record each integer/memcmp callback's operands into a per-execution CmpLogObserver buffer; I2SRandReplace scans the input for one operand and substitutes the other, pasting protocol literals like the Thread mesh-local prefix into the right offset in one mutation step. The lineage of a cmplog winner-resolving seed contains a depth-8 ParentInfo-only (mutation_op = -) entry, the current build's I2S-floor signal."
+  }
+]

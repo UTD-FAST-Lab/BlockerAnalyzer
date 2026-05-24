@@ -1,0 +1,513 @@
+{
+  "feature_id": "i2s_unrelated_cmp_pollution_overwrites_structure",
+  "mechanism_family": "I2S_anti",
+  "mechanism_label": "unrelated_cmp_pollution_overwrites_structure",
+  "definition": "I2S harvests operands from unrelated or non-input-derived CMPs elsewhere in the codepath and overwrites input bytes with them, destroying the structural properties (glyph layout, protocol sequencing, header format) that the target branch requires.",
+  "n_members": 4,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "naive",
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "harfbuzz_9523",
+      "target": "harfbuzz",
+      "branch_id": 9523,
+      "analysis_path": "prompts/RB--/01_harfbuzz_9523.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shaper-use.cc",
+      "function": "hb-ot-shaper-use.cc:reorder_syllable_use(hb_buffer_t*, unsigned int, unsigned int)",
+      "line": "394",
+      "source_line": "  if (info[start].use_category() == USE(R) && end - start > 1)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "USE(R)",
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace floods cmplog's corpus with repeating operand bytes from unrelated harfbuzz shaper CMPs, overwriting the structured ASCII-plus-header inputs that naive's havoc retains; the resulting corpus never produces a Repha-category leading glyph.",
+        "one_line": "I2S corpus pollution with integer CMP operands destroys structured header seeds needed for Repha glyph"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive",
+          "loser": "cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must encode a USE shaper buffer whose first glyph parses to use_category USE(R) (Repha) with cluster length > 1.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive>cmplog (I2S)"
+            ],
+            "what_input_feature": "Bytes that, after harfbuzz's harness parses them as a shaping job (font/lang/script + text), produce a buffer where info[start].use_category() == USE(R) (the Repha category) AND end - start > 1, i.e. a syllable cluster of length >=2 whose leading glyph is classified as Repha. The winner seeds contain readable language/script tag fragments (e.g. 'zo-hans', 'zo-', 'ker', 'n', 'h', 'p') and structured 16-byte header prefixes like '46 1d 01 00 00 01 0e 00 00 fe ...' that route input through the Indic/USE shaper category-assignment path.",
+            "why_winner_satisfies": "naive's broad havoc + token + crossover mutator stack repeatedly produces structured header bytes plus short ASCII tag fragments. Seeds 1-2 share an identical 11-byte prefix '46 1d 01 00 00 01 0e 00 00 fe 00' and only flip a few trailing bytes, and seeds 4-5 add language-tag-like ASCII ('zo-hans', 'ker', '---' filler) that flow into the USE shaper's category-assignment path; this gives the buffer a USE(R)-tagged leading glyph with at least one trailing glyph (the W column shows lines 377-391 of POST_BASE_FLAGS64 and the reorder loop 398-417 all firing).",
+            "why_loser_doesnt": "cmplog's corpus is dominated by seeds whose payload looks like recycled CMP operands (Seed 1: '9e 9e 9e 90 90 90 90 90 9e 9e 9e 9f', Seed 2: '20 20 ... 04 00 72 6e 20 20', Seed 4: 'be be be be d7 be 6d 6a ... be be be be d7 be be') -- repeating-byte patterns characteristic of I2SRandReplace overwriting input slices with one operand observed at unrelated CMP sites in the harfbuzz shaper. These payloads satisfy unrelated comparisons but never produce a parsed glyph at start with use_category() == USE(R); the branch fires T=15/F=125 in the W set and T=0/F=132 in the L set.",
+            "mechanism_attribution": "Pattern B (technique hurts). The winning fuzzer is naive (no I2S); it wins via plain havoc/token/crossover finding language/script tag fragments and header byte sequences that drive the harfbuzz parser into the USE category-assignment path that yields a Repha glyph. The loser is cmplog, whose input-to-state mutator pollutes the corpus with repeating operand bytes copied from the many integer/memcmp CMPs in the harfbuzz shaper (vtable dispatch, glyph property masks, FLAG64 checks). That corpus pollution starves the cmplog scheduler of the kind of structured ASCII+header inputs naive's pure-havoc lineage retains, so cmplog never reaches a buffer state where info[start].use_category() == USE(R)."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker requires info[start].use_category() == USE(R) AND end - start > 1.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6 source line",
+            "exact_quote": "if (info[start].use_category() == USE(R) && end - start > 1)"
+          },
+          {
+            "claim": "naive resolves 10/10 trials and cmplog blocks 10/10 trials at this branch -- pure Pattern B inversion.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "naive and cmplog rows",
+            "exact_quote": "naive                           10        0          0  winner (I2S vs cmplog)\ncmplog                           0       10          0  loser (I2S vs naive)"
+          },
+          {
+            "claim": "The only decisive pair at this branch is naive>cmplog with delta I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 header",
+            "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "The branch fires T=15/F=125 in the W set and never in the L set (T=0 F=132), confirming W-only exploration of the Repha-cluster reorder path.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "line 394 d=1 row",
+            "exact_quote": "d=1   L 394  T=15 F=125  T=0 F=132  if (info[start].use_category() == USE(R) && end - start > 1)  <-- BLOCKER"
+          },
+          {
+            "claim": "W-only execution of the reorder loop (lines 398-417) downstream of the blocker shows the winner reaches the Repha-relocation body.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 394-417 overlay",
+            "exact_quote": "[B]   394    if (info[start].use_category() == USE(R) && end - start > 1) <-- BLOCKER\n[W]   395    {"
+          },
+          {
+            "claim": "Winner seeds 1 and 2 share an identical 11-byte structured header prefix, the kind of stable framing produced by havoc/copy mutations on a working parent.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seeds 1, 2 first 11 bytes",
+            "exact_quote": "Seed 1 (id=6b27e0030f70e13d, size=16 bytes, fuzzer=naive, trial=1, discovered_at=68s, mutation_op=ByteRandMutator):\n  0000: 46 1d 01 00 00 01 0e 00 00 fe 00 00 00 00 00 72   F..............r\nSeed 2 (id=26118fa19faf0be5, size=16 bytes, fuzzer=naive, trial=1, discovered_at=105s, mutation_op=BytesCopyMutator):\n  0000: 46 1d 01 00 00 01 0e 00 00 fe 00 01 0e 00 00 72   F..............r"
+          },
+          {
+            "claim": "Winner seeds contain readable language-tag ASCII fragments like 'zo-hans' that drive the harfbuzz parser into a script/language path producing Indic-like category assignment.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 4 bytes 0x14-0x23",
+            "exact_quote": "  0010: 4e 0d 00 00 4e 09 00 00 4e 09 7a 6f 2d 68 61 6e   N...N...N.zo-han\n  0020: 73 00 00 00 4e 0d 00 00 4e 09 00 76 66 68 70 00   s...N...N..vfhp."
+          },
+          {
+            "claim": "Loser seeds are dominated by repeating-byte payloads (e.g. 9e/90 runs, be/d7 runs) characteristic of I2SRandReplace operand substitution.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser seeds 1 and 4 hex dumps",
+            "exact_quote": "Seed 1 (id=0068ef8b9292e1cb, size=18 bytes, fuzzer=cmplog, trial=1, discovered_at=4s, mutation_op=TokenInsert,BytesRandInsertMutator,ByteIncMutator):\n  0000: 9e 9e 9e 90 90 90 90 90 9e 9e 9e 9f b2 16 01 00   ................\n  0010: 9e 9e                                             .."
+          },
+          {
+            "claim": "Loser seed 4 shows the repeating 'be' operand pattern.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser seed 4",
+            "exact_quote": "Seed 4 (id=00ebca8a83a5c915, size=28 bytes, fuzzer=cmplog, trial=1, discovered_at=176s, mutation_op=BytesRandSetMutator,BytesDeleteMutator,TokenReplace,BytesInsertCopyMutator):\n  0000: e3 0a 01 00 01 75 65 70 be be be be d7 be 6d 6a   .....uep......mj\n  0010: 76 75 00 20 20 be be be be d7 be be               vu.  ......."
+          },
+          {
+            "claim": "cmplog has I2SRandReplace in its mutator stack which scans input for operand byte sequences and substitutes the other operand at those offsets -- the mechanism that produces the repeating-byte L payloads.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators paragraph",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive's mutators are pure havoc/token/crossover with no I2S, explaining why naive's corpus retains the structured language-tag ASCII rather than being overwritten with operand bytes.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Mutators paragraph",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "BYTE DIFF at offsets 0x1d-0x2f shows winner bytes are mostly 0x00 or ASCII ('h','p','f','d','_') while loser bytes are dominated by repeating operand fragments ('be','0c','MM' M=0x4d), corroborating the I2S corpus pollution diagnosis.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x002c-0x002f",
+            "exact_quote": "   0x002c  64(d)x2 66(f)x1 00(.)x1 5f(_)x1     4d(M)x2 0c(.)x1 04(.)x1 20( )x1     DIFFER\n   0x002d  1a(.)x2 68(h)x1 8a(.)x1 5f(_)x1     02(.)x2 0c(.)x1 41(A)x1 56(V)x1     DIFFER\n   0x002e  00(.)x2 70(p)x1 8a(.)x1 5f(_)x1     0b(.)x1 03(.)x1 0a(.)x1 54(T)x1 +1u  DIFFER\n   0x002f  00(.)x3 8a(.)x1 5f(_)x1             f3(.)x1 02(.)x1 4f(O)x1 48(H)x1 +1u  DIFFER"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "If a synthetic harness containing only the USE shaper category-assignment path (no other integer/memcmp gates that I2S could pollute) were built, and cmplog still failed to reach USE(R) at start while naive succeeded, that would refute the corpus-pollution diagnosis because the pollution surface would no longer exist."
+        },
+        "weakest_evidence_point": "The link from 'I2SRandReplace produced the repeating-byte loser payloads' to 'this specific repeating-byte payload prevents reaching USE(R) at start' is inferential: I show the payloads exist and the branch never fires for cmplog, but I do not directly verify (via a synthetic where the repeating-byte payload is fed to naive) that naive would also fail on those same payloads.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_9463",
+      "target": "harfbuzz",
+      "branch_id": 9463,
+      "analysis_path": "prompts/RBRB/00_harfbuzz_9463.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shaper-myanmar.cc",
+      "function": "hb-ot-shaper-myanmar.cc:initial_reordering_consonant_syllable(hb_buffer_t*, unsigned int, unsigned int)",
+      "line": "217",
+      "source_line": "    for (; i < base; i++)",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "I2S substitutions of font/script/language tag literals from unrelated CMP sites bias both cmplog and vpc corpora toward inputs that always place a consonant at syllable start, so base always equals start and the Myanmar reordering loop never enters its true branch.",
+        "one_line": "I2S tag-literal substitutions bias corpus so Myanmar syllable always starts with consonant, blocking loop entry"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive",
+          "loser": "cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must route to Myanmar shaper with a non-consonant-prefixed syllable so base advances past start and the reorder loop runs.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive>cmplog (I2S)",
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "A harfbuzz fuzz buffer whose script/language selection routes execution into initial_reordering_consonant_syllable AND whose syllable layout has a non-consonant byte before the first consonant, so that base = i (i > start) at line 206 and the loop at line 217 enters the true branch (i < base).",
+            "why_winner_satisfies": "Winner inputs (resolved by naive and value_profile in 10/10 trials) explore harfbuzz's input space without being anchored to I2S-suggested literal byte sequences; their havoc/CMP_MAP-gradient mutations produce buffers where the consonant scan at line 204 advances limit so base != start, then line 217's i<base condition holds and the T side executes \u2014 visible as the [W]-only line 218 'info[i].myanmar_position() = POS_PRE_C;' in the per-role overlay.",
+            "why_loser_doesnt": "Loser inputs (cmplog/vpc, 9/10 blocked) are polluted by I2S substitutions of font/script/language literals from other CMP sites across harfbuzz (visible as font-tag-like ASCII 'kezh-hant-mo', 'mosi', 'tpxn', 'tpx-' in the L seeds). These literals satisfy gates upstream of the Myanmar shaper or shape into the Myanmar path but always place a consonant at position start, so DIVERGENT BRANCHES shows L204 T=21 F=0 \u2014 consonant always found at first iteration, making base=start, and L217 T=0 F=21 \u2014 the loop never enters its true branch.",
+            "mechanism_attribution": "Not one of the four canonical mechanisms \u2014 the salient delta is the ABSENCE of I2S-driven corpus pollution. cmplog and vpc harvest CMP operands from harfbuzz's many script/language/feature tag comparisons and substitute those literals into inputs via their I2S substitution stage. This biases the corpus toward inputs that satisfy unrelated string gates (locale tags like 'kezh-hant-mo') rather than toward inputs that satisfy the structural precondition of this Myanmar reordering branch (a non-consonant-then-consonant syllable layout). Naive and value_profile, lacking the I2S substitution stage, mutate more uniformly and stumble onto the structural shape that naive havoc + edge feedback alone can find. The dash-row floor signal appears in BOTH a W and an L lineage we sampled, confirming I2S fires for both directions \u2014 but the FRACTION of I2S energy that lands on a productive (vs distracting) literal is what differs. Hence claimed_mechanism = 'other' (a pollution/distraction failure mode rather than a winning technique)."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "Branch is the loop header 'for (; i < base; i++)' in Myanmar shaper at hb-ot-shaper-myanmar.cc:217, T side blocked globally.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Location + Source line + Globally blocked side",
+            "exact_quote": "Location: /src/harfbuzz/src/hb-ot-shaper-myanmar.cc:217:12"
+          },
+          {
+            "claim": "Source line at the blocker is the loop header.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Source line",
+            "exact_quote": "Source line:     for (; i < base; i++)"
+          },
+          {
+            "claim": "Globally blocked side is the true branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Globally blocked side",
+            "exact_quote": "Globally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "Two decisive pairs at this branch, both under I2S delta, with winners being naive and value_profile (the fuzzers WITHOUT I2SRandReplace).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 header",
+            "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+          },
+          {
+            "claim": "Second decisive pair: value_profile > value_profile_cmplog, also under I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 header",
+            "exact_quote": "--- Pair 2: value_profile > value_profile_cmplog  [delta: I2S] ---"
+          },
+          {
+            "claim": "Winners resolve 10/10, losers blocked 9/10 \u2014 strong, symmetric across both pairs.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 winner/loser lines",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0"
+          },
+          {
+            "claim": "Winners take T at line 217 (POS_PRE_C body lit only in W).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 217-218",
+            "exact_quote": "[B]   217    for (; i < base; i++) <-- BLOCKER\n[W]   218      info[i].myanmar_position() = POS_PRE_C;"
+          },
+          {
+            "claim": "Both winners and losers reach line 204 (is_consonant_myanmar), but losers find a consonant on the very first iteration (T=21 F=0), so base = start.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "line 204 row",
+            "exact_quote": "d=1   L 204  T=36 F=26  T=21 F=0  if (is_consonant_myanmar (info[i]))"
+          },
+          {
+            "claim": "At the blocker line 217, losers never enter the loop true branch (T=0 F=21) while winners do (T=17 F=45).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "line 217 row",
+            "exact_quote": "d=1   L 217  T=17 F=45  T=0 F=21  for (; i < base; i++)  <-- BLOCKER"
+          },
+          {
+            "claim": "Loser-blocking seeds contain font/locale/script tag ASCII literals (e.g., 'kezh-hant-mo'), consistent with I2S substitution from harfbuzz's many tag CMPs.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser-blocking Seed 1 ASCII bytes",
+            "exact_quote": "0020: 68 2d 68 61 6e 74 2d 6d 6f 00 72 6e 20 20 20 20   h-hant-mo.rn    "
+          },
+          {
+            "claim": "Loser-blocking seeds also embed token-like ASCII 'tpx-' near offset 0, characteristic of dictionary/I2S substitution of script-tag-shaped strings.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser-blocking Seed 3 first row",
+            "exact_quote": "0000: 74 70 78 2d 00 10 00 00 00 1f 16 01 00 a0 00 00   tpx-............"
+          },
+          {
+            "claim": "Winner-resolving seeds have a consistent non-ASCII byte 0x99 at offset 0 (10x) rather than tag-style ASCII; offset 0x00 diverges sharply between W and L.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0000",
+            "exact_quote": "0x0000  99(.)x10                            00(.)x7 74(t)x1 01(.)x1 0a(.)x1     DIFFER"
+          },
+          {
+            "claim": "cmplog has I2SRandReplace in its mutator stack (the canonical I2S delta).",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace \u2014 its winning capability comes from CMP_MAP gradient, not literal substitution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "Dash-row floor signal is exclusive to cmplog/vpc and indicates an unwrapped I2SRandReplace find \u2014 used here to confirm I2S fires under both directions, supporting a pollution rather than absence narrative.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Observed mutation_op",
+            "exact_quote": "The dash rows are exclusive to cmplog and value_profile_cmplog; their\npresence in a winning seed's ancestor chain is direct (lower-bound)\nevidence of I2S contribution."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "If a synthetic harness emits ONLY the Myanmar code path with no script/language/feature-tag CMPs upstream (so I2S has no other literals to substitute), and cmplog still loses to naive on a branch with the same is_consonant-at-first-byte structure, the corpus-pollution attribution is wrong and the cause must be intrinsic to I2S's mutation distribution rather than dictionary distraction."
+        },
+        "weakest_evidence_point": "The 'corpus pollution' story is plausible but indirect \u2014 I have ASCII tag literals in L seeds and an I2S dash row in an L ancestor, but I cannot quantify how many of cmplog's 9/10 blocking trials actually had locale-tag-substituted ancestors versus simply unlucky havoc; a per-trial lineage count would be needed to harden the claim.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "openthread_8518",
+      "target": "openthread",
+      "branch_id": 8518,
+      "analysis_path": "prompts/--RB/03_openthread_8518.analysis.json",
+      "file": "/src/openthread/src/core/thread/mesh_forwarder.cpp",
+      "function": "ot::MeshForwarder::UpdateEcnOrDrop(ot::Message&, bool)",
+      "line": "273",
+      "source_line": "            case Ip6::kEcnCapable1:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "other:bitfield_constant",
+        "operand_literal": "kEcnCapable1",
+        "operand_width_bytes": null,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "The 2-bit ECN gate is too narrow for I2S substitution to help; vpc pays overhead from I2S corpus pollution at many unrelated CMP sites across the OpenThread codepath, displacing CMP_MAP-driven havoc on the IPv6 header byte.",
+        "one_line": "I2S overhead at unrelated CMPs displaces gradient exploration of 2-bit ECN field"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Set the IPv6 traffic-class ECN bits to value 01 (kEcnCapable1) inside a direct-transmission IP6 message whose queue time exceeds the mark threshold.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "An IPv6 packet whose first-2-byte version/traffic-class field encodes ECN == kEcnCapable1 (the 2-bit ECN sub-field of the TC byte equals 01), passed to UpdateEcnOrDrop with a queue time >= kTimeInQueueMarkEcn so the switch is entered. The ECN sub-field is the only constrained input feature (2 bits, 4 possible values: NotCapable=0, Capable1=1, Capable0=2, Marked=3).",
+            "why_winner_satisfies": "value_profile's CMP_MAP gradient bucket bumps when an input nudges the ECN sub-field closer to the kEcnCapable1 constant (Hamming distance over the 2-bit field), preserving the seed as new-bucket corpus; combined with havoc/token byte mutations exploring the IPv6 header version/TC byte, the 4-value 2-bit space is exhausted cheaply (~9/10 trials resolve). The W seeds share a near-identical 92-byte template with byte 0 cycling across 0x32/0x33/0x72/0x32/0x32 \u2014 direct evidence of cheap byte-level exploration on the header byte holding the ECN bits.",
+            "why_loser_doesnt": "value_profile_cmplog runs the same CMP_MAP gradient instrumentation but its augmented mutation stage (the input-to-state substitution stage that constitutes the I2S delta between vp and vpc) spends budget rewriting bytes at the many unrelated CMP sites the cmplog buffer captures across the OpenThread codepath (link-layer addresses, mesh-header constants, fragment offsets). That displaces CMP_MAP-driven havoc exploration of the IPv6 header byte. Only 2/10 vpc trials resolve and 8/10 stay blocked, with avg blocking duration 8.75h vs 3.80h for vp.",
+            "mechanism_attribution": "The winner side (value_profile) reaches the kEcnCapable1 arm via CMP_MAP gradient bucketing on the 2-bit ECN equality CMP plus naive havoc on the IPv6 header byte. This is Pattern B (technique-hurts) on the I2S axis: vp lacks the input-to-state substitution stage while vpc has it; the 2-bit ECN gate is too narrow for that substitution stage to contribute (no multi-byte literal to substitute), so vpc pays the overhead via corpus pollution at unrelated CMP sites without compensating gain on this gate. The claimed winner technique is CMP_MAP gradient, consistent with vp's instrumentation."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The branch is the kEcnCapable1 arm of a switch on the IPv6 header ECN field, gated by shouldMarkEcn (queue-time threshold).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L273 + L57-L62",
+            "exact_quote": "            case Ip6::kEcnCapable1:"
+          },
+          {
+            "claim": "The switch reads the ECN sub-field of the IPv6 header and is only entered when timeInQueue meets the mark threshold.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L57-L60",
+            "exact_quote": "        if (shouldMarkEcn)\n        {\n            switch (ip6Header.GetEcn())"
+          },
+          {
+            "claim": "The pair decisive at this branch is value_profile vs value_profile_cmplog with delta=I2S; value_profile is the winner.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 header",
+            "exact_quote": "--- Pair 1: value_profile > value_profile_cmplog  [delta: I2S] ---"
+          },
+          {
+            "claim": "value_profile resolves 9/10 trials at this branch while value_profile_cmplog blocks 8/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 counts",
+            "exact_quote": "  winner: resolved=9/10  blocked=1  unreached=0\n  loser:  resolved=2/10  blocked=8  unreached=0"
+          },
+          {
+            "claim": "Average duration blocked is ~2.3x longer for vpc (8.75h) than for vp (3.80h) at this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 durations",
+            "exact_quote": "  avg duration blocked: winner=3.80h  loser=8.75h"
+          },
+          {
+            "claim": "value_profile has CMP_MAP gradient bucketing but no I2SRandReplace mutator stage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile_cmplog has all of value_profile's instrumentation PLUS an I2SRandReplace mutator stage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "The five winner-resolving seeds in the DB all share the same near-identical 92-byte structure with only the first byte and a handful of payload bytes varying (consistent with cheap byte-level havoc on the IPv6 header version/TC byte).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seeds 1-5 offsets 0x00",
+            "exact_quote": "Seed 1 (id=1959324d29f50233, size=92 bytes, fuzzer=cmplog, trial=3, discovered_at=2508s, mutation_op=QwordAddMutator):\n  0000: 32 62 5c a0 80 00 33 00 52 08 80 08 e6 e4 30 74"
+          },
+          {
+            "claim": "No loser-blocking seed data is available at this branch, so winner/loser byte-pattern divergence cannot be confirmed directly from the BYTE DIFF section.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "section body",
+            "exact_quote": "[no readable seed bytes on at least one side]"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness reproducing the same 2-bit equality gate behind a queue-time predicate, instrumented across N unrelated dummy CMP sites (N in {0, 16, 128}). If value_profile_cmplog matches or beats value_profile at N=0 (no pollute) AND the vp-vs-vpc gap fails to grow with N, the I2S-corpus-pollution mechanism is refuted \u2014 the loss must be coming from somewhere other than I2S budget consumed at unrelated CMPs."
+        },
+        "weakest_evidence_point": "Loser-blocking seeds were not bisected, so the winner-vs-loser byte-level divergence on the IPv6 header byte is inferred from source semantics (the ECN sub-field is the only operand of the switch) rather than directly observed in a BYTE DIFF.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "openthread_8448",
+      "target": "openthread",
+      "branch_id": 8448,
+      "analysis_path": "prompts/RB--/04_openthread_8448.analysis.json",
+      "file": "/src/openthread/src/core/common/linked_list.hpp",
+      "function": "ot::LinkedList<ot::AddressResolver::CacheEntry>::PopAfter(ot::AddressResolver::CacheEntry*)",
+      "line": "218",
+      "source_line": "        if (aPrevEntry == nullptr)",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "The blocker compares a runtime pointer against nullptr, not an input-derived value; cmplog's I2S substitution injects pointer-shaped bytes from surrounding LinkedList traversal CMPs, wasting mutation budget on bytes irrelevant to the protocol-level sequencing needed to populate and then remove a list entry.",
+        "one_line": "I2S injects irrelevant pointer-byte substitutions, wasting budget on non-input-derived nullptr check"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive",
+          "loser": "cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Reach LinkedList::PopAfter with a non-null aPrevEntry by driving openthread to populate then remove a non-head linked-list entry.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive>cmplog (I2S)"
+            ],
+            "what_input_feature": "An input byte sequence that, when fed through the ip6_send fuzzer harness, causes openthread to add at least two entries to a LinkedList<T> (e.g. AddressResolver cache, Netif external unicast/multicast addresses) and then trigger Remove() on a non-head entry, so that LinkedList::Find succeeds with a non-null prev pointer and PopAfter is invoked with aPrevEntry != nullptr.",
+            "why_winner_satisfies": "naive (10/10 resolved) explores the input space with plain havoc and reaches the multi-entry list-removal sequence within the budget; reference fuzzer value_profile also resolves 10/10, confirming the requirement is reachable without I2S help.",
+            "why_loser_doesnt": "cmplog (2/10 resolved, 8/10 blocked at avg 9.60h) spends mutation budget on I2SRandReplace substitutions driven by the pointer/null and address-equality CMPs that flood the cmplog buffer along the LinkedList-heavy openthread call chain; these substitutions inject pointer-shaped bytes into the input that are wasted relative to the protocol-level sequencing required to populate-then-remove a list entry.",
+            "mechanism_attribution": "The winning side is naive's pure havoc mutator stack (ByteFlip/ByteInc/Bytes*/Crossover*/Token*) operating without CMP introspection. The blocker is a runtime pointer-vs-nullptr comparison (aPrevEntry == nullptr) whose operand is not derived from input bytes, so input-to-state substitution cannot help; instead, the saturated CMP buffer from surrounding LinkedList traversals biases cmplog's mutator toward irrelevant pointer-shaped byte substitutions, taxing its exploration budget. naive avoids this tax and wins."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking comparison is a pointer-vs-nullptr test, not a literal-vs-input-bytes test.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Source line at /src/openthread/src/core/common/linked_list.hpp:218",
+            "exact_quote": "Source line:         if (aPrevEntry == nullptr)"
+          },
+          {
+            "claim": "The blocked side is false, i.e. the agent must reach the branch with aPrevEntry being a non-null pointer.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Globally blocked side line",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "naive resolves the branch in 10/10 trials while cmplog resolves only 2/10 and is blocked 8/10 for an average of 9.60h.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1: naive > cmplog [delta: I2S]",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=2/10  blocked=8  unreached=0\n  avg duration blocked: winner=0.00h  loser=9.60h"
+          },
+          {
+            "claim": "The single canonical-pair delta between winner and loser is the I2S technique.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 header",
+            "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+          },
+          {
+            "claim": "The reference fuzzer value_profile (which does not run I2SRandReplace) also resolves 10/10, indicating the requirement is reachable without I2S help and the loser cmplog is being actively penalized by adding I2S to naive's baseline.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "value_profile row",
+            "exact_quote": "value_profile                   10        0          0  REFERENCE"
+          },
+          {
+            "claim": "The non-head-removal sequencing requirement is corroborated by the per-role coverage overlay: both W and L visit the PopAfter signature and the head-pop branch at line 220, but loser-blocking seeds spend their effort on Pop()/iteration paths.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "PopAfter body lines 215-233",
+            "exact_quote": "[B]   218          if (aPrevEntry == nullptr) <-- BLOCKER\n[B]   219          {\n[B]   220              entry = Pop();\n[B]   221          }\n[B]   222          else\n[B]   223          {\n[B]   224              entry = aPrevEntry->GetNext();"
+          },
+          {
+            "claim": "Loser-blocking seeds spend disproportionate budget iterating linked lists rather than reaching the multi-entry list state, e.g. LinkedList ConstIterator::Advance fires 5x more often in L than in W across five distinct list types.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "ConstIterator::Advance rows",
+            "exact_quote": "      15        75  ot::LinkedList<ot::Ip6::Netif::UnicastAddress>::ConstIterator::Advance()"
+          },
+          {
+            "claim": "Winner-resolving seeds invoke LinkedList FindMatching 3.6x more than loser seeds, including FindMatching on the AddressResolver::CacheEntry list that owns this PopAfter instantiation, indicating naive is producing inputs that drive list-membership queries that precede a non-head remove.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "FindMatching row for AddressResolver::CacheEntry",
+            "exact_quote": "      72        20  ot::AddressResolver::CacheEntry* ot::LinkedList<ot::AddressResolver::CacheEntry>::FindMatching<ot::Ip6::Address>(ot::Ip6::Address const&, ot::AddressResolver::CacheEntry*&)  (/src/openthread/src/core/common/linked_list.hpp:551-553)"
+          },
+          {
+            "claim": "cmplog's mutator family includes I2SRandReplace, which substitutes operands of intercepted CMP entries into the input; the harness's deep LinkedList-traversal call chain produces many irrelevant pointer/address CMPs that fill the cmplog buffer.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators paragraph",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive's mutator stack is pure havoc plus token operators with no CMP introspection at all, so it does not suffer the cmplog-buffer pollution tax.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Mutators paragraph",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A controlled rerun where cmplog matches or beats naive (>= 8/10 resolved at this branch within the same budget) when the harness is restricted to a synthetic input format that does not exercise multiple LinkedList traversals, so that cmplog's CMP buffer is not flooded with pointer/null comparisons. If cmplog still loses despite a clean CMP buffer, the I2S-tax mechanism is wrong and the divergence must come from a different cause (e.g. seed-scheduling, corpus selection)."
+        },
+        "weakest_evidence_point": "The claim that cmplog's loss is specifically due to CMP-buffer pollution by LinkedList pointer/null comparisons (rather than e.g. scheduler-level differences or unrelated mutation-distribution effects) is inferred from the LinkedList-heavy call chain and HIT-COUNT DIVERGENCE patterns but not directly measured; the prompt does not include a CMP-buffer occupancy histogram.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

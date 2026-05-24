@@ -1,0 +1,54 @@
+{
+  "id": "opaque_exact_literal_dispatch_gate",
+  "kind": "local",
+
+  "pair": {
+    "primary": {
+      "A": "cmplog",
+      "B": "naive",
+      "axis_differ": "I2S"
+    },
+    "involved_fuzzers": ["naive", "cmplog", "value_profile", "value_profile_cmplog"],
+    "has_axis": ["cmplog", "value_profile_cmplog"],
+    "lacks_axis": ["naive", "value_profile"]
+  },
+
+  "hypothesis": {
+    "mechanism": "A single all-or-nothing equality / switch CMP tests a contiguous opaque literal of width N bytes (a FOURCC table tag, PNG chunk type, URL scheme, the UTF-8 BOM, an enum/color_type byte, or 'xmlns'); satisfying it routes execution into a specific handler or case arm. cmplog and value_profile_cmplog both carry I2SRandReplace, which reads the literal out of the post-execution CmpLogObserver buffer and substitutes it into the input at the matching offset in one mutation step, so both has_axis fuzzers clear the gate regardless of width. naive has no CMP introspection and must brute-force the N-byte literal by random havoc (~1/256^N). value_profile only adds a Hamming CMP_MAP gradient, which is flat against an opaque equality (every wrong value is equidistant from the match), so it tracks naive rather than the has_axis cluster — the cluster's defining divergence is precisely that value_profile does NOT rescue the gap.",
+    "program_feature_parameter": "GATE_BYTES (compile-time -D flag) — the width in bytes of the opaque literal the single equality gate compares against; controls the size of the search space the lacks_axis arms must brute-force.",
+    "predicted_direction": "has_axis fuzzers (cmplog, value_profile_cmplog) outperform lacks_axis fuzzers (naive, value_profile); the crash-count ratio grows with GATE_BYTES",
+    "predicted_endpoints": {
+      "GATE_BYTES=1": "All four fuzzers crash quickly — a 1-byte literal is ~1/256, reachable by blind havoc within 600s, so has_axis and lacks_axis are at parity.",
+      "GATE_BYTES=8": "has_axis cluster (cmplog, value_profile_cmplog) still crashes effectively instantly via I2S substitution; lacks_axis cluster (naive, value_profile) records 0 crashes — 1/256^8 is intractable and the opaque equality gives value_profile no usable gradient."
+    },
+    "expected_curve_per_fuzzer": {
+      "cmplog": "flat-high (resolves at every GATE_BYTES via I2S substitution)",
+      "value_profile_cmplog": "flat-high (also has I2SRandReplace; may sit at or above cmplog from added VP feedback, but never below)",
+      "naive": "monotone-decreasing (crash count collapses ~1/256^GATE_BYTES; ~0 from GATE_BYTES>=4)",
+      "value_profile": "monotone-decreasing, tracking naive (flat Hamming gradient on an opaque equality gives no climb advantage)"
+    },
+    "tradeoff_observation": "value_profile's placement in lacks_axis is the load-bearing, falsifiable claim: although value_profile has CMP_MAP feedback, the gate is an opaque exact equality, so the per-byte Hamming gradient is flat and value_profile behaves like naive, not like the cmplog arm. If the sweep instead shows value_profile resolving at parity with value_profile_cmplog at GATE_BYTES>=4, the I2S-substitution attribution is refuted (this is the union of the members' would_be_refuted_by harness blueprints)."
+  },
+
+  "verification": {
+    "harness": "step5b/opaque_exact_literal_dispatch_gate/template.c",
+    "params": "step5b/opaque_exact_literal_dispatch_gate/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [1, 2, 3, 4, 5, 8],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "pending",
+
+    "results_per_trial": {},
+
+    "results_median": {},
+
+    "summary": {
+      "headline_finding": "",
+      "stratification_holds": "",
+      "monotone_curves": {}
+    },
+
+    "notes": []
+  }
+}

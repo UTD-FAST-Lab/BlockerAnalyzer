@@ -1,0 +1,265 @@
+{
+  "feature_id": "i2s_keyword_anchoring_starves_runtime_accumulator",
+  "mechanism_family": "I2S_anti",
+  "mechanism_label": "keyword_anchoring_starves_runtime_accumulator",
+  "definition": "I2S anchors the corpus on well-formed keyword or canonical-literal inputs at an early parse stage, producing shallow or structurally uniform executions that prevent a runtime accumulator from being driven past a compile-time cap by the branch guard.",
+  "n_members": 2,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "naive",
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libxml2_3121",
+      "target": "libxml2",
+      "branch_id": 3121,
+      "analysis_path": "prompts/RB--/03_libxml2_3121.analysis.json",
+      "file": "/src/libxml2/xmlreader.c",
+      "function": "xmlreader.c:xmlTextReaderFreeNodeList",
+      "line": "356",
+      "source_line": "\t\t(reader->ctxt->freeElemsNr < MAX_FREE_NODES)) {",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "I2SRandReplace anchors cmplog's corpus on file-extension and keyword literal CMP operands from the DOCTYPE/SYSTEM parser path, producing shallow inputs that never build a deep element tree; the runtime counter freeElemsNr never accumulates past MAX_FREE_NODES.",
+        "one_line": "I2S anchors corpus on shallow DOCTYPE keyword inputs, starving deep-tree traversal needed to exceed counter cap"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive",
+          "loser": "cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must drive enough element/text-node frees per run to push freeElemsNr past MAX_FREE_NODES (runtime counter, not a literal byte gate).",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive>cmplog (I2S)"
+            ],
+            "what_input_feature": "An XML document that, when read by the textreader, produces enough element/text node frees within a single parse such that the cumulative freeElemsNr counter reaches MAX_FREE_NODES \u2014 typically achieved by a deep or wide tree of element/text nodes (many sibling tags, nested children, or repeated parse cycles) so xmlTextReaderFreeNodeList's inner while-loop iterates many tens of times. The branch condition compares a runtime accumulator against a compile-time constant, so no single input byte can be substituted to flip it; the input must instead exercise the parse path enough times.",
+            "why_winner_satisfies": "Naive's pure havoc mutator pool (BytesExpand, Crossover, Token*, Byte*Mutator) produces a structurally diverse corpus, and at line 312-315 (the descend-into-children while loop) the winner takes the children-non-null branch 158/0 times vs the loser's 66/0 \u2014 i.e. each winner invocation walks the node tree more than twice as deeply, so freeElemsNr accumulates past the cap within one run.",
+            "why_loser_doesnt": "cmplog's loser seeds are all anchored on the '127772.xml' SYSTEM-URL byte sequence (visible across loser seeds 1-5 at offsets ~0x04..0x0d), which is the I2SRandReplace substitution target from the DOCTYPE/SYSTEM parser CMPs. This pulls the cmplog corpus toward shallow parser-stage inputs that get rejected before producing deep element trees, so the freeElemsNr counter never accumulates: the loser reaches the blocker line 50/0 (T/F) \u2014 never the F side \u2014 vs winner 100/20.",
+            "mechanism_attribution": "The winner is naive, which has no CMP introspection at all (no input-to-state mutator, no CMP_MAP). Its advantage here is the absence of I2S-driven corpus pollution: cmplog's substitution operator concentrates the corpus around inputs that satisfy literal parser CMPs (file-extension/keyword tokens), starving exploration of the deeper-tree state space that this runtime-counter gate actually needs. The differentiating mechanism is therefore plain havoc \u2014 diversity-by-randomness rather than diversity-by-substitution."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker compares a runtime counter against the MAX_FREE_NODES compile-time cap, not an input-derived literal.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Source line at xmlreader.c:356",
+            "exact_quote": "(reader->ctxt->freeElemsNr < MAX_FREE_NODES))"
+          },
+          {
+            "claim": "Naive resolves 9/10 trials while cmplog blocks 8/10 \u2014 the decisive I2S-axis pair runs the opposite of the usual direction (technique hurts).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 stats",
+            "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "Subject-level final-coverage Mann-Whitney is significant for naive vs cmplog with positive delta toward naive.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "subject 5",
+            "exact_quote": "delta_Final=158.3  p_final=0.0342"
+          },
+          {
+            "claim": "Inside the FreeNodeList inner loop, the winner walks the children-non-null path more than twice as deeply as the loser (158 vs 66 hits at the descend-while condition).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "xmlreader.c:312 (descend while loop)",
+            "exact_quote": "d=1   L 312  T=158 F=0  T=66 F=0  while ((cur->type != XML_DTD_NODE) &&"
+          },
+          {
+            "claim": "At the blocker line itself, only the winner ever takes the FALSE side (W: T=100 F=20; L: T=50 F=0).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "xmlreader.c:356 blocker line",
+            "exact_quote": "d=1   L 356  T=100 F=20  T=50 F=0  (reader->ctxt->freeElemsNr < MAX_FREE_NODES))"
+          },
+          {
+            "claim": "All five loser-blocking seeds carry the same '127772.xml' SYSTEM-URL byte fragment, evidence of I2S substitution locking the cmplog corpus to a parser-level literal.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "loser seeds 2-4 offsets 0x04-0x0d",
+            "exact_quote": "....127772.xml\\."
+          },
+          {
+            "claim": "Loser-blocking seeds also share the '<?xml version=\"1' header literal at offsets 0x0c-0x1f, another canonical I2S substitution target.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0b-0x1f L-side dominant values",
+            "exact_quote": "0x000b  6d(m)x1                             78(x)x5"
+          },
+          {
+            "claim": "cmplog's mutator stack includes I2SRandReplace, which scans the input for CMP operands and substitutes the other side at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators paragraph",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "Naive has no I2S mutator at all \u2014 pure havoc + token stack.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Mutators paragraph",
+            "exact_quote": "Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "The function xmlTextReaderFreeNodeList is invoked one time by the winner vs 14 times by the loser \u2014 winner reaches it less often but iterates much deeper each time.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "enclosing function entry-line count",
+            "exact_quote": "1        14  xmlreader.c:xmlTextReaderFreeNodeList"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose only gate is `runtime_counter >= COMPILE_TIME_CAP` (no input-byte literal to substitute, exercised once per executed input) on which cmplog matches or beats naive at equal trial budget \u2014 that would refute the claim that I2S corpus pollution is what hurts cmplog here."
+        },
+        "weakest_evidence_point": "I cannot directly verify the havoc-only claim in lineage because seed_bisect stored only the lex-min trial per direction (a cmplog trial), not a naive winner; my mechanism story for the winner rests on the absence of I2S in naive's mutator list plus indirect evidence (the shared '127772.xml' literal across loser seeds) that cmplog's corpus is I2S-anchored.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_2203",
+      "target": "libxml2",
+      "branch_id": 2203,
+      "analysis_path": "prompts/RBRB/01_libxml2_2203.analysis.json",
+      "file": "/src/libxml2/dict.c",
+      "function": "xmlDictQLookup",
+      "line": "1167",
+      "source_line": "    if ((nbi > MAX_HASH_LEN) &&",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "I2S rewrites seed bytes with canonical XML literal operands (xml, version, DOCTYPE, SYSTEM), anchoring the corpus on well-formed names that produce few distinct hash-bucket collisions, so the runtime collision counter nbi never exceeds MAX_HASH_LEN.",
+        "one_line": "I2S anchors corpus on canonical XML literals, preventing diverse names needed to overflow hash-bucket collision counter"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive",
+          "loser": "cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Winners produce many distinct (prefix, name) pairs that collide into one xmlDict hash bucket, growing nbi past MAX_HASH_LEN.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive>cmplog (I2S)",
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "Input must drive xmlDictQLookup so many times with distinct (prefix, name) string pairs that the same dict bucket accumulates a collision chain longer than MAX_HASH_LEN before insert (nbi increments at line 1110 inside the for-loop at 1105).",
+            "why_winner_satisfies": "Winner seeds invoke xmlDictQLookup 87 times (vs 28 for losers) and produce malformed/diverse XML fragments like `<ink:Xr`, `<ink:h`, `<b ><ink href` plus a runtime path through xmlDictComputeBigKey (234 W hits vs 0 L hits), inflating the collision chain so nbi exceeds MAX_HASH_LEN on at least one insertion.",
+            "why_loser_doesnt": "Loser seeds carry well-formed XML preambles (`<?xml version=\"1`, `<!DOCTYPE a SYSTEM \"dtds/1`) and reach xmlDictQLookup only 28 times, never accumulating enough distinct same-bucket collisions; line 1167 evaluates with nbi <= MAX_HASH_LEN (T=0 F=28).",
+            "mechanism_attribution": "Anti-I2S corpus pollution (Pattern B, I2S HURTS here): cmplog and vpc carry the input-to-state substitution mutator which rewrites seed bytes with canonical XML literals (xml, version, DOCTYPE, SYSTEM, etc.) drawn from the CMP buffer, anchoring those fuzzers' corpora on well-formed/canonical names and starving the dict of the diverse per-insertion (prefix, name) pairs needed to grow one bucket past MAX_HASH_LEN. naive and value_profile lack that substitution stage, so havoc/token mutations drift seeds into many distinct namespace prefixes that happen to collide into the same bucket. The winning side wins by NOT having corpus pollution from CMP-operand substitution, not by exercising any positive technique \u2014 this is the 'other' category (anti-substitution / corpus diversity preserved by absence of CMP-driven anchoring)."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker requires the true side of a guard whose left operand nbi is a runtime collision counter, not an input literal.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "source line at dict.c:1167",
+            "exact_quote": "Source line:     if ((nbi > MAX_HASH_LEN) &&"
+          },
+          {
+            "claim": "nbi is incremented inside the dict-chain walk at line 1110, i.e. once per hash collision in the same bucket.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "dict.c:1105-1110",
+            "exact_quote": "[B]  1110  \t    nbi++;"
+          },
+          {
+            "claim": "The decisive shape is RBRB: naive beats cmplog (I2S delta) and value_profile beats value_profile_cmplog (I2S delta) \u2014 the I2S side LOSES on both pairs.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 headers",
+            "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+          },
+          {
+            "claim": "Pair 2 confirms the same I2S-hurts direction at vpc-vs-vp.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 header",
+            "exact_quote": "--- Pair 2: value_profile > value_profile_cmplog  [delta: I2S] ---"
+          },
+          {
+            "claim": "Winners invoke xmlDictQLookup about 3x more often than losers (87 vs 28 entry-line hits).",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "xmlDictQLookup row",
+            "exact_quote": "      87        28  xmlDictQLookup  (/src/libxml2/dict.c:1081-1173)  <-- enclosing"
+          },
+          {
+            "claim": "Winners run xmlDictComputeBigKey 234 times while losers never call it, showing a different key-distribution regime that produces more bucket collisions.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "xmlDictComputeBigKey row",
+            "exact_quote": "     234         0  dict.c:xmlDictComputeBigKey  (/src/libxml2/dict.c:359-377)"
+          },
+          {
+            "claim": "Winner seeds carry malformed/diverse element-name fragments (e.g. `<ink:Xr`, `<ink:h`) that act as a stream of distinct prefix:name pairs feeding xmlDictQLookup.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "winner seed 1, offsets 0x30-0x3f",
+            "exact_quote": "  0030: 3c 69 6e 6b 3a 58 72 0a 20 0d 3c 69 6e 6b 3a 68   <ink:Xr. .<ink:h"
+          },
+          {
+            "claim": "Loser seeds carry canonical XML preamble bytes that I2S would substitute from CMP operands, keeping name diversity low.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "loser seed 1, offsets 0x10-0x2f",
+            "exact_quote": "  0010: 3c 3f 78 6d 6c 20 76 65 72 73 69 6f 6e 3d 22 31   <?xml version=\"1"
+          },
+          {
+            "claim": "At the blocker line itself, the True branch fires 6 times in W and 0 times in L \u2014 losers traverse the dict-insert path 28 times without ever pushing nbi past MAX_HASH_LEN.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L1167",
+            "exact_quote": "  d=1   L1167  T=6 F=54  T=0 F=28  if ((nbi > MAX_HASH_LEN) &&  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog and vpc are the only fuzzers that carry I2SRandReplace; naive and value_profile do not run it.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "I2SRandReplace substitutes CMP operands directly into input bytes at matching offsets, which biases cmplog/vpc seeds toward whatever string literals the program CMPs against.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators paragraph",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "If a synthetic harness drives xmlDictQLookup with an input that produces an arbitrary number of dict insertions but all (prefix, name) pairs map to DIFFERENT buckets (so nbi stays 0 even with many lookups), the True branch should still be unreachable \u2014 confirming the mechanism is bucket-collision diversity, not raw lookup count. Conversely, if cmplog reaches the True branch faster than naive on a harness with no XML-canonical CMP literals (so I2S has nothing to substitute), the I2S-corpus-pollution explanation is wrong."
+        },
+        "weakest_evidence_point": "The connection between 'I2S substitutes canonical XML literals' and 'fewer same-bucket collisions' is mechanistic but not directly observed in BYTE DIFF \u2014 the byte diff shows winners diverge from losers across the whole seed, not specifically at offsets where I2S would have rewritten XML keywords; the corpus-pollution story is the most parsimonious explanation but is not pinpointed to specific substituted offsets in this evidence.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

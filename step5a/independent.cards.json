@@ -1,0 +1,21 @@
+[
+  {
+    "id": "libpng_7254",
+    "family": "independent",
+    "target": "libpng",
+    "branch_id": 7254,
+    "analysis_path": "prompts/BRR-/00_libpng_7254.analysis.json",
+    "file": "/src/libpng/pngread.c",
+    "function": "OSS_FUZZ_png_read_info",
+    "line": "229",
+    "source_line": "      else if (chunk_name == png_sPLT)",
+    "covers_pairs": [
+      "cmplog>naive (I2S)",
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "Some chunk header in the PNG stream must place the 4-byte ASCII FOURCC 'sPLT' (0x73 0x50 0x4c 0x54) into chunk_name so the 32-bit equality `chunk_name == png_sPLT` at pngread.c:229 becomes true. The required content is a fixed multi-byte literal at a structurally-determined offset (the chunk-type field following the 4-byte length).",
+    "why_winner_satisfies": "Both winning fuzzers (cmplog, value_profile) clear FOURCC equality CMPs that gate other chunk handlers in the same dispatch chain \u2014 the SOURCE CONTEXT overlay shows W-only hits on png_PLTE, png_eXIf, png_iCCP, png_tRNS, png_zTXt handler call sites, and DIVERGENT BRANCHES shows W reaches the true side of those equality tests (e.g. line 159 T=5 vs L T=0; line 229 T=28 vs L T=0). Each individual CMP is the same 4-byte-magic shape as png_sPLT, so the fuzzers that solved the sibling chunks also solve this one.",
+    "why_loser_doesnt": "naive has no CMP introspection: it produces seeds whose offset-0x35-0x38 chunk-type field is restricted to byte sets {0x73,0x59,0x47,0x42} matching only sRGB / sYGB variants (see BYTE DIFF), never randomly hitting the 32-bit constant 0x73504c54 in 12h of search. The DIVERGENT BRANCHES table shows L takes the true side ZERO times at every chunk-FOURCC equality test on the chain (lines 159, 179, 224, 229, 244, 249) \u2014 naive fails the whole family of 4-byte FOURCC gates, not just sPLT.",
+    "mechanism_attribution": "cmplog>naive (I2S): I2SRandReplace intercepts the 32-bit CMP `chunk_name == png_sPLT`, records the constant operand 0x73504c54 in CmpLogObserver, and a subsequent mutation substitutes that literal at byte positions in the input \u2014 the I2S-floor (dash-row) ancestor confirmed in lineage of seed 0249d0124e1ec000 at depth 6 is direct evidence. value_profile>naive (value_profile): the same 32-bit CMP feeds CMP_MAP with a Hamming-distance bucket; inputs whose chunk-name field shares 1, 2, or 3 bytes with `sPLT` add new CMP_MAP buckets and are preserved, providing a gradient ladder that bridges to the exact match. Both techniques attack the same single input feature (a 4-byte FOURCC literal) but via complementary mechanisms \u2014 hence single_feature, multi-mechanism."
+  }
+]

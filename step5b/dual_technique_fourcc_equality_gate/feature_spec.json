@@ -1,0 +1,58 @@
+{
+  "id": "dual_technique_fourcc_equality_gate",
+  "kind": "local",
+
+  "pair": {
+    "primary": {
+      "A": "cmplog",
+      "B": "naive",
+      "axis_differ": "I2S"
+    },
+    "involved_fuzzers": ["cmplog", "naive", "value_profile"],
+    "has_axis": ["cmplog"],
+    "lacks_axis": ["naive", "value_profile"]
+  },
+
+  "hypothesis": {
+    "mechanism": "A single contiguous N-byte FOURCC equality gate (`chunk_name == png_sPLT`) admits no incremental coverage edges, so blind search must hit the full constant by chance (~1/256^N). I2S (cmplog) intercepts the wide CMP, records the constant operand 0x73504c54 in the CmpLogObserver, and I2SRandReplace substitutes that literal directly into the input at the matching offset — clearing the gate in one mutation regardless of N. The advantage grows with N because naive's blind-hit probability collapses while I2S substitution stays constant.",
+    "program_feature_parameter": "GATE_BYTES (compile-time -D) — width in bytes of the magic equality constant; the single difficulty axis (gap ~1/256^GATE_BYTES).",
+    "predicted_direction": "has_axis fuzzers (cmplog) outperform lacks_axis (naive); ratio grows with GATE_BYTES",
+    "predicted_endpoints": {
+      "GATE_BYTES=1": "naive, cmplog, and value_profile all crash readily (~1/256 per exec) — no axis advantage; curves coincide.",
+      "GATE_BYTES=8": "naive=0 (blind 1/256^8 is unreachable in 600s); cmplog crashes immediately via direct operand substitution; value_profile crashes via Hamming-gradient ascent up the 8-byte compare."
+    },
+    "expected_curve_per_fuzzer": {
+      "naive": "monotone-decreasing in GATE_BYTES (crash count collapses ~1/256 per added byte; 0 by GATE_BYTES=4-8)",
+      "cmplog": "flat-high (resolves at every dose; direct I2S substitution is width-insensitive)",
+      "value_profile": "flat-high / mildly slowing (resolves at every dose via byte-by-byte CMP_MAP gradient; per-trial time grows modestly with width but stays bounded)"
+    },
+    "tradeoff_observation": "This is an 'independent' cluster: the same contiguous 4-byte FOURCC equality is cleared by TWO distinct techniques on separate mechanisms — I2S (cmplog) by direct operand substitution, and value_profile by Hamming-gradient ascent — each beating naive on its own. The template names the I2S axis as primary (cmplog vs naive is the highest-resolution decisive pair: 10/10 vs 0/10), but value_profile is carried as an involved fuzzer expected to ALSO beat naive on the same gate, so it is NOT placed in has_axis for the I2S partition; its win is the second, independent decisive pair (value_profile > naive [value_profile]). The cluster's defining property is precisely that both win independently."
+  },
+
+  "verification": {
+    "harness": "step5b/dual_technique_fourcc_equality_gate/template.c",
+    "params": "step5b/dual_technique_fourcc_equality_gate/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [1, 2, 4, 8],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "pending",
+
+    "results_per_trial": {},
+
+    "results_median": {},
+
+    "summary": {
+      "headline_finding": "",
+      "stratification_holds": "",
+      "monotone_curves": {}
+    },
+
+    "notes": [
+      "Member: libpng_7254 sPLT (prompts/BRR-/00_libpng_7254.analysis.json). Source line: `else if (chunk_name == png_sPLT)`.",
+      "Two independent decisive pairs at the source branch: cmplog > naive [I2S] (10/10 vs 0/10) and value_profile > naive [value_profile] (8/10 vs 0/10). Both winners clear the SAME 4-byte FOURCC gate via different mechanisms — the 'independent' cluster identity.",
+      "Honesty caveat: the schema's has_axis/lacks_axis partition is single-axis (I2S), placing value_profile in lacks_axis for that axis. That is technically correct for the I2S partition but UNDERSTATES the cluster: value_profile is expected to BEAT naive too (its own decisive pair). The verdict adjudicator should evaluate BOTH cmplog>naive AND value_profile>naive, not treat value_profile as a predicted loser.",
+      "Singleton cluster (n=1); the dual-technique convergence is inferred from one branch's two decisive pairs, not corroborated across branches."
+    ]
+  }
+}

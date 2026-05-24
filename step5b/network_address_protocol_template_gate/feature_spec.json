@@ -1,0 +1,58 @@
+{
+  "id": "network_address_protocol_template_gate",
+  "kind": "local",
+
+  "pair": {
+    "primary": {
+      "A": "cmplog",
+      "B": "naive",
+      "axis_differ": "I2S"
+    },
+    "involved_fuzzers": ["naive", "cmplog", "value_profile", "value_profile_cmplog"],
+    "has_axis": ["cmplog", "value_profile_cmplog"],
+    "lacks_axis": ["naive", "value_profile"]
+  },
+
+  "hypothesis": {
+    "mechanism": "The branches in this cluster are gated by a single wide equality against a fixed multi-byte Thread/IPv6 protocol-header or network-address template (mesh-local ULA prefix, FF:FE routing-locator IID anchor, well-known multicast address, or next-header template), 6-32 bytes wide. cmplog and value_profile_cmplog carry I2SRandReplace, which reads the runtime CMP operand (the constant template) out of the CmpLogObserver buffer and substitutes it into the input at the matching offset in ONE mutation, materializing the whole literal at once. naive and value_profile lack I2SRandReplace, so they must reconstruct the contiguous literal by blind havoc, whose per-exec success probability is ~1/256^N in the literal width. value_profile's CMP_MAP gradient cannot rescue it: a single multi-byte memcmp exposes no per-byte Hamming gradient it can climb monotonically, so value_profile tracks naive in the lacks_axis cluster. The two has_axis fuzzers share the same technique, hence the same curve shape.",
+    "program_feature_parameter": "TEMPLATE_BYTES (compile-time -D) — width in bytes of the contiguous address/template literal the equality gate matches against",
+    "predicted_direction": "has_axis fuzzers {cmplog, value_profile_cmplog} outperform lacks_axis fuzzers {naive, value_profile}; the resolve-probability gap grows with TEMPLATE_BYTES (~1/256^N collapse for lacks_axis)",
+    "predicted_endpoints": {
+      "TEMPLATE_BYTES=2": "All four fuzzers crash readily (~1/65536 per exec is brute-forceable in 600s); lacks_axis cluster (naive, value_profile) roughly matches has_axis cluster (cmplog, value_profile_cmplog) — little separation",
+      "TEMPLATE_BYTES=16": "lacks_axis cluster (naive, value_profile) crashes 0 times (full-width address template is unreachable by havoc); has_axis cluster (cmplog, value_profile_cmplog) still resolves via I2S substitution — clean stratification"
+    },
+    "expected_curve_per_fuzzer": {
+      "naive": "monotone-decreasing in TEMPLATE_BYTES (high crashes at width 2, 0 by width 8)",
+      "value_profile": "monotone-decreasing in TEMPLATE_BYTES, tracks naive (single memcmp yields no usable gradient)",
+      "cmplog": "flat-high (resolves at every width via I2SRandReplace)",
+      "value_profile_cmplog": "flat-high (resolves at every width; I2S substitution dominates)"
+    },
+    "tradeoff_observation": "Several cluster members are decided only on the value_profile_cmplog > value_profile pair (e.g. branch 8453), and others on both that pair and cmplog > naive. Because the axis is I2S in every member's decisive_pairs, the anchor pair uses the cleanest single-axis evidence (cmplog > naive, member 8529, confidence high). The value_profile_cmplog > value_profile pair tests the same axis on top of value_profile; if value_profile were ever to resolve the gate as fast as value_profile_cmplog at width >=8, the I2S attribution would be wrong and CMP_MAP gradient alone would suffice — that is the cluster's stated falsification condition."
+  },
+
+  "verification": {
+    "harness": "step5b/network_address_protocol_template_gate/template.c",
+    "params": "step5b/network_address_protocol_template_gate/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [2, 4, 8, 16],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "pending",
+
+    "results_per_trial": {},
+
+    "results_median": {},
+
+    "summary": {
+      "headline_finding": "",
+      "stratification_holds": "",
+      "monotone_curves": {}
+    },
+
+    "notes": [
+      "Mechanism modeled as a single memcmp against a fixed multi-byte constant — deliberately no partial-match ladder, so value_profile gets no per-byte gradient and is predicted to track naive (lacks_axis), isolating the I2S substitution as the sole advantage.",
+      "Caveat: members exhibit the template at varied offsets (0x00, 0x18-0x27, etc.) and as both contiguous and dispersed byte runs. The harness uses a contiguous template at offset 0 — the simplest honest isolation of the width axis. Dispersed-template effects (members 8538) are not modeled here.",
+      "Caveat: real members reach these gates behind a deep parser/dispatch chain (IP6 HandlePayload, GetContext, mesh forwarder). The synthetic harness compares directly at the input head, so absolute resolve times are not comparable to the field branches — only the I2S-vs-blind-search stratification is."
+    ]
+  }
+}

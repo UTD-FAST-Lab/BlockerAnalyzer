@@ -1,0 +1,59 @@
+{
+  "id": "i2s_keyword_anchoring_starves_runtime_accumulator",
+  "kind": "local",
+
+  "pair": {
+    "primary": {
+      "A": "naive",
+      "B": "cmplog",
+      "axis_differ": "I2S"
+    },
+    "involved_fuzzers": ["naive", "cmplog", "value_profile", "value_profile_cmplog"],
+    "has_axis": ["cmplog", "value_profile_cmplog"],
+    "lacks_axis": ["naive", "value_profile"]
+  },
+
+  "hypothesis": {
+    "mechanism": "This is an I2S-ANTI feature: the I2S technique HURTS. The blocking branch guards a runtime accumulator (distinct-token count) that must exceed a compile-time cap; no input literal can flip it, only input DIVERSITY across the token region can. An early exact keyword CMP ('<?xml ver') sits in front of the accumulator. cmplog and value_profile_cmplog carry I2SRandReplace, which reads that CMP from the CmpLogObserver buffer and rewrites matching input offsets back to the canonical literal, anchoring their corpora on well-formed, structurally uniform inputs whose token region collapses to few distinct values. That homogenized corpus starves the accumulator. naive and value_profile lack I2SRandReplace, so havoc/token mutation drifts the token region into many distinct values and the accumulator overflows past the cap. Both decisive pairs in the cluster (naive>cmplog, value_profile>value_profile_cmplog) share this single I2S axis, so the I2S-lacking arms are predicted to win uniformly.",
+    "program_feature_parameter": "ACCUM_THRESHOLD (compile-time -D) — the number of DISTINCT runtime tokens that must accumulate before the trap fires; the analogue of MAX_FREE_NODES / MAX_HASH_LEN.",
+    "predicted_direction": "lacks_axis fuzzers (naive, value_profile) outperform has_axis fuzzers (cmplog, value_profile_cmplog); the gap grows with ACCUM_THRESHOLD",
+    "predicted_endpoints": {
+      "ACCUM_THRESHOLD=2": "Trivial diversity bar. All four arms clear the accumulator readily; near parity. Confirms the gate is reachable and the keyword CMP is satisfiable.",
+      "ACCUM_THRESHOLD=96": "Steep diversity bar (>96 distinct token bytes). lacks_axis arms (naive, value_profile) still climb via havoc-driven diversity; has_axis arms (cmplog, value_profile_cmplog) stay near 0 because I2S re-homogenizes their token region toward the anchored keyword literal. If even naive cannot clear it within budget, treat the high anchor as a difficulty ceiling."
+    },
+    "expected_curve_per_fuzzer": {
+      "naive": "flat-high / slow-decreasing — diversity-by-havoc clears the accumulator at low/mid doses, degrades only at the steepest dose",
+      "value_profile": "flat-high / slow-decreasing — like naive (lacks I2S); VP's Hamming feedback gives no purchase on a non-literal diversity gate",
+      "cmplog": "monotone-decreasing — I2S anchoring collapses token diversity; drops toward 0 as ACCUM_THRESHOLD grows",
+      "value_profile_cmplog": "monotone-decreasing — same I2S anchoring as cmplog; VP fallback does not restore token diversity"
+    },
+    "tradeoff_observation": "HARNESS-FAITHFULNESS CAVEAT (anti-family). The starvation in the real bug is a CORPUS-LEVEL / scheduler dynamic that emerges across many executions: I2SRandReplace repeatedly substitutes the canonical XML literal back into seeds, homogenizing the cmplog/vpc corpus over the campaign. A single-execution micro-harness cannot literally reproduce that corpus pollution — within one LLVMFuzzerTestOneInput there is no corpus. What this harness DOES isolate faithfully is the structural trap: (a) an early exact-literal CMP that I2SRandReplace will detect and keep re-satisfying with the SAME literal (the attractor), and (b) a diversity-only accumulator gate that no single-literal substitution can clear. The predicted starvation therefore depends on whether cmplog's substitution actually re-homogenizes the token region across the run; if cmplog's other havoc operators supply enough residual diversity, the arms may stay at parity and the result is honestly inconclusive rather than refuted. The acceptance rule is deliberately conservative (stratification required only at high dose; low-dose parity acceptable) for exactly this reason."
+  },
+
+  "verification": {
+    "harness": "step5b/i2s_keyword_anchoring_starves_runtime_accumulator/template.c",
+    "params": "step5b/i2s_keyword_anchoring_starves_runtime_accumulator/params.json",
+    "dockerfile": "one per scan value, see deployed_targets",
+    "scan_values": [2, 8, 32, 96],
+    "trials_per_point": 5,
+    "duration_s": 600,
+    "verdict": "pending",
+
+    "results_per_trial": {},
+
+    "results_median": {},
+
+    "summary": {
+      "headline_finding": "",
+      "stratification_holds": "",
+      "monotone_curves": {}
+    },
+
+    "notes": [
+      "Anti-family template: predicted direction is I2S-LACKING arms (naive, value_profile) WIN over I2S-HAVING arms (cmplog, value_profile_cmplog) — the technique hurts.",
+      "Knob ACCUM_THRESHOLD controls the distinct-token diversity bar; the early keyword CMP is the I2S attractor. Both are live in template.c (changing the knob changes the size guard and the accumulator comparison).",
+      "ACCUM_THRESHOLD=96 may be a difficulty ceiling for all arms; if naive also fails there, read it as inconclusive-by-ceiling, not as evidence against the I2S-anti mechanism.",
+      "Faithfulness: corpus-level anchoring cannot be fully reproduced in a single-exec harness; an inconclusive verdict here is an honest outcome (see hypothesis.tradeoff_observation)."
+    ]
+  }
+}
