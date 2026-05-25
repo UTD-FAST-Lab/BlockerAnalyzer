@@ -1,0 +1,87 @@
+{
+  "branch_id": 2686,
+  "target": "libxml2",
+  "summary_one_line": "Input must drive the DTD-scan state machine to state=']' by containing a complete '<!DOCTYPE ... [...]' internal-subset structure.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "A well-formed DOCTYPE prologue followed by an internal-subset opener: the byte stream must traverse the xmlParseLookupInternalSubset state machine through state=0 -> state='\"' (via *cur=='\"' at line 11304) -> back to state=0 -> *cur=='[' (also at line 11304, sets state=']') so that the blocker `else if (state == ']')` evaluates true. Equivalently, the input must contain the literal sequence `<!DOCTYPE <name> ... \"...\" ... [` reaching the state-machine's bracket-tracking arm.",
+      "why_winner_satisfies": "value_profile reaches this branch on every trial (resolved=10/10) and the per-role overlay shows it executing lines 11269-11272 (state=0; start=cur; continue;) exclusively — meaning value_profile actually enters the state==']' arm, encounters a non-']' non-'>' non-blank byte, and continues the scan. At the L11262 sub-branch the winner has T=0 F=24, i.e. it entered the state==']' block 24 times.",
+      "why_loser_doesnt": "naive blocks 8/10 trials and is unreached on 2/10. Its hitcount on the blocker is 0. The overlay shows lines 11263-11265 (the L-only success-path of state==']' && *cur=='>') reached only by loser-blocking seeds — i.e. the few times the loser enters the block it immediately exits via return(1), while never producing the broader exploration that the winner does. naive lacks any CMP-distance signal so it cannot build a gradient through the chained single-byte character comparisons (*cur=='<', '\"', '\\'', ']', '>', etc.) that gate every state transition; without that gradient, it spends 6.31h on average blocked here vs the winner's 1.10h.",
+      "mechanism_attribution": "value_profile's CMP_MAP records a (PC, Hamming-distance-bucket) entry on every intercepted character-equality CMP. Each distinct byte at *cur produces a new bucket at PCs like L11262 (*cur=='>'), L11267 (IS_BLANK_CH), L11269 (*cur!=']'), L11293 (*cur=='<'), L11304 (*cur=='\"' || '\\'' || ']'). This per-byte feedback rewards inputs that drive each gate one step closer to the target character, building up the multi-step DOCTYPE/internal-subset grammar that naive cannot stumble onto with edge-only feedback. cmplog (I2S substitution) helps less here because each gate is a 1-byte literal comparison rather than a multi-byte magic — there is little to substitute, but the CMP_MAP buckets still reward proximity."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair at this branch is value_profile>naive on the value_profile technique axis (not I2S).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+    },
+    {
+      "claim": "value_profile resolves every trial; naive resolves zero and is blocked 8/10.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive row + value_profile row",
+      "exact_quote": "naive                            0        8          2  loser (value_profile vs value_profile)\ncmplog                           2        8          0  REFERENCE\nvalue_profile                   10        0          0  winner (value_profile vs naive)"
+    },
+    {
+      "claim": "The blocker is the chained-else-if test against the literal ']' character in the internal-subset scan state machine.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Source line + enclosing function",
+      "exact_quote": "Source line:         else if (state == ']') {"
+    },
+    {
+      "claim": "state is assigned the value ']' when the scan encounters a '[' or other quote/bracket character at line 11304 — i.e. the input must literally drive the state machine through a '[' (or quote) before this branch can fire.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L11304",
+      "exact_quote": "else if ((*cur == '\"') || (*cur == '\\'') || (*cur == ']')) {\n[B] 11305              state = *cur;"
+    },
+    {
+      "claim": "The function comment explicitly describes the closing-token sequence the state machine is searching for: \"']' S? '>'\".",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L11236",
+      "exact_quote": "Internal subset ends with \"']' S? '>'\" in an unescaped section and"
+    },
+    {
+      "claim": "Winner-only coverage of lines 11270-11272 inside the state==']' block proves the winner reaches and exercises the blocker's true arm, while loser-only coverage of 11263-11265 shows loser entering the block only via the immediate-exit path.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L11262-11272 overlay tags",
+      "exact_quote": "[L] 11263                  ctxt->checkIndex = 0;\n[L] 11264                  ctxt->endCheckState = 0;\n[L] 11265                  return(1);\n[L] 11266              }\n[B] 11267              if (IS_BLANK_CH(*cur)) {\n[B] 11268                  state = ' ';\n[B] 11269              } else if (*cur != ']') {\n[W] 11270                  state = 0;\n[W] 11271                  start = cur;\n[W] 11272                  continue;"
+    },
+    {
+      "claim": "At line 11262 (*cur == '>'), winner enters the state==']' block 24 times vs loser's 4 times — a 6x divergence in how often the gate fires.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L11262 row",
+      "exact_quote": "d=1   L11262  T=0 F=24  T=2 F=2  if (*cur == '>') {"
+    },
+    {
+      "claim": "Winner spends 1.10h average on average blocked vs loser's 6.31h, and prob_div=1.00 confirms a clean per-branch separation.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 statistics",
+      "exact_quote": "avg duration blocked: winner=1.10h  loser=6.31h\n  avg hitcount on branch: winner=12  loser=0\n  prob_div=1.00  dur_div=5.21h  hit_div=12"
+    },
+    {
+      "claim": "value_profile's instrumentation adds a CMP_MAP keyed by (PC, operand-distance bucket) on top of naive's edge counters — direct per-byte gradient feedback at every character comparison.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile paragraph",
+      "exact_quote": "naive's edge counters **plus** integer-CMP\ninterception, but instead of buffering operands per execution (cmplog),\neach CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket)"
+    },
+    {
+      "claim": "naive has only edge-bucket signal from the SanitizerCoverage edge counters and has no CMP introspection of any kind.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive paragraph",
+      "exact_quote": "**Feedback**: per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile axis), not I2SRandReplace, so the mandatory lineage probe does not apply. The mechanism is corroborated structurally: the decisive delta is value_profile (DECISIVE PAIRS pair 1 header), the technique-bearing fuzzer is value_profile (winner), and the source gate at the blocker is a chain of single-byte character-equality CMPs that match the CMP_MAP-bucket feedback model (per-PC Hamming-distance bucket creates a new corpus-add for each distinct *cur byte). I2S substitution would offer little here because each individual gate is a 1-byte literal — there is no multi-byte magic to substitute — consistent with cmplog reaching only 2/10."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness that gates entry to its trap behind a chained-character-equality state machine over single-byte literals (like ']', '\"', '[', '<', '>') would show naive >= value_profile resolution rate at every dose. If equivalently, removing the CMP_MAP feedback from value_profile (replacing with edge-only) leaves resolution rates indistinguishable from naive, then the CMP_MAP gradient is not the active mechanism."
+  },
+  "weakest_evidence_point": "The single-byte character CMPs in this state machine are the weakest case for the CMP_MAP-gradient story: a Hamming-distance bucket on a 1-byte operand only distinguishes 8 distance classes, providing less gradient than multi-byte comparisons would — yet the divergence here is among the cleanest in the dataset (prob_div=1.0). The structural-grammar-via-CMP_MAP story may be incomplete; there could be a secondary feedback path (e.g. CMP_MAP buckets on the multi-byte STARTUP comparisons like the L11553 (cur=='<') && (next=='?') chain) doing most of the work upstream.",
+  "confidence": "medium"
+}

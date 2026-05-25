@@ -1,0 +1,81 @@
+{
+  "branch_id": 10652,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must form a valid TTF wrapper carrying a CFF2-tagged subtable whose blob survives hb_blob_t::as<cff2>() sanitization.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A TTF/OpenType container with the 'CFF2' four-byte table tag at offset 0x0c-0x0f, a sfnt header magic '00 01 00 00' at offset 0x00-0x03, a one-entry table directory (numTables=1) and a CFF2 subtable whose header bytes ('01 00 02 0c ...' starting around offset 0x18) parse as a valid CFF2 top-dict so that hb_blob_t::as<OT::cff2>() returns a non-Null pointer at line 409.",
+      "why_winner_satisfies": "All five W seeds carry the exact byte pattern '00 01 00 00 00 01 ... CFF2 ... 00 00 00 1a 01 00 02 0c' in the first 0x1c bytes, giving a sfnt header with numTables=1, a CFF2 tag, and a CFF2 top-dict that sanitizes; the W-side overlay shows execution proceeding past line 411 into the topDict parsing block at lines 414-420.",
+      "why_loser_doesnt": "L seeds are scattered at the magic-byte offsets (offset 0x0c-0x0f shows 00/20/56/56 'VV', 'VA', 'GS', 'GP' table tags instead of 'CFF2'; offset 0x05 ranges across 04/20/1f/03 instead of 01); the L-side overlay shows control flow hits line 412 'goto fail' for 9/10 trials, so the cff2 pointer compared equal to &Null and the constructor aborts before topDict.init.",
+      "mechanism_attribution": "Synergy of I2SRandReplace (cmplog/vpc) substituting the literal 'CFF2' four-byte tag into the input from intercepted CMPs against the table-directory iterator, AND the CMP_MAP Hamming-distance gradient (vp/vpc) preserving intermediate seeds that get progressively closer to a sanitizable CFF2 top-dict structure. cmplog alone can plant 'CFF2' but cannot incrementally satisfy the multi-byte CFF2 header validation; value_profile alone has the gradient but no literal substitution for the tag — only their union (vpc) clears both stages within the 12h budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is an equality comparison of cff2 against the sentinel &Null(OT::cff2) at line 411 in the cff2 accelerator constructor.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "/src/harfbuzz/src/hb-ot-cff2-table.hh:411",
+      "exact_quote": "Source line:       if (cff2 == &Null (OT::cff2))"
+    },
+    {
+      "claim": "The winner-resolving seeds share an identical 16-byte prefix containing a sfnt header and the 'CFF2' table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seeds 1-3 offsets 0x00-0x0f",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 43 46 46 32   ......      CFF2"
+    },
+    {
+      "claim": "The 'CFF2' tag bytes at offsets 0x0c-0x0f are fully concentrated in W (all 10 reads = 43 46 46 32) but diverge in L (mostly 'VV', 'VA', 'GS', 'GP' or 00/20).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  43(C)x10                            20( )x6 ff(.)x2 00(.)x1 e0(.)x1     DIFFER"
+    },
+    {
+      "claim": "Offset 0x0f is uniformly '32' (ASCII '2') in W seeds but '56' (V) or 00 in L seeds.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0f",
+      "exact_quote": "0x000f  32(2)x10                            56(V)x8 00(.)x2                     DIFFER"
+    },
+    {
+      "claim": "Loser seeds branch into line 412 'goto fail' (9 of 10 L trials reach line 411 True) whereas winner seeds skip that goto and execute the topDict parsing block (W hits lines 414-420 exclusively).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 411",
+      "exact_quote": "d=1   L 411  T=0 F=10  T=9 F=0  if (cff2 == &Null (OT::cff2))  <-- BLOCKER"
+    },
+    {
+      "claim": "OT::cff2::sanitize is invoked 10 times by W seeds and 0 times by L seeds — only W seeds reach the CFF2 sanitization codepath that gates the as<cff2>() success.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "OT::cff2::sanitize",
+      "exact_quote": "10         0  OT::cff2::sanitize(hb_sanitize_context_t*) const  (/src/harfbuzz/src/hb-ot-cff2-table.hh:388-392)"
+    },
+    {
+      "claim": "Both decisive pairs at this branch are synergy losses — neither cmplog (with I2S) nor value_profile (with CMP_MAP) resolves any of 10 trials within the campaign, while value_profile_cmplog (with both) resolves 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 + Pair 2 counts",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace works by scanning the input for one CMP operand and substituting the other — the mechanism that can plant the 'CFF2' four-byte literal into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile's CMP_MAP bucket signal preserves seeds whose CMP operands are coming progressively closer to matching — the gradient mechanism that helps stage-by-stage past CFF2 header sub-checks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 10652 --role W --fuzzer value_profile_cmplog --trial 1 --seed 772f3a6f0978eae1` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 11 and 12 of the 13-level ancestor chain; the leaf at depth 0 is a havoc-tagged vpc seed but its ancestors at depth 11-12 are ParentInfo-only entries, the LibAFL build's lower-bound signature for unwrapped I2SRandReplace finds in cmplog/vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness in which the gate is `memcmp(input+12, \"CFF2\", 4) == 0` followed by an inequality check on a small computed length field, where cmplog alone resolves at the same rate as value_profile_cmplog — this would show I2S substitution by itself is sufficient and the value_profile gradient is not a co-requisite, refuting the synergy claim."
+  },
+  "weakest_evidence_point": "The 'CMP_MAP gradient is a co-requisite' half of the synergy claim is the weakest leg — the prompt shows cmplog losing 10/10 but does not directly demonstrate which downstream sub-CMP (e.g., topDictSize, FDSelect offset) is the gradient-friendly stage that vp+I2S clears together, so the gradient contribution is inferred from the BBR shape rather than observed in seed bytes.",
+  "confidence": "medium"
+}

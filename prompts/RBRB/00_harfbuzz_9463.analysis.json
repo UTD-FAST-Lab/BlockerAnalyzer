@@ -1,0 +1,117 @@
+{
+  "branch_id": 9463,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must route to Myanmar shaper with a non-consonant-prefixed syllable so base advances past start and the reorder loop runs.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)", "value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A harfbuzz fuzz buffer whose script/language selection routes execution into initial_reordering_consonant_syllable AND whose syllable layout has a non-consonant byte before the first consonant, so that base = i (i > start) at line 206 and the loop at line 217 enters the true branch (i < base).",
+      "why_winner_satisfies": "Winner inputs (resolved by naive and value_profile in 10/10 trials) explore harfbuzz's input space without being anchored to I2S-suggested literal byte sequences; their havoc/CMP_MAP-gradient mutations produce buffers where the consonant scan at line 204 advances limit so base != start, then line 217's i<base condition holds and the T side executes — visible as the [W]-only line 218 'info[i].myanmar_position() = POS_PRE_C;' in the per-role overlay.",
+      "why_loser_doesnt": "Loser inputs (cmplog/vpc, 9/10 blocked) are polluted by I2S substitutions of font/script/language literals from other CMP sites across harfbuzz (visible as font-tag-like ASCII 'kezh-hant-mo', 'mosi', 'tpxn', 'tpx-' in the L seeds). These literals satisfy gates upstream of the Myanmar shaper or shape into the Myanmar path but always place a consonant at position start, so DIVERGENT BRANCHES shows L204 T=21 F=0 — consonant always found at first iteration, making base=start, and L217 T=0 F=21 — the loop never enters its true branch.",
+      "mechanism_attribution": "Not one of the four canonical mechanisms — the salient delta is the ABSENCE of I2S-driven corpus pollution. cmplog and vpc harvest CMP operands from harfbuzz's many script/language/feature tag comparisons and substitute those literals into inputs via their I2S substitution stage. This biases the corpus toward inputs that satisfy unrelated string gates (locale tags like 'kezh-hant-mo') rather than toward inputs that satisfy the structural precondition of this Myanmar reordering branch (a non-consonant-then-consonant syllable layout). Naive and value_profile, lacking the I2S substitution stage, mutate more uniformly and stumble onto the structural shape that naive havoc + edge feedback alone can find. The dash-row floor signal appears in BOTH a W and an L lineage we sampled, confirming I2S fires for both directions — but the FRACTION of I2S energy that lands on a productive (vs distracting) literal is what differs. Hence claimed_mechanism = 'other' (a pollution/distraction failure mode rather than a winning technique)."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Branch is the loop header 'for (; i < base; i++)' in Myanmar shaper at hb-ot-shaper-myanmar.cc:217, T side blocked globally.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location + Source line + Globally blocked side",
+      "exact_quote": "Location: /src/harfbuzz/src/hb-ot-shaper-myanmar.cc:217:12"
+    },
+    {
+      "claim": "Source line at the blocker is the loop header.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Source line",
+      "exact_quote": "Source line:     for (; i < base; i++)"
+    },
+    {
+      "claim": "Globally blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "Two decisive pairs at this branch, both under I2S delta, with winners being naive and value_profile (the fuzzers WITHOUT I2SRandReplace).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "Second decisive pair: value_profile > value_profile_cmplog, also under I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: value_profile > value_profile_cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "Winners resolve 10/10, losers blocked 9/10 — strong, symmetric across both pairs.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 winner/loser lines",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0"
+    },
+    {
+      "claim": "Winners take T at line 217 (POS_PRE_C body lit only in W).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 217-218",
+      "exact_quote": "[B]   217    for (; i < base; i++) <-- BLOCKER\n[W]   218      info[i].myanmar_position() = POS_PRE_C;"
+    },
+    {
+      "claim": "Both winners and losers reach line 204 (is_consonant_myanmar), but losers find a consonant on the very first iteration (T=21 F=0), so base = start.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "line 204 row",
+      "exact_quote": "d=1   L 204  T=36 F=26  T=21 F=0  if (is_consonant_myanmar (info[i]))"
+    },
+    {
+      "claim": "At the blocker line 217, losers never enter the loop true branch (T=0 F=21) while winners do (T=17 F=45).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "line 217 row",
+      "exact_quote": "d=1   L 217  T=17 F=45  T=0 F=21  for (; i < base; i++)  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser-blocking seeds contain font/locale/script tag ASCII literals (e.g., 'kezh-hant-mo'), consistent with I2S substitution from harfbuzz's many tag CMPs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser-blocking Seed 1 ASCII bytes",
+      "exact_quote": "0020: 68 2d 68 61 6e 74 2d 6d 6f 00 72 6e 20 20 20 20   h-hant-mo.rn    "
+    },
+    {
+      "claim": "Loser-blocking seeds also embed token-like ASCII 'tpx-' near offset 0, characteristic of dictionary/I2S substitution of script-tag-shaped strings.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser-blocking Seed 3 first row",
+      "exact_quote": "0000: 74 70 78 2d 00 10 00 00 00 1f 16 01 00 a0 00 00   tpx-............"
+    },
+    {
+      "claim": "Winner-resolving seeds have a consistent non-ASCII byte 0x99 at offset 0 (10x) rather than tag-style ASCII; offset 0x00 diverges sharply between W and L.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0000",
+      "exact_quote": "0x0000  99(.)x10                            00(.)x7 74(t)x1 01(.)x1 0a(.)x1     DIFFER"
+    },
+    {
+      "claim": "cmplog has I2SRandReplace in its mutator stack (the canonical I2S delta).",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace — its winning capability comes from CMP_MAP gradient, not literal substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Dash-row floor signal is exclusive to cmplog/vpc and indicates an unwrapped I2SRandReplace find — used here to confirm I2S fires under both directions, supporting a pollution rather than absence narrative.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Observed mutation_op",
+      "exact_quote": "The dash rows are exclusive to cmplog and value_profile_cmplog; their\npresence in a winning seed's ancestor chain is direct (lower-bound)\nevidence of I2S contribution."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "other",
+    "verified_in_lineage": false,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 9463 --role W --fuzzer cmplog --trial 2 --seed 28fc288a1cdeafa0` and `--role L --fuzzer cmplog --trial 1 --seed 00293b686680cdda`. The W lineage has 19 ancestor levels with one I2S-floor dash row at depth 18; the L lineage has 4 ancestor levels with one I2S-floor dash row at depth 3. I2S fires in BOTH directions — so the mechanism here is NOT 'I2S enables the winner' (the winners are naive and value_profile, neither of which has I2SRandReplace). Instead the mechanism is 'I2S in cmplog/vpc pollutes the corpus with locale/script-tag literals (visible as ASCII kezh-hant-mo, mosi, tpx- in L seeds), distracting the fuzzer from the structural input shape that triggers this Myanmar shaper branch.' This does not fit any of the four canonical mechanisms (I2SRandReplace / CMP_MAP gradient / havoc-only / token-replace) cleanly — the winning technique is havoc+CMP_MAP, but the salient delta is the ABSENCE of the I2S pollution. Hence claimed_mechanism = 'other' and verified_in_lineage = false (the canonical floor check is inverted here — finding dash rows in losers supports the pollution hypothesis, not the standard I2S-helps-winner one)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a synthetic harness emits ONLY the Myanmar code path with no script/language/feature-tag CMPs upstream (so I2S has no other literals to substitute), and cmplog still loses to naive on a branch with the same is_consonant-at-first-byte structure, the corpus-pollution attribution is wrong and the cause must be intrinsic to I2S's mutation distribution rather than dictionary distraction."
+  },
+  "weakest_evidence_point": "The 'corpus pollution' story is plausible but indirect — I have ASCII tag literals in L seeds and an I2S dash row in an L ancestor, but I cannot quantify how many of cmplog's 9/10 blocking trials actually had locale-tag-substituted ancestors versus simply unlucky havoc; a per-trial lineage count would be needed to harden the claim.",
+  "confidence": "medium"
+}

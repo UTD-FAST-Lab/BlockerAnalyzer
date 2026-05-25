@@ -1,0 +1,69 @@
+{
+  "branch_id": 2313,
+  "target": "libxml2",
+  "summary_one_line": "XML input that drives the parser to fire xmlFatalErr with the integer enum value XML_ERR_INVALID_HEX_CHARREF (a malformed &#x... hex character reference inside the parsed document).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "An XML document body that exercises the entity/character-reference parsing path deeply enough to invoke xmlFatalErr with the specific enum constant XML_ERR_INVALID_HEX_CHARREF — i.e. an input containing structures like '<?xml' declarations, DTDs, or entity references that lead the parser to scan a malformed hex character reference. The blocking branch is the integer-switch arm 'case XML_ERR_INVALID_HEX_CHARREF:' on the runtime value of the parameter 'error' passed by an upstream caller; the input must drive a caller path that passes that exact enum value.",
+      "why_winner_satisfies": "value_profile_cmplog's CMP_MAP gradient feedback rewards inputs that bring intermediate-stage CMP operands (e.g. the byte-by-byte comparisons inside xmlIsNameChar, xmlParseNCName, xmlParseStartTag2, xmlParseCharData, xmlParseCharDataComplex) closer to their target tokens, letting the corpus climb the multi-step XML parsing pipeline and reach a caller that fires XML_ERR_INVALID_HEX_CHARREF. The HIT-COUNT DIVERGENCE table shows W-side invocations of these upstream parsing functions dominate L by 10x–70x (e.g. xmlIsNameChar 560 vs 0; xmlParseNCName 401 vs 29), confirming the winner navigates deeper into the parser. value_profile_cmplog resolved 10/10 trials with avg duration 4.65h.",
+      "why_loser_doesnt": "cmplog has input-to-state substitution (which can substitute the integer constant XML_ERR_INVALID_HEX_CHARREF directly into the input where its bytes appear in a CMP buffer) but lacks the CMP_MAP gradient. Without the gradient feedback on the many intermediate string/byte comparisons in the upstream parsing chain, cmplog only stochastically navigates to the caller that produces this specific error enum — it resolved only 1/10 trials (in trial 9, after 426s of mutations), while value_profile_cmplog resolved every trial.",
+      "mechanism_attribution": "CMP_MAP gradient. The technique difference between winner (value_profile_cmplog) and loser (cmplog) is value_profile — i.e., the CMP_MAP/Hamming-similarity feedback. Both fuzzers carry input-to-state substitution, so the integer switch-case substitution capability is shared; what cmplog lacks is the upstream gradient signal that rewards inputs incrementally approaching deeper parsing states. The 10x–70x W/L hit-count divergence on upstream NameChar/NCName/StartTag2/CharData functions is the direct fingerprint of CMP_MAP guiding corpus growth along the parsing chain that culminates in firing XML_ERR_INVALID_HEX_CHARREF."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a switch arm 'case XML_ERR_INVALID_HEX_CHARREF:' inside xmlFatalErr, gating on the integer 'error' parameter.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "parser.c:255-256",
+      "exact_quote": "switch (error) {\n[W]   256          case XML_ERR_INVALID_HEX_CHARREF: <-- BLOCKER"
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog > cmplog with delta=value_profile, where vpc resolved 10/10 and cmplog resolved 1/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > cmplog  [delta: value_profile] ---\n  subject 7  (value_profile_cmplog vs cmplog, admissible)\n  winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0"
+    },
+    {
+      "claim": "Winner inputs reach deep XML parsing functions far more than loser inputs, by 10x to 70x on upstream NameChar/NCName/StartTag2/CharData routines.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "xmlIsNameChar / xmlParseNCName / xmlParseStartTag2 rows",
+      "exact_quote": "     560         0  parser.c:xmlIsNameChar  (/src/libxml2/parser.c:3183-3219)\n     401        29  parser.c:xmlParseNCName  (/src/libxml2/parser.c:3489-3535)\n     250        22  parser.c:xmlParseQName  (/src/libxml2/parser.c:8884-8953)\n     219         3  parser.c:xmlParseNCNameComplex  (/src/libxml2/parser.c:3415-3471)\n     209         3  parser.c:xmlIsNameStartChar  (/src/libxml2/parser.c:3152-3180)\n     198        14  parser.c:nameNsPush  (/src/libxml2/parser.c:1820-1860)\n     198        14  parser.c:spacePush  (/src/libxml2/parser.c:1945-1962)\n     198        14  parser.c:xmlParseStartTag2  (/src/libxml2/parser.c:9355-9774)"
+    },
+    {
+      "claim": "Winner seeds carry XML constructs like '<?xml ...' declarations, DTD entity declarations and xlink attributes; loser seeds carry similar XML but never trip the XML_ERR_INVALID_HEX_CHARREF arm.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seeds 1, 3",
+      "exact_quote": "Seed 1 (id=96e84b345c730043, size=584 bytes, fuzzer=cmplog, trial=9, discovered_at=426s, mutation_op=TokenInsert,DwordAddMutator,DwordAddMutator,ByteIncMutator,BytesRandSetMutator,BytesRandSetMutator,DwordInterestingMutator):\n  0000: 69 6d 70 6c 65 27 0a 20 20 20 20 20 20 20 20 20   imple'.         \n  0010: 20 20 20 78 6c 69 6e 6b 3a 68 72 65 66 62 20 28      xlink:hrefb ("
+    },
+    {
+      "claim": "On the branch line itself, winner-side seeds take the true side 17 times across 71 invocations of xmlFatalErr; loser-side seeds take it 0 times across 27 invocations.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 256",
+      "exact_quote": "d=1   L 256  T=17 F=54  T=0 F=27  case XML_ERR_INVALID_HEX_CHARREF:  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog's instrumentation adds CMP_MAP gradient buckets on top of cmplog's I2S substitution; both fuzzers share I2SRandReplace, so the technique difference between them is exactly the value_profile feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog block",
+      "exact_quote": "**Instrumentation**: union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets.\n\n**Feedback**: edge-bucket + CMP_MAP-bucket signals."
+    },
+    {
+      "claim": "cmplog's mutator stack is naive's havoc+token plus I2SRandReplace; it has no CMP_MAP gradient feedback, so it cannot incrementally climb partial-match comparison chains.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog block",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Lineage verification is optional for claimed_mechanism='CMP_MAP gradient' (the mandatory db_query is only required for I2SRandReplace). For corroboration I still ran `python3 tools/db_query.py lineage --branch 2313 --role W --fuzzer cmplog --trial 9 --seed 96e84b345c730043` and observed one I2S-floor dash row at depth 4. That confirms I2S DID contribute to cmplog's single resolving trial, but does not invalidate the CMP_MAP claim: cmplog has I2S yet only resolved 1/10 trials while vpc (I2S + CMP_MAP) resolved 10/10, so the gradient feedback is the differentiator. CMP_MAP-specific verification would require an LLVM-level CMP_MAP bucket trace, which is outside the available tooling — hence verified_in_lineage=false with this explanation."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness that exposes the same integer switch-arm shape (multi-case switch on a runtime enum parameter, reachable only via a deep multi-step CMP chain whose intermediate comparisons can be tracked by CMP_MAP) where value_profile and value_profile_cmplog do NOT outperform naive and cmplog at long horizons (e.g. dose-response curves with overlapping medians at all chain depths). That would mean the CMP_MAP gradient confers no advantage at the upstream chain and the observed divergence at this branch must be due to some other factor."
+  },
+  "weakest_evidence_point": "The argument that CMP_MAP gradient (rather than some other byproduct of vpc's larger feedback bucket set) is what drives the 10x-70x upstream hit-count divergence is inferred from the technique-delta and the mechanism library paragraphs, not from a direct CMP_MAP bucket trace.",
+  "confidence": "medium"
+}

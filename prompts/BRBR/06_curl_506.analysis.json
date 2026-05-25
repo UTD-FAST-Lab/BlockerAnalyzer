@@ -1,0 +1,123 @@
+{
+  "branch_id": 506,
+  "target": "curl",
+  "summary_one_line": "Input must contain the 4-byte ASCII literal 'file' at the URL scheme position so strcmp(schemebuf, \"file\") returns 0.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A 4-byte ASCII substring '66 69 6c 65' (\"file\") aligned at the URL-scheme offset so that Curl_is_absolute_url copies it into schemebuf with schemelen=4, and the subsequent strcmp(schemebuf, \"file\") returns 0 — flipping the true branch into the file: scheme handler.",
+      "why_winner_satisfies": "Winner-resolving seeds carry the literal 'file' at offset 0x06-0x09 (e.g. seed 1: '66 69 6c 65 3a 2f 2f' = 'file://') so schemebuf is parsed as \"file\" and strcmp succeeds; the W coverage overlay shows lines 947–1054 (the file: handler body) executed only on the W side.",
+      "why_loser_doesnt": "Loser-blocking seeds contain a different scheme literal at those offsets — '70 6f 70 33' (\"pop3\") in four of five samples — so strcmp(\"pop3\", \"file\") is non-zero and execution falls into the else branch at line 1055; the L-side reaches the generic-scheme path (lines 1061-1130) but never the file: body, confirming the gate is decided by exactly those four bytes.",
+      "mechanism_attribution": "Fuzzers with cmplog (cmplog and value_profile_cmplog) intercept strcmp through __sanitizer_weak_hook_strcmp; the desired operand \"file\" is recorded in the CmpLogObserver and the I2SRandReplace mutator substitutes it into the corpus seed at the scheme offset in a single mutation step. naive and value_profile lack I2SRandReplace and must blindly mutate to the exact 4-byte sequence, which is improbable under random havoc; value_profile's CMP_MAP Hamming-distance feedback does not help here because strcmp interception in vp records prefix-match length but cannot substitute the operand, so vp also blocks."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is a 4-byte strcmp equality against the string literal \"file\".",
+      "cited_section": "BLOCKER",
+      "cited_locator": "urlapi.c:946 source line",
+      "exact_quote": "if(schemelen && !strcmp(schemebuf, \"file\")) {"
+    },
+    {
+      "claim": "Both decisive pairs at this branch differ exactly by the I2S technique (cmplog>naive and vpc>vp).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "The second decisive pair is cmplog>naive with I2S as the differing technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "Winner-resolving seed 1 carries the literal 'file://' at offset 0x06.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 hex dump",
+      "exact_quote": "0000: 00 01 00 00 00 19 66 69 6c 65 3a 2f 2f 31 32 77   ......file://12w"
+    },
+    {
+      "claim": "Loser-blocking seed 1 contains 'pop3:/' at the same scheme offset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 (loser) hex dump",
+      "exact_quote": "0000: 00 01 00 00 00 19 70 6f 70 33 3a 2f 4a ff 5f 90   ......pop3:/J._."
+    },
+    {
+      "claim": "Offsets 0x07-0x09 cleanly partition winner vs loser: W shows i/l/e (ile), L shows o/p/3 (op3).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x07-0x09",
+      "exact_quote": "   0x0007  69(i)x9 49(I)x1                     6f(o)x7 2d(-)x1 35(5)x1 2b(+)x1     DIFFER"
+    },
+    {
+      "claim": "Byte position 0x08 shows winner 'l'x9 vs loser 'p'x7 — direct evidence the scheme literal differs.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x08",
+      "exact_quote": "   0x0008  6c(l)x9 4c(L)x1                     70(p)x7 2e(.)x3                     DIFFER"
+    },
+    {
+      "claim": "Byte position 0x09 shows winner 'e'x9 vs loser '3'x7 — fourth differing byte of the scheme literal.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x09",
+      "exact_quote": "   0x0009  65(e)x9 45(E)x1                     33(3)x7 2d(-)x2 2e(.)x1             DIFFER"
+    },
+    {
+      "claim": "The file: handler body (lines 947–1054) executes only on the W side.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 947, 954, 956 marked [W]",
+      "exact_quote": "[W]   947      if(urllen <= 6) {"
+    },
+    {
+      "claim": "The else-branch generic-scheme path (lines 1055-1130) executes only on the L side.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 1055, 1057, 1061 marked [L]",
+      "exact_quote": "[L]  1055    else {"
+    },
+    {
+      "claim": "DIVERGENT BRANCHES confirms the blocker direction split: W takes T=10 F=0, L takes T=0 F=10.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "line 946 row",
+      "exact_quote": "d=1   L 946  T=10 F=0  T=0 F=10  if(schemelen && !strcmp(schemebuf, \"file\")) {  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog intercepts strcmp via __sanitizer_weak_hook_strcmp and feeds the operand to the I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog section",
+      "exact_quote": "string/memory-CMP interception (`__sanitizer_weak_hook_strcmp`,"
+    },
+    {
+      "claim": "I2SRandReplace scans the input for one operand and substitutes the other operand at those offsets — exactly the substitution needed to insert \"file\".",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators section",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and so cannot substitute the literal \"file\" — it depends only on Hamming-distance CMP_MAP feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators section",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "naive's mutator set has no I2S mechanism at all.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive observed-op section",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile_cmplog inherits I2SRandReplace from cmplog and is therefore decisive against value_profile.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog mutators section",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 506 --role W --fuzzer cmplog --trial 1 --seed 21408e1021570fd1` — observed I2S-floor dash rows (mutation_op = -) at ancestor depths 3 and 4. Also verified seed 1484a0a7f57cd476 (same trial) — also shows dash rows at depths 3 and 4. Both winning seeds inherit from an I2S-discovered ancestor, confirming I2SRandReplace contribution to the file-scheme breakthrough under the current build's logging floor."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with strcmp(schemebuf, \"file\") replaced by a dynamically-computed comparison (e.g. character-by-character against a non-literal byte produced by hashing the input) — if cmplog/vpc still resolve as fast as today on that variant, the mechanism is NOT I2S literal substitution and the hypothesis is refuted."
+  },
+  "weakest_evidence_point": "The I2S-floor dash-row signal is a lower bound only — some I2S finds leak into the havoc bucket, and depths 3-4 do not by themselves prove the dash rows specifically substituted the bytes 'file'; a stronger check would tag the exact mutation site, which the current LibAFL build does not log.",
+  "confidence": "high"
+}

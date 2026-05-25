@@ -1,0 +1,69 @@
+{
+  "branch_id": 2727,
+  "target": "libxml2",
+  "summary_one_line": "Input must reach the <![C prefix gate with a 5th byte that is NOT 'D' (i.e., <![C? where ? != 'D'), avoiding the CDATA literal lock-in.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "Inputs whose XML_PARSER_CONTENT byte stream reaches `<![C` (cur[0..3] = '<','!','[','C') but whose 5th byte (cur[4]) is anything other than ASCII 'D' (0x44), so the AND-chain breaks at line 11750 and the parser falls through to the avail<9 / cur=='<' fallback branches instead of entering XML_PARSER_CDATA_SECTION.",
+      "why_winner_satisfies": "value_profile's mutator stack is havoc + tokens only (no I2SRandReplace), so when its corpus contains seeds with `<![C?` style content (or any byte sequence near the gate), random byte mutations on the 5th position have P(non-'D') = 255/256 — they freely break the 'D' byte and take the F branch. DIVERGENT BRANCHES at L11750 records W: T=0 F=38 and L: T=19 F=0, confirming the winner reaches the gate site 38 times and always falls through F while the loser always matches T.",
+      "why_loser_doesnt": "value_profile_cmplog adds I2SRandReplace, which observes the runtime CMP `cur[4] == 0x44` (and the surrounding `cur[2]=='[', cur[3]=='C', cur[5]=='A', cur[6]=='T', cur[7]=='A', cur[8]='['` chain) and writes operand 0x44 plus the full `<![CDATA[` literal into its substitution dictionary. Once a seed in the corpus matches the CDATA prefix and takes T, I2SRandReplace keeps re-substituting these literals into mutated children — corpus drifts toward CDATA-matching inputs, and any havoc mutation that would break the 'D' byte is repeatedly 'fixed' back. The loser then descends into XML_PARSER_CDATA_SECTION (lines 11755-11757, all marked [L]) and gets stuck there processing CDATA content, never returning to encounter a non-'D' 5th byte at this gate.",
+      "mechanism_attribution": "This is a Pattern-B / I2S-hurts divergence with the I2SRandReplace mutator as the technique axis. The loser (value_profile_cmplog) carries I2SRandReplace, which observes the runtime equality CMPs against the literal bytes of `<![CDATA[` and pollutes the corpus with seeds matching that prefix; once seeds matching T accumulate, mutations that would break the 'D' byte are repeatedly re-substituted back, creating a one-way attractor. The winner (value_profile) lacks I2SRandReplace, so its corpus retains diversity at offset cur[4]; havoc/token mutations on any seed reaching the `<![C` prefix have P(non-'D') = 255/256 per byte, and the F branch is taken naturally. The technique axis IS I2S; the direction of effect is reversed compared to the canonical 'I2S-helps' Pattern-A case."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a single-byte equality CMP `cur[4] == 'D'` inside the <![CDATA[ literal AND-chain at parser.c line 11750, with the false branch globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location + Source line + blocked side",
+      "exact_quote": "Source line: \t\t    (ctxt->input->cur[4] == 'D') &&"
+    },
+    {
+      "claim": "value_profile resolves the F side in 9/10 trials while value_profile_cmplog blocks in 9/10, the decisive pair carrying the I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 counts",
+      "exact_quote": "--- Pair 1: value_profile > value_profile_cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "The loser actually reaches the gate site and always matches the T branch (matches 'D'); the winner reaches it 38 times and always takes the F branch (non-'D').",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L11750",
+      "exact_quote": "d=1   L11750  T=0 F=38  T=19 F=0  (ctxt->input->cur[4] == 'D') &&"
+    },
+    {
+      "claim": "The loser descends into XML_PARSER_CDATA_SECTION (SKIP(9); instate change; break) — those lines are L-only in the per-role overlay, confirming the loser commits to the CDATA path.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 11755-11757",
+      "exact_quote": "[L] 11755  \t\t    SKIP(9);"
+    },
+    {
+      "claim": "The winner instead takes the avail<9 fallback branch at line 11760 (goto done) — that line is W-only.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 11760",
+      "exact_quote": "[W] 11760  \t\t    goto done;"
+    },
+    {
+      "claim": "value_profile's mutator stack does NOT include I2SRandReplace, so it cannot substitute literal constants from CMP instrumentation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog DOES include I2SRandReplace on top of vp's mutators, so it observes runtime CMP operands and substitutes them into mutated children.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": false,
+    "verification_method": "This is Pattern B (I2S-hurts): I2SRandReplace is the technique axis, but its effect is reversed — it appears in the LOSER's lineage and drives the loser toward CDATA-matching seeds, rather than appearing in the winner's lineage. Ran `python3 tools/db_query.py lineage --branch 2727 --role L --fuzzer cmplog --trial 1 --seed 06df74971968a6c6` on a loser-blocking seed: chain has 5 ancestor levels with I2S-floor rows (mutation_op = -) at depths 3 and 4, confirming I2S fired in the ancestry of inputs matching the CDATA prefix. Also ran lineage on a winner-resolving seed (`--role W --fuzzer naive --trial 1 --seed 157640cddf590417`): chain has 6 levels with one dash row at depth 5, but the dash row's ancestor `8c7bd7ba6dfb824c` is shared with the loser chain (an initial-corpus seed inherited from the shared starting seed). No I2S substitution in the winner's own descent path (naive does not run I2SRandReplace; the dash row is an inherited initial-seed artefact). Therefore verified_in_lineage=false in the canonical sense (technique did not help the winner's winning seed) but the I2S axis is verified as the operative differentiator via the loser-side evidence."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a `<![CDATA[`-style 9-byte equality-AND chain on bytes parsed from input, seeded with a CDATA-matching corpus, where value_profile_cmplog beats value_profile on resolving the F branch of the 5th-byte gate. If I2S corpus pollution is the mechanism, vpc should be slower; if vpc wins or ties, the lock-in story is wrong (e.g., I2S substitutions at this gate-chain do not actually accumulate in the corpus, or CMP_MAP gradient meaningfully helps vpc explore non-D 5th bytes)."
+  },
+  "weakest_evidence_point": "The story relies on inferring corpus pollution as the loser's failure mode without directly inspecting whether vpc's corpus actually accumulates CDATA-prefix seeds over time — the dash-row I2S-floor signal in the L lineage confirms I2S fired somewhere in the ancestry, but does not prove that the specific substitution that pushed the seed to match the CDATA prefix is what caused the lock-in (vs. the seed being a havoc descendant of an initial seed that already contained the CDATA literal).",
+  "confidence": "medium"
+}

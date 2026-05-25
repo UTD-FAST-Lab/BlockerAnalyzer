@@ -1,0 +1,117 @@
+{
+  "branch_id": 9107,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must contain a valid OpenType font directory carrying a 'GSUB' or 'GPOS' four-byte table tag so harfbuzz reaches GSUBGPOS::get_script_list() with a non-version-1/2 major version.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must embed the 4-byte ASCII table tag 'GSUB' (47 53 55 42) or 'GPOS' (47 50 4f 53) at the position where harfbuzz's font-directory parser equality-compares against those tag literals, so that the parser walks into OT::GSUBGPOS::get_script_list() and the switch on u.version.major falls through case 1 (and case 2) into the default arm returning Null(ScriptList).",
+      "why_winner_satisfies": "All five winner-resolving seeds carry the literal four-byte tag at offsets 0x1c-0x1f — six show 'GSUB' (47 53 55 42), four show 'GPOS' (47 50 4f 53) — together with an OpenType-like header prefix (00 01 00 00 sfnt_version) at offsets 0x00-0x03, which is what walks the parser into the GSUBGPOS table.",
+      "why_loser_doesnt": "None of the five loser-blocking seeds contain the 'GSUB' or 'GPOS' four-byte literal at any concentrated offset — at offsets 0x1c-0x1f the loser byte sets are scattered (e.g. {00, 1a, 56, 0c, ...}, {00, 20, 55, 0c, ...}) with no occurrences of the 47 53 55 42 / 47 50 4f 53 ASCII run, so the font-directory walk never reaches the GSUBGPOS dispatch.",
+      "mechanism_attribution": "cmplog and value_profile_cmplog intercept the 4-byte memcmp / integer-CMP that harfbuzz uses to match the table tag during directory lookup, record the 'GSUB'/'GPOS' literal in the CmpLogObserver buffer, and the I2SRandReplace mutator substitutes that literal into the candidate input at the matching byte offsets in a single step. naive and value_profile lack I2SRandReplace; naive must synthesize the four-byte ASCII tag through random havoc (probability ~1/2^32 per attempt), and value_profile's per-byte distance feedback gives at best a per-byte nudge that did not bridge the four-byte literal within the 12-hour budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs at this branch share the I2S technique delta and are unanimous (10/10 winner-resolved vs 10/10 loser-blocked).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 header lines",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "value_profile_cmplog>value_profile is also under the I2S delta (vpc adds I2SRandReplace on top of value_profile).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "The blocker is the default arm of a switch on u.version.major in GSUBGPOS::get_script_list().",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 4238-4243",
+      "exact_quote": "switch (u.version.major) {"
+    },
+    {
+      "claim": "Reaching the default arm requires walking into GSUBGPOS, which is only invoked when the parser identifies a GSUB or GPOS table in the font directory.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "enclosing function and source line",
+      "exact_quote": "Enclosing function: OT::GSUBGPOS::get_script_list() const"
+    },
+    {
+      "claim": "Winner seed 1 carries the literal 'GSUB' ASCII run at offsets 0x1c-0x1f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 id=00078a6e395420d4 row 0x0010",
+      "exact_quote": "0010: 41 52 b9 b9 53 53 ff ff fe f2 1a 20 47 53 55 42   AR..SS..... GSUB"
+    },
+    {
+      "claim": "Winner seed 2 also carries 'GSUB' at offsets 0x1c-0x1f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 2 id=0009a8dcb2f65ed7 row 0x0010",
+      "exact_quote": "0010: 41 51 b9 b9 b9 00 ff ff fe f2 1a 20 47 53 55 42   AQ......... GSUB"
+    },
+    {
+      "claim": "Winner seed 3 carries 'GPOS' at offsets 0x1c-0x1f, confirming the tag is not unique to GSUB but is the 4-byte literal family the gate looks for.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 3 id=000abbc88e443f45 row 0x0010",
+      "exact_quote": "0010: 41 51 b9 b9 b9 01 ff ff fe f2 1a 20 47 50 4f 53   AQ......... GPOS"
+    },
+    {
+      "claim": "Winner seeds also share an OpenType-style sfnt header prefix 00 01 00 00 at offsets 0x00-0x03.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 row 0x0000",
+      "exact_quote": "0000: 00 01 00 00 00 03 20 00 00 7f 00 20 20 20 56 56   ...... ....   VV"
+    },
+    {
+      "claim": "At offset 0x1c the winner byte set is concentrated on 0x47 ('G') ten out of ten while the loser byte set is scattered without the 'G' anchor.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x001c",
+      "exact_quote": "0x001c  47(G)x10                            00(.)x5 1a(.)x1 56(V)x1 0c(.)x1 +2u  DIFFER"
+    },
+    {
+      "claim": "Offsets 0x1d/0x1e/0x1f split cleanly between 'SUB' and 'POS' on the winner side, again concentrated, while losers are scattered with no occurrences of the tag.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x001d-0x001f",
+      "exact_quote": "0x001f  53(S)x6 42(B)x4                     00(.)x3 01(.)x2 ff(.)x1 3c(<)x1 +3u  DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace on top of naive's mutator stack, scanning the input for byte sequences matching one operand of an intercepted CMP and substituting the other operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators block",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive only has the havoc + token stack and has no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile also lacks I2SRandReplace; it only adds the CMP_MAP gradient on top of naive's mutator stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators block",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace on top of the value_profile feedback stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators block",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "The dash-row I2S-floor signal appears in the ancestor chain of winning seed 00078a6e395420d4 — confirmed by db_query.py lineage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Observed mutation_op TODO note",
+      "exact_quote": "their\npresence in a winning seed's ancestor chain is direct (lower-bound)\nevidence of I2S contribution."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 9107 --role W --fuzzer cmplog --trial 1 --seed 00078a6e395420d4` and observed 1 I2S-floor dash row (mutation_op = -) at depth 22 of a 23-level chain (ancestor e0a5b09f80625fb6). Corroborated with seed 0009a8dcb2f65ed7 which has a dash row at depth 32 of a 33-level chain at the SAME ancestor e0a5b09f80625fb6 — both winning seeds share an I2SRandReplace-discovered root, direct evidence that cmplog's I2S substitution introduced the 'GSUB'/'GPOS' tag literal into the lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness that switches on a 4-byte field equality-compared against two literal tags ('GSUB','GPOS') and gates trap on the default arm — if cmplog and value_profile_cmplog FAIL to reach the trap while naive/value_profile succeed at comparable rate, the I2S-substitution attribution is refuted."
+  },
+  "weakest_evidence_point": "The exact dataflow from input byte offset 0x1c-0x1f to harfbuzz's tag-CMP site is inferred from byte-set concentration; the actual harfbuzz directory parser may apply length/checksum gating before the tag CMP, in which case the I2S substitution alone would not be sufficient.",
+  "confidence": "high"
+}

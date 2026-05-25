@@ -1,0 +1,69 @@
+{
+  "branch_id": 2983,
+  "target": "libxml2",
+  "summary_one_line": "ATTLIST attribute whose local-name (after QName split) equals the literal string xmlns, so ret->name matches BAD_CAST \"xmlns\".",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Input must declare an attribute whose post-xmlSplitQName local name equals the 5-byte literal \"xmlns\" exactly (e.g. <!ATTLIST elem xmlns CDATA ...>), so that the equality CMP at valid.c:2134 (xmlStrEqual(ret->name, BAD_CAST \"xmlns\")) returns true and the branch's true side is taken.",
+      "why_winner_satisfies": "value_profile_cmplog winner seeds include declarations whose attribute local-name is literally \"xmlns\" — e.g. Seed 3 at offset 0xd0 shows '<!ATTLIST b xmlns        CDATA' and Seed 1 contains 'xmlns%xlink' that after xmlSplitQName yields ret->name == \"xmlns\". The DIVERGENT BRANCHES tally at L2134 shows the winner reaches the true side 30 times vs the loser's 0.",
+      "why_loser_doesnt": "value_profile loser seeds only carry the namespaced form 'xmlns:xlink' where the local-name after QName split is \"xlink\" and the prefix is \"xmlns\"; ret->name never equals \"xmlns\" so the first clause at line 2134 is always false (L T=0 F=60). vp has CMP_MAP Hamming feedback but no I2SRandReplace stage to bulk-substitute the literal token into the local-name position.",
+      "mechanism_attribution": "I2SRandReplace in value_profile_cmplog logs the runtime CMP operand BAD_CAST \"xmlns\" via cmplog instrumentation and substitutes it directly into the byte position that becomes ret->name. value_profile lacks the I2S mutator and must rely on Hamming-distance gradient + havoc, which can reach the prefix-form 'xmlns:...' but does not produce the unprefixed local-name form within the budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is an equality CMP comparing ret->name with the 5-byte string literal \"xmlns\"; the true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "valid.c:2134, Source line",
+      "exact_quote": "if ((xmlStrEqual(ret->name, BAD_CAST \"xmlns\")) ||"
+    },
+    {
+      "claim": "The single decisive pair at this branch is value_profile_cmplog > value_profile with delta technique I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner resolves on all 10 trials while loser blocks on 9 of 10 trials at this branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 trial counts",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0"
+    },
+    {
+      "claim": "At the blocker line 2134 the per-role coverage shows winner takes true 30 times and loser takes true 0 times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L2134",
+      "exact_quote": "d=1   L2134  T=30 F=66  T=0 F=60  if ((xmlStrEqual(ret->name, BAD_CAST \"xmlns\")) ||  <-- BLOCKER"
+    },
+    {
+      "claim": "At line 2136 (the second clause checking ret->prefix == \"xmlns\") the loser reaches the prefix-form true case 21 times while the winner reaches it 0 times, indicating loser only hits the namespaced prefix form and never the unprefixed local-name form required by the line-2134 first clause.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L2136",
+      "exact_quote": "d=1   L2136  T=0 F=63  T=21 F=36  (xmlStrEqual(ret->prefix, BAD_CAST \"xmlns\"))))) {"
+    },
+    {
+      "claim": "value_profile lacks the I2SRandReplace mutator that would let it substitute the literal CMP operand into the input byte position.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile section, Mutators line",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog uniquely combines CMP_MAP gradient feedback with the I2SRandReplace mutator, which is the only one-technique-delta against value_profile.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators line",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2983 --role W --fuzzer cmplog --trial 2 --seed 761378055f85e12d` and observed 1 I2S-floor ancestor dash row (mutation_op = -) at depth 3 of the 4-level chain. Under the current LibAFL build dash rows are exclusive to cmplog/vpc, so the floor row corroborates an I2SRandReplace substitution somewhere on the path to this winner-resolving seed. Note: the lineage was queried on the cmplog-trial-2 storing fuzzer (one of the two I2S-capable variants); the same I2S mutator is what defines the value_profile_cmplog>value_profile delta."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the gate compares ret->name against a runtime-derived value (not a literal) — under the same scan, value_profile_cmplog should LOSE its edge over value_profile, since I2SRandReplace cannot substitute non-literal operands. If vpc still beat vp on such a harness, the I2S literal-substitution attribution would be refuted."
+  },
+  "weakest_evidence_point": "The lineage check found a dash row at depth 3 but the cmplog-storing winner trial is provenance only; I cannot directly confirm the I2S substitution event installed the exact bytes \"xmlns\" into the local-name position (the dash signal is a per-build lower bound on I2S activity).",
+  "confidence": "high"
+}

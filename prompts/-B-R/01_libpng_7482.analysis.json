@@ -1,0 +1,87 @@
+{
+  "branch_id": 7482,
+  "target": "libpng",
+  "summary_one_line": "PNG IHDR bit_depth byte at file offset 0x18 must be >=16 (i.e. 0x10) to take the false side of the < 16 gate",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "The byte at PNG file offset 0x18 (the IHDR bit_depth field) must be >= 16, with 0x10 (decimal 16) being the canonical winning value. The byte must reach pngset.c via a parsed IHDR chunk so info_ptr->bit_depth carries that value at the tRNS-handling site.",
+      "why_winner_satisfies": "value_profile_cmplog resolves 10/10 trials and the one winner-resolving seed carries 0x10 at offset 0x18 — exactly the threshold value 16 that flips `info_ptr->bit_depth < 16` to false. CMP_MAP/value-profile feedback rewards inputs whose bit_depth field byte moves toward 16 along the 1-byte CMP gradient, so vpc gets a continuous signal during the climb from typical values (0x01/0x08) to 0x10.",
+      "why_loser_doesnt": "cmplog resolves only 1/10 trials and blocks 9/10. Its loser seeds carry 0x08 or 0x01 at offset 0x18, both <16. cmplog has I2S but lacks the CMP_MAP gradient: I2SRandReplace can record CMP(bit_depth, 16) and try byte substitution, but with 8-bit operands the I2S substitution offset is essentially random across the input — without the value-profile distance reward there is no monotone signal to anchor the substitution at offset 0x18 specifically, so resolution depends on luck.",
+      "mechanism_attribution": "The technique delta between value_profile_cmplog and cmplog is value_profile, i.e. the CMP_MAP gradient. For the 1-byte comparison `info_ptr->bit_depth < 16` the CMP_MAP records the Hamming/distance between the runtime operand and the constant 16, giving vpc a smooth gradient signal that selects intermediate seeds whose bit_depth byte is closer to 16; this reliably converges to 0x10. cmplog has no such gradient — its I2S substitution is unguided about which offset to overwrite, which explains the 10/10 vs 1/10 split."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair at this branch is value_profile_cmplog>cmplog with delta=value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "value_profile_cmplog resolves 10/10 trials while cmplog blocks 9/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 counts",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0"
+    },
+    {
+      "claim": "The blocker compares the parsed bit_depth field against the literal 16.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Source line",
+      "exact_quote": "if (info_ptr->bit_depth < 16)"
+    },
+    {
+      "claim": "The winner takes the false side of the comparison.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "At file offset 0x18 the winner byte is 0x10 (=16) and the loser bytes are 0x08 (9 of 10) or 0x01 (1 of 10).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0018",
+      "exact_quote": "0x0018  10(.)x1                             08(.)x9 01(.)x1                     DIFFER"
+    },
+    {
+      "claim": "The winner-resolving seed begins with the canonical PNG signature followed by an IHDR chunk header, so byte 0x18 lies inside the IHDR payload where bit_depth resides.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 first row",
+      "exact_quote": "0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR"
+    },
+    {
+      "claim": "cmplog's mutator stack is naive's havoc/token plus I2SRandReplace, which substitutes one CMP operand for the other at byte sequences matching the recorded operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile_cmplog adds CMP_MAP gradient bucket feedback on top of cmplog's I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Instrumentation paragraph",
+      "exact_quote": "**Instrumentation**: union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    },
+    {
+      "claim": "value_profile_cmplog's feedback adds CMP_MAP buckets that cmplog does not have.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Feedback paragraph",
+      "exact_quote": "**Feedback**: edge-bucket + CMP_MAP-bucket signals."
+    },
+    {
+      "claim": "The duration-blocked gap is enormous (vpc averages 0.05h vs cmplog 11.35h), consistent with vpc's gradient reaching the threshold quickly while cmplog spins.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "avg duration row",
+      "exact_quote": "avg duration blocked: winner=0.05h  loser=11.35h"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient, not I2SRandReplace, so lineage verification is not strictly required by the schema rules. As a sanity check I ran `python3 tools/db_query.py lineage --branch 7482 --role W --fuzzer cmplog --trial 4 --seed 89231cc67258fb77` and observed 2 I2S-floor dash rows at depths 12 and 13 — confirming that I2S contributes in cmplog's chain too, which is consistent: cmplog has I2S but lacks the value-profile gradient, so its sole resolving trial (1/10) hit the gate by luck. The vpc 10/10 outcome is attributable to the value_profile technique that cmplog lacks, not to I2S which both share."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness exposing a 1-byte CMP `x < K` where K is a literal and x is derived from one parsed input byte, run with cmplog vs value_profile_cmplog at multiple K values, where cmplog matches or exceeds vpc's resolution rate at all K. That would mean CMP_MAP gradient is NOT the differentiator and the win must come from something else."
+  },
+  "weakest_evidence_point": "Only one winner-resolving seed is available, so the claim that 0x10 is the canonical winning byte at offset 0x18 (vs other values >=16 like 0x18, 0x20, 0xff) rests on a single observation; cmplog's I2S could in principle pick any operand-matching offset for substitution, and the structural mapping (offset 0x18 = bit_depth) is inferred from the PNG IHDR layout rather than from libpng parsing code shown in the prompt.",
+  "confidence": "high"
+}

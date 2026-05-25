@@ -1,0 +1,69 @@
+{
+  "branch_id": 2692,
+  "target": "libxml2",
+  "summary_one_line": "Input must contain a ']' byte (0x5D) at the cur pointer while state==0 to set state=']' and progress to internal-subset close.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "A literal ']' byte (0x5D) must appear at a cur position while the state machine is in state==0 (outside a quoted string, not inside a comment). Reaching this gate's true side specifically requires the third disjunct `*cur == ']'` to match — i.e. byte 0x5D at the scanned offset.",
+      "why_winner_satisfies": "value_profile's CMP_MAP records a Hamming-distance bucket for the integer compare `*cur == ']'`. Inputs whose byte at the cur offset gets bit-closer to 0x5D enter a new CMP_MAP bucket and are preserved as corpus, providing a gradient that culminates in an actual ']' byte landing at the right position. Winner saw avg hitcount=9 (true side fired ~9 times per trial).",
+      "why_loser_doesnt": "naive has only edge-counter feedback — the integer comparison `*cur == ']'` is just one edge that either fires the true side or doesn't, with no partial-match gradient. Without CMP_MAP, naive never gets a reward signal for bytes that are close-but-not-equal to 0x5D, so it must stumble onto a 0x5D placement by chance and never does within 10 trials (loser blocked=8/10, resolved=0/10, hitcount=0).",
+      "mechanism_attribution": "CMP_MAP gradient feedback in value_profile's CMP-interception instrumentation rewards Hamming-distance progress toward the literal 0x5D operand of the equality compare on line 11304, building a corpus gradient that naive's pure edge feedback cannot construct."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The branch under analysis tests `*cur == ']'` as the third disjunct at parser.c:11304 col 53; the true side enables `state = *cur` which is the only path to setting state=']'.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "parser.c:11304-11305",
+      "exact_quote": "else if ((*cur == '\"') || (*cur == '\\'') || (*cur == ']')) { <-- BLOCKER\n[B] 11305              state = *cur;"
+    },
+    {
+      "claim": "value_profile resolved this branch in all 10 trials with avg hitcount=9; naive resolved in 0/10 trials with hitcount=0, and blocked in 8/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 winner/loser counts",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=0/10  blocked=8  unreached=2\n  avg duration blocked: winner=1.10h  loser=6.31h\n  avg hitcount on branch: winner=9  loser=0"
+    },
+    {
+      "claim": "The single technique difference between value_profile and naive is the CMP_MAP per-PC Hamming-distance bucket that rewards getting close to a CMP operand value.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile paragraph",
+      "exact_quote": "each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket). The distance bucket is a coarse encoding of how close the two\noperands were (Hamming distance bucket for `trace_cmp*`; matching-prefix\nlength for string/memory CMPs)."
+    },
+    {
+      "claim": "naive's feedback is only per-edge hit-count bucketing — no operand-distance signal — so it cannot reward partial-match progress toward 0x5D.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive paragraph",
+      "exact_quote": "**Feedback**: per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+    },
+    {
+      "claim": "Within xmlParseLookupInternalSubset, the W role reaches state==']' transitions (lines 11270-11272) and the state==' '+'>' success path (11277-11279), while L only reaches the state==']'+'>' return path (11263-11265) — consistent with L sometimes setting state=']' from a quote/apostrophe arm but never via the `*cur=='\\]'` disjunct that powers W.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "parser.c:11262-11280",
+      "exact_quote": "[B] 11262              if (*cur == '>') {\n[L] 11263                  ctxt->checkIndex = 0;\n[L] 11264                  ctxt->endCheckState = 0;\n[L] 11265                  return(1);\n[L] 11266              }\n[B] 11267              if (IS_BLANK_CH(*cur)) {\n[B] 11268                  state = ' ';\n[B] 11269              } else if (*cur != ']') {\n[W] 11270                  state = 0;\n[W] 11271                  start = cur;\n[W] 11272                  continue;\n[W] 11273              }\n[B] 11274          }\n[B] 11275          else if (state == ' ') {\n[B] 11276              if (*cur == '>') {\n[W] 11277                  ctxt->checkIndex = 0;\n[W] 11278                  ctxt->endCheckState = 0;\n[W] 11279                  return(1);"
+    },
+    {
+      "claim": "The branch-1 (d=1) divergence shows W explores the `*cur != ']'` branch heavily (T=12 F=0) while L never enters it (T=0 F=0), consistent with W's state machine actually visiting state==']' from the disjunct under analysis.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L11269 row",
+      "exact_quote": "d=1   L11269  T=12 F=0  T=0 F=0  } else if (*cur != ']') {"
+    },
+    {
+      "claim": "Loser seeds carry DOCTYPE prefixes ending in patterns without a ']' at the scanned cur offsets (e.g. `a SYSTEM \"dtds/...`), whereas winner seeds have richer byte variation around DOCTYPE that lands a 0x5D-byte at a scan offset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser-blocking Seed 2 (id=09c1dd84699b5feb)",
+      "exact_quote": "Seed 2 (id=09c1dd84699b5feb, size=376 bytes, fuzzer=cmplog, trial=1, discovered_at=7s, mutation_op=DwordAddMutator,WordInterestingMutator,BytesSetMutator,BytesInsertMutator,DwordInterestingMutator):\n  0000: 06 00 00 00 31 32 37 37 37 32 2e 78 6d 6c 5c 0a   ....127772.xml\\.\n  0010: 3c 3f 78 6d 6c 20 76 65 72 73 69 6f 6e 3d 22 31   <?xml version=\"1\n  0020: 2e 30 22 3f 3e 0a 3c 21 44 4f 43 54 59 50 45 20   .0\"?>.<!DOCTYPE \n  0030: 61 20 53 59 53 54 45 4d 20 22 64 74 64 73 2f 31   a SYSTEM \"dtds/1"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Lineage verification not required for CMP_MAP gradient claims — the CMP_MAP signal is a feedback/instrumentation effect, not a mutator-stage signature visible in ancestor mutation_op chains. The mechanism is supported instead by: (1) the single-technique delta is value_profile (cmplog absent from involved fuzzers — see TRIAL VECTOR), (2) the source CMP at line 11304 is an integer equality compare on a literal 0x5D that produces precisely the per-PC Hamming-distance bucket value_profile rewards, and (3) avg hitcount=9 vs 0 indicates many successful operand-equality events in W and none in L, consistent with gradient-driven discovery rather than chance."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a synthetic harness gating execution on an equality compare against a single fixed byte constant (e.g. `if (*p == 0x5D) trap()`) were run for matching budget and value_profile DID NOT reproduce the win over naive at the same N=10 trial scale (e.g. p_resolve_vp <= p_resolve_naive within MW noise), the CMP_MAP-gradient mechanism would be refuted as the dominant cause of this branch's divergence."
+  },
+  "weakest_evidence_point": "The byte-diff section shows broad divergence across many DOCTYPE-region offsets rather than a clean concentration at one offset where ']' lands in W and is absent in L, so the exact cur position where 0x5D appears in winner inputs is not pinpointed.",
+  "confidence": "high"
+}

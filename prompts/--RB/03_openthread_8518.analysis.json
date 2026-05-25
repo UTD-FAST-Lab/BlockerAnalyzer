@@ -1,0 +1,81 @@
+{
+  "branch_id": 8518,
+  "target": "openthread",
+  "summary_one_line": "Set the IPv6 traffic-class ECN bits to value 01 (kEcnCapable1) inside a direct-transmission IP6 message whose queue time exceeds the mark threshold.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "An IPv6 packet whose first-2-byte version/traffic-class field encodes ECN == kEcnCapable1 (the 2-bit ECN sub-field of the TC byte equals 01), passed to UpdateEcnOrDrop with a queue time >= kTimeInQueueMarkEcn so the switch is entered. The ECN sub-field is the only constrained input feature (2 bits, 4 possible values: NotCapable=0, Capable1=1, Capable0=2, Marked=3).",
+      "why_winner_satisfies": "value_profile's CMP_MAP gradient bucket bumps when an input nudges the ECN sub-field closer to the kEcnCapable1 constant (Hamming distance over the 2-bit field), preserving the seed as new-bucket corpus; combined with havoc/token byte mutations exploring the IPv6 header version/TC byte, the 4-value 2-bit space is exhausted cheaply (~9/10 trials resolve). The W seeds share a near-identical 92-byte template with byte 0 cycling across 0x32/0x33/0x72/0x32/0x32 — direct evidence of cheap byte-level exploration on the header byte holding the ECN bits.",
+      "why_loser_doesnt": "value_profile_cmplog runs the same CMP_MAP gradient instrumentation but its augmented mutation stage (the input-to-state substitution stage that constitutes the I2S delta between vp and vpc) spends budget rewriting bytes at the many unrelated CMP sites the cmplog buffer captures across the OpenThread codepath (link-layer addresses, mesh-header constants, fragment offsets). That displaces CMP_MAP-driven havoc exploration of the IPv6 header byte. Only 2/10 vpc trials resolve and 8/10 stay blocked, with avg blocking duration 8.75h vs 3.80h for vp.",
+      "mechanism_attribution": "The winner side (value_profile) reaches the kEcnCapable1 arm via CMP_MAP gradient bucketing on the 2-bit ECN equality CMP plus naive havoc on the IPv6 header byte. This is Pattern B (technique-hurts) on the I2S axis: vp lacks the input-to-state substitution stage while vpc has it; the 2-bit ECN gate is too narrow for that substitution stage to contribute (no multi-byte literal to substitute), so vpc pays the overhead via corpus pollution at unrelated CMP sites without compensating gain on this gate. The claimed winner technique is CMP_MAP gradient, consistent with vp's instrumentation."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The branch is the kEcnCapable1 arm of a switch on the IPv6 header ECN field, gated by shouldMarkEcn (queue-time threshold).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L273 + L57-L62",
+      "exact_quote": "            case Ip6::kEcnCapable1:"
+    },
+    {
+      "claim": "The switch reads the ECN sub-field of the IPv6 header and is only entered when timeInQueue meets the mark threshold.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L57-L60",
+      "exact_quote": "        if (shouldMarkEcn)\n        {\n            switch (ip6Header.GetEcn())"
+    },
+    {
+      "claim": "The pair decisive at this branch is value_profile vs value_profile_cmplog with delta=I2S; value_profile is the winner.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "--- Pair 1: value_profile > value_profile_cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "value_profile resolves 9/10 trials at this branch while value_profile_cmplog blocks 8/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 counts",
+      "exact_quote": "  winner: resolved=9/10  blocked=1  unreached=0\n  loser:  resolved=2/10  blocked=8  unreached=0"
+    },
+    {
+      "claim": "Average duration blocked is ~2.3x longer for vpc (8.75h) than for vp (3.80h) at this branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 durations",
+      "exact_quote": "  avg duration blocked: winner=3.80h  loser=8.75h"
+    },
+    {
+      "claim": "value_profile has CMP_MAP gradient bucketing but no I2SRandReplace mutator stage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog has all of value_profile's instrumentation PLUS an I2SRandReplace mutator stage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "The five winner-resolving seeds in the DB all share the same near-identical 92-byte structure with only the first byte and a handful of payload bytes varying (consistent with cheap byte-level havoc on the IPv6 header version/TC byte).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seeds 1-5 offsets 0x00",
+      "exact_quote": "Seed 1 (id=1959324d29f50233, size=92 bytes, fuzzer=cmplog, trial=3, discovered_at=2508s, mutation_op=QwordAddMutator):\n  0000: 32 62 5c a0 80 00 33 00 52 08 80 08 e6 e4 30 74"
+    },
+    {
+      "claim": "No loser-blocking seed data is available at this branch, so winner/loser byte-pattern divergence cannot be confirmed directly from the BYTE DIFF section.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "section body",
+      "exact_quote": "[no readable seed bytes on at least one side]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Claim is not I2SRandReplace — the winner of this pair is value_profile, which has no I2SRandReplace stage (see MECHANISM CONTEXT). For corroboration I still ran `python3 tools/db_query.py lineage --branch 8518 --role W --fuzzer cmplog --trial 3 --seed 1959324d29f50233` and observed zero I2S-floor (dash) rows across all 50 ancestor levels — every ancestor carries an explicit havoc mutator list (the tool's trailing comment reads 'No I2S-floor rows in this chain'). This is consistent with the winner-side mechanism being havoc-driven exploration of a 2-bit field with modest CMP_MAP gradient assistance, rather than I2S substitution."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness reproducing the same 2-bit equality gate behind a queue-time predicate, instrumented across N unrelated dummy CMP sites (N in {0, 16, 128}). If value_profile_cmplog matches or beats value_profile at N=0 (no pollute) AND the vp-vs-vpc gap fails to grow with N, the I2S-corpus-pollution mechanism is refuted — the loss must be coming from somewhere other than I2S budget consumed at unrelated CMPs."
+  },
+  "weakest_evidence_point": "Loser-blocking seeds were not bisected, so the winner-vs-loser byte-level divergence on the IPv6 header byte is inferred from source semantics (the ECN sub-field is the only operand of the switch) rather than directly observed in a BYTE DIFF.",
+  "confidence": "medium"
+}

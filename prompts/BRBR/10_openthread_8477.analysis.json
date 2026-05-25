@@ -1,0 +1,99 @@
+{
+  "branch_id": 8477,
+  "target": "openthread",
+  "summary_one_line": "Input must carry a fixed IPv6-header byte prefix that routes the packet through UDP/ICMP6 handlers whose handlers return a non-kErrorNone status.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A fixed multi-byte IPv6-header prefix at offsets 0x00-0x07 (W seeds share `78 66 65 5c 7[7-8] 00 10 11`, where 0x11 = kProtoUdp at the next-header byte) that lets HandlePayload reach the UDP/ICMP6 dispatch and have the chosen handler return a non-kErrorNone status so `if (error != kErrorNone)` takes the true branch at ip6.cpp:981.",
+      "why_winner_satisfies": "W seeds all carry the constant 8-byte header prefix (offsets 0x00-0x07 collapse to one or two values), routing the message into `case kProtoUdp` or `case kProtoIcmp6` and exclusively reaching the ICMP6 handler at line 972-973 and the UDP error-drop branch at line 966, which produces error != kErrorNone (winner takes T=10 at line 981, loser takes T=0).",
+      "why_loser_doesnt": "L seeds have widely varied bytes at offsets 0x00-0x07 (e.g. byte 0 spans 80/81/7f, byte 6 spans 64/29, byte 7 spans 00/29) so the IPv6 header is malformed before HandlePayload; the loser only reaches `case kProtoUdp` with successful UDP processing (error stays kErrorNone) and never exercises the ICMP6 case (line 972-973 is W-only [W] in the per-role overlay), so error remains kErrorNone and line 981 never takes the true branch in 10/10 loser trials.",
+      "mechanism_attribution": "cmplog's I2SRandReplace intercepts the multi-byte equality CMPs that parse the IPv6 header (next-header/length fields), reads the literal protocol constants from the per-execution CmpLogObserver buffer, and substitutes them into the input in one mutation step. naive and value_profile lack I2SRandReplace, so they cannot perform input-to-state substitution and must rely on havoc mutation to randomly hit a multi-byte exact prefix, which is exponentially unlikely within budget. The asymmetry is between I2S-equipped fuzzers (cmplog, vpc) and the rest, exactly matching the [delta: I2S] axis of both decisive pairs."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is `if (error != kErrorNone)` at ip6.cpp:981, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location ip6.cpp:981:9, Globally blocked side: T",
+      "exact_quote": "Source line:     if (error != kErrorNone)"
+    },
+    {
+      "claim": "Both decisive pairs share the I2S technique delta and resolve every trial vs zero loser trials.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive, Pair 2 value_profile_cmplog>value_profile",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "Pair 2 also has I2S delta, supporting single_feature classification with one shared mechanism axis.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "Only the winner reaches the ICMP6 dispatch case in HandlePayload (lines 972-973 are W-only in the per-role coverage overlay).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "ip6.cpp lines 972-973",
+      "exact_quote": "[W]   972      case kProtoIcmp6:\n[W]   973          error = mIcmp.HandleMessage(*message, aMessageInfo);"
+    },
+    {
+      "claim": "The error-true side of the blocker is reached only by W; L never takes the true branch.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "ip6.cpp line 981",
+      "exact_quote": "d=1   L 981  T=10 F=20  T=0 F=20  if (error != kErrorNone)  <-- BLOCKER"
+    },
+    {
+      "claim": "W reaches the UDP error-drop branch (line 966) nine times while L never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "ip6.cpp line 966",
+      "exact_quote": "d=1   L 966  T=9 F=20  T=0 F=20  if (error == kErrorDrop)"
+    },
+    {
+      "claim": "All five winner-resolving seeds share the leading byte 0x78 at offset 0 (10/10) while L bytes at offset 0 are 80/81/7f, evidencing a multi-byte fixed-prefix gate.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0000",
+      "exact_quote": "0x0000  78(x)x10                            80(.)x5 81(.)x4 7f(.)x1             DIFFER"
+    },
+    {
+      "claim": "Offset 0x06 is 0x10 in 10/10 W seeds but 0x64/0x29 in L seeds — a constant byte the winner must match.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0006",
+      "exact_quote": "0x0006  10(.)x10                            64(d)x6 29())x4                     DIFFER"
+    },
+    {
+      "claim": "Offset 0x07 is 0x11 (= kProtoUdp = 17) in 9/10 W seeds but 0x00 in 9/10 L seeds — the next-header protocol field.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0007",
+      "exact_quote": "0x0007  11(.)x9 2c(,)x1                     00(.)x9 29())x1                     DIFFER"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace mutator reads CmpLogObserver and substitutes one operand of the CMP into the input, enabling exact multi-byte matches in one mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S; only edge-counter feedback and havoc mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace; its CMP_MAP only buckets by Hamming/prefix distance.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 8477 --role W --fuzzer cmplog --trial 1 --seed 0396cf0f608eb8a1` and observed one I2S-floor row (mutation_op = -) at depth 21 of the 22-level ancestor chain. Tool output: `# I2S-floor signal: 1 ancestor dash row(s) at depth 21.` This is the dash-row signal that under the current LibAFL fuzzbench build is exclusive to cmplog/vpc and characteristic of an unwrapped I2SRandReplace find."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a synthetic harness that gates a true branch on an 8-byte fixed IPv6-header-shaped equality CMP (where one operand is a runtime-loaded literal at the same address each call) and a downstream handler that returns a non-success error were built, and cmplog FAILED to resolve it while naive resolved it within the same budget, the I2SRandReplace attribution would be refuted."
+  },
+  "weakest_evidence_point": "The exact CMP site whose operands I2S substitutes is not directly localized in the prompt — the chain from offset 0x06=0x10 to which OpenThread header field is parsed could be in the harness wrapper rather than in HandlePayload's call chain, so the 'multi-byte prefix' description is the right shape but the bytes may correspond to multiple smaller CMPs upstream.",
+  "confidence": "high"
+}

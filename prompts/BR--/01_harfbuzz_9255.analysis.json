@@ -1,0 +1,87 @@
+{
+  "branch_id": 9255,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must contain the literal 4-byte OpenType table tag 'GPOS' (0x47 0x50 0x4f 0x53) at the table directory offset so apply_gpos is set and fallback_kern is skipped.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A valid OpenType font header (sfnt magic 00 01 00 00 at offset 0x00) whose table directory entry contains the literal ASCII tag 'GPOS' (47 50 4f 53). When harfbuzz parses this, it locates a GPOS table and sets this->apply_gpos=true, which causes the if (this->apply_gpos) branch at line 263 to take the true side and route positioning through map.position(), making apply_fallback_kern irrelevant (and apply_kern undefined enough that the false branch of the else-if at line 274 is taken).",
+      "why_winner_satisfies": "All 5 cmplog-winning seeds carry the exact 4-byte sequence 47 50 4f 53 ('GPOS') at offsets 0x1c-0x1f together with the constant 00 01 00 00 OpenType sfnt prefix at offsets 0x00-0x03 and constant magic bytes 56 56 41 51 (VVAQ) at 0x0e-0x11 plus b9 b9 at 0x12-0x13. These are stable across all 5 W seeds despite differing havoc mutation chains, indicating the bytes were inserted/substituted as a unit rather than evolved byte-by-byte. The presence of the GPOS tag drives the per-role overlay to show line 263 'if (this->apply_gpos)' hit by W only ([W] at 264 map.position) while line 274 'else if (this->apply_fallback_kern)' takes the false branch (W: T=0 F=210).",
+      "why_loser_doesnt": "The 5 naive-blocking seeds carry no GPOS tag at all — instead they hold near-miss strings like 'frn', 'kern', 'ern' and arbitrary bytes from havoc mutation. Without the literal 4-byte 'GPOS' match in the input, harfbuzz's table-directory walk does not locate a GPOS table, so this->apply_gpos stays false, the else-if chain advances, and apply_fallback_kern is set to true (line 274 T=131 F=0 in the L cov). Naive's mutators (havoc + token stack only) have probability ~1/(256^4) of constructing the 4-byte 'GPOS' literal at the right offset by random byte mutation, so naive blocks 9/10 trials.",
+      "mechanism_attribution": "cmplog's I2SRandReplace mutator captures the 4-byte equality CMP that compares the input's table tag bytes against the constant HB_TAG('G','P','O','S')=0x47504f53 inside harfbuzz's GPOS-lookup code path. After one execution, the CmpLogObserver buffer contains both operands; I2SRandReplace then scans the input for the input-side operand and substitutes the constant 'GPOS' at that offset. Naive has no CMP interception and must hit the 4-byte literal by chance. Lineage of W seed 001af94af95ed053 shows an I2S-floor ancestor (mutation_op = -) at depth 33 in its 34-deep chain, consistent with an I2SRandReplace find followed by ~33 havoc generations refining the rest of the input. Seed 000abbc88e443f45 shows the same I2S-floor ancestor at depth 34."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The branch under analysis is else if (this->apply_fallback_kern) in hb_ot_shape_plan_t::position, and the winner takes the false side.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Source line + Globally blocked side",
+      "exact_quote": "Source line:   else if (this->apply_fallback_kern)\nGlobally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "cmplog resolves 10/10 trials while naive blocks 9/10, with a single decisive pair under the I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1: cmplog > naive [delta: I2S]",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---\n  subject 17  (cmplog vs naive, admissible)\n  winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0"
+    },
+    {
+      "claim": "All five winner-resolving seeds carry the literal ASCII bytes 'GPOS' (47 50 4f 53) at offsets 0x1c-0x1f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving seeds, offsets 0x1c-0x1f",
+      "exact_quote": "41 51 b9 b9 01 01 ff ff fe f2 1a 20 47 50 4f 53   AQ......... GPOS"
+    },
+    {
+      "claim": "All five W seeds share a constant 00 01 00 00 OpenType sfnt magic prefix at offsets 0x00-0x03.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x00-0x03",
+      "exact_quote": "   0x0000  00(.)x10                            00(.)x5 01(.)x1 4b(K)x1 6d(m)x1 +2u  PARTIAL\n   0x0001  01(.)x10                            00(.)x2 20( )x1 01(.)x1 47(G)x1 +5u  PARTIAL\n   0x0002  00(.)x10                            00(.)x6 7a(z)x1 01(.)x1 1a(.)x1 +1u  PARTIAL\n   0x0003  00(.)x10                            00(.)x4 ff(.)x2 04(.)x1 80(.)x1 +2u  PARTIAL"
+    },
+    {
+      "claim": "The 'GPOS' 4-byte tag is present in W seeds and essentially absent (random bytes) in L seeds, at the same offsets.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x1c-0x1f",
+      "exact_quote": "   0x001c  47(G)x10                            00(.)x5 1a(.)x1 56(V)x1 0c(.)x1 +2u  DIFFER\n   0x001d  50(P)x10                            00(.)x2 20( )x2 55(U)x1 0c(.)x1 +4u  DIFFER\n   0x001e  4f(O)x10                            00(.)x4 20( )x1 55(U)x1 02(.)x1 +3u  DIFFER\n   0x001f  53(S)x10                            00(.)x3 01(.)x2 ff(.)x1 3c(<)x1 +3u  DIFFER"
+    },
+    {
+      "claim": "The SOURCE CONTEXT overlay confirms W takes the apply_gpos=true path (line 263 true, line 264 map.position called) while L flows to the apply_fallback_kern call site (line 275).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 263-275 of hb-ot-shape.cc",
+      "exact_quote": "[B]   263    if (this->apply_gpos)\n[W]   264      map.position (this, font, buffer);\n[L]   265  #ifndef HB_NO_AAT_SHAPE\n[L]   266    else if (this->apply_kerx)"
+    },
+    {
+      "claim": "On the call chain at the blocker line, W takes the false side every time while L takes the true side every time.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L274",
+      "exact_quote": "  d=1   L 274  T=0 F=210  T=131 F=0  else if (this->apply_fallback_kern)  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser-blocking seeds contain near-miss kern-related strings rather than the GPOS tag (e.g. 'frn', 'kern', 'ern').",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seeds 1, 2, 3",
+      "exact_quote": "  0000: 00 00 00 04 00 ff 00 00 00 66 72 6e 20 20 20 20   .........frn    "
+    },
+    {
+      "claim": "cmplog's mutator stack includes I2SRandReplace, which substitutes the other operand of an intercepted CMP into the input at the matching offset.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "Naive has no I2S facility — its mutator stack is havoc + tokens only.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op paragraph",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 9255 --role W --fuzzer cmplog --trial 1 --seed 001af94af95ed053` and observed an I2S-floor row (mutation_op = -) at depth 33 of the 34-deep ancestor chain. Re-ran on a second winning seed (000abbc88e443f45) and observed the same I2S-floor ancestor at depth 34. Both winning seeds therefore descend from a common I2S find — consistent with I2SRandReplace planting the 4-byte 'GPOS' literal early in the chain, after which ~30+ havoc generations refined surrounding bytes without disturbing the magic tag."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness that hides the GPOS tag behind a non-CMP transform (e.g. compares input bytes to a hash of 'GPOS' rather than to the literal bytes) on which cmplog still resolves the apply_gpos=true path within the same wall-clock budget as the unhashed version. That would show the resolution did not require I2S substitution of a literal CMP."
+  },
+  "weakest_evidence_point": "The 5 W seeds also share constant runs (56 56 41 51 b9 b9 ...) outside the GPOS tag region, which means the apply_gpos path may also require additional structural constraints (a valid table directory entry with offset/length fields pointing at a parseable GPOS body) beyond just the 4-byte tag — so the minimum sufficient input feature could be wider than 'GPOS literal'.",
+  "confidence": "high"
+}

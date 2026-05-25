@@ -1,0 +1,81 @@
+{
+  "branch_id": 7376,
+  "target": "libpng",
+  "summary_one_line": "Input must contain a PNG chunk whose 4-byte type field equals the ASCII magic 'eXIf' with declared length < 2.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A PNG chunk-type field (4 bytes at the chunk header) equal to the ASCII literal 'eXIf' (0x65 0x58 0x49 0x66) followed by a length-prefix < 2, so the dispatcher routes to png_handle_eXIf and the (length < 2) true side fires.",
+      "why_winner_satisfies": "value_profile_cmplog seeds carry the 4-byte 'eXIf' literal at the chunk-type offset (e.g. bytes '65 58 49 66' at offset 0x35-0x38 in 5 of 6 W seeds), so OSS_FUZZ_png_handle_eXIf is actually invoked and the (length < 2) branch is reached and taken true 6 times.",
+      "why_loser_doesnt": "value_profile seeds never plant the 4-byte 'eXIf' chunk-type literal; at the corresponding chunk-type offset all 10 L seeds carry 'sRGB' (0x73 0x52 0x47 0x42), so the eXIf handler is never entered and the (length<2) branch's true side is taken 0 times by L (avg hitcount on branch loser=0).",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile. The CMP that gates dispatch to png_handle_eXIf is an equality check of the parsed chunk-type word against the constant 0x66495865 ('eXIf'); cmplog logs that CMP's operand pair, then I2SRandReplace substitutes the 4-byte constant directly into a corpus seed at the byte position the CMP read from. value_profile alone has only the CMP_MAP Hamming-distance gradient — a 4-byte equality on an arbitrary FOURCC offers a flat gradient (any of 2^32 wrong values is equidistant), so VP cannot climb to the exact match within budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the relational compare 'if (length < 2)' at pngrutil.c:2047 inside OSS_FUZZ_png_handle_eXIf, blocked on the true side.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "pngrutil.c:2047, blocked_side=T",
+      "exact_quote": "Source line:    if (length < 2)"
+    },
+    {
+      "claim": "value_profile_cmplog resolves this branch in 10/10 trials while value_profile blocks in 10/10 trials, with prob_div=1.00 and the loser's avg hitcount on the branch is 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 subject 12",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "Loser blocking seeds never reach the eXIf handler — they take the (length<2) compare's true side 0 times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2047",
+      "exact_quote": "d=1   L2047  T=6 F=1  T=0 F=14  if (length < 2)  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the 4-byte ASCII 'eXIf' literal at offsets 0x35-0x38 (5 of 6 W seeds).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x35-0x38",
+      "exact_quote": "   0x0035  65(e)x5 73(s)x1                     73(s)x10                            PARTIAL"
+    },
+    {
+      "claim": "Loser-blocking seeds carry the 'sRGB' chunk-type FOURCC at the same offsets instead of 'eXIf'.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x35-0x38, L side all 10 seeds",
+      "exact_quote": "   0x0038  66(f)x5 42(B)x1                     42(B)x10                            PARTIAL"
+    },
+    {
+      "claim": "Winner seed hex dumps show the 'eXIf' magic bytes at offset 0x35.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 id=7b07952999c1e352, bytes at 0x35-0x38",
+      "exact_quote": "0030: 05 00 00 00 01 65 58 49 66 01 d9 c9 2c 7f 00 00   .....eXIf...,..."
+    },
+    {
+      "claim": "Loser seeds at the equivalent offset hold the 'sRGB' FOURCC, not 'eXIf'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 id=20f01791fb2f96bf",
+      "exact_quote": "0030: 05 00 00 00 01 73 52 47 42 01 d9 c9 2c 7f 00 00   .....sRGB...,..."
+    },
+    {
+      "claim": "value_profile_cmplog carries the I2SRandReplace mutator that cmplog and vpc share, on top of value_profile's CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile alone has no I2SRandReplace mutator — only CMP_MAP gradient + havoc/token mutations.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 7376 --role W --fuzzer cmplog --trial 1 --seed 7b07952999c1e352` and observed exactly one I2S-floor dash row (mutation_op = -) at depth 4 of the 5-level ancestor chain, which under the current LibAFL build is the lower-bound signature of an I2SRandReplace find for cmplog/vpc. The 4-byte chunk-type FOURCC ('eXIf') is the natural I2S substitution candidate for the chunk-dispatch equality CMP that gates entry to png_handle_eXIf."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A controlled sweep where the program-side chunk-type equality CMP is replaced by a non-CMP dispatch (e.g. a 4-byte XOR-and-test or a hash lookup that does not emit a single 4-byte equality CMP) at the same difficulty; if value_profile_cmplog still beats value_profile under that opaque dispatch with no other change, I2SRandReplace on the FOURCC constant cannot be the explanation."
+  },
+  "weakest_evidence_point": "The byte-diff is observed at the absolute byte offset 0x35 in the seeds, but the libpng chunk dispatcher actually reads the chunk-type FOURCC at a position computed from preceding chunk-length fields, so the claim that I2SRandReplace plants the FOURCC at the chunk-type slot (rather than via a chain of upstream length/CRC adjustments) is inferred from seed bytes plus mechanism, not directly verified by intercepting the cmplog CMP record for this branch.",
+  "confidence": "high"
+}

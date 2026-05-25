@@ -1,0 +1,81 @@
+{
+  "branch_id": 8529,
+  "target": "openthread",
+  "summary_one_line": "Input must encode an IPv6 multicast destination equal to ff32::1 or ff33::1 (Thread well-known all-thread-nodes addresses).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The IPv6 header destination field (16 bytes) must compare-equal to one of two well-known Thread multicast addresses: LinkLocalAllThreadNodes (ff32:...:0001) or RealmLocalAllThreadNodes (ff33:...:0001). The seeds must first encode a Type=Ip6 message with a multicast destination not larger than realm-local and not MPL-retransmission subtype, then place the 16-byte multicast address literal at the destination offset of the embedded IPv6 header.",
+      "why_winner_satisfies": "Winner-resolving seeds carry the 16-byte FF32-prefixed multicast address literal verbatim — e.g. seed dfad99a60a0fc48e contains 'ff 32 00 40 fd de ad 00 be ef 00 00 00 00 00 01' at offsets 0x18-0x27 and seed ca90f41f741f4e23 contains the same pattern at 0x19-0x28, exactly matching the operand returned by mle.GetLinkLocalAllThreadNodesAddress().",
+      "why_loser_doesnt": "Loser-blocking seeds reach the same site (line 81 fires T=0 F=67 in L) but the destination bytes do not match either fixed multicast address; their payloads after the header offset are dominated by zero runs or unrelated bytes (e.g. seed 009333ba20c255f4 is mostly NULs at the address position), so both 16-byte equality comparisons fail and control flows to the unicast-else / for-loop path at lines 96-103.",
+      "mechanism_attribution": "cmplog's CMP instrumentation intercepts the 16-byte address equality (a memcmp / Address::operator== chain). I2SRandReplace then reads the per-execution CMP buffer, locates the runtime operand (the well-known multicast address constant retrieved from mle), and substitutes it into matching offsets of the input, planting the literal address bytes naive cannot synthesize from blind havoc."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a 128-bit IPv6 destination address equality comparison against a Thread well-known multicast constant.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Source line",
+      "exact_quote": "if (ip6Header.GetDestination() == mle.GetLinkLocalAllThreadNodesAddress() ||"
+    },
+    {
+      "claim": "A second equality with the realm-local-all-thread-nodes address gates the same arm; both constants must be matched (one of two).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 82",
+      "exact_quote": "ip6Header.GetDestination() == mle.GetRealmLocalAllThreadNodesAddress())"
+    },
+    {
+      "claim": "The branch is preceded by a multicast-and-not-larger-than-realm-local gate, so the destination must already be a small-scope multicast address before the equality check fires.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 67-73",
+      "exact_quote": "if (!ip6Header.GetDestination().IsMulticastLargerThanRealmLocal())"
+    },
+    {
+      "claim": "The winning seed dfad99a60a0fc48e contains the FF32-prefixed multicast address literal verbatim within its bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed dfad99a60a0fc48e offsets 0x18-0x27",
+      "exact_quote": "ff 32 00 40 fd de ad   \\x3b\\xG.\\.2.@..."
+    },
+    {
+      "claim": "The same FF32-prefixed multicast pattern appears in the second cmplog-trial-1 winner, ending in 00 01 — exactly the canonical LinkLocalAllThreadNodes terminator.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed ca90f41f741f4e23 offsets 0x19-0x28",
+      "exact_quote": "30 ff 32 00 40 fd de ad   ..VF.$..0.2.@..."
+    },
+    {
+      "claim": "Loser seeds reach the comparison but never take the true branch — line 81 fires T=2 F=12 in W versus T=0 F=67 in L.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L 81",
+      "exact_quote": "d=1   L  81  T=2 F=12  T=0 F=67  if (ip6Header.GetDestination() == mle.GetLinkLocalAllThre..."
+    },
+    {
+      "claim": "The cmplog vs naive pair is admissible and decisive at this branch with prob_div=0.80 and subject p_AUC=0.0002.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 subject 13",
+      "exact_quote": "prob_div=0.80  dur_div=8.95h  hit_div=2"
+    },
+    {
+      "claim": "I2SRandReplace works by substituting one CMP operand into the input at offsets matching the other operand, which is how a 16-byte fixed multicast address constant from a runtime call gets planted.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "Naive has no CMP introspection and only havoc/token mutations, so it cannot synthesize a 16-byte fixed multicast literal except by improbable random construction.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators / Observed mutation_op",
+      "exact_quote": "Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 8529 --role W --fuzzer cmplog --trial 1 --seed dfad99a60a0fc48e` and observed an I2S-floor row (mutation_op = -) at depth 17 of the chain (ancestor 4578ba613b6d1a35); cross-checked with seed ca90f41f741f4e23 which shares the SAME I2S-floor ancestor 4578ba613b6d1a35 at depth 18 — i.e. both winning trial-1 seeds descend from a common I2SRandReplace find."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a 16-byte equality CMP against a fixed constant where cmplog fails to resolve significantly more often than naive within the same budget — i.e. observing naive-vs-cmplog resolution probability difference <0.2 at MAGIC_BYTES=16 with default trial duration would falsify the I2S-substitution attribution."
+  },
+  "weakest_evidence_point": "The 16-byte multicast address may be wired through a method call chain (Address::operator==) rather than a single memcmp callback; if cmplog's CMP instrumentation does not actually intercept this chain as a single 16-byte operand pair, the I2S signal would have to come from a smaller sub-comparison and the dose-response curve under MAGIC_BYTES=16 might behave differently than predicted.",
+  "confidence": "high"
+}

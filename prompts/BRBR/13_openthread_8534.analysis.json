@@ -1,0 +1,99 @@
+{
+  "branch_id": 8534,
+  "target": "openthread",
+  "summary_one_line": "Input must encode an IPv6 address with mesh-local prefix AND the 0x000000FFFE00 routing-locator IID anchor at the IID middle bytes.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "An IPv6 address whose lower 64 bits (IID) match the routing-locator anchor pattern 0x0000:00FF:FE00:XXXX (the modified EUI-64 with the fixed 'FF FE' middle marker and zero high-IID bytes) AND whose upper bits satisfy IsMeshLocalAddress. Concretely the winner seeds carry a 4-byte equality-gated run '00 00 00 00 ff fe 00' at offsets 0x1f-0x25 plus the 'be ef' / mesh-local prefix bytes at offsets 0x08-0x09 and 0x1d-0x1e.",
+      "why_winner_satisfies": "All five cmplog winner seeds have the identical concentrated multi-byte run '00 be ef 00 00 00 00 00 ff fe 00' across offsets 0x1c-0x26 (W shows that pattern with count 10/10 at offsets 0x19-0x26), which is the literal anchor compared inside the IsMeshLocalAddress and IsRoutingLocator predicate.",
+      "why_loser_doesnt": "Naive/value_profile loser seeds at the same offsets 0x19-0x26 carry varied bytes dominated by 'ff' and ')' (0x29) padding with no occurrence of the 'ff fe 00' middle marker — without that 16-bit anchor and the mesh-local prefix, the && short-circuits at IsMeshLocalAddress(aAddress) returning false. The aggregate hitcount of the true branch is 134/167 for winners and 0 for losers.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the per-execution CMP buffer recorded by integer-CMP interception when IsMeshLocalAddress and IsRoutingLocator perform their address-prefix and IID equality comparisons, then substitutes the literal mesh-local prefix and the 0xFFFE IID anchor into the input at the offsets where the loser carried random havoc bytes. Naive and value_profile lack I2SRandReplace; value_profile's CMP_MAP Hamming-distance gradient on a wide multi-byte address compare provides no clean gradient because the anchor is a fixed concatenation of constants spanning 8+ bytes, so even VP fails to drive the input to the exact pattern within budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The branch is a boolean conjunction gating on both an address-prefix check and an IID routing-locator check.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "mle.cpp:3835",
+      "exact_quote": "return IsMeshLocalAddress(aAddress) && aAddress.GetIid().IsRoutingLocator();"
+    },
+    {
+      "claim": "Both decisive pairs are under the I2S technique axis with the augmented fuzzer winning 10/10 and the loser blocked.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "cmplog resolves 10/10 trials and naive blocks in 9/10 trials at this branch.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "rows for cmplog and naive",
+      "exact_quote": "cmplog                          10        0          0  winner (I2S vs naive)"
+    },
+    {
+      "claim": "Winner-resolving seeds share a multi-byte anchor 'be ef 00 ... 00 ff fe 00' spanning offsets 0x08 through 0x26.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 winner-resolving",
+      "exact_quote": "0020: 00 00 00 00 ff fe 00 80 00"
+    },
+    {
+      "claim": "The winner-side byte sets at offsets 0x19-0x1b are unanimous '\\xfd\\xde\\xad' across all 10 sampled winner seeds, indicating a literal multi-byte equality constraint inside the predicate.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x19-0x1b",
+      "exact_quote": "0x0019  fd(.)x10                            ff(.)x10                            DIFFER"
+    },
+    {
+      "claim": "The winner side has unanimous 'be ef 00' bytes at offsets 0x1c-0x1e while losers vary.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x1c-0x1e",
+      "exact_quote": "0x001d  be(.)x10                            13(.)x5 00(.)x3 30(0)x1 65(e)x1     DIFFER"
+    },
+    {
+      "claim": "Winner inputs are unanimous '\\xff\\xfe' at offsets 0x24-0x25, the fixed middle marker of the modified EUI-64 IID identifying a routing locator.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x24-0x25",
+      "exact_quote": "0x0024  ff(.)x10                            30(0)x5 29())x1 90(.)x1 0e(.)x1 +2u  PARTIAL"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes one CMP operand with the other after scanning the input, which is exactly the operator needed to plant the FF:FE anchor at the correct offset.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive's mutator stack contains no I2S substitution mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and relies only on CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "The blocker's true branch hits zero in losers and 134 in value_profile_cmplog winners on average.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 avg hitcount",
+      "exact_quote": "avg hitcount on branch: winner=134  loser=0"
+    },
+    {
+      "claim": "The blocker line is hit by both W and L sets, but the true outcome differs — W takes the true path 42 times while L takes false 10 times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L3835",
+      "exact_quote": "d=1   L3835  T=42 F=0  T=0 F=10  return IsMeshLocalAddress(aAddress) && aAddress.GetIid()....  <-- BLOCKER"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 8534 --role W --fuzzer cmplog --trial 1 --seed 2d0d9b87803c3479` and observed an I2S-floor row (mutation_op = -, ancestor 4578ba613b6d1a35) at depth 6 of the chain; also ran the lineage on seed 437431defc4c318e and observed the same I2S-floor ancestor 4578ba613b6d1a35 at depth 22 (the two winning seeds share the I2S progenitor). Dash rows are exclusive to cmplog/vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness implementing the same IsMeshLocalAddress && IsRoutingLocator gate at offsets 0x18-0x27 of the input where, at 12h budget × 10 trials, naive resolves the trap with the same probability as cmplog — that would show the multi-byte anchor is reachable by havoc alone and the I2S substitution is not the mechanism."
+  },
+  "weakest_evidence_point": "I claim the mesh-local prefix is the 'be ef' bytes at offsets 0x08 and 0x1d, but those bytes could be a coincidental marker in this test harness rather than the literal Thread mesh-local prefix constant; without reading mle.cpp's IsMeshLocalAddress implementation I cannot verify which exact constant is compared.",
+  "confidence": "high"
+}

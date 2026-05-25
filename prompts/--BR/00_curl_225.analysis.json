@@ -1,0 +1,101 @@
+{
+  "branch_id": 225,
+  "target": "curl",
+  "summary_one_line": "Input must drive the mime/userheaders code path so part->userheaders is a non-NULL curl_slist when search_header iterates it.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": [
+        "value_profile_cmplog>value_profile (I2S)"
+      ],
+      "what_input_feature": "Input must contain the literal protocol selector bytes that route the fuzz harness into the mime/SMTP-userheader code path (e.g. the `pop3` token at offsets 0x06-0x09 plus the framing/length fields at 0x00-0x05 and 0x1c-0x20), so the caller Curl_mime_prepare_headers receives a non-NULL part->userheaders list and the for-loop body at line 350 actually executes.",
+      "why_winner_satisfies": "All five winner-resolving seeds carry the exact 4-byte literal `pop3` at offsets 0x06-0x09 and consistent framing bytes (00 01 00 00 00 19 at 0x00-0x05; 0x47 = 'G' at offset 0x24), and the per-role overlay shows line 351 (match_header call) hit only by W with 48 invocations of match_header in W vs 0 in L.",
+      "why_loser_doesnt": "Loser-blocking seeds (all from naive) have scrambled bytes at the same offsets (no concentrated `pop3` literal; offset 0x06 has 70(p)x7 6f(o)x1 2d(-)x1 64(d)x1 and offset 0x09 has 33(3)x6 plus three other values), so the protocol-selection CMPs in the harness reject these inputs and the mime/userheader chain is never reached; consequently hdrlist is NULL at line 350 and the loop body never runs (T=0 hits in L at the blocker).",
+      "mechanism_attribution": "The pair delta is I2SRandReplace: value_profile_cmplog adds the cmplog CMP buffer and the I2SRandReplace mutator on top of value_profile's existing instrumentation. The harness compares the input prefix against fixed protocol literals like `pop3`; I2SRandReplace reads those operands out of the CMP buffer and substitutes them into the input verbatim, materializing the multi-byte literal in a single mutation. Without I2SRandReplace, value_profile must synthesize the 4-byte equality match by blind havoc, since prefix-distance feedback is all-or-nothing on the literal."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the for-loop predicate in search_header at mime.c:350, blocked side T (loop body).",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location header",
+      "exact_quote": "Location: /src/curl/lib/mime.c:350:19"
+    },
+    {
+      "claim": "The blocker source line is the for-loop that iterates the user-headers list.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Source line",
+      "exact_quote": "for(; !value && hdrlist; hdrlist = hdrlist->next)"
+    },
+    {
+      "claim": "Only the value_profile_cmplog > value_profile (I2S) pair is decisive at this branch; cmplog and naive are reference fuzzers.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner resolves every trial; loser blocks every trial — prob_div is 1.00.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 stats",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "Line 351 (the body that calls match_header) is hit only by winner-resolving seeds.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "mime.c line 351",
+      "exact_quote": "[W]   351      value = match_header(hdrlist, hdr, len);"
+    },
+    {
+      "claim": "search_header is called from Curl_mime_prepare_headers with part->userheaders as hdrlist, so a NULL userheaders list keeps the loop body unentered.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "Caller line 1791",
+      "exact_quote": "customct = search_header(part->userheaders, STRCONST(\"Content-Type\"));"
+    },
+    {
+      "claim": "match_header was invoked 48 times under the W seed set and 0 times under L — winner builds and walks a non-empty userheaders list while loser never gets there.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "match_header row",
+      "exact_quote": "48         0  mime.c:match_header  (/src/curl/lib/mime.c:335-342)"
+    },
+    {
+      "claim": "At the blocker line, W took the true side 48 times and false 60; L took true 0 times — the loop body is the diverging side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L 350 row",
+      "exact_quote": "d=1   L 350  T=48 F=60  T=0 F=60  for(; !value && hdrlist; hdrlist = hdrlist->next)  <-- BLOCKER"
+    },
+    {
+      "claim": "All five winner-resolving seeds contain the literal `pop3` token at offsets 0x06-0x09 (concentrated `33(3)x10` at 0x09).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0009",
+      "exact_quote": "0x0009  33(3)x10                            33(3)x6 00(.)x2 76(v)x1 2e(.)x1     PARTIAL"
+    },
+    {
+      "claim": "Winner-resolving seeds tend to carry SMTP-style header bytes (`GFrom: me@` substring) at offsets 0x24+, the userheaders payload that populates part->userheaders.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 offset 0x20",
+      "exact_quote": "0020: 0d 00 00 00 47 46 72 6f 6d 3a 20 6d 65 40 2e 6f   ....GFrom: me@.o"
+    },
+    {
+      "claim": "value_profile_cmplog has I2SRandReplace as part of its mutator set on top of CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace; it has only edge feedback + CMP_MAP gradient + havoc/token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 225 --role W --fuzzer cmplog --trial 1 --seed 039ae17b8f83392b`; the ancestor chain has 10 recorded levels and the trailing 'I2S-floor signal' line reports exactly one dash row (mutation_op = -) at depth 9. Per fuzzer_mechanism_library.md cmplog/vpc sections, dash rows are exclusive to cmplog and value_profile_cmplog under the current LibAFL build and indicate an unwrapped I2SRandReplace find (lower-bound floor). Cmplog (REFERENCE here) resolves 10/10, and the decisive vpc-vs-vp pair shares the same I2S delta, so this lineage corroborates the I2SRandReplace attribution for the decisive pair as well."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose only gate to the search_header loop is an equality CMP on a multi-byte literal should reproduce the vpc > vp gap at MAGIC_BYTES = 4 but eliminate it at MAGIC_BYTES = 1; if value_profile resolves at MAGIC_BYTES = 4 as quickly as value_profile_cmplog (i.e. CMP_MAP gradient alone clears a 4-byte equality), the I2SRandReplace attribution is wrong."
+  },
+  "weakest_evidence_point": "The I2S-floor verification was run against a cmplog (REFERENCE) seed because that is what the BRANCH SEEDS section stores for this branch; I have not directly inspected a value_profile_cmplog lineage on this branch (no vpc seed was stored by seed_bisect), so the I2SRandReplace attribution for the actual decisive pair vpc>vp is inferred from the shared I2S delta and matching mechanism context rather than verified on a vpc winning seed.",
+  "confidence": "medium"
+}

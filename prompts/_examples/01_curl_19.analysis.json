@@ -1,0 +1,37 @@
+{
+  "branch_id": 19,
+  "target": "curl",
+  "summary_one_line": "Winners produce input bytes that materialize a Curl writer_stack before cleanup.",
+  "pair_decision": "single_feature",
+  "hypotheses": [{
+    "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+    "what_input_feature": "Input must trigger Curl_unencode_write path so writer_stack is non-NULL at cleanup time",
+    "why_winner_satisfies": "Winner inputs successfully parse a Content-Encoding header causing writer chain to be built",
+    "why_loser_doesnt": "Loser inputs fail upstream parsing so writer_stack is never populated",
+    "mechanism_attribution": "I2SRandReplace substitutes literal byte sequences from CMP operands so the Content-Encoding parser path is reached"
+  }],
+  "evidence_trail": [
+    {"claim": "The blocker is at content_encoding.c:1016 while(writer)",
+     "cited_section": "BLOCKER",
+     "cited_locator": "Location header",
+     "exact_quote": "Location: /src/curl/lib/content_encoding.c:1016:9"},
+    {"claim": "Losers reach line 1016 but never enter the loop body",
+     "cited_section": "SOURCE CONTEXT",
+     "cited_locator": "lines 1017-1020",
+     "exact_quote": "[W]  1017      k->writer_stack = writer->downstream;"},
+    {"claim": "Cmplog's mutator stack includes I2SRandReplace",
+     "cited_section": "MECHANISM CONTEXT",
+     "cited_locator": "cmplog mutators",
+     "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"}
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 19 --role W --fuzzer cmplog --trial 1 --seed 006459fd40731a4e`; chain has 21 ancestor levels; depths 19 and 20 are I2S-floor rows (mutation_op = -, ParentInfo-only metadata). Per fuzzer_mechanism_library.md cmplog section, dash rows are exclusive to cmplog/vpc under the current LibAFL build and indicate an unwrapped I2SRandReplace find (lower bound — some I2S finds leak into the havoc bucket)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a hand-crafted input that takes the F branch at line 1016 by setting writer_stack via a different code path (e.g., not via Content-Encoding) yields cleanup with writer=NULL, the writer-stack hypothesis is incomplete."
+  },
+  "weakest_evidence_point": "Floor signal is a lower bound — the cited dash rows confirm I2S contributed somewhere in the ancestry, but the immediate leaf mutation was havoc, so we cannot prove the *byte that unlocked* the gate came from I2S vs from later havoc on an I2S-seeded ancestor.",
+  "confidence": "medium"
+}

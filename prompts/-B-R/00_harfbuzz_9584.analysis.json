@@ -1,0 +1,81 @@
+{
+  "branch_id": 9584,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must produce a glyph stream whose current codepoint equals 0x0A85 inside the HB_SCRIPT_GUJARATI per-character switch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "After font/cmap parsing routes the buffer to HB_SCRIPT_GUJARATI, the current glyph's codepoint (a 32-bit value compared inside a switch) must equal the literal 0x0A85u. The CMP at line 172 is `buffer->cur().codepoint == 0x0A85u`; loser inputs do reach the Gujarati per-glyph loop (line 167 F=0 W=45, F=0 L=150) but their codepoints fall through to the default arm.",
+      "why_winner_satisfies": "Winning seeds contain the literal little-endian bytes `85 0a` adjacent in the payload (e.g. seed 07e89a36cf4fe8ee begins `85 0a 00 00`, and seed 33370b3cd9a8dde4 has `85 0a` at offset 0x2a). At line 172 the W overlay shows T=3 F=42 — the true branch fires only under W, confirming a codepoint==0x0A85 outcome.",
+      "why_loser_doesnt": "Loser inputs reach HB_SCRIPT_GUJARATI (line 166 T=10 F=0 under L) and iterate the loop 150 times (line 167 T=150) but never produce codepoint 0x0A85 — at line 172 L shows T=0 F=150, so every glyph falls through to the 0x0AC5 arm or default. None of the five loser seeds carry the byte pair `85 0a` together.",
+      "mechanism_attribution": "The decisive delta between vpc (winner) and cmplog (loser) is value_profile, i.e. the CMP_MAP gradient bucket. cmplog has the input-to-state mutator and naive havoc but no Hamming/prefix-distance feedback, so it gets no gradient credit for getting closer to 0x0A85; vpc has the same comparison-substitution kit plus CMP_MAP, so every approach toward the constant (e.g. flipping one byte from 0x0B to 0x0A or from 0x84 to 0x85) is rewarded as new feedback and survives in the corpus. The mechanism enabling vpc here is the CMP_MAP gradient feedback signal, not input-to-state byte substitution."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair at this branch is value_profile_cmplog>cmplog with delta value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The branch under analysis is a switch case comparing the current glyph codepoint against the literal 0x0A85u.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L172",
+      "exact_quote": "case 0x0A85u: <-- BLOCKER"
+    },
+    {
+      "claim": "The enclosing case fires only after the buffer's script is HB_SCRIPT_GUJARATI.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L166",
+      "exact_quote": "case HB_SCRIPT_GUJARATI:"
+    },
+    {
+      "claim": "Loser inputs do reach the Gujarati case and iterate the per-glyph loop but never fire the 0x0A85 arm.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L172 row",
+      "exact_quote": "d=1   L 172  T=3 F=42  T=0 F=150  case 0x0A85u:  <-- BLOCKER"
+    },
+    {
+      "claim": "Winning seed 07e89a36cf4fe8ee begins with the little-endian byte pair 85 0a (encoding codepoint 0x0A85).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 2",
+      "exact_quote": "0000: 85 0a 00 00 e8 03 20 20 20 20 20 20 20 20 20 df"
+    },
+    {
+      "claim": "Winning seed 33370b3cd9a8dde4 also embeds the byte pair 85 0a in its payload.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 offset 0x20",
+      "exact_quote": "0020: 20 1a 1a 20 70 20 20 0a 20 20 85 0a 00 00 e8 03"
+    },
+    {
+      "claim": "Loser seeds reach the Gujarati per-glyph loop the expected number of times (150 iterations).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L167",
+      "exact_quote": "d=1   L 167  T=45 F=3  T=150 F=10  for (buffer->idx = 0; buffer->idx + 1 < count && buffer->..."
+    },
+    {
+      "claim": "value_profile_cmplog adds CMP_MAP gradient buckets on top of cmplog's I2S kit.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Instrumentation",
+      "exact_quote": "**Instrumentation**: union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    },
+    {
+      "claim": "cmplog (the loser) has I2SRandReplace and naive havoc/token mutators but no CMP_MAP gradient feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Feedback",
+      "exact_quote": "**Feedback**: same edge-bucket signal as naive. The CMP buffer is\nconsumed by the mutator, not by feedback."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Lineage check is mandatory only when claimed_mechanism=I2SRandReplace. Here the decisive delta is value_profile (CMP_MAP gradient), distinguishing vpc (winner) from cmplog (loser); both have I2S, so I2S cannot be the differentiator. No db_query.py lineage call was issued because the I2S-floor signal would not discriminate between the two arms of this pair (both fuzzers have I2SRandReplace). The verdict relies on the technique-delta logic plus the per-role overlay (line 172 T=3 under W, T=0 under L) and the BRANCH SEEDS evidence of 85 0a byte pairs in winners."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a single `if (read_u32_le(input) == 0x0A85u) trap();` gate run for the same duration showing cmplog reaching the trap at the same rate as value_profile_cmplog (i.e., no separation between the I2S-only fuzzer and the I2S+CMP_MAP fuzzer on a single direct equality gate against this constant)."
+  },
+  "weakest_evidence_point": "The mapping from raw input bytes to `buffer->cur().codepoint` goes through harfbuzz's font/cmap parser, so the literal `85 0a` bytes in winning seeds may be load-bearing for an upstream cmap CMP rather than the line-172 comparison; the CMP_MAP gradient attribution stands on the value_profile technique-delta alone, not on a verified taint path.",
+  "confidence": "medium"
+}

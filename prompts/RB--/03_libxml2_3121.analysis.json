@@ -1,0 +1,87 @@
+{
+  "branch_id": 3121,
+  "target": "libxml2",
+  "summary_one_line": "Input must drive enough element/text-node frees per run to push freeElemsNr past MAX_FREE_NODES (runtime counter, not a literal byte gate).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "An XML document that, when read by the textreader, produces enough element/text node frees within a single parse such that the cumulative freeElemsNr counter reaches MAX_FREE_NODES — typically achieved by a deep or wide tree of element/text nodes (many sibling tags, nested children, or repeated parse cycles) so xmlTextReaderFreeNodeList's inner while-loop iterates many tens of times. The branch condition compares a runtime accumulator against a compile-time constant, so no single input byte can be substituted to flip it; the input must instead exercise the parse path enough times.",
+      "why_winner_satisfies": "Naive's pure havoc mutator pool (BytesExpand, Crossover, Token*, Byte*Mutator) produces a structurally diverse corpus, and at line 312-315 (the descend-into-children while loop) the winner takes the children-non-null branch 158/0 times vs the loser's 66/0 — i.e. each winner invocation walks the node tree more than twice as deeply, so freeElemsNr accumulates past the cap within one run.",
+      "why_loser_doesnt": "cmplog's loser seeds are all anchored on the '127772.xml' SYSTEM-URL byte sequence (visible across loser seeds 1-5 at offsets ~0x04..0x0d), which is the I2SRandReplace substitution target from the DOCTYPE/SYSTEM parser CMPs. This pulls the cmplog corpus toward shallow parser-stage inputs that get rejected before producing deep element trees, so the freeElemsNr counter never accumulates: the loser reaches the blocker line 50/0 (T/F) — never the F side — vs winner 100/20.",
+      "mechanism_attribution": "The winner is naive, which has no CMP introspection at all (no input-to-state mutator, no CMP_MAP). Its advantage here is the absence of I2S-driven corpus pollution: cmplog's substitution operator concentrates the corpus around inputs that satisfy literal parser CMPs (file-extension/keyword tokens), starving exploration of the deeper-tree state space that this runtime-counter gate actually needs. The differentiating mechanism is therefore plain havoc — diversity-by-randomness rather than diversity-by-substitution."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker compares a runtime counter against the MAX_FREE_NODES compile-time cap, not an input-derived literal.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Source line at xmlreader.c:356",
+      "exact_quote": "(reader->ctxt->freeElemsNr < MAX_FREE_NODES))"
+    },
+    {
+      "claim": "Naive resolves 9/10 trials while cmplog blocks 8/10 — the decisive I2S-axis pair runs the opposite of the usual direction (technique hurts).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 stats",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "Subject-level final-coverage Mann-Whitney is significant for naive vs cmplog with positive delta toward naive.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "subject 5",
+      "exact_quote": "delta_Final=158.3  p_final=0.0342"
+    },
+    {
+      "claim": "Inside the FreeNodeList inner loop, the winner walks the children-non-null path more than twice as deeply as the loser (158 vs 66 hits at the descend-while condition).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "xmlreader.c:312 (descend while loop)",
+      "exact_quote": "d=1   L 312  T=158 F=0  T=66 F=0  while ((cur->type != XML_DTD_NODE) &&"
+    },
+    {
+      "claim": "At the blocker line itself, only the winner ever takes the FALSE side (W: T=100 F=20; L: T=50 F=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "xmlreader.c:356 blocker line",
+      "exact_quote": "d=1   L 356  T=100 F=20  T=50 F=0  (reader->ctxt->freeElemsNr < MAX_FREE_NODES))"
+    },
+    {
+      "claim": "All five loser-blocking seeds carry the same '127772.xml' SYSTEM-URL byte fragment, evidence of I2S substitution locking the cmplog corpus to a parser-level literal.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seeds 2-4 offsets 0x04-0x0d",
+      "exact_quote": "....127772.xml\\."
+    },
+    {
+      "claim": "Loser-blocking seeds also share the '<?xml version=\"1' header literal at offsets 0x0c-0x1f, another canonical I2S substitution target.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0b-0x1f L-side dominant values",
+      "exact_quote": "0x000b  6d(m)x1                             78(x)x5"
+    },
+    {
+      "claim": "cmplog's mutator stack includes I2SRandReplace, which scans the input for CMP operands and substitutes the other side at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "Naive has no I2S mutator at all — pure havoc + token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators paragraph",
+      "exact_quote": "Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "The function xmlTextReaderFreeNodeList is invoked one time by the winner vs 14 times by the loser — winner reaches it less often but iterates much deeper each time.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "enclosing function entry-line count",
+      "exact_quote": "1        14  xmlreader.c:xmlTextReaderFreeNodeList"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 3121 --role W --fuzzer cmplog --trial 4 --seed de46e38dc559bdc1` (the only winner-resolving seed in the DB; provenance fuzzer=cmplog because seed_bisect picks one lex-min trial per direction, but the winning ARM is naive). The chain has 15 levels, with I2S-floor dash rows at depths 13 and 14. This means I2S contributed to that one cmplog trial that did resolve (cmplog 2/10 resolved overall), but the differentiating winner is the naive arm which by construction cannot have I2SRandReplace in its lineage. Claim is havoc-only because the winner fuzzer is naive; the lineage available is for cmplog-found seeds and is not the right artifact to verify a havoc-only claim. The DB does not store seed lineage for naive-found resolving seeds at this branch (seed_bisect picked the cmplog trial, not a naive trial)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose only gate is `runtime_counter >= COMPILE_TIME_CAP` (no input-byte literal to substitute, exercised once per executed input) on which cmplog matches or beats naive at equal trial budget — that would refute the claim that I2S corpus pollution is what hurts cmplog here."
+  },
+  "weakest_evidence_point": "I cannot directly verify the havoc-only claim in lineage because seed_bisect stored only the lex-min trial per direction (a cmplog trial), not a naive winner; my mechanism story for the winner rests on the absence of I2S in naive's mutator list plus indirect evidence (the shared '127772.xml' literal across loser seeds) that cmplog's corpus is I2S-anchored.",
+  "confidence": "medium"
+}

@@ -1,0 +1,105 @@
+{
+  "branch_id": 9654,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must parse into a font whose buffer->props.script equals HB_SCRIPT_MODI so the MODI case-arm is selected in the script dispatch switch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)", "value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Bytes that survive harfbuzz font parsing far enough to set buffer->props.script = HB_SCRIPT_MODI before reaching the switch at hb-ot-shaper-vowel-constraints.cc:56. The script field is populated by upstream font/cmap/feature processing from input bytes; the blocker case-arm fires only when that derived field equals the MODI constant.",
+      "why_winner_satisfies": "Naive (Pair 1 winner) reaches MODI 10/10 trials via random havoc on a font-shaped corpus (winner seeds carry an OTTO TrueType magic header and a `df 20 20` payload that drives script selection toward MODI). value_profile_cmplog (Pair 2 winner) reaches MODI 9/10 trials because the added value-profile gradient feedback rewards seeds that get closer to MODI in upstream comparisons, escaping the corpus state cmplog gets trapped in.",
+      "why_loser_doesnt": "cmplog blocks 8/10 trials because its input-to-state substitution mutator harvests the literal codepoint constants from the inner switches of OTHER scripts (DEVANAGARI 0x0905/0x0906/0x0909/0x090F/0x0930, TELUGU 0x0C12/0x0C3F/0x0C46/0x0C4A, MALAYALAM 0x0D07/0x0D09/0x0D0E/0x0D12, TAKRI 0x11680/0x11686). The loser overlay shows cmplog explores those competing case-arms heavily (15 traversals of each inner switch) but never lands on MODI: the input-to-state substitution pulls inputs toward non-MODI script values, polluting the corpus away from the blocker.",
+      "mechanism_attribution": "Pattern B (input-to-state substitution hurts). The MODI case-arm is not a literal in the input — buffer->props.script is a derived field set by upstream font parsing. cmplog's input-to-state mutator finds many literal codepoints in the inner switch CMPs of other scripts and substitutes them, but those substitutions push the derived script field toward DEVANAGARI/TELUGU/MALAYALAM/TAKRI rather than MODI. naive avoids this trap by doing pure random byte mutations (no CMP-directed pollution), and vpc escapes it via the added value-profile gradient over upstream comparisons that lead to MODI selection."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the MODI case-arm of the script dispatch switch in _hb_preprocess_text_vowel_constraints.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location header",
+      "exact_quote": "Location: /src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc:426:5"
+    },
+    {
+      "claim": "Naive resolves the MODI branch in all 10 trials while cmplog blocks in 8 of 10.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive vs cmplog rows",
+      "exact_quote": "naive                           10        0          0  winner (I2S vs cmplog)"
+    },
+    {
+      "claim": "cmplog is the loser in both decisive pairs, blocking 8/10 trials.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "cmplog row",
+      "exact_quote": "cmplog                           2        8          0  loser (I2S vs naive); loser (value_profile vs value_profile_cmplog)"
+    },
+    {
+      "claim": "value_profile_cmplog wins Pair 2 over cmplog under the value_profile delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "Only the winner-side seeds annotate the MODI case-arm body; loser seeds skip it.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 426 of vowel-constraints",
+      "exact_quote": "[W]   426      case HB_SCRIPT_MODI: <-- BLOCKER"
+    },
+    {
+      "claim": "The per-branch divergence on MODI's case-arm: winner takes T=10 F=0, loser takes T=0 F=9.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L426 row",
+      "exact_quote": "d=1   L 426  T=10 F=0  T=0 F=9  case HB_SCRIPT_MODI:  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser seeds heavily explore the DEVANAGARI case-arm inner switch instead of MODI.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L58 row",
+      "exact_quote": "d=1   L  58  T=0 F=10  T=1 F=8  case HB_SCRIPT_DEVANAGARI:"
+    },
+    {
+      "claim": "Loser also enters the inner switches of TELUGU, MALAYALAM, and TAKRI but never reaches MODI.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L222/L263/L446 rows",
+      "exact_quote": "d=1   L 222  T=0 F=10  T=1 F=8  case HB_SCRIPT_TELUGU:"
+    },
+    {
+      "claim": "Loser explores the DEVANAGARI inner codepoint switch 15 times without matching MODI codepoints.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L64 row",
+      "exact_quote": "d=1   L  64  T=0 F=0  T=0 F=15  case 0x0905u:"
+    },
+    {
+      "claim": "Winner seeds include the TrueType `OTTO` magic header at offset 0 plus a `df 20 20` payload that drives script selection.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 2 first 16 bytes",
+      "exact_quote": "0000: 4f 54 54 4f 00 01 20 20 20 20 20 20 00 01 48 56   OTTO..      ..HV"
+    },
+    {
+      "claim": "cmplog's mutator stack includes I2SRandReplace which substitutes CMP operands into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators section",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "I2SRandReplace harvests operands by scanning the per-execution CmpLogObserver buffer and substituting matched byte sequences in the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile_cmplog adds CMP_MAP gradient feedback on top of cmplog's instrumentation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Instrumentation",
+      "exact_quote": "**Instrumentation**: union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "other",
+    "verified_in_lineage": false,
+    "verification_method": "Not run. This is a Pattern B (I2S hurts) branch: cmplog is the LOSER in both decisive pairs, not the winner. The winners are naive (havoc-only) for Pair 1 and value_profile_cmplog (CMP_MAP gradient added on top of cmplog) for Pair 2 — neither winner's enabling mechanism is I2SRandReplace, so lineage of the winner seeds would not confirm or refute the hypothesis. The hypothesis is about WHY cmplog is poisoned: the I2S dictionary harvests literal codepoint constants from competing script inner-switches (DEVANAGARI 0x0905, TELUGU 0x0C12, etc.) and substitutes them, pulling derived buffer->props.script away from HB_SCRIPT_MODI. The right lineage probe would be on cmplog LOSER (blocked) seeds to check whether their ancestry has I2S-floor dash rows produced by substituting those competing codepoints; that probe is outside the standard W-seed verification path."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a synthetic harness with a single switch on a derived-from-input field, where the I2S dictionary at the cmplog mutator harvests N>=8 distinct competing literal arms, fails to show cmplog underperforming naive on the target arm (i.e., I2S does NOT cause directional pollution under controlled chain depth), then the I2S-poisoning explanation is wrong and the cmplog deficit must come from somewhere else (e.g., per-execution cost slowing cmplog throughput)."
+  },
+  "weakest_evidence_point": "The chain from input bytes to buffer->props.script is opaque in this prompt — we infer from DIVERGENT BRANCHES that cmplog's mutations push the script field toward DEVANAGARI/TELUGU/MALAYALAM rather than MODI, but we have not traced exactly which input bytes the harfbuzz font parser consumes to set the script field, so the 'I2S substitutes competing codepoints' story is plausible but not byte-level verified.",
+  "confidence": "medium"
+}

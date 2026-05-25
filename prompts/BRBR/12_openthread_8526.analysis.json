@@ -1,0 +1,105 @@
+{
+  "branch_id": 8526,
+  "target": "openthread",
+  "summary_one_line": "Input must steer UpdateIp6Route to return an error code that is neither kErrorNone nor kErrorAddressQuery, requiring specific magic bytes in IPv6 header fields.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "An IPv6 message payload whose header fields drive UpdateIp6Route() to return an error code that is neither kErrorNone nor kErrorAddressQuery (e.g. kErrorDrop / kErrorNoRoute / kErrorInvalidArgs). Concretely, the W seeds carry a fixed multi-byte literal at offsets 0x19-0x1f equal to `fd de ad 00 be ef 00` (a fd00::dead:beef-style IPv6 ULA prefix block) plus an early-offset header signature (`66 65 5c` = `fe\\` at 0x01-0x03) — these bytes are constant across all 10 W seeds.",
+      "why_winner_satisfies": "cmplog/vpc winners contain the exact 7-byte run `fd de ad 00 be ef 00` at offsets 0x19-0x1f in 10/10 seeds, and the `66 65` (`fe`) signature at offsets 0x01-0x02 in 10/10 seeds. With these constants in place, switch(error) at line 571 falls through case kErrorNone and case kErrorAddressQuery and reaches `default:` at line 582.",
+      "why_loser_doesnt": "naive/vp blocking seeds never produce the `fd de ad 00 be ef 00` run (loser bytes at 0x19-0x1f are dominated by `ff ff ff 00 00 00 00` or other random patterns) and lack the `fe\\` header signature. Without these literal byte runs, UpdateIp6Route returns kErrorNone (the dominant case at line 573 in the loser cov dump: T=105 F=0) and ExitNow() fires before reaching the default arm.",
+      "mechanism_attribution": "I2SRandReplace in cmplog/vpc reads operands from the CmpLogObserver buffer populated by trace_cmp* callbacks inside UpdateIp6Route() and Ip6 header parsing; the integer/memory comparisons against the ULA prefix constants (0xfd 0xde 0xad 0xbe 0xef) and the header magic are captured and substituted into the input via I2SRandReplace. naive/vp lack I2SRandReplace and therefore cannot synthesize these multi-byte literal constants within budget — chaining 4-7 byte runs together at fixed offsets requires direct operand substitution, which only cmplog/vpc provide through I2SRandReplace."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs at this branch are under the I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "The second decisive pair is also under I2S delta with cmplog winning over naive.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "The blocker is the default arm of the switch(error) statement on UpdateIp6Route's return value.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 571-582",
+      "exact_quote": "        default: <-- BLOCKER"
+    },
+    {
+      "claim": "Loser inputs overwhelmingly take the kErrorNone arm (T=105 F=0) while winner inputs take the default arm (T=19 F=60 on the kErrorNone case means most fall through to default; L=T=0 F=105 means loser never reaches default).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "lines 573 and 582 on call chain",
+      "exact_quote": "  d=1   L 573  T=60 F=19  T=105 F=0  case kErrorNone:"
+    },
+    {
+      "claim": "Loser never reaches the default arm at line 582 (W=T=19, L=T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "line 582 on call chain",
+      "exact_quote": "  d=1   L 582  T=19 F=60  T=0 F=105  default:  <-- BLOCKER"
+    },
+    {
+      "claim": "All 10 winner seeds contain the literal byte fd at offset 0x19, while only 1 of 10 loser seeds does.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0019",
+      "exact_quote": "   0x0019  fd(.)x10                            ff(.)x9 fd(.)x1                     PARTIAL"
+    },
+    {
+      "claim": "All 10 winner seeds carry the literal byte de at offset 0x1a, while loser seeds dominate with 53 (`S`).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x001a",
+      "exact_quote": "   0x001a  de(.)x10                            53(S)x6 c3(.)x2 ff(.)x1 de(.)x1     PARTIAL"
+    },
+    {
+      "claim": "All 10 winner seeds carry the literal byte ad at offset 0x1b, while losers carry ff or 00.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x001b",
+      "exact_quote": "   0x001b  ad(.)x10                            ff(.)x6 00(.)x3 ad(.)x1     PARTIAL"
+    },
+    {
+      "claim": "All 10 winner seeds carry be ef 00 at offsets 0x1d-0x1f, never present together in losers.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x001d-0x001f",
+      "exact_quote": "   0x001e  ef(.)x10                            ff(.)x3 00(.)x3 78(x)x2 20( )x1 +1u  DIFFER"
+    },
+    {
+      "claim": "All 10 winner seeds share the literal `f` (0x66) byte at offset 0x01 and `e` (0x65) at offset 0x02 (`fe` signature) — losers do not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0001-0x0002",
+      "exact_quote": "   0x0001  66(f)x10                            65(e)x9 6e(n)x1                     DIFFER"
+    },
+    {
+      "claim": "cmplog and value_profile_cmplog instrumentation captures CMP operands per execution and I2SRandReplace mutator substitutes those operands into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile uses Hamming-distance CMP_MAP gradient but lacks I2SRandReplace, so it cannot directly substitute multi-byte literals.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "cmplog winning trial-1 has 10/10 resolution while naive has 9/10 blocking and value_profile 10/10 blocking, attributable to I2S delta.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "fuzzer trial counts",
+      "exact_quote": "cmplog                          10        0          0  winner (I2S vs naive)"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 8526 --role W --fuzzer cmplog --trial 1 --seed 2d0d9b87803c3479` and observed an I2S-floor row (mutation_op = -) at depth 6 (ancestor 4578ba613b6d1a35). Cross-checked seed 23ef6000356aac6c — same dash-row ancestor 4578ba613b6d1a35 appears at depth 8. Two independent winning cmplog seeds converge on the same I2S-floor ancestor, confirming I2SRandReplace contributed to the lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a synthetic harness replaces UpdateIp6Route()'s error-returning code path with one whose distinguishing inputs are NOT compared as multi-byte literals (e.g. error returned when an accumulated checksum equals a runtime value), then cmplog should NOT retain its >=8/10 win over naive — if it still wins, the mechanism is not I2S substitution of constants but something else."
+  },
+  "weakest_evidence_point": "I am inferring from BYTE DIFF that the fd-de-ad-be-ef and `fe` patterns are operands of integer/memory CMPs inside UpdateIp6Route — I have not directly traced which CMP instruction the I2S find substituted into. The patterns are consistent with IPv6 ULA prefix and link-local SLAAC tokens but the exact CMP site is unconfirmed.",
+  "confidence": "high"
+}

@@ -1,0 +1,126 @@
+{
+  "branch_id": 422,
+  "target": "curl",
+  "summary_one_line": "Input must encode a complete URL scheme plus a parseable HTTP-like server response so the request actually receives bytes and bytecount+headerbytecount != 0.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": [
+        "cmplog>naive (I2S)",
+        "value_profile_cmplog>value_profile (I2S)"
+      ],
+      "what_input_feature": "Input must contain (a) a recognized URL-scheme literal at the front (winners carry 'pop3+-' at offsets 0x06-0x0b, an extended pop3 form curl's URL parser accepts) followed by a host:port spec like '127.0.0.1:9021', AND (b) a synthetic server-response payload at offsets 0x20-0x2b that begins with the literal 'HTTP/' so curl's response parser accepts framing bytes and increments data->req.bytecount/headerbytecount, making the sum at line 1866 non-zero (the FALSE side).",
+      "why_winner_satisfies": "All five winner seeds share the literal byte sequence 70 6f 70 33 2b 2d ('pop3+-') at offsets 0x06-0x0b and 47 48 54 54 50 2f ('GHTTP/') at offsets 0x24-0x29, which drives the request through the read/write data path: HIT-COUNT DIVERGENCE shows readwrite_upload, Curl_fillreadbuffer, Curl_done_sending, and Curl_http2_done_sending all fire on W with zero L hits, and DIVERGENT BRANCHES confirms W takes the FALSE side ten times at L1866 (T=0 F=10), meaning bytecount+headerbytecount evaluated > 0.",
+      "why_loser_doesnt": "Loser seeds are short and unstructured (32-38 bytes for four of five) with no concentrated bytes at 0x06-0x0b (variants 31 5a 2b 25 41, no 'pop3+-' literal) and no 'HTTP/' literal anywhere in 0x24-0x29 (L bytes there are 6f/41/4b/dc — random havoc residue), so the URL never resolves to a valid connection and no response bytes are read; DIVERGENT BRANCHES shows L takes TRUE every time at L1866 (T=10 F=0) because bytecount+headerbytecount stays at zero, and HIT-COUNT DIVERGENCE shows zero L invocations of Curl_fillreadbuffer and readwrite_upload.",
+      "mechanism_attribution": "curl's URL parser performs literal string CMPs against scheme names ('pop3', '+', '-' suffix characters) and its response parser performs a literal CMP against 'HTTP/' at the start of an incoming buffer; cmplog's CmpLogObserver captures both pairs of operands and I2SRandReplace substitutes them into the input at matching offsets, planting 'pop3+-' at 0x06 and 'HTTP/' at 0x24 in one mutation rather than blindly stumbling onto 11 consecutive ASCII bytes. value_profile_cmplog inherits the same I2SRandReplace mutator on top of value_profile's CMP_MAP feedback, which is why both vpc>vp and cmplog>naive are decisive on the I2S axis."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the bytecount+headerbytecount==0 conjunct at transfer.c:1866 column 6 inside Curl_retry_request; the blocked side is FALSE.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location header and blocked-side line",
+      "exact_quote": "Location: /src/curl/lib/transfer.c:1866:6"
+    },
+    {
+      "claim": "Globally blocked side is FALSE, meaning the winner needs to take the FALSE branch (sum is non-zero).",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side line",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Cmplog and value_profile_cmplog resolve all ten trials; naive and value_profile resolve zero of ten.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "trial counts per fuzzer",
+      "exact_quote": "cmplog                          10        0          0  winner (I2S vs naive)"
+    },
+    {
+      "claim": "Both decisive pairs differ on the I2S technique only (cmplog vs naive, value_profile_cmplog vs value_profile).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "pair delta tags",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "The second decisive pair (vpc>vp) is also a single-axis I2S difference.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "At L1866 the winner side takes the false branch ten times and the loser takes the true branch ten times — a clean directional flip on this exact branch.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1866 row",
+      "exact_quote": "d=1   L1866  T=0 F=10  T=10 F=0  if((data->req.bytecount + data->req.headerbytecount == 0) &&  <-- BLOCKER"
+    },
+    {
+      "claim": "The read/upload data-path functions fire only on the winner side, confirming the winner actually received/transferred bytes.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "readwrite_upload and Curl_fillreadbuffer rows",
+      "exact_quote": "       1         0  transfer.c:readwrite_upload  (/src/curl/lib/transfer.c:928-1154)"
+    },
+    {
+      "claim": "Curl_fillreadbuffer (the function that drains response bytes into the request buffer) is W-only.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "Curl_fillreadbuffer row",
+      "exact_quote": "       1         0  Curl_fillreadbuffer  (/src/curl/lib/transfer.c:163-363)"
+    },
+    {
+      "claim": "All ten winner seeds share the literal bytes 'pop3+-' at offsets 0x06-0x0b (concentrated single-value sets per offset).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x06-0x0b",
+      "exact_quote": "   0x0006  70(p)x10                            43(C)x2 31(1)x1 33(3)x1 41(A)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "Offset 0x0a is consistently '+' on W and scattered random bytes on L — characteristic of an I2S-substituted scheme separator.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0a",
+      "exact_quote": "   0x000a  2b(+)x10                            25(%)x3 65(e)x2 31(1)x1 be(.)x1 +3u  DIFFER"
+    },
+    {
+      "claim": "All ten winner seeds carry the literal bytes 'GHTTP' at offsets 0x24-0x28 (single-value W sets, scattered L sets).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x24-0x28",
+      "exact_quote": "   0x0024  47(G)x10                            6f(o)x1 41(A)x1 4b(K)x1 dc(.)x1     DIFFER"
+    },
+    {
+      "claim": "Winner seed 1 contains the full 'HTTP/' literal at bytes 0x24-0x29 followed by space and 'mK@Sn' header text.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 1 hex dump line 0x20",
+      "exact_quote": "0020: 02 00 00 00 47 48 54 54 50 2f 20 6d 4b 40 53 6e   ....GHTTP/ mK@Sn"
+    },
+    {
+      "claim": "Winner seed 2 contains the 'pop3+-' scheme literal at offsets 0x06-0x0b and a host:port string '127.0.0.1' starting at 0x0d.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 2 hex dump line 0x00",
+      "exact_quote": "0000: 00 01 00 00 00 19 70 6f 70 33 2b 2d 2f 31 32 37   ......pop3+-/127"
+    },
+    {
+      "claim": "Loser seeds are short (32-38 bytes) and carry no 'HTTP/' or 'pop3+-' literal — example loser seed 1 ends at 32 bytes with random havoc bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 1 hex dump",
+      "exact_quote": "0000: 00 01 00 00 00 19 31 5a 60 47 65 65 5e 25 5a 5a   ......1Z`Gee^%ZZ"
+    },
+    {
+      "claim": "Cmplog adds I2SRandReplace on top of naive's havoc+token stack — the mutator that scans input for one CMP operand and substitutes the other.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "Value_profile lacks I2SRandReplace and relies on CMP_MAP gradient feedback only, which explains why it loses to value_profile_cmplog on this branch.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 422 --role W --fuzzer cmplog --trial 1 --seed 006459fd40731a4e`. The chain has 21 ancestor levels with two I2S-floor dash rows at depth 19 and 20 (mutation_op = -, ParentInfo-only metadata). Per the cmplog MECHANISM CONTEXT note, dash rows are exclusive to cmplog/vpc in the current LibAFL build (zero occurrences in 6000 naive/vp samples) and indicate at least one unwrapped I2SRandReplace substitution somewhere in the ancestor chain — a lower-bound corroboration that this winning seed inherits from an I2S find, consistent with the concentrated 'pop3+-' and 'HTTP/' literals planted at fixed offsets in all winner seeds."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a hand-crafted input that omits the literal 'HTTP/' at offsets 0x24-0x29 and uses an arbitrary 4-byte placeholder there still drives bytecount+headerbytecount above zero (e.g. because some other code path on the harness increments those counters independently of the response parser), then 'HTTP/' literal substitution is not the required gate and the I2S-substitution mechanism story is wrong."
+  },
+  "weakest_evidence_point": "The dash-row floor confirms an I2SRandReplace contribution somewhere in the seed's 21-level ancestor chain, but the dash rows sit at depths 19-20 (near the root); we cannot mechanically prove that the specific 'HTTP/' bytes at 0x24-0x29 in the leaf came from I2S rather than from lucky havoc on an I2S-seeded ancestor, nor can we distinguish whether the 'pop3+-' scheme literal or the 'HTTP/' response literal is the dominant I2S target.",
+  "confidence": "high"
+}

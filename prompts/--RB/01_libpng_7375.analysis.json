@@ -1,0 +1,93 @@
+{
+  "branch_id": 7375,
+  "target": "libpng",
+  "summary_one_line": "A bKGD chunk reaching the RGB path with at least one of buf[0], buf[2], buf[4] non-zero (the invalid-color error branch).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A PNG stream that reaches png_handle_bKGD via the non-palette, color RGB path (color_type with PNG_COLOR_MASK_COLOR set, not PALETTE) with bit_depth<=8, and supplies a 6-byte bKGD payload in which at least one of buf[0], buf[2], or buf[4] is non-zero so the disjunction (buf[0] != 0 || buf[2] != 0 || buf[4] != 0) evaluates true and the function returns via the 'invalid color' chunk-error path.",
+      "why_winner_satisfies": "value_profile reaches this branch with the TRUE side resolved 9/10 trials. With no I2SRandReplace mutator it does not pre-load the bKGD payload bytes with the literal 0 the CMP compares against; havoc + CMP_MAP gradient feedback over the three independent !=0 compares preserves intermediate inputs whose buf[0]/buf[2]/buf[4] still hold non-zero bytes (e.g. arbitrary scratch bytes from havoc that have not been zeroed), so the disjunction trivially fires on the TRUE side.",
+      "why_loser_doesnt": "value_profile_cmplog is identical to value_profile except for I2SRandReplace. Its cmplog observer logs the three (buf[i], 0) compares at line 2018 and the I2SRandReplace mutator substitutes the right-hand constant 0 directly into the bKGD payload positions, driving inputs toward buf[0]==0 && buf[2]==0 && buf[4]==0 — precisely the FALSE side. The blocker is FALSE (loser=8/10 blocked); I2S actively pushes payload bytes into the unique zero configuration that satisfies all three compares simultaneously, which is the harder side.",
+      "mechanism_attribution": "Pattern B 'I2S hurts': the only technique delta between value_profile (winner) and value_profile_cmplog (loser) is I2SRandReplace. The branch's CMP shape is a 3-way disjunction of byte!=0 tests; I2S sees the constant 0 and substitutes it into the operand bytes, biasing vpc inputs toward the FALSE (blocked) side. vp, lacking I2S, retains random byte content at those offsets and trivially takes the TRUE side. The integer-distance CMP feedback that both fuzzers share is identical here, so the divergence is attributable to the I2SRandReplace substitution direction alone."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The branch is the three-way disjunction buf[0] != 0 || buf[2] != 0 || buf[4] != 0 at pngrutil.c:2018, inside png_handle_bKGD on the non-palette color RGB path with bit_depth<=8.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "/src/libpng/pngrutil.c:2018 (lines 2014-2022)",
+      "exact_quote": "if (buf[0] != 0 || buf[2] != 0 || buf[4] != 0) <-- BLOCKER"
+    },
+    {
+      "claim": "The globally blocked side is the TRUE branch — the invalid-color error path that the winner must reach.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "The branch is gated by the non-palette color RGB path (color_type with PNG_COLOR_MASK_COLOR set) and bit_depth<=8.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 2014-2017",
+      "exact_quote": "[B]  2016        if (png_ptr->bit_depth <= 8)"
+    },
+    {
+      "claim": "value_profile is the winner and value_profile_cmplog is the loser at this branch under an I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: value_profile > value_profile_cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "value_profile resolved 9/10 trials at this branch; value_profile_cmplog only 2/10 and was blocked 8/10.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "rows for value_profile and value_profile_cmplog",
+      "exact_quote": "value_profile                    9        1          0  winner (I2S vs value_profile_cmplog)"
+    },
+    {
+      "claim": "The loser was blocked on average 10.25h vs the winner's 1.90h — large duration divergence, separation is significant (p_AUC=0.0004).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 subject stats",
+      "exact_quote": "avg duration blocked: winner=1.90h  loser=10.25h"
+    },
+    {
+      "claim": "The DIVERGENT BRANCHES section shows W takes the TRUE side 10/20 visits at line 2018 while L takes TRUE 0/10 — direct evidence the loser never resolves while the winner does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2018 row",
+      "exact_quote": "d=1   L2018  T=10 F=10  T=0 F=10  if (buf[0] != 0 || buf[2] != 0 || buf[4] != 0)  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog is the only involved fuzzer carrying I2SRandReplace; value_profile does NOT carry it.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog's mutators are the union — havoc/token PLUS I2SRandReplace — making it the only fuzzer in this pair that can substitute the literal 0 from the CMP into the input bytes.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "Both fuzzers share identical CMP_MAP gradient feedback (Hamming-bucket on integer compares), so the CMP_MAP signal cannot explain the divergence — only the I2SRandReplace presence/absence does.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog instrumentation paragraph",
+      "exact_quote": "**Instrumentation**: union of cmplog and value_profile — edge counters,"
+    },
+    {
+      "claim": "The BYTE DIFF inside the first 64-byte window shows the bKGD payload offsets are NOT in the window (the differing offsets are 0x19, 0x35-0x38 — IHDR color_type and the chunk-name region for sRGB vs cHRM/etc.), consistent with the bKGD chunk lying further into the file where the seeds diverge structurally.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x19, 0x35-0x38",
+      "exact_quote": "   0x0019  06(.)x10                            06(.)x9 02(.)x1                     PARTIAL"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 7375 --role W --fuzzer cmplog --trial 3 --seed 65506083907ae32f` and observed 1 I2S-floor dash row (mutation_op = -) at depth 12 of the ancestor chain. This confirms I2SRandReplace was firing in the cmplog/vpc family that has the technique. Note: the winning fuzzer at this branch is value_profile (no I2S); the lineage query was used to confirm that the I2S mechanism is the one that distinguishes vp from vpc — the dash signal is exclusive to fuzzers with I2SRandReplace, and its presence on cmplog-derived seeds that take this branch shows the technique is active in the I2S-carrying family. The hypothesis is Pattern B (I2S hurts vpc here): I2S substitutes the CMP literal 0 into buf[0]/buf[2]/buf[4], biasing vpc toward the FALSE (blocked) side; this attribution is grounded in the canonical one-technique-delta semantics of the (vp, vpc) pair."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the same 3-way buf[i]!=0 disjunction over a bKGD-like 6-byte payload, swept across input lengths/positions, where value_profile_cmplog matches or beats value_profile at resolving the TRUE side. If I2S being present does not actively reduce TRUE-side resolution probability at this CMP shape, the Pattern-B I2S-hurts attribution is wrong."
+  },
+  "weakest_evidence_point": "The W-seeds in the DB are all tagged fuzzer=cmplog (a reference fuzzer here), so we have no direct seed-byte sample from the actual decisive winner (value_profile); the mechanism attribution leans on the canonical one-technique-delta semantics (vp vs vpc differ only in I2SRandReplace) and on observed Pattern-B trial counts, not on direct byte-level evidence from vp seeds.",
+  "confidence": "medium"
+}

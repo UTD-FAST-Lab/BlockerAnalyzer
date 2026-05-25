@@ -1,0 +1,105 @@
+{
+  "branch_id": 8494,
+  "target": "openthread",
+  "summary_one_line": "Input must contain the 7-byte locator-IID magic prefix 00 00 00 ff fe 00 fc at offsets 0x21-0x27 so IsLocator() passes and m8[6] >= kAloc16Mask flips the false branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A 7-byte magic constant sequence 00 00 00 ff fe 00 fc placed at the input offsets that map to the InterfaceIdentifier (here 0x21-0x27). The first four bytes satisfy m32[0] == HostSwap32(0x000000ff) and bytes 4-5 satisfy m16[2] == HostSwap16(0xfe00) (the IsLocator() equality CMPs), then byte 6 == 0xfc satisfies m8[6] >= kAloc16Mask (the blocked F side at line 256:28) while still clearing the reserved-bit mask at line 256:61.",
+      "why_winner_satisfies": "All five cmplog winner seeds carry the literal byte run 00 00 00 00 ff fe 00 fc at offset 0x20 (so the locator IID bytes land at 0x21-0x27). The BYTE DIFF section quantifies this: offset 0x24 is ff x10 in W, 0x25 is fe x10, 0x26 is 00 x10, 0x27 is fc x9 / ff x1 — i.e. every winner-resolving seed has the magic locator prefix and an m8[6] value >= 0xfc.",
+      "why_loser_doesnt": "All five naive-blocking seeds have unrelated bytes at the same offsets: at 0x24 the L set is 00x3 c4x2 16x2 30x1 ..., at 0x25 it is 20x3 00x3 16x2 ..., at 0x26 it is 00x7 16x2 5cx1, at 0x27 it is 00x5 16x2 78x1 6dx1 — none of the 5 L seeds reconstruct the required ff fe 00 fc tail, so IsLocator() returns false and the chain short-circuits.",
+      "mechanism_attribution": "cmplog/value_profile_cmplog instrument the integer CMPs inside IsLocator() (m32[0] == 0x000000ff and m16[2] == 0xfe00) and the m8[6] < 0xfc test at line 256:28. The post-execution CmpLogObserver buffer hands those constants to I2SRandReplace, which scans the input for the current operand bytes and substitutes the expected constant. naive and value_profile lack I2SRandReplace (value_profile only widens edge feedback with CMP_MAP buckets, no operand substitution), so they must reconstruct seven specific bytes via blind havoc and almost never succeed within 12 h."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The branch under analysis is line 256 col 28 inside IsRoutingLocator(), whose source line combines IsLocator() with two byte tests on m8[6].",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Source line",
+      "exact_quote": "return (IsLocator() && (mFields.m8[6] < kAloc16Mask) && ((mFields.m8[6] & kRloc16ReservedBitMask) == 0));"
+    },
+    {
+      "claim": "Both decisive pairs at this branch carry an I2S technique delta and both place cmplog-style fuzzers as winners against their I2S-less counterparts.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "cmplog won the second decisive pair against naive with a one-technique I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "Every cmplog winner-resolving seed contains the literal byte sequence 00 00 00 00 ff fe 00 fc starting at input offset 0x20, anchoring the IsLocator magic prefix and the m8[6] = 0xfc byte.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 row offset 0x0020",
+      "exact_quote": "0020: 00 00 00 00 ff fe 00 fc 01"
+    },
+    {
+      "claim": "The same 00 00 00 00 ff fe 00 fc prefix repeats in a second winner seed, confirming the pattern is shared across cmplog's resolving seeds and not a single-seed artifact.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 2 row offset 0x0020",
+      "exact_quote": "0020: 00 00 00 00 ff fe 00 fc 30"
+    },
+    {
+      "claim": "Across all 10 winner seeds the byte at input offset 0x27 is fc nine times and ff once, i.e. always >= 0xfc (kAloc16Mask), so every W seed flips the false side of m8[6] < 0xfc.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0027",
+      "exact_quote": "0x0027  fc(.)x9 ff(.)x1                     00(.)x5 16(.)x2 78(x)x1 6d(m)x1 +1u  DIFFER"
+    },
+    {
+      "claim": "Winner seeds carry the IsLocator m16[2] == 0xfe00 magic at offsets 0x24-0x25 unanimously (ff x10, fe x10), where the loser set is dispersed.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0024 and 0x0025",
+      "exact_quote": "0x0024  ff(.)x10                            00(.)x3 c4(.)x2 16(.)x2 30(0)x1 +2u  DIFFER"
+    },
+    {
+      "claim": "The m16[2] low byte 0x00 also appears at 0x26 in all winner seeds, completing the fe 00 fc trail required to keep IsLocator true and select the blocked side of the m8[6] < kAloc16Mask branch.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0026",
+      "exact_quote": "0x0026  00(.)x10                            00(.)x7 16(.)x2 5c(\\)x1             PARTIAL"
+    },
+    {
+      "claim": "Loser-blocking seeds have unrelated bytes at the same offsets and never reconstruct the locator prefix.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 offset 0x0020",
+      "exact_quote": "0020: 5c 5c 5c 5c 30 30 5c 78 34 cf 00 00 00 02 00 00"
+    },
+    {
+      "claim": "The enclosing function is the locator-IID predicate and its only path to the blocked F side is the chained && expression.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "/src/openthread/src/core/net/ip6_address.cpp:256",
+      "exact_quote": "[B]   256      return (IsLocator() && (mFields.m8[6] < kAloc16Mask) && ((mFields.m8[6] & kRloc16ReservedBitMask) == 0)); <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog's instrumentation captures the integer CMPs inside IsLocator and the m8[6] < 0xfc test, and its I2SRandReplace mutator can substitute those operands into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive carries no I2SRandReplace stage, so reconstructing the 7-byte magic must come from blind havoc/token mutations.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op paragraph",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace as well — its CMP_MAP signal only widens feedback, it does not substitute operands.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 8494 --role W --fuzzer cmplog --trial 1 --seed 42f0755109cd79b2` and observed one I2S-floor row (mutation_op = -, ancestor 4578ba613b6d1a35) at depth 8 of the 9-level ancestor chain. Under the documented LibAFL i2s-logging-bug this dash row is the lower-bound signal that I2SRandReplace contributed to a cmplog-only winner, and dash rows do not appear in naive/vp lineages."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness that gates on the same 7-byte magic prefix 00 00 00 ff fe 00 fc but in which cmplog and value_profile_cmplog still cannot resolve the branch within the trial budget — that would show I2SRandReplace is not the deciding capability and some other property of the openthread harness is responsible."
+  },
+  "weakest_evidence_point": "The third sub-condition at col 61 ((m8[6] & kRloc16ReservedBitMask) == 0) is not directly evidenced as I2S-driven — I infer that fixing m8[6] = 0xfc happens to clear the reserved bits, but I do not have an explicit I2S substitution trace for that mask CMP.",
+  "confidence": "high"
+}

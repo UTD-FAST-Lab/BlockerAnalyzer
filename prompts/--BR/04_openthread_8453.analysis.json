@@ -1,0 +1,107 @@
+{
+  "branch_id": 8453,
+  "target": "openthread",
+  "summary_one_line": "Input must carry a stable multi-byte literal at offsets 0x00-0x1f that upstream IP6/checksum parser equality CMPs accept, so a long enough multi-buffer message reaches GetFirstChunk with aOffset >= kBufferDataSize after the head-buffer subtraction.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": [
+        "value_profile_cmplog>value_profile (I2S)"
+      ],
+      "what_input_feature": "Input bytes at offsets 0x00-0x1f must match a fixed multi-byte literal sequence (the 5 winner seeds share `78 66 65 5c 78` at 0x00-0x04 and dozens of single-valued offsets through 0x1f) so that upstream IP6 datagram parsing / checksum validation accepts the packet and feeds it into GetFirstChunk with an aOffset that, after subtracting kHeadBufferDataSize at line 513, still exceeds kBufferDataSize — forcing the loop to subtract `aOffset -= kBufferDataSize` (lines 529-530, hit only by W) before the branch ever evaluates true.",
+      "why_winner_satisfies": "All five winner-resolving seeds carry the exact same first-32-bytes template (BYTE DIFF shows offsets 0x00-0x07, 0x0d-0x11, 0x16-0x1f each concentrated to a single byte value xN10), demonstrating they share a fixed protocol-header literal. The per-role overlay marks lines 529-530 (`aOffset -= kBufferDataSize`) as [W]-only — direct evidence the winner traverses the multi-buffer subtract path and reaches the false branch, while the loser never does.",
+      "why_loser_doesnt": "Loser-blocking seeds (all from naive) have heterogeneous bytes at the same offsets (e.g. offset 0x02 shows 24($)x3 23(#)x3 10(.)x2 2e(.)x2 in L vs 65(e)x10 in W; offset 0x1a shows 53(S)x10 in L vs de(.)x10 in W) — no concentrated multi-byte literal. The DIVERGENT BRANCHES table shows L hits the blocker line with T=176 F=0: every L invocation takes the TRUE branch (aOffset fits in one buffer) because the message never has enough bytes to push aOffset past kBufferDataSize after the head subtraction. Value_profile's CMP_MAP gradient is Hamming-bucketed and cannot collapse a multi-byte equality match in one step; it must accumulate byte-by-byte.",
+      "mechanism_attribution": "The pair delta is I2SRandReplace: value_profile_cmplog adds the cmplog CMP buffer and the I2SRandReplace mutator on top of value_profile's existing instrumentation. The upstream IP6/checksum parser performs multi-byte equality CMPs against fixed header literals; I2SRandReplace reads those operands out of the CMP buffer and substitutes them into the input verbatim, materializing the multi-byte template in a single mutation. Without I2SRandReplace, value_profile must synthesize the multi-byte literal via blind havoc + token mutators, and the absolute search cost for a 32-byte concentrated pattern is what produces the 0/10 resolve rate."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is an inequality compare inside the multi-buffer chunk-walk loop of ot::Message::GetFirstChunk; the blocked side is the false branch (aOffset >= kBufferDataSize after the head-subtract).",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location + Source line + blocked side",
+      "exact_quote": "Source line:         if (aOffset < kBufferDataSize)"
+    },
+    {
+      "claim": "The blocked side at this branch is the false (F) branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "The only decisive pair at this branch is value_profile_cmplog > value_profile with I2S as the technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "vpc resolves every trial; vp blocks every trial — prob_div is 1.00 and the loser never escapes the gate.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 stats",
+      "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "The per-role overlay marks line 529 (`aOffset -= kBufferDataSize`) as hit only by winner-resolving seeds — direct evidence W traverses the multi-buffer subtract path and L does not.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "message.cpp line 529",
+      "exact_quote": "[W]   529          aOffset -= kBufferDataSize;"
+    },
+    {
+      "claim": "The loop-iteration step at line 530 is also W-only, confirming W is the only side that re-enters the while loop after the first chunk and falls into the false branch.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "message.cpp line 530",
+      "exact_quote": "[W]   530      }"
+    },
+    {
+      "claim": "At the blocker line, loser invocations always take the true branch (T=176 F=0) while winner takes both (T=47 F=35) — the false side is exactly the side L never reaches.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L 523 row",
+      "exact_quote": "d=1   L 523  T=47 F=35  T=176 F=0  if (aOffset < kBufferDataSize)  <-- BLOCKER"
+    },
+    {
+      "claim": "All five winner-resolving seeds share the same first five bytes `78 66 65 5c 78` (ASCII `xfe\\x`), each concentrated to a single value across all 10 reads.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0000-0x0004",
+      "exact_quote": "   0x0000  78(x)x10                            81(.)x5 80(.)x5                     DIFFER"
+    },
+    {
+      "claim": "The stable winner literal extends through offsets 0x01-0x04 — each concentrated to a single byte value across all 10 W reads while L is heterogeneous.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0001",
+      "exact_quote": "   0x0001  66(f)x10                            65(e)x10                            DIFFER"
+    },
+    {
+      "claim": "The winner template also pins offset 0x1a to `de` x10 while L pins it to `53` (ASCII 'S') x10 — different stable literals on each side, but the W side is the one upstream parser accepts.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x001a",
+      "exact_quote": "   0x001a  de(.)x10                            53(S)x10                            DIFFER"
+    },
+    {
+      "claim": "The first winner seed shows the characteristic pattern visually: `78 66 65 5c 78 00 10 2c b0 78 da 30 5c 78 30 30` at offsets 0x00-0x0f, all repeated across the five W seeds.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 offset 0x00",
+      "exact_quote": "0000: 78 66 65 5c 78 00 10 2c b0 78 da 30 5c 78 30 30   xfe\\x..,.x.0\\x00"
+    },
+    {
+      "claim": "value_profile_cmplog has I2SRandReplace as part of its mutator set on top of CMP_MAP gradient and the cmplog CMP buffer.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace; it has only edge feedback + CMP_MAP gradient + havoc/token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 8453 --role W --fuzzer cmplog --trial 1 --seed 27e3a6c597f95b0d`; the ancestor chain has 29 recorded levels and the trailing 'I2S-floor signal' line reports one dash row (mutation_op = -) at depth 28. Per fuzzer_mechanism_library.md cmplog/vpc sections, dash rows are exclusive to cmplog and value_profile_cmplog under the current LibAFL build and indicate an unwrapped I2SRandReplace find (lower-bound floor). The seed_bisect lex-min picked cmplog seeds for storage at this branch; no vpc-fuzzer winner seeds are present in resolving_seeds for branch 8453 (verified via `db_query.py more-seeds --role W --fuzzer value_profile_cmplog`, which returned zero matches). Since the decisive pair vpc>vp shares the I2S delta with the cmplog REFERENCE (which also resolves 10/10), the I2S-floor signal observed on cmplog's chain corroborates the I2SRandReplace attribution for the decisive vpc>vp pair as well."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness that gates a multi-buffer Message chunk-walk behind a single equality CMP on the same multi-byte literal would, under I2S attribution, show vpc resolving the false branch while vp blocks. If at literal-width MAGIC_BYTES=4 (or higher) value_profile resolves the loop's false branch as quickly as value_profile_cmplog, the I2SRandReplace attribution is wrong and CMP_MAP gradient alone suffices."
+  },
+  "weakest_evidence_point": "The I2S-floor verification was performed on a cmplog (REFERENCE) seed because seed_bisect stored no value_profile_cmplog winning seeds for this branch; the I2SRandReplace attribution for the decisive vpc>vp pair is therefore inferred from the shared I2S delta plus the matching mechanism context, not directly observed on a vpc lineage.",
+  "confidence": "medium"
+}

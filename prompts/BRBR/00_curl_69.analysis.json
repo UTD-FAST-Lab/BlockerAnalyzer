@@ -1,0 +1,96 @@
+{
+  "branch_id": 69,
+  "target": "curl",
+  "summary_one_line": "Input must encode a parseable HTTP response with CRLF-terminated headers so httphdrs.head is non-empty at cleanup.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": [
+        "cmplog>naive (I2S)",
+        "value_profile_cmplog>value_profile (I2S)"
+      ],
+      "what_input_feature": "Input must contain literal HTTP framing bytes (e.g. 'HTTP/' at the response position and CRLF '\\r\\n' line terminators) so Curl's header parser pushes entries onto data->state.httphdrs.head, making the head pointer non-NULL when Curl_headers_cleanup walks it.",
+      "why_winner_satisfies": "All five winner seeds carry the literal byte sequence 47 48 54 54 50 2f ('HTTP/') at offsets 0x24-0x29 followed by header text terminated by 0d 0a (CRLF); the W-only coverage of Curl_headers_push (12 hits) and namevalue (10 hits) confirms the parser actually populated the headers linked-list on the winner side, so the for-loop initializer e=httphdrs.head sees a non-NULL head.",
+      "why_loser_doesnt": "Loser seeds have random bytes at offsets 0x06-0x2c (no concentrated values; mostly %-characters, repeated 'e'/'Z', or short truncations); none of them carries 'HTTP/' literally or CRLF in the right positions, so Curl_headers_push and namevalue receive zero invocations on the L side and httphdrs.head stays NULL — the for-loop's first conditional evaluates false and the true branch is never taken.",
+      "mechanism_attribution": "The curl harness invokes integer/string CMPs against the literal 'HTTP/' (and the CRLF token) while parsing the synthetic response; cmplog's CmpLogObserver captures those operands and I2SRandReplace substitutes them into the input at matching offsets, planting the required literals far faster than naive's blind havoc; vpc inherits the same I2SRandReplace mutator, so it wins over plain value_profile for the same reason."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the for-loop initializer at headers.c:348 inside Curl_headers_cleanup, blocked side T.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location header",
+      "exact_quote": "Location: /src/curl/lib/headers.c:348:38"
+    },
+    {
+      "claim": "Cmplog and vpc resolve every trial; naive and value_profile resolve zero of ten.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "trial counts per fuzzer",
+      "exact_quote": "cmplog                          10        0          0  winner (I2S vs naive)"
+    },
+    {
+      "claim": "Both decisive pairs differ on the I2S technique only (cmplog vs naive, vpc vs value_profile).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "pair deltas",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "Winners take the true branch and execute the loop body lines 349-352; losers reach the for-loop header but the body is dead.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "headers.c:348-352 overlay",
+      "exact_quote": "[W]   349      struct Curl_header_store *hs = e->ptr;"
+    },
+    {
+      "claim": "The branch-flip is driven by whether the headers linked-list is populated: W enters the loop ten times with iteration count divergence T=10 F=30 vs L T=0 F=30.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L 348 row at d=1",
+      "exact_quote": "d=1   L 348  T=10 F=30  T=0 F=30  for(e = data->state.httphdrs.head; e; e = n) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Curl_headers_push (the function that appends to httphdrs.head) and namevalue (the header-line parser) are invoked only on the winner side.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "Curl_headers_push and namevalue rows",
+      "exact_quote": "      12         0  Curl_headers_push  (/src/curl/lib/headers.c:278-330)"
+    },
+    {
+      "claim": "All ten winner seeds carry the literal bytes 'HTTP/' at offsets 0x24-0x29 followed by a space and 'me' text.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x24-0x2b",
+      "exact_quote": "   0x0024  47(G)x10                            6f(o)x1 41(A)x1                     DIFFER"
+    },
+    {
+      "claim": "Winner seed bytes at offsets 0x20-0x2f spell 'GHTTP/ mK@S' followed by CRLF and a header name, while losers have no such structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 1 hex dump",
+      "exact_quote": "0020: 02 00 00 00 47 48 54 54 50 2f 20 6d 4b 40 53 6e   ....GHTTP/ mK@Sn"
+    },
+    {
+      "claim": "Loser seeds are short (32-38 bytes for four of five) and contain no 'HTTP/' literal — only random havoc bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 1 hex dump",
+      "exact_quote": "0000: 00 01 00 00 00 19 2b 43 2e 2b 2b 2b 2b 2e 2d 4c   ......+C.++++.-L"
+    },
+    {
+      "claim": "Cmplog adds I2SRandReplace on top of naive's mutator stack; the mutator scans the input for one CMP operand and substitutes the other.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "Value_profile lacks I2SRandReplace and relies on CMP_MAP gradient feedback only.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 69 --role W --fuzzer cmplog --trial 1 --seed 004b74409cb04016` and `... --seed 006459fd40731a4e`. The first chain has 16 ancestor levels with I2S-floor dash rows at depth 14 and 15; the second has 21 ancestor levels with I2S-floor dash rows at depth 19 and 20 (mutation_op = -, ParentInfo-only metadata). Both winning seeds therefore inherit from at least one unwrapped I2SRandReplace find. Per the MECHANISM CONTEXT cmplog paragraph, dash rows are exclusive to cmplog/vpc in the current LibAFL build and indicate I2SRandReplace contribution (lower bound — some I2S finds leak into the havoc bucket so this underestimates the true frequency)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a hand-crafted input that omits the literal 'HTTP/' and CRLF at the expected offsets still causes Curl_headers_push to populate httphdrs.head (e.g. because some other parser path on the harness appends a header), then non-NULL head at line 348 is not actually gated on those literals and the I2S-substitution story is wrong."
+  },
+  "weakest_evidence_point": "The dash-row floor confirms I2SRandReplace contributed somewhere in both winners' ancestor chains, but the dash rows sit 14-20 levels above the leaf — havoc on intermediate ancestors could be what actually flipped the gate, so we cannot prove that the specific 'HTTP/' bytes at 0x24-0x29 were planted by I2S rather than by lucky havoc on an I2S-seeded ancestor.",
+  "confidence": "high"
+}

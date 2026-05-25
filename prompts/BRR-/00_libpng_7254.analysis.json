@@ -1,0 +1,87 @@
+{
+  "branch_id": 7254,
+  "target": "libpng",
+  "summary_one_line": "Input must contain a 4-byte chunk header equal to the literal FOURCC sPLT (0x73 0x50 0x4c 0x54) at a chunk-name position.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile>naive (value_profile)"],
+      "what_input_feature": "Some chunk header in the PNG stream must place the 4-byte ASCII FOURCC 'sPLT' (0x73 0x50 0x4c 0x54) into chunk_name so the 32-bit equality `chunk_name == png_sPLT` at pngread.c:229 becomes true. The required content is a fixed multi-byte literal at a structurally-determined offset (the chunk-type field following the 4-byte length).",
+      "why_winner_satisfies": "Both winning fuzzers (cmplog, value_profile) clear FOURCC equality CMPs that gate other chunk handlers in the same dispatch chain — the SOURCE CONTEXT overlay shows W-only hits on png_PLTE, png_eXIf, png_iCCP, png_tRNS, png_zTXt handler call sites, and DIVERGENT BRANCHES shows W reaches the true side of those equality tests (e.g. line 159 T=5 vs L T=0; line 229 T=28 vs L T=0). Each individual CMP is the same 4-byte-magic shape as png_sPLT, so the fuzzers that solved the sibling chunks also solve this one.",
+      "why_loser_doesnt": "naive has no CMP introspection: it produces seeds whose offset-0x35-0x38 chunk-type field is restricted to byte sets {0x73,0x59,0x47,0x42} matching only sRGB / sYGB variants (see BYTE DIFF), never randomly hitting the 32-bit constant 0x73504c54 in 12h of search. The DIVERGENT BRANCHES table shows L takes the true side ZERO times at every chunk-FOURCC equality test on the chain (lines 159, 179, 224, 229, 244, 249) — naive fails the whole family of 4-byte FOURCC gates, not just sPLT.",
+      "mechanism_attribution": "cmplog>naive (I2S): I2SRandReplace intercepts the 32-bit CMP `chunk_name == png_sPLT`, records the constant operand 0x73504c54 in CmpLogObserver, and a subsequent mutation substitutes that literal at byte positions in the input — the I2S-floor (dash-row) ancestor confirmed in lineage of seed 0249d0124e1ec000 at depth 6 is direct evidence. value_profile>naive (value_profile): the same 32-bit CMP feeds CMP_MAP with a Hamming-distance bucket; inputs whose chunk-name field shares 1, 2, or 3 bytes with `sPLT` add new CMP_MAP buckets and are preserved, providing a gradient ladder that bridges to the exact match. Both techniques attack the same single input feature (a 4-byte FOURCC literal) but via complementary mechanisms — hence single_feature, multi-mechanism."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a 32-bit equality test between a chunk_name field and the literal png_sPLT — a classic 4-byte FOURCC magic-number gate.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Source line",
+      "exact_quote": "else if (chunk_name == png_sPLT)"
+    },
+    {
+      "claim": "cmplog resolves every trial; naive blocks every trial — winner_resolved=10/10 and loser_blocked=10/10 establishes the cmplog>naive (I2S) decisive pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile resolves 8/10 vs naive 0/10 — the value_profile>naive (value_profile) decisive pair shows the CMP_MAP gradient also clears this gate, independent of I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "Naive never takes the true side of the sPLT FOURCC CMP across the whole campaign (T=0), and never takes the true side of any sibling chunk-FOURCC equality on the chain — confirming the failure is the whole 4-byte-magic family, not sPLT alone.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "lines 159, 179, 224, 229, 244, 249",
+      "exact_quote": "d=1   L 229  T=28 F=50  T=0 F=73  else if (chunk_name == png_sPLT)  <-- BLOCKER"
+    },
+    {
+      "claim": "W seeds reach the png_handle_sPLT handler (the action gated by the blocker); L seeds never do — direct overlay evidence of resolution.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 230",
+      "exact_quote": "[W]   230           png_handle_sPLT(png_ptr, info_ptr, length);"
+    },
+    {
+      "claim": "naive's mutator set has no I2S, so it has no mechanism to insert the 4-byte literal sPLT into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive section",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog's I2SRandReplace mutator literally scans the input for one CMP operand and substitutes the other — the exact substitution rule needed to plant png_sPLT into chunk_name.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog section",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer, picks a CMP entry, scans the input for byte sequences matching one operand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile feeds a CMP_MAP keyed by Hamming-distance buckets — exactly the gradient signal needed to climb from 1-byte-match toward a 4-byte match on sPLT.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile section",
+      "exact_quote": "each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket). The distance bucket is a coarse encoding of how close the two\noperands were (Hamming distance bucket for `trace_cmp*`; matching-prefix\nlength for string/memory CMPs)."
+    },
+    {
+      "claim": "value_profile preserves inputs that produce closer-than-seen operand pairs — this is the mechanism that ladders chunk-name bytes toward sPLT one byte at a time.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "L's chunk-type bytes at offset 0x35-0x38 are concentrated on sRGB / sYGB shapes only (single-cluster), with no diversity exploration toward sPLT — consistent with naive lacking any CMP feedback.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "0x35-0x38",
+      "exact_quote": "   0x0035  73(s)x6 63(c)x3 70(p)x1             73(s)x10                            PARTIAL"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 7254 --role W --fuzzer cmplog --trial 1 --seed 0249d0124e1ec000` and observed an I2S-floor row (mutation_op = -) at depth 6 of the chain. Cross-checked with seed 008e36779bb8be0f (same branch/fuzzer/trial), which has an I2S-floor row at depth 13. Both winning seeds carry an I2SRandReplace ancestor under the current LibAFL build's dash-row convention. This is the primary claimed mechanism for the cmplog>naive pair; the second decisive pair (value_profile>naive) is attributed to CMP_MAP gradient (a different technique under the same I2S-axis of CMP introspection)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a single 32-bit equality gate `if (read_u32(input+4) == 0x73504c54) trap;` (i.e. the exact png_sPLT FOURCC, no other context) on which naive resolves in <12h would refute the claim that this is a magic-number-gate mechanism. Conversely, if cmplog fails to resolve such a synthetic gate at any value of an inserted padding/cost knob between input and CMP, the I2SRandReplace attribution is wrong."
+  },
+  "weakest_evidence_point": "The BYTE DIFF table only shows the first 64 bytes and the offset of the literal sPLT bytes is not directly visible (the actual sPLT chunk falls deeper in the file); my claim that the substituted literal is at a structurally-determined chunk-name offset is inferred from PNG chunk layout (4-byte length followed by 4-byte type) plus the dispatch loop structure, not directly observed in the byte-diff.",
+  "confidence": "high"
+}

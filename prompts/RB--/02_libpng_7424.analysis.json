@@ -1,0 +1,81 @@
+{
+  "branch_id": 7424,
+  "target": "libpng",
+  "summary_one_line": "An iTXt chunk whose keyword field is either empty (first byte NUL) or runs more than 79 bytes before the first NUL terminator.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A PNG input that reaches an iTXt chunk in which the keyword prefix scan computes prefix_length > 79 OR prefix_length < 1. Concretely: an iTXt chunk payload whose first byte is 0x00 (empty keyword) or whose first 80+ bytes contain no 0x00 terminator (over-long keyword).",
+      "why_winner_satisfies": "Naive uses pure random byte mutation (byte/word/dword random/interesting/flip/inc, bytes insert/delete). Random byte placement makes it easy to either set the first iTXt payload byte to 0 (length=0) or to fill 80+ bytes of the iTXt payload with non-zero bytes (length>79). Naive resolves the branch in 8/10 trials.",
+      "why_loser_doesnt": "Cmplog's I2SRandReplace substitutes input bytes with operands seen at intercepted CMPs (PNG chunk-type magic numbers like 'IHDR'/'iTXt', length fields, CRC operands). These substitutions push the input toward well-formed PNG keyword structures (printable ASCII followed by a NUL within 1-79 bytes), keeping prefix_length inside the valid 1..79 range. Cmplog reaches png_handle_iTXt MUCH more often than naive (HIT-COUNT DIVERGENCE shows ~10-20x more invocations) yet resolves the branch in only 1/10 trials — the I2S bias steers AROUND the malformed-keyword condition rather than toward it.",
+      "mechanism_attribution": "Pattern-B: I2SRandReplace (cmplog's distinguishing technique vs naive) HURTS here. The branch operand prefix_length is a runtime-computed loop-count, not a literal that any CMP records, so I2S has no direct lever to set it. Meanwhile the CMPs I2S DOES see (chunk magic 'IHDR'/'iTXt', CRC, fixed-format header fields) are constraints whose satisfaction produces well-formed keywords, which fall in the [1,79] range the branch checks AGAINST. Naive's unbiased random mutation explores the malformed boundary cases more readily."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a compound length-range check on a runtime-computed keyword length, not a direct equality CMP on input bytes.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "/src/libpng/pngrutil.c:2767, source_line",
+      "exact_quote": "if (prefix_length > 79 || prefix_length < 1)"
+    },
+    {
+      "claim": "prefix_length is computed by a NUL-scan loop over the iTXt chunk buffer; it is not an input field that any CMP intercepts as a literal operand.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 2761-2764",
+      "exact_quote": "for (prefix_length=0;\n[B]  2762        prefix_length < length && buffer[prefix_length] != 0;\n[B]  2763        ++prefix_length)\n[B]  2764        /* Empty loop */ ;"
+    },
+    {
+      "claim": "Naive resolves this branch 8/10 trials while cmplog resolves only 1/10 — the I2S-augmented fuzzer is strictly worse here.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive vs cmplog rows",
+      "exact_quote": "naive                            8        2          0  winner (I2S vs cmplog)\ncmplog                           1        9          0  loser (I2S vs naive)"
+    },
+    {
+      "claim": "The naive>cmplog separation is statistically strong at subject level (p_AUC=0.0002, p_final=0.0002).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 subject-level row",
+      "exact_quote": "subject-level: delta_AUC=3983370.0  p_AUC=0.0002  delta_Final=309.8  p_final=0.0002"
+    },
+    {
+      "claim": "Cmplog (L) hits the PNG-parsing call chain dramatically more often than naive (W) — e.g. png_get_uint_31 fires 214 times for L vs 14 for W, png_check_chunk_name 192 vs 12 — yet still fails to reach the resolved side. This means cmplog is spending its budget re-parsing well-formed PNGs rather than producing the malformed iTXt keyword.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "top rows: png_get_uint_31, png_check_chunk_name",
+      "exact_quote": "  W hits    L hits  function  (file:start-end)\n      14       214  OSS_FUZZ_png_get_uint_31  (/src/libpng/pngrutil.c:23-30)\n      17       205  OSS_FUZZ_png_crc_read  (/src/libpng/pngrutil.c:197-203)\n      12       194  OSS_FUZZ_png_read_chunk_header  (/src/libpng/pngrutil.c:157-192)\n      12       192  OSS_FUZZ_png_check_chunk_name  (/src/libpng/pngrutil.c:3136-3151)"
+    },
+    {
+      "claim": "At the blocker itself, cmplog (L) DOES occasionally take the TRUE side (3/12) but more often takes FALSE (9/12 and 12/12 across two branch records), while naive (W) shows T=1/3 and T=1/4 — both sparse, but naive arrives with less of the auxiliary FALSE-side noise. Cmplog explores the FALSE-side downstream code (lines 2780-2850 marked [L]) extensively, which is precisely the well-formed-keyword path.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2767 BLOCKER rows",
+      "exact_quote": "  d=1   L2767  T=1 F=2  T=3 F=9  if (prefix_length > 79 || prefix_length < 1)  <-- BLOCKER\n  d=1   L2767  T=1 F=3  T=0 F=12  if (prefix_length > 79 || prefix_length < 1)  <-- BLOCKER"
+    },
+    {
+      "claim": "I2SRandReplace is available to cmplog and substitutes intercepted CMP operands (chunk magic, length fields, CRC operands) into the input, biasing toward well-formed PNG structures.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "Naive's mutator stack is purely structure-agnostic random byte/word/dword/bits transforms with no CMP introspection, so its output distribution over byte sequences is unbiased relative to PNG well-formedness.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators paragraph",
+      "exact_quote": "**Mutators**: havoc + token stack — `ByteFlipMutator`, `ByteRandMutator`,\n`ByteIncMutator`, `ByteDecMutator`, `ByteAddMutator`, `WordAddMutator`,\n`DwordAddMutator`, `QwordAddMutator`, `BytesDeleteMutator`,\n`BytesInsertMutator`, `BytesInsertCopyMutator`, `BytesExpandMutator`,\n`BytesRandInsertMutator`, `BytesRandSetMutator`, `BytesCopyMutator`,\n`BytesSwapMutator`, `WordInterestingMutator`, `DwordInterestingMutator`,\n`ByteInterestingMutator`, `CrossoverInsertMutator`,\n`CrossoverReplaceMutator`, `TokenInsert`, `TokenReplace`."
+    },
+    {
+      "claim": "The rare cmplog winner's lineage does contain I2S-floor dash rows, confirming I2S DID fire — but it produced a win only 1/10 times because most I2S firings push the input toward well-formed PNG and away from the malformed-keyword condition.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving Seed 1, fuzzer=cmplog trial=4 seed 8d7db84a6b1ec8bc",
+      "exact_quote": "Seed 1 (id=8d7db84a6b1ec8bc, size=8759 bytes, fuzzer=cmplog, trial=4, discovered_at=7348s, mutation_op=BytesDeleteMutator,ByteRandMutator,WordInterestingMutator,ByteInterestingMutator,ByteInterestingMutator,TokenInsert,ByteAddMutator)"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 7424 --role W --fuzzer cmplog --trial 4 --seed 8d7db84a6b1ec8bc` and observed I2S-floor dash rows at depths 7 and 8 of the cmplog winner's ancestor chain (output: 'I2S-floor signal: 2 ancestor dash row(s) at depth 7, 8'). I2SRandReplace IS the distinguishing technique at this branch — but this is a Pattern-B (technique-HURTS) case: cmplog is the LOSER. I2S fires for cmplog (verified), but its substitutions push the input toward well-formed PNG keyword structures (length 1-79) and AWAY from the malformed-keyword condition (length 0 or >79) that the gate requires. Naive, lacking I2S bias, finds the malformed condition through unbiased random mutation. The named technique (I2SRandReplace) is the same as the agreed mechanism in mechanism_attribution; the polarity (helps vs hurts) is captured in the hypothesis text, not in the technique label."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the gate operand is a length scanned from a NUL-terminated input field embedded behind a PNG-style magic-number prelude should show naive > cmplog when the gate boundary lies OUTSIDE the range I2S substitutions would naturally produce (length < 1 or > 79). If, instead, a synthetic with this exact shape shows cmplog >= naive (or no separation), the 'I2S bias steers AWAY from malformed boundary' mechanism is refuted."
+  },
+  "weakest_evidence_point": "The claim that I2S substitutions actively bias cmplog toward valid keyword lengths (rather than just spending budget on other parsing work) is inferential — we observe the HIT-COUNT divergence and infer the mechanism, but we did not directly trace which I2S substitutions wrote which bytes into the keyword field of any specific cmplog input.",
+  "confidence": "medium"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 7252,
+  "target": "libpng",
+  "summary_one_line": "Input must contain a PNG chunk header whose 4-byte chunk_name FOURCC equals png_hIST ('hIST').",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed PNG chunk whose 4-byte chunk_name field (read as png_uint_32) equals the constant png_hIST ('hIST' = 0x68 0x49 0x53 0x54). The chunk must be reached after the PNG signature + IHDR so the chunk-dispatch loop in png_read_info evaluates the chunk_name against png_hIST.",
+      "why_winner_satisfies": "Cmplog winners (e.g. seed 0efff458ec8ef5fb at 3s) start with the PNG signature and IHDR then place subsequent chunk-name fields (gAMA/zTXt etc.) that pass earlier checks — by I2S substituting the 32-bit constant png_hIST into one of those chunk-name slots, the equality CMP at line 189 fires true. The winner side shows T=12 hits at the blocker line in W coverage.",
+      "why_loser_doesnt": "Naive trials never synthesize the 4-byte literal 'hIST' inside a valid chunk header — random havoc + tokens have ~2^-32 chance of producing the exact FOURCC. Loser hits the blocker line many times (F=134) but the true side is taken zero times (T=0), so the gate at line 189 never opens.",
+      "mechanism_attribution": "cmplog's I2SRandReplace intercepts the 32-bit integer comparison `chunk_name == png_hIST` via __sanitizer_cov_trace_cmp4, records the runtime constant png_hIST in the CmpLogObserver buffer, then substitutes that literal at the chunk_name byte offset of an input that has otherwise reached the dispatch loop. Naive has no such substitution and must rely on havoc/token to guess the FOURCC."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the 4-byte chunk_name FOURCC comparison against png_hIST at pngread.c:189.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Source line",
+      "exact_quote": "Source line:       else if (chunk_name == png_hIST)"
+    },
+    {
+      "claim": "cmplog resolves the branch in every trial while naive blocks in every trial.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive vs cmplog rows",
+      "exact_quote": "naive                            0       10          0  loser (I2S vs cmplog)\ncmplog                          10        0          0  winner (I2S vs naive)"
+    },
+    {
+      "claim": "The technique delta is I2S between cmplog and naive.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "The chunk_name value being tested is freshly read each loop iteration from the chunk header.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 108-109",
+      "exact_quote": "[B]   108        png_uint_32 length = png_read_chunk_header(png_ptr);\n[B]   109        png_uint_32 chunk_name = png_ptr->chunk_name;"
+    },
+    {
+      "claim": "Winner-only coverage on the hIST-handler call (line 190) confirms only W reaches png_handle_hIST.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 190",
+      "exact_quote": "[W]   190           png_handle_hIST(png_ptr, info_ptr, length);"
+    },
+    {
+      "claim": "At the blocker, W takes the true side 12 times while L takes it 0 times — losers reach line 189 but never satisfy chunk_name == png_hIST.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L 189",
+      "exact_quote": "d=1   L 189  T=12 F=124  T=0 F=134  else if (chunk_name == png_hIST)  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog's mutator stack includes I2SRandReplace, which substitutes CMP-operand bytes into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "Naive's mutator set has no I2S substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive mutation_op observation",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 7252 --role W --fuzzer cmplog --trial 1 --seed 0efff458ec8ef5fb`. Chain has 6 ancestor levels; depth 5 is an I2S-floor row (mutation_op = -, ParentInfo-only metadata). Per fuzzer_mechanism_library.md cmplog section, dash rows are exclusive to cmplog/vpc under the current LibAFL build and indicate an unwrapped I2SRandReplace find. The seed itself was discovered at 3s into the trial — too early for naive-style havoc to randomly land a 4-byte FOURCC, consistent with I2S substitution of png_hIST."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a synthetic harness that gates on chunk_name == png_hIST is also blocked for cmplog (i.e., cmplog fails to resolve it within the same budget as on libpng), the I2SRandReplace explanation for the 4-byte FOURCC gate is refuted — the divergence would have to come from something other than I2S substitution of a 32-bit equality CMP."
+  },
+  "weakest_evidence_point": "The I2S-floor verification is a lower bound — the single dash row at depth 5 confirms I2S contributed somewhere in the ancestry of seed 0efff458ec8ef5fb, but the immediate leaf mutation is havoc, so we cannot prove the exact byte that placed 'hIST' at a chunk_name offset came from I2S vs from later havoc on an I2S-seeded ancestor.",
+  "confidence": "high"
+}

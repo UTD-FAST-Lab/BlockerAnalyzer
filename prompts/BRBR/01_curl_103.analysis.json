@@ -1,0 +1,87 @@
+{
+  "branch_id": 103,
+  "target": "curl",
+  "summary_one_line": "Input must encode a parseable harness scheme/host/port header so curl receives non-zero response bytes and bytecount+headerbytecount-deductheadercount > 0.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A multi-field harness preamble whose bytes at fixed offsets spell scheme/host/port/HTTP literals — specifically bytes 0x06-0x0b = 'pop3+-', bytes 0x0c-0x14 forming '127.0.0.1', bytes 0x24-0x29 spelling 'GHTTP/' — so the harness opens an HTTP-over-pop3 transfer that delivers a non-empty body, making (bytecount + headerbytecount - deductheadercount) > 0.",
+      "why_winner_satisfies": "Every cmplog-winning seed carries the exact literal byte sequences at the constrained offsets (0x06-0x0b='pop3+-' x10, 0x09='3' x10, 0x0a='+' x10, 0x0b='-' x10, 0x24-0x29='GHTTP/' x10), so the harness drives a real HTTP exchange whose byte counters become positive, taking the false branch at line 1708 into the return CURLE_OK path.",
+      "why_loser_doesnt": "Naive/value_profile seeds at the same offsets show heavily scattered byte sets (e.g. 0x06: 43/31/33/41 +5 unique; 0x09: 25/47/2f/37 +4 unique; 0x24: 6f/41/4b/dc all singletons), no concentration on the literals — the harness rejects them, no bytes are read, bytecount stays 0, the (<=0) test holds, and execution enters the 'Empty reply from server' arm (lines 1714-1717) which is the L-only region.",
+      "mechanism_attribution": "cmplog's I2SRandReplace intercepts the harness's memcmp/strcmp against the scheme/host/port literals at fixed PCs, records (input_bytes, expected_constant) pairs into the CmpLogObserver buffer, then substitutes the expected constants at the matching input offsets in one mutation step. value_profile_cmplog inherits the same I2SRandReplace mutator and the same advantage over plain value_profile, which has only CMP_MAP distance gradients and no operand-substitution mutator and so cannot synthesize the multi-byte literals reliably within 12h."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The branch tests whether the running HTTP transfer received any payload bytes; the false (winner) side means bytecount+headerbytecount-deductheadercount > 0.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1708-L1710",
+      "exact_quote": "(data->req.bytecount + <-- BLOCKER"
+    },
+    {
+      "claim": "The true (loser) side leads to the 'Empty reply from server' failure path, which is the L-only region in the per-role overlay.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1714-L1717",
+      "exact_quote": "[L]  1714      failf(data, \"Empty reply from server\");"
+    },
+    {
+      "claim": "All 10 cmplog winners pin offsets 0x06-0x0b to the literal bytes 'pop3+-'.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x06-0x0b",
+      "exact_quote": "0x0006  70(p)x10                            43(C)x2 31(1)x1 33(3)x1 41(A)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "Winner offset 0x09 is uniformly '3' across all 10 seeds; loser is scattered.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x09",
+      "exact_quote": "0x0009  33(3)x10                            25(%)x3 47(G)x1 2f(/)x1 37(7)x1 +4u  DIFFER"
+    },
+    {
+      "claim": "Winner offsets 0x24-0x29 spell 'GHTTP/' across all 10 seeds; loser bytes are all singletons.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x24-0x29",
+      "exact_quote": "0x0024  47(G)x10                            6f(o)x1 41(A)x1 4b(K)x1 dc(.)x1     DIFFER"
+    },
+    {
+      "claim": "Winner seeds carry the literal bytes '127.0.0.1' and 'HTTP/' in their hex+ASCII dumps.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 2 id=006459fd40731a4e",
+      "exact_quote": "0000: 00 01 00 00 00 19 70 6f 70 33 2b 2d 2f 31 32 37   ......pop3+-/127"
+    },
+    {
+      "claim": "All 10 cmplog trials resolved the branch while all 10 naive trials remained blocked for the full 12h budget — a complete probability divergence with a 545-hit per-branch hitcount gap.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0\n  avg duration blocked: winner=0.35h  loser=12.00h\n  avg hitcount on branch: winner=545  loser=0\n  prob_div=1.00  dur_div=11.65h  hit_div=545"
+    },
+    {
+      "claim": "The value_profile_cmplog vs value_profile pair shows the same complete probability divergence under the same I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 value_profile_cmplog>value_profile",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace reads CmpLogObserver entries, finds the input bytes matching one operand, and substitutes the other operand at those offsets — the exact mechanism that would imprint scheme/HTTP literals onto corpus seeds.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog block, I2SRandReplace paragraph",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks the I2SRandReplace mutator and only has CMP_MAP gradient feedback, which cannot synthesize multi-byte literal substrings directly.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile block",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 103 --role W --fuzzer cmplog --trial 1 --seed 006459fd40731a4e` and observed I2S-floor rows (mutation_op = -) at depths 19 and 20 of the 21-level ancestor chain — direct lower-bound evidence that I2SRandReplace operated on ancestors of this winning seed under the current LibAFL build's unwrapped logging."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose only gate is a multi-byte equality CMP against a fixed literal (e.g. memcmp(input+6,\"pop3+-\",6)==0) in which cmplog does NOT outperform naive at 12h — would falsify the I2S-substitution-of-scheme-literals account; or, conversely, observing that the cmplog winners' ancestor chains never contain a dash row would refute the lineage attribution."
+  },
+  "weakest_evidence_point": "The mapping from each constrained byte offset to a specific harness memcmp/strcmp call site is inferred from the byte-pattern shapes (scheme name, IP address, 'HTTP/' literal) rather than from a direct read of the curl harness source, so a fraction of the constrained bytes may be gated by a different mechanism than I2S literal substitution.",
+  "confidence": "high"
+}

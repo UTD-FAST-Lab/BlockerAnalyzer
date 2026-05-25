@@ -1,0 +1,111 @@
+{
+  "branch_id": 190,
+  "target": "curl",
+  "summary_one_line": "Input must contain a complete header line ending in 0x0a whose first line matches a recognized HTTP/RTSP protocol prefix so headerline counter increments.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The buffer must contain a newline byte (0x0a) AND the accumulated first header line must begin with a recognizable protocol prefix (literally the ASCII string 'HTTP/' or 'RTSP/') so that checkprotoprefix/checkhttpprefix returns non-STATUS_BAD, then sscanf(\" HTTP/%1d.%1d%c%3d%c\", ...) parses it and k->headerline is post-incremented at line 4298 (`if(!k->headerline++)`). Once headerline becomes non-zero, subsequent iterations take the false branch of `if(!k->headerline)` at line 3932 (the blocker).",
+      "why_winner_satisfies": "Every winner-resolving seed carries the literal ASCII bytes 'GHTTP/' at offsets 0x24-0x29 followed by ' ' and a status-line tail; the prefix 'HTTP/' starting at offset 0x25 matches the sscanf format string ' HTTP/%1d.%1d%c%3d%c' that sets nc>=4 and lets Curl_http_statusline succeed, after which headerline is incremented. The W set also exhibits a stable network/URL preamble (e.g. '127.0.0.1:9021') and trailing '\\r\\n' separators that produce well-formed header lines.",
+      "why_loser_doesnt": "Loser-blocking seeds (naive) lack the literal 'HTTP/' / 'RTSP/' substring at any aligned offset — at offset 0x24-0x29 W has 47 48 54 54 50 2f ('GHTTP/') while L shows a scatter of unrelated bytes (6f, 41, 4b, dc, ...). Without that 5-byte literal, checkprotoprefix returns STATUS_BAD on the first complete line and k->headerline is never incremented, so the (!k->headerline) test at line 3932 stays true on every subsequent partial-line iteration.",
+      "mechanism_attribution": "cmplog's CmpLogObserver records the literal 'HTTP/' (and the related multi-byte tokens inside sscanf / strcmp inside checkprotoprefix) as a CMP operand pair when the harness drives the parser; I2SRandReplace then substitutes that literal at random offsets in the input, manufacturing seeds that satisfy the protocol-prefix gate. value_profile_cmplog wins for the same reason — it has I2SRandReplace too. naive and value_profile have only havoc/token mutators with no I2S substitution, so finding the exact 5-byte 'HTTP/' literal at the right alignment is left to blind byte mutation."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker branch is `if(!k->headerline)` at http.c:3932 and the globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "/src/curl/lib/http.c:3932:10",
+      "exact_quote": "Source line:       if(!k->headerline) {"
+    },
+    {
+      "claim": "naive and value_profile never resolve this branch across 10 trials each; cmplog and value_profile_cmplog resolve it in all 10 trials.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "per-fuzzer counts",
+      "exact_quote": "naive                            0       10          0  loser (I2S vs cmplog)"
+    },
+    {
+      "claim": "Both decisive pairs share the I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 + Pair 2 delta",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "Pair 2 is value_profile_cmplog > value_profile under the same I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "The headerline counter is post-incremented at line 4298 by `if(!k->headerline++)`, which is only reached after a complete header line is processed and the protocol prefix check succeeds.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "http.c:4298",
+      "exact_quote": "if(!k->headerline++) {"
+    },
+    {
+      "claim": "Curl_http_readwrite_headers reaches sscanf with the format string ' HTTP/%1d.%1d%c%3d%c' to parse the first header line.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "http.c:4318-4319",
+      "exact_quote": "                      \" HTTP/%1d.%1d%c%3d%c\","
+    },
+    {
+      "claim": "When a complete line is not yet present (no 0x0a in buffer), the loser branch executes checkprotoprefix on the partial buffer at line 3934-3937 — and L is the only side that hits these lines in the per-role overlay.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "http.c:3934-3937 marked [L]",
+      "exact_quote": "[L]  3934          statusline st ="
+    },
+    {
+      "claim": "The W set always contains the literal ASCII 'GHTTP/' starting at offset 0x24 across all 5 displayed winning seeds.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x24-0x29",
+      "exact_quote": "   0x0024  47(G)x10                            6f(o)x1 41(A)x1 4b(K)x1 dc(.)x1     DIFFER"
+    },
+    {
+      "claim": "At the immediately following offset 0x25 the W set always carries 0x48 ('H'), while L's bytes at that offset are random.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x25",
+      "exact_quote": "   0x0025  48(H)x10                            00(.)x1 41(A)x1 25(%)x1 dc(.)x1     DIFFER"
+    },
+    {
+      "claim": "Offsets 0x26, 0x27, 0x28, 0x29 carry 'T','T','P','/' in all 10 winner samples — i.e. the full 'HTTP/' literal at fixed alignment.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x26-0x29",
+      "exact_quote": "   0x0026  54(T)x10                            10(.)x1 dc(.)x1                     DIFFER"
+    },
+    {
+      "claim": "The actual seed hexdump confirms 'GHTTP/' at row 0x20 of Seed 1 winner.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed id=004b74409cb04016",
+      "exact_quote": "  0020: 02 00 00 00 47 48 54 54 50 2f 20 6d 4b 40 53 6e   ....GHTTP/ mK@Sn"
+    },
+    {
+      "claim": "cmplog mutators include I2SRandReplace which substitutes CMP operands (such as 'HTTP/') into the input at scanned offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators block",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and uses only havoc + token mutators, so it has no mechanism for substituting the 'HTTP/' literal directly.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators block",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog has I2SRandReplace, matching the cmplog mechanism for this branch.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators block",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 190 --role W --fuzzer cmplog --trial 1 --seed 006459fd40731a4e` and observed I2S-floor rows (mutation_op = -) at depths 19 and 20 of the 21-level ancestor chain. Dash rows are exclusive to cmplog/vpc under the current build and constitute direct lower-bound evidence that I2SRandReplace fired in the lineage of this winning seed; this aligns with the literal 'HTTP/' bytes at offsets 0x25-0x29 being present in every winner seed but absent from every loser seed."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose only gate is matching a literal multi-byte string at a fixed input offset shows naive and value_profile reaching the gate at the same rate as cmplog and value_profile_cmplog within the duration budget — i.e. lacks_I2S fuzzers solve the literal-substitution gate without I2S help."
+  },
+  "weakest_evidence_point": "I inferred the gate is checkprotoprefix recognizing 'HTTP/' from the seed bytes plus the source layout, but I did not directly observe checkprotoprefix's internal string compare; an unrelated downstream condition that also requires 'HTTP/' (e.g. the sscanf format string at line 4319) could be the proximate CMP source recorded by CmpLogObserver, in which case the upstream blocker mechanism is the same I2S substitution but the exact CMP-site attribution is approximate.",
+  "confidence": "high"
+}

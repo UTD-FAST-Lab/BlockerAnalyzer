@@ -1,0 +1,111 @@
+{
+  "branch_id": 192,
+  "target": "curl",
+  "summary_one_line": "Input must contain the literal ASCII bytes 'HTTP/' at the start of a header line so sscanf parses a status line and increments k->headerline.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A complete first header line that begins with the 5-byte ASCII literal 'HTTP/' (0x48 0x54 0x54 0x50 0x2f) so that sscanf(HEADER1, \" HTTP/%1d.%1d%c%3d%c\", ...) at line 4318 returns nc>=4 and Curl_http_statusline() is called, which causes k->headerline to be incremented past 0 by the !k->headerline++ branch at line 4298. Subsequent iterations then take the FALSE side of the blocker at line 3971.",
+      "why_winner_satisfies": "All five winner-resolving seeds contain the exact byte sequence 'HTTP/' at offsets 0x25-0x29 (47 48 54 54 50 2f / 'GHTTP/'), so the sscanf at line 4318 matches the HTTP version pattern, nc>=4, k->httpcode is parsed, and the !k->headerline++ branch at line 4298 fires the first time, leaving k->headerline=1 for the second pass — flipping the line-3971 test to FALSE.",
+      "why_loser_doesnt": "All five loser-blocking seeds carry 'From:' (46 72 6f 6d 3a) at offsets 0x25-0x29 instead of 'HTTP/', so sscanf returns nc=0 (no HTTP/ prefix), the else-if(!nc) checkhttpprefix path also fails (no 'HTTP' anywhere usable), and on subsequent loop iterations k->headerline remains 0, so the line-3971 test stays TRUE and the false branch is never taken.",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace mutator reads the runtime CMP operands logged when sscanf's internal byte comparisons (and the Curl_dyn_addn / strcmp callbacks) compare an input span against the literal 'HTTP/', then substitutes that 5-byte literal directly into the input. naive and value_profile lack I2SRandReplace, so they would have to land all five bytes 'H','T','T','P','/' contiguously by havoc — a ~1/2^40 random-byte event per offset — which neither achieved in 10/10 trials over ~12h. The value_profile-only path has no equivalent single-step substitution and cannot synthesize the 5-byte literal in one shot; only I2SRandReplace does."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the false side of `if(!k->headerline)` at http.c:3971, reached inside the per-header-line do/while loop of Curl_http_readwrite_headers.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location: /src/curl/lib/http.c:3971:8",
+      "exact_quote": "Source line:     if(!k->headerline) {"
+    },
+    {
+      "claim": "k->headerline is incremented by the post-increment in the line-4298 branch, which is what flips the line-3971 test to false on subsequent iterations.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "http.c:4298",
+      "exact_quote": "if(!k->headerline++) {"
+    },
+    {
+      "claim": "The branch on the line-4298 increment path runs sscanf against the literal HTTP version pattern, so an input matching 'HTTP/%1d.%1d%c%3d%c' is what makes nc>=4 and clears the path to k->headerline incrementing.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "http.c:4318-4324",
+      "exact_quote": "nc = sscanf(HEADER1,"
+    },
+    {
+      "claim": "Winners cleanly carry the literal 'HTTP/' (0x48 0x54 0x54 0x50 0x2f) at offsets 0x25-0x29 across all sampled seeds, while losers carry 'From:' at the same offsets — exactly the bytes the sscanf needs to start parsing a status line.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x25-0x29",
+      "exact_quote": "   0x0025  48(H)x10                            46(F)x9 00(.)x1                     DIFFER"
+    },
+    {
+      "claim": "The second byte of the 'HTTP/' run is also a unanimous winner vs loser divergence (0x54 'T' x10 vs 0x72 'r' x9 + 0x01 x1), confirming the literal is the discriminating feature.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x26",
+      "exact_quote": "   0x0026  54(T)x10                            72(r)x9 01(.)x1                     DIFFER"
+    },
+    {
+      "claim": "A representative winning seed shows the 'HTTP/' literal in situ at offset 0x24 of the seed bytes: the 'G' header tag (0x47) is followed immediately by 'HTTP/' (0x48 0x54 0x54 0x50 0x2f).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 006459fd40731a4e offset 0x20",
+      "exact_quote": "  0020: 02 00 00 00 47 48 54 54 50 2f 20 6d 65 40 31 6e   ....GHTTP/ me@1n"
+    },
+    {
+      "claim": "A representative loser-blocking seed carries 'From:' (46 72 6f 6d 3a) at the same offset where winners carry 'HTTP/' — no HTTP version prefix present.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 07ab79b291b9daf6 offset 0x20",
+      "exact_quote": "  0020: 02 00 00 00 47 46 72 6f 6d 3a 20 6d 65 40 73 6f   ....GFrom: me@so"
+    },
+    {
+      "claim": "The blocker line-3971 is reached on both W and L sides ([B] line 3971), but only W proceeds past it to lines 4000+ that depend on k->headerline being already set — confirming the divergence is at the line-3971 test direction, not at reachability.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "http.c:3971 vs http.c:4000",
+      "exact_quote": "[W]  4000      headp = Curl_dyn_ptr(&data->state.headerb);"
+    },
+    {
+      "claim": "Curl_http_statusline is invoked 10 times in W and zero times in L — the natural consequence of W's sscanf matching the HTTP/ prefix and L's failing.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "Curl_http_statusline",
+      "exact_quote": "      10         0  Curl_http_statusline  (/src/curl/lib/http.c:3774-3844)"
+    },
+    {
+      "claim": "On the W side, the !k->headerline++ branch at line 4298 took the true side 10 times (executing the status-line parsing block); on the L side it never fired — direct evidence the loser never increments k->headerline.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L4298",
+      "exact_quote": "  d=1   L4298  T=10 F=12  T=0 F=0  if(!k->headerline++) {"
+    },
+    {
+      "claim": "Both decisive pairs are I2S deltas (cmplog>naive and value_profile_cmplog>value_profile), so the technique axis present in winners and absent in losers is specifically I2SRandReplace.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 + Pair 2 delta tags",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "value_profile_cmplog vs value_profile is the other decisive pair on the same I2S axis — winners 10/10 resolve, losers 10/10 block.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "Mechanism context attributes the I2S substitution to cmplog's I2SRandReplace mutator, which scans the input for one operand of an intercepted CMP and substitutes the other — exactly the operation that would inject the literal 'HTTP/' at a CMP site.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,"
+    },
+    {
+      "claim": "naive and value_profile lack I2SRandReplace (only havoc + token mutators), which explains why they cannot synthesize the 5-byte literal in one step.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive / value_profile Mutators paragraphs",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 192 --role W --fuzzer cmplog --trial 1 --seed 006459fd40731a4e` and observed 2 I2S-floor dash rows (mutation_op = -, ParentInfo-only LibAFL metadata characteristic of an unwrapped I2SRandReplace find) at depths 19 and 20 of the 21-level ancestor chain. The trailing tool line confirms: 'I2S-floor signal: 2 ancestor dash row(s) at depth 19, 20.' This is a lower-bound signal under the current build (the literal 'I2SRandReplace' string is not yet logged), and dash rows are exclusive to cmplog/vpc in the current data."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the gate at line 3971 is reachable but the operand it depends on is NOT a literal byte sequence in the input — e.g., k->headerline is incremented based on a runtime-computed value the input bytes do not directly equal — should show cmplog and naive equally slow. If, on such a harness, cmplog still resolved 10/10 while naive blocked, then I2SRandReplace literal-substitution is NOT the mechanism here and the hypothesis is refuted."
+  },
+  "weakest_evidence_point": "The byte diff shows the 'HTTP/' literal is present in winners and absent in losers, but does not directly prove the CMP that I2S intercepted was the sscanf-internal one (vs an earlier strncmp/memcmp in checkhttpprefix or Curl_dyn_addn); the precise CMP site that fired I2SRandReplace is inferred from source rather than logged.",
+  "confidence": "high"
+}

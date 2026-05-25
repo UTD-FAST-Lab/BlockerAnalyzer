@@ -1,0 +1,99 @@
+{
+  "branch_id": 252,
+  "target": "curl",
+  "summary_one_line": "Input must contain a parseable protocol scheme, IP:port, HTTP request line, and header tokens so a full transfer reaches multi_done with non-zero Curl_pgrsDone return.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A structured byte sequence containing several literal multi-byte tokens at fixed offsets: a protocol scheme prefix 'pop3+-' at 0x06-0x0b, a dotted-quad host 0x0c-0x14 ('127.0.0.1' / '.0.0.1:'), an ASCII port string near 0x15-0x1a ('9021' or similar), and an HTTP request-line/header fragment from 0x24 onwards containing 'HTTP/' and recognised header names like 'Retry-A' or 'TranSfe'. All five winner seeds share these literal strings; together they drive the harness through scheme parsing, connect, HTTP transfer, and into multi_done with result==CURLE_OK while Curl_pgrsDone returns non-zero, satisfying '!result && rc'.",
+      "why_winner_satisfies": "Every winner-resolving seed carries the literal byte runs 'pop3+-' at 0x06-0x0b, '127.0.0.1' at 0x0c-0x14, ':9021'/'9021' at 0x16-0x1a, 'GHTTP/' at 0x24-0x29 and header keywords (e.g. 'Retry-A', 'TranSfe') at 0x2f+. Cmplog/vpc's I2SRandReplace observes these constants in curl's strcmp/memcmp/strncmp calls during URL/protocol/header parsing and pastes them into the input, unblocking each successive gate so execution reaches multi.c:654 and exercises the true branch (winner W(T/F)=10/0).",
+      "why_loser_doesnt": "The loser-blocking seeds are short (35-47 bytes) random-byte / percent-encoding garbage at the same offsets (e.g. 0x06=%, 0x08-0x0a=random bytes, no 'pop3', no '127.0.0.1', no 'HTTP/'). Without the multi-byte literal scheme/host/HTTP tokens at the gates upstream of multi_done, naive's and value_profile's havoc mutators cannot synthesise the exact constants in tractable time: naive has no CMP introspection, and value_profile's CMP_MAP only rewards Hamming-distance progress per-CMP, which scales poorly across multiple independent multi-byte equality gates that must all be satisfied in sequence to reach multi_done.",
+      "mechanism_attribution": "I2SRandReplace. Cmplog and value_profile_cmplog intercept the integer/string CMPs in curl's URL parser, scheme dispatch, hostname resolver, port parser, and HTTP header tokenizer; I2SRandReplace then copies those concrete constants into the seed at offsets where the input byte appeared as one CMP operand. value_profile alone cannot perform substitution (it only buckets Hamming distance), so it stays blocked just like naive."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs differ on the I2S axis; cmplog and value_profile_cmplog resolve every trial while naive and value_profile resolve at most 1/10 and 0/10.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "fuzzer rows naive..value_profile_cmplog",
+      "exact_quote": "naive                            1        9          0  loser (I2S vs cmplog)\ncmplog                          10        0          0  winner (I2S vs naive)\nvalue_profile                    0       10          0  loser (I2S vs value_profile_cmplog)\nvalue_profile_cmplog            10        0          0  winner (I2S vs value_profile)"
+    },
+    {
+      "claim": "Pair 1 (vpc>vp) and Pair 2 (cmp>naive) both carry the I2S technique delta, supporting a single-feature collapse.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1, Pair 2 delta tags",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "The blocker fires on a compound predicate combining the result of conn->handler->done with the progress-callback return; the path to it traverses several conditional gates from line 612 onward.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "multi.c:654 in multi_done",
+      "exact_quote": "[B]   654    if(!result && rc) <-- BLOCKER"
+    },
+    {
+      "claim": "Winner-resolving seeds share the literal protocol-scheme byte run 'pop3+-' at offsets 0x06-0x0b.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 004b74409cb04016 offset 0x0000-0x000f",
+      "exact_quote": "0000: 00 01 00 00 00 19 70 6f 70 33 2b 2d 00 31 32 37   ......pop3+-.127"
+    },
+    {
+      "claim": "Winner-resolving seeds share the literal IP:port substring '127.0.0.1:9021' or '127.0.0.1:9001' starting at 0x0d.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 006459fd40731a4e offsets 0x000d-0x001f",
+      "exact_quote": "0010: 2e 30 2e 30 2e 31 c5 39 30 32 31 77 b8 35 30 00   .0.0.1.9021w.50."
+    },
+    {
+      "claim": "Winner-resolving seeds share the literal 'HTTP/' token at offsets 0x24-0x29 and HTTP-header keywords 'TranSfe' / 'Retry-A' at 0x30+.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 006459fd40731a4e offsets 0x0020-0x003f",
+      "exact_quote": "0020: 02 00 00 00 47 48 54 54 50 2f 20 6d 65 40 31 6e   ....GHTTP/ me@1n\n  0030: 6d 65 77 68 65 72 65 0d 0a 54 72 61 6e 53 66 65   mewhere..TranSfe"
+    },
+    {
+      "claim": "Loser-blocking seeds carry no protocol-scheme or HTTP literals at those offsets; instead they hold random '%'-percent-encoding noise.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0034486ac73dda4c offsets 0x0006-0x001f",
+      "exact_quote": "0000: 00 01 00 00 00 25 66 e3 3c 8f 70 25 64 a1 47 66   .....%f.<.p%d.Gf"
+    },
+    {
+      "claim": "At every byte offset spanning the scheme/host/port/HTTP region (0x05 through 0x2f), W bytes are a concentrated single-value set (e.g. 70(p)x10, 33(3)x10, 47(G)x10, 48(H)x10, 54(T)x10) while L bytes are a high-cardinality random set — the textbook fingerprint of I2S substituting a fixed constant.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0006-0x002c",
+      "exact_quote": "0x0006  70(p)x10                            25(%)x3 70(p)x2 67(g)x1 66(f)x1 +3u  PARTIAL"
+    },
+    {
+      "claim": "At offset 0x0024 ten of ten winner seeds carry 'G' while loser seeds show four distinct random bytes — the boundary of the literal 'GHTTP/' constant.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0024",
+      "exact_quote": "0x0024  47(G)x10                            42(B)x1 6e(n)x1 40(@)x1 65(e)x1     DIFFER"
+    },
+    {
+      "claim": "The d=1 row at line 654 confirms the direction split: winners take T=10 F=0, losers take T=0 F=10 — perfect role separation on the blocker itself.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L654",
+      "exact_quote": "d=1   L 654  T=10 F=0  T=0 F=10  if(!result && rc)  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog's mechanism is I2SRandReplace, which scans the input for byte sequences matching one CMP operand and substitutes the other — exactly the pattern observed for 'pop3+-', '127.0.0.1', and 'HTTP/'.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile does NOT have I2SRandReplace — it only updates a Hamming-distance CMP_MAP — which is why vp blocks just like naive on this branch.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 252 --role W --fuzzer cmplog --trial 1 --seed 004b74409cb04016` and observed two I2S-floor dash rows (mutation_op = -) in the ancestor chain at depth 14 (ancestor 92cece3b9f534109) and depth 15 (ancestor 1ce58f232eec81f2). Per the cmplog MECHANISM CONTEXT TODO(i2s-logging-bug) note, dash rows are exclusive to cmplog/vpc in the current build and are direct lower-bound evidence of an I2SRandReplace find in the lineage of this cmplog winner."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic experiment that replaces the literal multi-byte constants 'pop3+-', '127.0.0.1', '9021', 'HTTP/', and the header keywords with runtime-derived (non-literal) operands — e.g. a checksum-gated dispatcher — and observes cmplog/vpc still resolving the branch within the same wallclock as naive/vp would refute the I2S-substitution explanation. Equivalently: if removing the literal tokens from the winner seeds (replacing them with random bytes of the same length) and replaying still resolves the branch, the hypothesis is wrong."
+  },
+  "weakest_evidence_point": "The chain from the harness entry to multi.c:654 involves function-pointer dispatch (conn->handler->done) which the source-grep callers index does not fully resolve, so the exact set of CMP sites upstream that I2S substitutes is inferred from the seed byte patterns rather than confirmed by an annotated call chain.",
+  "confidence": "high"
+}

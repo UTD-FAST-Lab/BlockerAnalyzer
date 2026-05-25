@@ -1,0 +1,105 @@
+{
+  "branch_id": 313,
+  "target": "curl",
+  "summary_one_line": "Input must encode a parseable pop3-style URL header so curl reaches the poll/socket-check path with an upstream socket pending.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A structured fuzz-input whose protocol-scheme bytes spell 'pop3' at offsets 0x06-0x09 and whose subsequent bytes form a host:port URL (e.g. '127.0.0.1:9001') plus an HTTP-style request line ('GHTTP/' at 0x24-0x29) — i.e. the input matches curl's expected protocol/URL string CMPs so the fuzzer harness drives curl into the upload/connect path where Curl_socket_check is invoked with a writefd socket whose revents come back WITHOUT (POLLRDNORM|POLLIN|POLLERR|POLLHUP), taking the false side of the readfd0 revents mask test.",
+      "why_winner_satisfies": "Every winner-resolving seed contains the literal ASCII 'pop3' (70 6f 70 33) at offsets 0x06-0x09 and a CRLF-terminated URL+HTTP-header payload (`127.0.0.1:9001`, `GHTTP/`, `mewhere\\r\\n`). HIT-COUNT DIVERGENCE confirms the winners enter the upload path (Curl_get_upload_buffer 20 hits, ossl_seed/ossl_random 20 hits, Curl_fillreadbuffer 10, Curl_done_sending 10, readwrite_upload 10) — all zero for the loser. At branch L231 the winner takes both T (14) and F (10); the loser only ever takes T (10) and never F.",
+      "why_loser_doesnt": "Loser-blocking seeds are 32-38 bytes of garbled bytes with no 'pop3' magic at 0x06-0x09 (offsets show 1Z`Gee^, p3:0/12, A22%e8, +-k7%E, %AAA — random havoc). They never satisfy curl's scheme strcmp, so the harness never wires up the upload path; Curl_socket_check is only ever called on a readfd path where revents arrives with POLLIN/POLLRDNORM set (true side), never on the writefd path where the false side becomes reachable.",
+      "mechanism_attribution": "cmplog's I2SRandReplace observes the strcmp/memcmp CMP_MAP entries when curl parses the scheme ('pop3', 'http://', host, port) and substitutes those literal operands into the input at the matching offsets. Naive lacks CMP interception entirely (per MECHANISM CONTEXT, 'No I2S'), so it must brute-force every byte of the protocol header by havoc, which is statistically infeasible inside the 12h budget — naive blocks 10/10 trials while cmplog resolves 10/10 within ~66-3064s. The lineage of two winning seeds (1abae053b6f68107, 06c4f49e154580bb) both terminate in I2S-floor dash rows (depth 7-8 and 16-17 respectively), directly confirming I2SRandReplace contribution."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is at curl/lib/select.c:231 in Curl_socket_check, false side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location and Globally blocked side lines",
+      "exact_quote": "Location: /src/curl/lib/select.c:231:8\nEnclosing function: Curl_socket_check\nSource line:     if(pfd[num].revents & (POLLRDNORM|POLLIN|POLLERR|POLLHUP))\nGlobally blocked side: F"
+    },
+    {
+      "claim": "cmplog resolves 10/10 while naive blocks 10/10 with the largest possible prob_div=1.0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "The decisive pair is the single canonical I2S delta (cmplog vs naive).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "Every winner-resolving seed contains the literal ASCII 'pop3' bytes at offsets 0x06-0x09.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seeds 1-5 winner-resolving, offsets 0x06-0x09",
+      "exact_quote": "0000: 00 01 00 00 00 19 70 6f 70 33"
+    },
+    {
+      "claim": "Winning seeds embed a host:port URL fragment '127.0.0.1:9001'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 winner-resolving, offsets 0x0a-0x1b",
+      "exact_quote": "0010: 2e 00 00 00 00 31 3a 39 30 30 31 77 b8 31 30 00   .....1:9001w.10."
+    },
+    {
+      "claim": "Winning seeds embed an HTTP-style request line and CRLF-terminated header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 winner-resolving, offsets 0x24-0x39",
+      "exact_quote": "0020: 11 00 00 00 47 48 74 54 50 2f 20 6d 65 40 70 6e   ....GHtTP/ me@pn\n  0030: 6d 65 77 68 65 72 65 0d 0a 33 6f 39 20 66 61 6b"
+    },
+    {
+      "claim": "BYTE DIFF flags offsets 0x06-0x09 as a strong magic-bytes divergence: all 10 winners hold 70/6f/70 and 6f/33; loser bytes are 10+ distinct values.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x06-0x09",
+      "exact_quote": "0x0006  70(p)x9 25(%)x1                     43(C)x2 31(1)x1 33(3)x1 41(A)x1 +5u  PARTIAL\n   0x0007  6f(o)x10                            5a(Z)x1 3a(:)x1 32(2)x1 2d(-)x1 +6u  DIFFER\n   0x0008  70(p)x10                            ff(.)x2 60(`)x1 30(0)x1 32(2)x1 +5u  DIFFER\n   0x0009  33(3)x10                            25(%)x3 47(G)x1 2f(/)x1 37(7)x1 +4u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds are short (32-38 bytes) garbled inputs that do not contain the pop3 scheme.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seeds 1, 3, 4, 5",
+      "exact_quote": "Seed 1 (id=0022f5056b29d1a1, size=32 bytes, fuzzer=naive, trial=1, discovered_at=73s, mutation_op=BytesInsertMutator,BytesDeleteMutator,QwordAddMutator,QwordAddMutator):\n  0000: 00 01 00 00 00 19 31 5a 60 47 65 65 5e 25 5a 5a"
+    },
+    {
+      "claim": "At the blocker line the winner takes both T and F directions while the loser only ever takes T and never F.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L231",
+      "exact_quote": "d=1   L 231  T=14 F=10  T=10 F=0  if(pfd[num].revents & (POLLRDNORM|POLLIN|POLLERR|POLLHUP))  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner exclusively enters the upload/TLS path (Curl_get_upload_buffer, ossl_seed, ossl_random, readwrite_upload, etc.) while the loser hits zero of those — proof the loser never advances past curl's protocol-scheme parsing.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "first 8 rows",
+      "exact_quote": "20         0  Curl_get_upload_buffer  (/src/curl/lib/transfer.c:118-125)\n      20         0  openssl.c:ossl_seed  (/src/curl/lib/vtls/openssl.c:807-883)\n      20         0  openssl.c:ossl_random  (/src/curl/lib/vtls/openssl.c:4438-4451)\n      16         0  Curl_single_getsock  (/src/curl/lib/transfer.c:1352-1387)\n      16         0  openssl.c:rand_enough  (/src/curl/lib/vtls/openssl.c:802-804)\n      10         0  Curl_fillreadbuffer  (/src/curl/lib/transfer.c:163-363)\n      10         0  Curl_done_sending  (/src/curl/lib/transfer.c:882-896)\n      10         0  transfer.c:readwrite_upload  (/src/curl/lib/transfer.c:928-1154)"
+    },
+    {
+      "claim": "cmplog's mutator set includes I2SRandReplace, which scans input for one CMP operand and substitutes the other.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S — by mechanism it cannot perform operand substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op paragraph",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "I2S-floor dash rows (mutation_op = -) in cmplog/vpc lineage are direct lower-bound evidence of I2SRandReplace finds.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Observed mutation_op paragraph",
+      "exact_quote": "silent ParentInfo-only entries\n(`mutation_op = -` in lineage output) that — in cmplog/vpc only —\nindicate an I2SRandReplace find under the current build. The dash\nrows are exclusive to cmplog and value_profile_cmplog; their\npresence in a winning seed's ancestor chain is direct (lower-bound)\nevidence of I2S contribution."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 313 --role W --fuzzer cmplog --trial 1 --seed 1abae053b6f68107` and observed I2S-floor dash rows (mutation_op = -) at depths 7 and 8 of the 9-level ancestor chain; cross-checked seed 06c4f49e154580bb (the TokenReplace-tagged leaf at 2355s) which converges on the same I2S-floor ancestors 92cece3b9f534109 and 1ce58f232eec81f2 at depths 16 and 17. Both winning lineages share the same I2S ancestor pair, confirming I2SRandReplace produced the foundational protocol-scheme substitution that made the upload path reachable."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose only winning constraint is a 4-byte literal 'pop3' equality CMP at a fixed input offset should show cmplog>>naive at scan_value=4 bytes; if naive resolves it within the same budget (e.g. <=2x cmplog's median time-to-resolve) then the 4-byte magic-string gate is NOT what blocks naive here and the mechanism would be refuted."
+  },
+  "weakest_evidence_point": "I cannot directly read the curl fuzz harness source to confirm the 'pop3'+URL+HTTP-line layout is exactly what it parses; the input-feature description is inferred from BYTE DIFF concentration and HIT-COUNT DIVERGENCE rather than from the harness code.",
+  "confidence": "high"
+}

@@ -1,0 +1,81 @@
+{
+  "branch_id": 7423,
+  "target": "libpng",
+  "summary_one_line": "iTXt chunk with a length field large enough that png_read_buffer's allocation fails and returns NULL.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)", "value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "A well-formed PNG prelude (signature + IHDR) followed by an iTXt chunk whose 4-byte big-endian length header is set to a value large enough that the subsequent png_read_buffer(length+1, 1) call cannot allocate it (png_malloc_base returns NULL), forcing the True branch at pngrutil.c:2748. The input does not need to actually contain `length` bytes of chunk data — only the declared length field matters because the allocation is attempted before the data is read.",
+      "why_winner_satisfies": "Both winners (naive and value_profile_cmplog) reach the buffer==NULL True branch in 8/10 trials. The winner-resolving seeds we have are 8-12 KB sized PNGs whose declared iTXt chunk length is large enough to defeat png_malloc_base; the per-role overlay shows W exclusively executing the OOM-handling block (lines 2749-2753) and never the buffer!=NULL post-buffer-read path, confirming buffer == NULL fires.",
+      "why_loser_doesnt": "cmplog resolves only 1/10 trials and is blocked 9/10 with avg duration 10.80h. Its I2SRandReplace mutator, driven by CmpLogObserver entries on the chunk-length and chunk-type CMPs that fire during chunk-header parsing, systematically substitutes the length field back to plausible in-file values (or to constants seen in length CMPs upstream), pinning length to ranges that png_malloc_base can satisfy. The L seeds in BRANCH SEEDS take the False branch and continue into the prefix-scanning loop at L2761-L2764 and beyond — i.e., they reach the chunk with a length the allocator handled.",
+      "mechanism_attribution": "Composite Pattern-B story (claimed_mechanism = other; no single positive enabler explains both decisive pairs). On (naive, cmplog) the input-to-state substitution mutator that cmplog carries on top of naive's stack is counterproductive here: it scans CmpLogObserver entries from chunk-length and chunk-type comparisons and pulls the 4-byte iTXt length field back toward plausible recorded values, undoing the random-large mutations that naive's pure havoc/token stack produces freely. On (value_profile_cmplog, cmplog) the value-profile Hamming-distance feedback signal rewards progress on the allocation-size comparison path independently of the input-to-state substitutions that trap cmplog. Both decisive pairs collapse to the same single feature requirement (a huge declared iTXt length), so the technique label `other` is the honest pick — it is the I2S sub-mutator hurting cmplog that drives the divergence, not any single positive enabler shared by the two winners."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is `if (buffer == NULL)` at pngrutil.c:2748 in OSS_FUZZ_png_handle_iTXt and the globally blocked side is True.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location + Globally blocked side",
+      "exact_quote": "Location: /src/libpng/pngrutil.c:2748:8\nEnclosing function: OSS_FUZZ_png_handle_iTXt\nSource line:    if (buffer == NULL)\nGlobally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "Buffer is assigned from png_read_buffer(png_ptr, length+1, 1) immediately before the blocking branch, so taking the True branch requires that allocation to fail.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L2746-L2748",
+      "exact_quote": "[B]  2746     buffer = png_read_buffer(png_ptr, length+1, 1/*warn*/);\n[ ]  2747  \n[B]  2748     if (buffer == NULL) <-- BLOCKER"
+    },
+    {
+      "claim": "Winners execute only the OOM-handling block (lines 2749-2753) and never the buffer-consumption path that follows; losers execute the post-allocation path including the prefix-scanning loop.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L2749-L2755 and L2761-L2764",
+      "exact_quote": "[W]  2749     {\n[W]  2750        png_crc_finish(png_ptr, length);\n[W]  2751        png_chunk_benign_error(png_ptr, \"out of memory\");\n[W]  2752        return;\n[W]  2753     }\n[ ]  2754  \n[L]  2755     png_crc_read(png_ptr, buffer, length);"
+    },
+    {
+      "claim": "naive resolves 8/10 trials while cmplog resolves 1/10 and is blocked 9/10; value_profile_cmplog also resolves 8/10.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "per-fuzzer trial vector",
+      "exact_quote": "naive                            8        2          0  winner (I2S vs cmplog)\ncmplog                           1        9          0  loser (I2S vs naive); loser (value_profile vs value_profile_cmplog)\nvalue_profile                    8        2          0  REFERENCE\nvalue_profile_cmplog             8        2          0  winner (value_profile vs cmplog)"
+    },
+    {
+      "claim": "Both decisive pairs identify cmplog as the loser with the same prob_div=0.70 and the same 1/10 vs 8/10 split; both pair-level deltas are statistically significant.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 + Pair 2 stats",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---\n  subject 9  (cmplog vs naive, admissible)\n  winner: resolved=8/10  blocked=2  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0\n  avg duration blocked: winner=4.70h  loser=10.80h\n  avg hitcount on branch: winner=1  loser=0\n  prob_div=0.70  dur_div=6.10h  hit_div=1\n  subject-level: delta_AUC=3983370.0  p_AUC=0.0002  delta_Final=309.8  p_final=0.0002\n--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "Loser-blocking seeds proceed past the blocker into the keyword-prefix scanning loop, confirming they had a length the allocator handled.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2762 row",
+      "exact_quote": "d=1   L2762  T=0 F=0  T=75 F=2  prefix_length < length && buffer[prefix_length] != 0;"
+    },
+    {
+      "claim": "naive's mutator stack is pure havoc/token with no I2S — it cannot CMP-anchor mutations on the chunk-length field.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive section",
+      "exact_quote": "**Mutators**: havoc + token stack — `ByteFlipMutator`, `ByteRandMutator`,\n`ByteIncMutator`, `ByteDecMutator`, `ByteAddMutator`, `WordAddMutator`,\n`DwordAddMutator`, `QwordAddMutator`, `BytesDeleteMutator`,\n`BytesInsertMutator`, `BytesInsertCopyMutator`, `BytesExpandMutator`,\n`BytesRandInsertMutator`, `BytesRandSetMutator`, `BytesCopyMutator`,\n`BytesSwapMutator`, `WordInterestingMutator`, `DwordInterestingMutator`,\n`ByteInterestingMutator`, `CrossoverInsertMutator`,\n`CrossoverReplaceMutator`, `TokenInsert`, `TokenReplace`."
+    },
+    {
+      "claim": "cmplog's I2SRandReplace scans the input for byte sequences matching one CMP operand and substitutes the other, which on chunk-length CMPs pulls a havoc-mutated huge length back toward plausible recorded values.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog section",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile_cmplog has both CMP_MAP gradient and I2S; the CMP_MAP gradient bucket signal lets it climb the allocation/length CMP gradient even when I2S substitutions push back.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog section",
+      "exact_quote": "**Instrumentation**: union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "other",
+    "verified_in_lineage": false,
+    "verification_method": "Claimed mechanism is `other` (Pattern-B technique-hurts on (cmplog, naive)): the winner's enabling mechanism is naive's pure havoc on the 4-byte chunk-length field, not I2SRandReplace; the loser cmplog underperforms because I2S substitution on chunk-length CMPs anchors the length back to plausible values. As a corroborating check I still ran `python3 tools/db_query.py lineage --branch 7423 --role W --fuzzer cmplog --trial 4 --seed 62c6887c9402b9b5` on cmplog's single winning seed; that chain does contain one I2S-floor dash row at depth 8, but that is the cmplog-specific lineage of cmplog's lucky 1/10 win and does not explain naive's 8/10 advantage. The per-direction seed_bisect picked cmplog/trial=4 lex-min so no naive winner seed is in resolving_seeds to lineage-verify the naive=havoc-only claim directly; the naive-mechanism attribution rests on the documented mutator stack in MECHANISM CONTEXT, not on a per-seed lineage trace."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A parameterized synthetic that gates a `buffer == NULL` branch behind a 4-byte big-endian length field at a fixed file offset, swept over scan_values = {0x00000100, 0x00100000, 0x10000000, 0xFFFFFFFF}, should show cmplog's resolve rate decreasing monotonically as the required length grows and diverging from naive's by >=30 percentage points at the highest scan value. If instead cmplog matches or beats naive at the high-length scan points, the I2S-anchoring story is wrong."
+  },
+  "weakest_evidence_point": "I cannot directly inspect the 4-byte iTXt length field in the winner seeds because BYTE DIFF only shows the first 64 bytes and the iTXt length header sits deeper in the file; the chunk-length-anchoring story is inferred from the source allocation path plus mutator-stack semantics rather than from a visible W-vs-L byte difference at the length offset.",
+  "confidence": "medium"
+}

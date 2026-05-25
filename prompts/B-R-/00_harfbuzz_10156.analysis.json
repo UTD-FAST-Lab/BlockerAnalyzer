@@ -1,0 +1,105 @@
+{
+  "branch_id": 10156,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must encode codepoint 0x0D91 (bytes 91 0d 00 00 little-endian) at the start so the Sinhala switch lands on case 0x0D91u.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "The first four bytes of the input must equal the 32-bit little-endian encoding of codepoint 0x0D91 (i.e., 0x91 0x0D 0x00 0x00). After a single decoding hop into buffer->cur().codepoint, the Sinhala switch at line 309 then takes the case 0x0D91u arm (true side of the case-label branch).",
+      "why_winner_satisfies": "Every value_profile winner-resolving seed shown begins with the exact 4-byte little-endian encoding of 0x0D91 (91 0d 00 00); the BYTE DIFF section confirms offset 0x0000 is byte 0x91 in 8/8 W seeds and offset 0x0001 is byte 0x0d in 8/8 W seeds, while loser seeds show those bytes only sporadically.",
+      "why_loser_doesnt": "naive uses only edge-counter feedback with havoc/token mutators; it has no signal to grind a 4-byte integer toward equality with the literal 0x0D91, so the loser seeds rarely produce the magic 4-byte prefix and instead carry unrelated 16-bit/32-bit values at offsets 0x00-0x03 (e.g. 00 01 00 00, 6a 0c ff 00, af 93 76 af).",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient. Each integer CMP that compares buffer->cur().codepoint against a switch-case literal (0x0D85, 0x0D8B, ..., 0x0D91, ...) writes a Hamming-distance bucket into CMP_MAP keyed by (PC, distance). An input whose first 32-bit word is numerically closer to 0x0D91 than any previously-seen input adds a new CMP_MAP bucket and is preserved — giving value_profile a monotone gradient toward the exact match. naive lacks any CMP feedback and must rely on havoc luck to set 4 specific bytes simultaneously."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The branch is the Sinhala case-label switch arm for codepoint 0x0D91 inside _hb_preprocess_text_vowel_constraints.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location and source line",
+      "exact_quote": "Location: /src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc:309:4"
+    },
+    {
+      "claim": "The exact source line at the blocker is the 0x0D91u case label.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Source line",
+      "exact_quote": "Source line: \t  case 0x0D91u:"
+    },
+    {
+      "claim": "The blocker sits inside the HB_SCRIPT_SINHALA switch over buffer->cur().codepoint at line 293; the case label fires only when codepoint == 0x0D91.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 289-309",
+      "exact_quote": "[B]   309  \t  case 0x0D91u: <-- BLOCKER"
+    },
+    {
+      "claim": "The decisive pair is value_profile > naive under the value_profile delta (single decisive pair at this branch).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+    },
+    {
+      "claim": "value_profile resolves the branch in 9/10 trials while naive blocks in 10/10 trials, a 0.90 probability divergence.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 stats",
+      "exact_quote": "prob_div=0.90  dur_div=7.30h  hit_div=3"
+    },
+    {
+      "claim": "All five winner-resolving seeds begin with the byte sequence 91 0d at offsets 0x00-0x01.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seeds 1-5, offset 0x0000",
+      "exact_quote": "  0000: 91 0d 00 00 00 0c 00 00 00 00 ff 2d 1b df 00 6e   ...........-...n"
+    },
+    {
+      "claim": "Across the 8 winner seeds tallied in BYTE DIFF, offset 0x0000 is 0x91 in all 8, and offset 0x0001 is 0x0d in all 8, while loser bytes at these offsets are mostly 0x00 and 0x01 respectively.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0000 and 0x0001",
+      "exact_quote": "   0x0000  91(.)x8                             00(.)x7 af(.)x1 91(.)x1 6a(j)x1     PARTIAL"
+    },
+    {
+      "claim": "Winner offset 0x0001 is uniformly 0x0d across 8 seeds, while losers are dominated by 0x01 with a single 0x0d outlier.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0001",
+      "exact_quote": "   0x0001  0d(.)x8                             01(.)x7 93(.)x1 0d(.)x1 0c(.)x1     PARTIAL"
+    },
+    {
+      "claim": "Loser-blocking seeds (from cmplog/trial=1) carry unrelated prefixes such as 00 01 00 00 or 6a 0c ff 00 — they fail to hit the 0x0D91 magic value.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 3 and 4, offset 0x0000",
+      "exact_quote": "  0000: 6a 0c ff 00 ff 00 00 00 00 0c 00 00 db 5e 5e db   j............^^."
+    },
+    {
+      "claim": "value_profile's mechanism is CMP_MAP keyed by (PC, operand-distance bucket); an input whose CMP operand pair is closer to matching than any seen before adds a new bucket and is preserved as corpus.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile section",
+      "exact_quote": "each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket). The distance bucket is a coarse encoding of how close the two\noperands were (Hamming distance bucket for `trace_cmp*`; matching-prefix\nlength for string/memory CMPs)."
+    },
+    {
+      "claim": "naive has only edge-counter feedback and havoc/token mutators — no CMP introspection — so it cannot get a gradient toward a specific 32-bit literal.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive section",
+      "exact_quote": "**Feedback**: per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+    },
+    {
+      "claim": "value_profile's mutators do not include I2SRandReplace; only havoc and token mutators are observed in its mutation_op metadata.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile section, Mutators line",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Within the enclosing function, the executed switch arm under W is the HB_SCRIPT_SINHALA dispatch starting at line 289; W reaches the case 0x0D91 label at line 309.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "depth=1, line 310 T/F counts",
+      "exact_quote": "  d=1   L 310  T=8 F=0  T=2 F=0  switch (buffer->cur (1).codepoint)"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile), not I2SRandReplace, so the I2S-floor lineage query is not mandatory per RULES. The mechanism is corroborated structurally: (a) winner is value_profile, whose only CMP-aware machinery is the Hamming-distance CMP_MAP (MECHANISM CONTEXT explicitly states 'No `I2SRandReplace`'); (b) the gated literal is a 32-bit integer compared via the switch dispatch, which the integer-CMP interceptor instruments and which produces a smooth Hamming-distance gradient as the seed's first 32-bit word approaches 0x0D91; (c) winner seeds carry only havoc/token mutators (BytesDeleteMutator, DwordInterestingMutator, BytesSetMutator, etc.) — the gradient acts via corpus selection, not via a special mutator. Lineage verification of I2S floors is therefore not applicable to this hypothesis."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A controlled run in which value_profile, deprived of its CMP_MAP feedback (edge counters only, same mutator stack), still resolves a synthetic switch-case-on-32-bit-literal gate at significantly higher rate than naive within the same budget — that would show CMP_MAP is not the load-bearing component and some other value_profile-specific factor explains the win."
+  },
+  "weakest_evidence_point": "The Hamming-distance gradient is plausible but unverified — I have no direct trace showing CMP_MAP buckets accumulating monotonically toward 0x0D91; the structural argument relies on the published mechanism description rather than runtime evidence at this branch.",
+  "confidence": "high"
+}

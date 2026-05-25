@@ -1,0 +1,99 @@
+{
+  "branch_id": 430,
+  "target": "curl",
+  "summary_one_line": "User field must contain a percent-escape that Curl_urldecode rejects (invalid hex or REJECT_CTRL/ZERO violation) for the protocol-handler flags active on the parsed scheme.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "After the 6-byte fixed header the input must carry a scheme tag (e.g. 'SM' for SMTP, 'pop3') that selects a handler with PROTOPT_USERPWDCTRL or similar strict decode mode, AND a USER subfield containing a malformed percent-escape (e.g. '%&', '%F', '%00' under REJECT_ZERO, or a control-byte after %-decode) so that Curl_urldecode returns non-zero and result becomes truthy at line 2102.",
+      "why_winner_satisfies": "Naive (winner) seeds carry 'SM' and 'pop3' scheme bytes at offsets 0x06-0x09 followed by user fields packed with raw '%' literals and ASCII filler that occasionally decode to a rejected sequence (e.g. '%&%' or '%00000000'); pure random havoc on bytes 0x08-0x1f routinely produces the required malformed percent pattern because no operand-guided substitution pulls those bytes toward well-formed hex.",
+      "why_loser_doesnt": "Cmplog (loser) executes the same havoc stack but its I2SRandReplace pass intercepts the cascade of scheme/header strcasecompare CMPs (http, ftp, ...) and substitutes those operands into the input, biasing offsets 0x06-0x0f toward well-formed scheme literals and percent-encoded operand fragments that Curl_urldecode accepts; cmplog therefore steers seeds AWAY from the brittle decode-failure state — confirmed by the loser-blocking seeds dominating offsets 0x07-0x1c with '%' literals interleaved with valid hex digits and '@'/'.' tokens characteristic of CMP-table substitution.",
+      "mechanism_attribution": "havoc-only — pure random byte mutation (naive's havoc/token stack) is more effective than cmplog at producing the malformed-percent decode-failure state because I2S substitution actively REPAIRS percent-escapes by replacing them with intercepted CMP operands; this is a Pattern-B inversion where the I2S technique hurts the search."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is if(result) at line 2102 inside parseurlandfillconn, blocked on the TRUE side; result is the return value of Curl_urldecode applied to the URL's user field.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "url.c:2099-2103",
+      "exact_quote": "result = Curl_urldecode(data->state.up.user, 0, &decoded, NULL,"
+    },
+    {
+      "claim": "Curl_urldecode's rejection mode depends on the parsed scheme's handler flags (PROTOPT_USERPWDCTRL toggles REJECT_ZERO vs REJECT_CTRL).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "url.c:2100-2101",
+      "exact_quote": "conn->handler->flags&PROTOPT_USERPWDCTRL ?"
+    },
+    {
+      "claim": "The decisive pair is naive>cmplog with delta I2S; naive resolved 8/10 trials, cmplog only 2/10, confirming I2S is the technique axis that hurts here.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "Winner-resolving seeds carry distinctive scheme prefixes 'SMa' and 'pop3' at offsets 0x06-0x09 followed by '%' patterns.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seeds 1,2,3,4 offsets 0x06-0x0f",
+      "exact_quote": "00 01 00 00 00 19 53 4d 61 25 26 25 64 25 30 30   ......SMa%&%d%00"
+    },
+    {
+      "claim": "Another winner seed uses pop3 as the scheme tag with %00000 padding and additional '%' escapes in the user field.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 4",
+      "exact_quote": "00 01 00 00 00 19 70 6f 70 33 25 30 30 30 30 30   ......pop3%00000"
+    },
+    {
+      "claim": "Loser-blocking seeds occupy a different byte distribution at the same offsets, with '%' interleaved with hex digits and '@'/'.' tokens characteristic of CMP-operand substitution.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 3",
+      "exact_quote": "00 01 00 00 00 19 54 4f 3b 50 28 28 42 25 38 41   ......TO;P((B%8A"
+    },
+    {
+      "claim": "Per-offset byte distribution at 0x06 shows W concentrating on 'S'/'p' (SMTP/pop3) while L spreads across 'T','v','%','g' — the scheme byte is sharply separated between the two roles.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0006",
+      "exact_quote": "0x0006  53(S)x3 70(p)x1                     54(T)x4 76(v)x3 25(%)x2 67(g)x1     DIFFER"
+    },
+    {
+      "claim": "Offsets 0x0e-0x17 in the winner are concentrated on the literal '0' (0x30) byte four times — a run of ASCII zeros following a percent — whereas the loser side at the same offsets is dominated by '%' (0x25) intermixed with diverse operand fragments, indicating cmplog substitutes CMP operands into bytes naive keeps as zero-fill.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000e",
+      "exact_quote": "0x000e  30(0)x4                             25(%)x4 66(f)x2 38(8)x1 7e(~)x1 +2u  DIFFER"
+    },
+    {
+      "claim": "Cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer, picks a CMP entry, scans the input for byte sequences matching one operand, and substitutes the other operand at those offsets — exactly the substitution that would dilute the malformed-percent state.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "Naive's mutator stack is pure havoc plus tokens with no CMP introspection, so it samples raw byte distributions uniformly and is unbiased by intercepted-operand pull.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators paragraph",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "The per-function hit-count divergence shows cmplog (L) repeatedly enters downstream connection-setup functions (ConnectionExists, prune_dead_connections, idnconvert_hostname) while naive (W) does not — consistent with cmplog seeds passing the user-decode check and proceeding deeper, exactly what taking the FALSE side of the blocker implies.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "Curl_idnconvert_hostname / ConnectionExists rows",
+      "exact_quote": "       0        20  Curl_idnconvert_hostname  (/src/curl/lib/url.c:1599-1659)"
+    },
+    {
+      "claim": "Downstream divergent branches in create_conn (depth-2 caller) consistently show L=10 explored while W=4, confirming the loser proceeds past the decode-failure check and enters proxy/SSL/connection setup that the winner short-circuits via 'return result' at line 2103.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=2 L3722",
+      "exact_quote": "d=2   L3722  T=4 F=0  T=0 F=10  if(result)"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Claimed mechanism is havoc-only (Pattern-B: I2S HURTS), so I2S-floor verification is not the relevant signal. For completeness I ran `python3 tools/db_query.py lineage --branch 430 --role W --fuzzer cmplog --trial 4 --seed 2a96acac3ec27bd9` and observed 2 dash rows (I2S-floor) at depth 9 and 10 of the ancestor chain; this confirms cmplog DOES exercise I2S along this lineage, but the technique is unable to consistently produce the malformed-percent decode-failure state — naive's pure havoc reaches it more often (8/10 vs 2/10). The mechanism attribution rests on the BYTE DIFF showing cmplog substitutes CMP operands into bytes naive keeps as zero-fill, biasing seeds toward well-formed schemes that bypass the blocker."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a synthetic harness reproduces the scheme-gated REJECT_ZERO/REJECT_CTRL decode-failure structure and cmplog's win rate equals or exceeds naive's at any chain length (i.e., I2S substitution does NOT bias offsets toward well-formed percent-hex), then the I2S-hurts mechanism is wrong and the divergence must come from something other than CMP-operand pull."
+  },
+  "weakest_evidence_point": "I infer that cmplog's I2S substitution targets scheme/header strcasecompare operands and thereby repairs malformed percent-escapes, but I have no direct CmpLogObserver dump showing which operands fired at offsets 0x07-0x1c during the loser trials — the bias is argued from the byte-distribution shift alone.",
+  "confidence": "medium"
+}

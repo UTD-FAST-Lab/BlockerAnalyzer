@@ -1,0 +1,87 @@
+{
+  "branch_id": 2274,
+  "target": "libxml2",
+  "summary_one_line": "Input must contain an entity reference whose name begins with byte 'q' (0x71) so the switch dispatches to case 'q'.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The input must parse as XML containing an entity reference of the form &q...; so xmlGetPredefinedEntity is called with a name whose first byte equals 'q' (0x71), causing the switch(name[0]) at entities.c:313 to dispatch to the 'q' arm.",
+      "why_winner_satisfies": "Winner seeds (cmplog) contain the literal byte sequence '&q;' / '&q...' inside their XML body (e.g. Seed 1 has '&q;*' at offset 0x20), so when the parser reaches xmlParseEntityRef the resolved entity name starts with 'q' and the case 'q' arm fires (W shows hits T=168 F=165 on line 313 while L shows T=0 F=98).",
+      "why_loser_doesnt": "Loser seeds (naive) reach xmlGetPredefinedEntity (entry-line hit 98 times in L) but every call has name[0] != 'q' — their entity references use other letters (e.g. '&TTLI;' in Seed 3, '&...' patterns elsewhere) so case 'q' is never taken (L shows T=0 on line 313).",
+      "mechanism_attribution": "cmplog's I2SRandReplace observes the byte-wide CMP between name[0] and the constant 'q' inside the switch jump table, captures 'q' as a CMP operand, then substitutes 'q' into the input at offsets matching name[0]. Naive's havoc/token stack has no such CMP-operand source so reaching the exact byte 'q' as the first character of an entity name is left to chance."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the case 'q' arm of switch(name[0]) at entities.c:313, with the true branch globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location + Source line + Globally blocked side",
+      "exact_quote": "Location: /src/libxml2/entities.c:313:9"
+    },
+    {
+      "claim": "The blocked branch is the true side of case 'q'.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side line",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "cmplog resolves this branch in 10/10 trials while naive blocks in 10/10, with prob_div=1.00.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 stats",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "Naive blocks the branch in every trial.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 loser counts",
+      "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "Winner-side coverage hits case 'q' line many times while loser-side never takes it.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "xmlGetPredefinedEntity case 'q' row",
+      "exact_quote": "d=1   L 313  T=168 F=165  T=0 F=98  case 'q':  <-- BLOCKER"
+    },
+    {
+      "claim": "Both winner and loser reach xmlGetPredefinedEntity (entry covered in both, but only winner takes the case 'q' arm).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "case 'q' line 313",
+      "exact_quote": "[W]   313          case 'q': <-- BLOCKER"
+    },
+    {
+      "claim": "Winner seed 1 contains the literal entity reference '&q;' which forces name[0]='q' inside xmlGetPredefinedEntity.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 bytes at offset 0x20",
+      "exact_quote": "0020: 26 71 3b 2a 3a 27 29 3e 0a 0a 5e 27 45 00 45 4d   &q;*:')>..^'E.EM"
+    },
+    {
+      "claim": "A loser seed reaches the entity machinery but its entity references use names that do not start with 'q' (e.g. 'TTLI').",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 3 bytes at offset 0x30",
+      "exact_quote": "0030: 6c 65 26 54 54 4c 49 3b 44 44 7f 10 00 00 54 20   le&TTLI;DD....T "
+    },
+    {
+      "claim": "cmplog's mutator stack includes I2SRandReplace, which substitutes CMP operands into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "naive has no I2S substitution stage available.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive observed mutation_op paragraph",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2274 --role W --fuzzer cmplog --trial 1 --seed 6ccd943329cab99a`. Chain has 6 ancestor levels; depth 5 ancestor (8c7bd7ba6dfb824c) is an I2S-floor row (mutation_op = -, ParentInfo-only metadata). Per fuzzer_mechanism_library.md cmplog section, dash rows are exclusive to cmplog/vpc under the current LibAFL build and indicate an unwrapped I2SRandReplace find (lower bound — some I2S finds leak into the havoc bucket via wrapped sub-mutator tagging)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a synthetic harness exposing the switch(name[0]) over predefined-entity letters is solved by naive within a comparable wall-clock budget (i.e. naive reaches the 'q' arm in a meaningful fraction of trials despite lacking any CMP-operand source for the byte 'q'), then I2S-byte substitution is not the bottleneck and the dispatch is reachable by random first-byte mutation alone."
+  },
+  "weakest_evidence_point": "The lineage floor signal is a lower bound (one dash row at depth 5) that confirms I2S contributed somewhere in the chain, but the immediate leaf mutation list is all-havoc — so we cannot prove the exact byte 'q' that unlocked case 'q' was placed by I2SRandReplace as opposed to landing during subsequent havoc on an I2S-seeded ancestor.",
+  "confidence": "high"
+}

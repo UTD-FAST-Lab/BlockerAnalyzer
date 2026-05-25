@@ -1,0 +1,111 @@
+{
+  "branch_id": 7294,
+  "target": "libpng",
+  "summary_one_line": "PNG with IHDR color_type=2 (RGB) plus a tRNS chunk so num_trans!=0 and PNG_EXPAND_tRNS gets set.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A PNG whose IHDR color_type byte at file offset 0x19 is 0x02 (truecolor RGB, non-palette) AND which carries a tRNS chunk (so png_ptr->num_trans becomes non-zero and libpng turns on PNG_EXPAND_tRNS). The blocker is inside the else-branch at line 4790, so PNG_COLOR_TYPE_PALETTE is excluded; the surrounding gates also require PNG_EXPAND to be active. Color_type 0x02 reaches the else and tRNS sets num_trans, simultaneously satisfying both CMP operands of the &&.",
+      "why_winner_satisfies": "All five winner-resolving seeds carry IHDR color_type=0x02 at offset 0x19 and reach line 4794 (the W-only true-side body). Their ancestry includes a ParentInfo-only dash row, the I2S-floor signal that I2SRandReplace produced an input matching the const-byte/const-mask compares in this gate.",
+      "why_loser_doesnt": "The naive loser seeds vary color_type at 0x19 across {0x00 grayscale, 0x06 RGBA, 0x04 gray+alpha} and never lock onto 0x02; they take the else-false path at line 4797 (L-only line), and their grayscale low-bit-depth inputs are pulled into png_do_unpack (199 invocations W=0). Naive has no I2S/CMP introspection, only blind havoc on the color_type byte.",
+      "mechanism_attribution": "Both winners (cmplog and value_profile_cmplog) carry I2SRandReplace in their mutator stack. The blocker is a conjunction of two equality/mask CMPs against compile-time constants (num_trans!=0 and a fixed bitmask PNG_EXPAND_tRNS), and the upstream IHDR color_type check at line 4772 is also a constant-equality CMP. cmplog logs those operands during execution and I2SRandReplace substitutes the matching constant directly at the dataflow offset, while naive and pure value_profile must stumble onto color_type=0x02 plus tRNS-chunk via havoc — a low-probability joint event that explains the 0/10 and 2/10 resolve rates respectively."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a conjunction comparing num_trans against a constant and a transformations flag against the bitmask PNG_EXPAND_tRNS.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "/src/libpng/pngrtran.c:4792-4793",
+      "exact_quote": "if (png_ptr->num_trans != 0 && <-- BLOCKER"
+    },
+    {
+      "claim": "The second conjunct masks the transformations field with PNG_EXPAND_tRNS.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "/src/libpng/pngrtran.c:4793",
+      "exact_quote": "(png_ptr->transformations & PNG_EXPAND_tRNS) != 0)"
+    },
+    {
+      "claim": "The blocker sits inside the non-palette else-branch, so PNG_COLOR_TYPE_PALETTE inputs cannot reach it.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "/src/libpng/pngrtran.c:4772 + 4790",
+      "exact_quote": "if (row_info->color_type == PNG_COLOR_TYPE_PALETTE)"
+    },
+    {
+      "claim": "All five winner seeds carry IHDR color_type byte 0x02 at offset 0x19 of the PNG.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0019",
+      "exact_quote": "0x0019  02(.)x10                            00(.)x7 06(.)x2 04(.)x1             DIFFER"
+    },
+    {
+      "claim": "Loser seeds use color_type values {0x00 grayscale, 0x06 RGBA, 0x04 gray+alpha} at 0x19, never converging on 0x02.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0019",
+      "exact_quote": "0x0019  02(.)x10                            00(.)x7 06(.)x2 04(.)x1             DIFFER"
+    },
+    {
+      "claim": "On the W trace, the true side of the blocker fires 251 times while L takes the false side 460 times, confirming the dataflow flip.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L4792",
+      "exact_quote": "d=1   L4792  T=251 F=0  T=0 F=460  if (png_ptr->num_trans != 0 &&  <-- BLOCKER"
+    },
+    {
+      "claim": "When the true side fires (W), line 4794's png_do_expand with &(png_ptr->trans_color) is reached; only L takes line 4797's NULL-trans variant.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "/src/libpng/pngrtran.c:4794 W, 4797 L",
+      "exact_quote": "[W]  4794              png_do_expand(row_info, png_ptr->row_buf + 1,"
+    },
+    {
+      "claim": "The L-only line at 4797 is the else-arm that passes NULL for the trans_color, taken only when the blocker is false.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "/src/libpng/pngrtran.c:4797",
+      "exact_quote": "[L]  4798              png_do_expand(row_info, png_ptr->row_buf + 1, NULL);"
+    },
+    {
+      "claim": "cmplog wins every trial (10/10 resolved) while naive blocks every trial (0/10 resolved, 10/10 blocked) at this branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "value_profile_cmplog 10/10 vs value_profile 2/10 — pure CMP_MAP gradient feedback is much weaker than I2S substitution at this gate.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for one CMP operand and substitutes the other.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mechanism — only havoc + token mutators with no CMP introspection.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace; its CMP_MAP gradient cannot directly substitute a constant byte.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "The W-set hits png_do_unpack zero times while L hits it 199 times — L drifted into the bit-packed grayscale path because its color_type 0x00 / low bit_depth seeds take the unpack branch instead of EXPAND_tRNS.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "png_do_unpack",
+      "exact_quote": "0       199  pngrtran.c:png_do_unpack  (/src/libpng/pngrtran.c:2153-2240)"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 7294 --role W --fuzzer cmplog --trial 1 --seed 1ae308b366a1ed95` and observed an I2S-floor row (mutation_op = -, ParentInfo-only) at depth 8 (ancestor 94c47bff5687a0c9). Cross-checked seed 150ec4117236ded6 (a sibling W seed); its chain converges to the same ancestor at depth 10 with the same dash row, confirming a shared I2S ancestor underlies both winning trajectories."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a synthetic harness reduced the gate to `if (in[25] == 0x02)` (a single-byte equality against a constant) and naive still resolved it at parity with cmplog within 12h, the I2S attribution would be falsified — the conjunction structure, not the I2S substitution, would be doing the work."
+  },
+  "weakest_evidence_point": "The byte diff cleanly shows the IHDR color_type lock-in at 0x19, but the dataflow from input bytes to num_trans (which depends on a downstream tRNS chunk header somewhere later in the file, not in the first 64 bytes shown) is inferred from libpng semantics rather than observed in the BYTE DIFF section.",
+  "confidence": "high"
+}

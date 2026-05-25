@@ -1,0 +1,69 @@
+{
+  "branch_id": 2243,
+  "target": "libxml2",
+  "summary_one_line": "Input must begin with the 3-byte UTF-8 BOM literal 0xEF 0xBB 0xBF at offsets 0..2 (with len>=3).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "First three input bytes must equal the UTF-8 BOM literal 0xEF, 0xBB, 0xBF (checked by a chain of equality comparisons against constants in xmlDetectCharEncoding at encoding.c:987-988), with len>=3.",
+      "why_winner_satisfies": "cmplog intercepts the byte-CMPs against 0xEF/0xBB/0xBF and feeds those literals to I2SRandReplace, which substitutes the constants at the matching input offsets in one mutation step; cmplog resolves the branch 10/10 trials (avg 227 hits on the true side).",
+      "why_loser_doesnt": "naive has no CMP introspection — it can only land all three magic bytes by chance via havoc byte mutations (probability ~1/2^24 per attempt), so it blocks 9/10 trials with zero hits on the true side at line 987.",
+      "mechanism_attribution": "I2SRandReplace in cmplog reads the post-execution CmpLogObserver buffer and substitutes the captured CMP operands (0xEF, 0xBB, 0xBF) into the input at locations matching the other operand; an I2S-floor (dash) row at depth 4 of a winning seed's lineage corroborates I2S participation in the chain that produced the resolving seed."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a 3-way equality test against the UTF-8 BOM bytes 0xEF, 0xBB, 0xBF at encoding.c:987-988.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "encoding.c:987-988",
+      "exact_quote": "if ((in[0] == 0xEF) && (in[1] == 0xBB) &&"
+    },
+    {
+      "claim": "The branch is guarded by a len>=3 precondition.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "encoding.c:982",
+      "exact_quote": "if (len >= 3) {"
+    },
+    {
+      "claim": "cmplog resolves this branch in all 10 trials while naive blocks in 9 of 10 trials, the decisive I2S divergence at this branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "Winner trial counts show cmplog resolved=10/10 vs loser naive blocked=9/10 with hit-count divergence of 227 on the branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 counts",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "On the true side at line 987 (winning side), W traces show T=40 while L traces show T=0, i.e. the loser never takes the BOM-matching side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 987",
+      "exact_quote": "d=1   L 987  T=40 F=0  T=0 F=40  if ((in[0] == 0xEF) && (in[1] == 0xBB) &&  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes captured CMP operands directly into the input at matching offsets, enabling one-step magic-byte synthesis.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog block",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no CMP introspection and can only flip bytes blindly via havoc.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive block",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2243 --role W --fuzzer cmplog --trial 1 --seed 039dbbb1fc96a2e4`. The 5-level ancestor chain contains 1 I2S-floor (dash) row at depth 4 (ancestor 8c7bd7ba6dfb824c with mutation_op = -), characteristic of an unwrapped I2SRandReplace find in cmplog under the current LibAFL build (lower-bound signal per the cmplog mechanism note)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A parameterized synthetic with a 3-byte equality gate against a fixed magic literal that nonetheless shows cmplog NOT outperforming naive (e.g. cmplog resolves <=naive in trial counts at the same duration) — that would refute the claim that I2SRandReplace is the mechanism flipping this branch."
+  },
+  "weakest_evidence_point": "Only one of five winning seeds was checked for lineage; the I2S-floor signal at depth 4 confirms I2S participated somewhere in this seed's chain but does not prove the specific dash-row ancestor is what placed the 0xEF/0xBB/0xBF triple — havoc steps after that ancestor could have rearranged the bytes.",
+  "confidence": "high"
+}
