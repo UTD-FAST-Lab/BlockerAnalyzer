@@ -65,15 +65,29 @@ def _default_output(stem: str, targets) -> Path:
         suffix = ""
     return DEFAULT_CSV_DIR / f"{stem}{suffix}.csv"
 
-CANONICAL_TARGETS = ["bloaty", "lcms", "mbedtls", "sqlite3"]
-CANONICAL_FUZZERS = ["naive", "cmplog", "value_profile", "value_profile_cmplog"]
+CANONICAL_TARGETS = ["bloaty", "lcms", "libpng", "libxml2"]
+CANONICAL_FUZZERS = [
+    "naive", "cmplog", "value_profile", "value_profile_cmplog",
+    "naive_ctx", "naive_ngram4", "mopt", "minimizer", "fast", "grimoire",
+]
 
-# Each entry is (A, B, delta_technique). A and B differ in exactly one technique.
+# Each entry is (A, B, delta_technique). A and B differ in EXACTLY ONE technique;
+# the baseline B is chosen so the delta is single-technique even when a variant
+# bundles a second technique another variant already isolates (verified against
+# the LibAFL fuzzbench lib.rs sources, 2026-05-27). See fuzzer_mechanism_library.md.
+#   - fast = minimizer + AFLFast n_fuzz energy weighting   -> baseline minimizer
+#   - grimoire = cmplog + generalization/Grimoire mutators -> baseline cmplog
 CANONICAL_PAIRS = [
     ("cmplog", "naive", "I2S"),
     ("value_profile", "naive", "value_profile"),
     ("value_profile_cmplog", "cmplog", "value_profile"),
     ("value_profile_cmplog", "value_profile", "I2S"),
+    ("naive_ctx", "naive", "ctx_coverage"),
+    ("naive_ngram4", "naive", "ngram_coverage"),
+    ("mopt", "naive", "mopt_mutation"),
+    ("minimizer", "naive", "calibrated_energy"),
+    ("fast", "minimizer", "aflfast_rarity"),
+    ("grimoire", "cmplog", "grimoire_structural"),
 ]
 
 

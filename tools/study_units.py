@@ -15,8 +15,8 @@ Subcommands
 -----------
     init                  create the two tables (idempotent)
     add                   register/refresh ONE subject; populate subject_branches
-    add-canonical         add all 4 canonical pairs for one or more targets
-                          (per-target coverage walk shared across the 4 subjects)
+    add-canonical         add all canonical comparable pairs (10) for one or more targets
+                          (per-target coverage walk shared across all subjects)
     list                  list registered subjects
     top                   print ranked candidate branches for one subject
     evidence-per-branch   emit per-branch structured prompt for
@@ -42,7 +42,7 @@ Design choices:
 - (2026-05-16 redesign) Admission is per-subject: a branch lands in
   `branches` iff some canonical subject admits it (≥1 of 20 trials blocked
   AND ≥1 resolved at final checkpoint). Per-target coverage walk happens
-  once and is shared across the 4 subjects (Option A).
+  once and is shared across all subjects (Option A).
 """
 
 import argparse
@@ -57,21 +57,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from seed_utils import parse_count as _shared_parse_count  # noqa: E402
+# Single source of truth for the comparable-pair set + fuzzer list lives in
+# Step-1's subject_significance.py. Import (not duplicate) so the two stay in
+# lockstep — a drift here would silently mis-populate subject_branches. See
+# that file for the 10-fuzzer / anti-direction rationale (2026-05-27).
+from subject_significance import (  # noqa: E402
+    CANONICAL_TARGETS, CANONICAL_FUZZERS, CANONICAL_PAIRS,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB = REPO_ROOT / "db" / "blockers.sqlite"
 DEFAULT_TS_BASE = REPO_ROOT / "out" / "coverage_ts"
 
-CANONICAL_TARGETS = [
-    "curl", "harfbuzz", "jsoncpp", "libpng", "libxml2",
-    "openthread", "woff2", "lcms", "bloaty", "sqlite3",
-]
-CANONICAL_PAIRS = [
-    ("cmplog",                "naive",         "I2S"),
-    ("value_profile",         "naive",         "value_profile"),
-    ("value_profile_cmplog",  "cmplog",        "value_profile"),
-    ("value_profile_cmplog",  "value_profile", "I2S"),
-]
+# CANONICAL_TARGETS / CANONICAL_PAIRS imported from subject_significance above.
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS study_subjects (
@@ -115,7 +113,7 @@ CREATE INDEX IF NOT EXISTS idx_sb_branch  ON subject_branches(branch_id);
 """
 
 
-CANONICAL_FUZZERS = ["naive", "cmplog", "value_profile", "value_profile_cmplog"]
+# CANONICAL_FUZZERS imported from subject_significance above (all 10 variants).
 DEFAULT_N_TRIALS = 10
 DEFAULT_STEP_S = 1800  # 30 min checkpoint cadence
 
@@ -558,7 +556,7 @@ def _add_one(conn, target, a, b, delta_tech, ts_base, alpha, mannwhitneyu,
     """Register/refresh one subject (target, a, b).
 
     If `state`, `source_lines`, and `fn_index` are provided (per-target walk
-    + function index shared across the 4 canonical subjects), they're used
+    + function index shared across the canonical subjects), they're used
     directly. Otherwise this builds them on-the-fly (single-subject use case).
     """
     sys.path.insert(0, str(REPO_ROOT / "tools"))
@@ -628,7 +626,7 @@ def cmd_add_canonical(args):
     conn = open_db(args.db)
     conn.executescript(SCHEMA_SQL)
     for tgt in targets:
-        # Option A: walk the target's coverage once, share state across the 4 subjects.
+        # Option A: walk the target's coverage once, share state across all subjects.
         print(f"== walking {tgt} ==", file=sys.stderr)
         try:
             state, source_lines = walk_target_state(tgt, ts_base)
@@ -785,7 +783,7 @@ def main():
     s.set_defaults(func=cmd_add)
 
     s = sub.add_parser("add-canonical",
-                       help="add all 4 canonical pairs for the listed targets")
+                       help="add all canonical comparable pairs (10) for the listed targets")
     s.add_argument("--targets", nargs="+",
                    help=f"default: {' '.join(CANONICAL_TARGETS)}")
     s.add_argument("--ts-base", default=str(DEFAULT_TS_BASE))
