@@ -50,7 +50,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB = REPO_ROOT / "db" / "blockers.sqlite"
 DEFAULT_CSV_DIR = REPO_ROOT / "csvs"
 
-CANONICAL_FUZZERS = ["naive", "cmplog", "value_profile", "value_profile_cmplog"]
+# Single source of truth (all 10 variants); was a local 4-fuzzer list before
+# the 10-fuzzer campaign. Drives the per-fuzzer count columns in the CSV.
+from subject_significance import CANONICAL_FUZZERS  # noqa: E402
 
 
 def _default_output(targets):

@@ -189,6 +189,35 @@ def _extract_source_lines(cov_file):
 
 # ─── per-target walk (Option A: parse once, share across subjects) ──────────
 
+_HOURLY_RE = re.compile(r"branch_report_h(\d+)\.txt$")
+
+
+def _trial_report_map(trial_dir):
+    """Map {time_s: path_to_branch_report} for ONE trial dir, supporting both
+    report layouts:
+
+      (a) pilot layout : <trial>/reports/<time_s>/branch_coverage_show.txt
+      (b) icse2027 layout: <trial>/branch_report_h<NN>.txt  (NN = hour → NN*3600s)
+
+    Returns {} if neither is present.
+    """
+    trial_dir = Path(trial_dir)
+    out = {}
+    reports = trial_dir / "reports"
+    if reports.is_dir():
+        for d in reports.iterdir():
+            if d.name.isdigit():
+                cov = d / "branch_coverage_show.txt"
+                if cov.is_file():
+                    out[int(d.name)] = cov
+    if not out:
+        for f in trial_dir.glob("branch_report_h*.txt"):
+            m = _HOURLY_RE.search(f.name)
+            if m:
+                out[int(m.group(1)) * 3600] = f
+    return out
+
+
 def walk_target_state(target, ts_base, fuzzers=None, n_trials=DEFAULT_N_TRIALS,
                       step_s=DEFAULT_STEP_S, verbose=False):
     """Walk all checkpoints for (fuzzer, trial) under one target.
@@ -206,27 +235,33 @@ def walk_target_state(target, ts_base, fuzzers=None, n_trials=DEFAULT_N_TRIALS,
     if not target_dir.is_dir():
         raise FileNotFoundError(f"target dir not found: {target_dir}")
 
-    # Discover checkpoints across the whole target
+    # Discover per-(fuzzer, trial) report maps once (both layouts), then the
+    # union of checkpoints across the whole target.
+    report_maps = {}  # (fz, trial) -> {time_s: path}
     checkpoints = set()
     for fz in fuzzers:
         for trial in range(1, n_trials + 1):
-            reports = target_dir / fz / f"trial{trial}" / "reports"
-            if reports.is_dir():
-                for d in reports.iterdir():
-                    if d.name.isdigit():
-                        checkpoints.add(int(d.name))
+            rm = _trial_report_map(target_dir / fz / f"trial{trial}")
+            if rm:
+                report_maps[(fz, trial)] = rm
+                checkpoints.update(rm)
     if not checkpoints:
         return {}, {}
     checkpoints = sorted(checkpoints)
-    step_h = step_s / 3600.0
+    # Infer per-checkpoint step from the actual grid (hourly icse2027 = 3600s,
+    # pilot = 1800s); fall back to the configured step_s if only one checkpoint.
+    if len(checkpoints) >= 2:
+        step_h = min(b - a for a, b in zip(checkpoints, checkpoints[1:])) / 3600.0
+    else:
+        step_h = step_s / 3600.0
 
     branch_state = defaultdict(dict)
 
     for cp in checkpoints:
         for fz in fuzzers:
             for trial in range(1, n_trials + 1):
-                cov = target_dir / fz / f"trial{trial}" / "reports" / str(cp) / "branch_coverage_show.txt"
-                if not cov.is_file():
+                cov = report_maps.get((fz, trial), {}).get(cp)
+                if cov is None or not Path(cov).is_file():
                     continue
                 bd = _parse_coverage_file(str(cov))
                 ft = (fz, trial)
@@ -265,8 +300,8 @@ def walk_target_state(target, ts_base, fuzzers=None, n_trials=DEFAULT_N_TRIALS,
     final_t = checkpoints[-1]
     source_lines = {}
     for fz in fuzzers:
-        cov = target_dir / fz / "trial1" / "reports" / str(final_t) / "branch_coverage_show.txt"
-        if cov.is_file():
+        cov = report_maps.get((fz, 1), {}).get(final_t)
+        if cov and Path(cov).is_file():
             source_lines.update(_extract_source_lines(str(cov)))
             break
 

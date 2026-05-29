@@ -498,24 +498,14 @@ groups, longer sequential chains).
 omits any (target, branch_id) already covered. Pass `--skip-existing
 /dev/null` to disable.
 
-## `tools/lint_template_shapes.py`
+## `tools/lint_template_shapes.py` (removed 2026-05-29)
 
-Verifies the agent's per-rep template assignments are consistent with the
-decisive-shape × region equivalence rule. Two checks:
-1. **Intra-template**: reps assigned to the same template should share a
-   single decisive shape. ≥2 distinct shapes per template hints at overlumping.
-2. **Cross-template**: a given decisive shape should NOT span ≥2 templates.
-   A split shape hints at a missed merge.
-
-```bash
-python3 tools/lint_template_shapes.py \
-    [--index templates/branch_index.json] \
-    [--reps  csvs/blocker_representatives.csv] \
-    [--map   csvs/blocker_dedup_map.csv] \
-    [--include-legacy] [--show-clean] [--output -]
-```
-
-Exit codes: 0=clean, 1=intra-only warnings, 2=cross-template warnings.
+Deleted. It linted decisive-shape purity of the agent's `branch_index.json`
+template assignments, but under the analysis-only contract (2026-05-17) the
+agent no longer classifies into templates and Step 5a Pass-B clusters by
+`mechanism_summary` (shape is only a secondary signal), so shape-purity is no
+longer a desired invariant. A future Step-6 quality gate, if wanted, should
+lint `step5a/<family>/clusters.json` (mechanism-aware), not decisive shape.
 
 ## `tools/plot_coverage_curves.py`
 

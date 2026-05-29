@@ -32,7 +32,6 @@ BlockerAnalyzer/
 │   ├── build_candidates.py       # Per-branch ≥8/≥8 aggregation → blocker_candidates.csv
 │   ├── select_representatives.py # Shape × region dedup → blocker_representatives.csv + dedup_map
 │   ├── run_hypothesis_fanout.py  # Manifest builder; reads reps, calls evidence-per-branch
-│   ├── lint_template_shapes.py   # Post-agent: intra/cross-template shape consistency check
 │   ├── seed_bisect.py            # 10-bucket bisection to find seeds that hit blocking branches
 │   ├── per_role_coverage.py      # Per-branch W (winner-resolving) / L (loser-blocking) seed-set coverage gen → db/per_role_coverage/<target>/<branch_id>/{W,L}/branch_coverage_show.txt (powers SOURCE CONTEXT overlay diff)
 │   ├── callers_index.py          # Per-target source-grep callers index → db/callers_index/<target>.json. {callee_demangled: [(caller, file, line, c_start, c_end)]}. One-time per target; powers the cross-file 1-hop caller block and call-chain section in the overlay.
@@ -168,8 +167,7 @@ phase (see "Typical Workflow" further down for the phase ordering):
 - `check_template.py` — deterministic preflight gating the sweep: schema/fuzzer sanity + every `scan_value` compiles + **dead-knob detection** (min vs max scan value must yield different assembly, else the `-D` macro/params drifted). Catches mechanical defects so an author retry isn't spent on a refutation.
 - `verify_template.py` — synthetic-harness sweep runner. Builds `step5b/<feature_id>/template.c` under each involved fuzzer (`<fuzzer>_cc --libafl -D<knob>=<val>` in the `libafl-base` image), sweeps `params.json:scan_values`, counts crashes (`<corpus>/crashes/`), scores a dose-response verdict. **Serial by default (`--jobs 1`) — host runs other campaigns.**
 
-**Step 6 + auxiliary**
-- `lint_template_shapes.py` — intra/cross-template decisive-shape consistency.
+**Auxiliary**
 - `plot_coverage_curves.py` — coverage-by-time spaghetti plot → `out/coverage_curves.png`.
 - `fuzzer_mechanism_library.md` — canonical per-fuzzer mechanism paragraphs spliced into prompts.
 
@@ -288,7 +286,6 @@ Step 4b: Per-branch analysis — each agent writes .analysis.json (NO template c
 Step 4c: Validate analyses — tools/check_analysis.py catches schema gaps + exact_quote hallucinations
 Step 5a: Cross-branch classification — coarse family (mechanism_family.py) → Pass A distill (hypothesis-signature-distiller → open mechanism_summary signatures) → Pass B discover (signature-feature-classifier clusters by mechanism + coins categories) → clusters.json
 Step 5b: Author→preflight→verify→adjudicate loop (build_template_briefs → template-author → check_template → verify_template → verdict-adjudicator). Built + validated 2026-05-24. Retry twice on artifacts; record genuine refutations.
-Step 6: Lint template-shape consistency (post-agent quality check)
 ```
 
 **Step 1 — significance** (`tools/subject_significance.py`):
@@ -549,17 +546,13 @@ is currently manual.) **Validated 2026-05-24:** the loop ran end-to-end on
 `opaque_exact_literal_dispatch_gate` (author → preflight PASS → smoke verify
 `reproduced`).
 
-**Step 6 — lint template-shape consistency**:
-
-```bash
-python3 tools/lint_template_shapes.py
-# → stdout report (or --output FILE)
-# Exit codes: 0=clean, 1=intra-only, 2=cross-template
-```
-
-Verifies (a) intra-template: reps assigned to the same template share a
-single decisive shape; (b) cross-template: a given shape doesn't span
-≥2 templates. Catches over-lumping and missed merges by the agent.
+**(Removed) Step 6 — lint template-shape consistency.** `lint_template_shapes.py`
+was deleted 2026-05-29: it checked decisive-shape purity of the *agent's*
+`branch_index.json` template assignments, but under the analysis-only contract
+(2026-05-17) the agent no longer classifies — Step 5a Pass-B clusters by
+`mechanism_summary` (shape demoted to secondary signal), so shape-purity is no
+longer a desired invariant. If a Step-6 quality gate is wanted, write a new lint
+over `step5a/<family>/clusters.json` (mechanism-aware), not over shape.
 
 **Auxiliary tools:**
 - `tools/plot_coverage_curves.py` — coverage-by-time spaghetti plot.

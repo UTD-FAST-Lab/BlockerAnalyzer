@@ -16,17 +16,24 @@ Pro vs anti falls straight out of technique membership: an edge "W>L (T)" is
 ``T_pro`` if the winner carries technique T (it helped), else ``T_anti`` (the
 technique-having arm lost, so T hurt).
 
-Six families + one escape hatch:
-  I2S_pro     — only I2S edges, technique helped
-  I2S_anti    — only I2S edges, technique hurt
-  VP_pro      — only value_profile edges, technique helped
-  VP_anti     — only value_profile edges, technique hurt
-  synergy     — both techniques help AND every winner is value_profile_cmplog
-                (neither single technique suffices; the -BBR corpus-pollution shape)
-  independent — both techniques help, won by single-technique arms
-                (each technique clears it alone; the BRR- shape)
-  mixed       — a technique both helped and hurt at the same branch (rare;
-                route to a human, do not force into a family)
+Family = "<technique>_pro" / "<technique>_anti" for any single-technique edge
+set, plus two I2S×VP-specific composites and one escape hatch:
+
+  <T>_pro      — all edges isolate technique T and T helped (winner carries T)
+  <T>_anti     — all edges isolate technique T and T hurt (winner lacks T)
+                 T ∈ {I2S, VP, ctx_coverage, ngram_coverage, mopt_mutation,
+                      calibrated_energy, aflfast_rarity, grimoire_structural}
+  synergy      — pro = {I2S, VP} AND every winner is value_profile_cmplog
+                 (neither single technique suffices; the -BBR pollution shape)
+  independent  — pro = {I2S, VP} won by single-technique arms (the BRR- shape)
+  mixed        — the same technique both helped and hurt, OR a cross-technique
+                 mix that is not the I2S×VP composite (rare; route to a human,
+                 do not force into a family)
+
+synergy/independent are SPECIFIC to value_profile_cmplog bundling I2S+VP. The
+six newer techniques each have their own isolating pair (e.g. naive_ctx/naive,
+grimoire/cmplog), so they only ever produce <T>_pro / <T>_anti; a hypothesis
+mixing one of them with another technique falls to `mixed`.
 
 Usage:
   python3 tools/mechanism_family.py            # self-test + scan pilot analyses
@@ -47,16 +54,36 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_GLOB = "prompts/**/*.analysis.json"
 
 # What each canonical fuzzer contains. The delta technique of a canonical pair
-# is exactly the one technique that differs between the two arms.
+# is exactly the one technique that differs between the two arms (see
+# subject_significance.CANONICAL_PAIRS); edge_tag only needs the WINNER's
+# content, so a variant that bundles a 2nd technique still tags correctly as
+# long as its baseline shares that 2nd technique (fast/minimizer share
+# calibrated_energy; grimoire/cmplog share I2S).
 TECH = {
     "naive": frozenset(),
     "cmplog": frozenset({"I2S"}),
     "value_profile": frozenset({"VP"}),
     "value_profile_cmplog": frozenset({"I2S", "VP"}),
+    "naive_ctx": frozenset({"ctx_coverage"}),
+    "naive_ngram4": frozenset({"ngram_coverage"}),
+    "mopt": frozenset({"mopt_mutation"}),
+    "minimizer": frozenset({"calibrated_energy"}),
+    "fast": frozenset({"calibrated_energy", "aflfast_rarity"}),  # minimizer + AFLfast
+    "grimoire": frozenset({"I2S", "grimoire_structural"}),       # cmplog + structural
 }
 
-# covers_pairs spells the delta technique as one of these tokens.
-TECH_ALIAS = {"I2S": "I2S", "value_profile": "VP", "VP": "VP"}
+# covers_pairs spells the delta technique as one of these tokens (value_profile
+# has a short alias; the rest are identity).
+TECH_ALIAS = {
+    "I2S": "I2S",
+    "value_profile": "VP", "VP": "VP",
+    "ctx_coverage": "ctx_coverage",
+    "ngram_coverage": "ngram_coverage",
+    "mopt_mutation": "mopt_mutation",
+    "calibrated_energy": "calibrated_energy",
+    "aflfast_rarity": "aflfast_rarity",
+    "grimoire_structural": "grimoire_structural",
+}
 
 
 def parse_edge(s):
@@ -78,30 +105,34 @@ def parse_edge(s):
 
 
 def edge_tag(winner, loser, tech):
-    """tech in {'I2S','VP'}; pro if the winner carries the technique, else anti."""
+    """pro if the winner carries the technique, else anti. Works for any
+    technique token in TECH_ALIAS, not just I2S/VP."""
     return f"{tech}_pro" if tech in TECH[winner] else f"{tech}_anti"
 
 
 def coarse_family(covers_pairs):
-    """covers_pairs (list of strings) -> one of the seven family labels."""
+    """covers_pairs (list of strings) -> one family label.
+
+    Single-technique edge sets map to "<technique>_pro" / "<technique>_anti".
+    The pro == {I2S, VP} composite stays special (synergy vs independent, the
+    only case where two techniques co-help via value_profile_cmplog). Anything
+    else with >1 technique, or a technique that both helped and hurt, is
+    `mixed` (route to a human).
+    """
     edges = [parse_edge(e) for e in covers_pairs]
     tags = {edge_tag(*e) for e in edges}
-    pro = {t[:-4] for t in tags if t.endswith("_pro")}     # subset of {"I2S","VP"}
-    anti = {t[:-5] for t in tags if t.endswith("_anti")}
+    pro = {t[:-4] for t in tags if t.endswith("_pro")}    # strip "_pro"
+    anti = {t[:-5] for t in tags if t.endswith("_anti")}  # strip "_anti"
 
     if pro & anti:                       # same technique helped and hurt
         return "mixed"
-    if pro == {"I2S", "VP"}:
+    if pro == {"I2S", "VP"} and not anti:   # I2S×VP composite (vpc bundling)
         winners = {w for (w, _l, _t) in edges}
         return "synergy" if winners == {"value_profile_cmplog"} else "independent"
-    if pro == {"I2S"}:
-        return "I2S_pro"
-    if pro == {"VP"}:
-        return "VP_pro"
-    if anti == {"I2S"}:
-        return "I2S_anti"
-    if anti == {"VP"}:
-        return "VP_anti"
+    if len(pro) == 1 and not anti:
+        return f"{next(iter(pro))}_pro"
+    if len(anti) == 1 and not pro:
+        return f"{next(iter(anti))}_anti"
     return "mixed"
 
 
@@ -114,6 +145,18 @@ _EDGE_CASES = {
     "value_profile>naive (value_profile)": "VP_pro",
     "naive>cmplog (I2S)": "I2S_anti",
     "value_profile>value_profile_cmplog (I2S)": "I2S_anti",
+    # 10-fuzzer techniques (pro = technique-carrying arm wins; anti = it loses)
+    "naive_ctx>naive (ctx_coverage)": "ctx_coverage_pro",
+    "naive>naive_ctx (ctx_coverage)": "ctx_coverage_anti",
+    "naive_ngram4>naive (ngram_coverage)": "ngram_coverage_pro",
+    "naive>naive_ngram4 (ngram_coverage)": "ngram_coverage_anti",
+    "mopt>naive (mopt_mutation)": "mopt_mutation_pro",
+    "minimizer>naive (calibrated_energy)": "calibrated_energy_pro",
+    "naive>minimizer (calibrated_energy)": "calibrated_energy_anti",
+    "fast>minimizer (aflfast_rarity)": "aflfast_rarity_pro",
+    "minimizer>fast (aflfast_rarity)": "aflfast_rarity_anti",
+    "grimoire>cmplog (grimoire_structural)": "grimoire_structural_pro",
+    "cmplog>grimoire (grimoire_structural)": "grimoire_structural_anti",
 }
 
 _FAMILY_CASES = {
@@ -128,17 +171,34 @@ _FAMILY_CASES = {
     ("naive>cmplog (I2S)", "value_profile>value_profile_cmplog (I2S)"): "I2S_anti",       # RBRB
     # contradictory edge set -> the escape hatch fires
     ("cmplog>naive (I2S)", "value_profile>value_profile_cmplog (I2S)"): "mixed",
+    # 10-fuzzer single-technique families
+    ("naive_ctx>naive (ctx_coverage)",): "ctx_coverage_pro",
+    ("naive>naive_ctx (ctx_coverage)",): "ctx_coverage_anti",
+    ("naive>naive_ngram4 (ngram_coverage)",): "ngram_coverage_anti",
+    ("mopt>naive (mopt_mutation)",): "mopt_mutation_pro",
+    ("minimizer>naive (calibrated_energy)",): "calibrated_energy_pro",
+    ("fast>minimizer (aflfast_rarity)",): "aflfast_rarity_pro",
+    ("minimizer>fast (aflfast_rarity)",): "aflfast_rarity_anti",
+    ("grimoire>cmplog (grimoire_structural)",): "grimoire_structural_pro",
+    # cross-technique mix that is NOT the I2S×VP composite -> mixed
+    ("cmplog>naive (I2S)", "grimoire>cmplog (grimoire_structural)"): "mixed",
+    ("naive_ctx>naive (ctx_coverage)", "naive>naive_ngram4 (ngram_coverage)"): "mixed",
 }
 
 
 def self_test():
+    # Every canonical fuzzer must have a TECH entry, or parse_edge raises on it.
+    from subject_significance import CANONICAL_FUZZERS
+    missing = [f for f in CANONICAL_FUZZERS if f not in TECH]
+    assert not missing, f"TECH missing canonical fuzzers: {missing}"
     for s, want in _EDGE_CASES.items():
         got = edge_tag(*parse_edge(s))
         assert got == want, f"edge {s!r}: got {got}, want {want}"
     for cps, want in _FAMILY_CASES.items():
         got = coarse_family(list(cps))
         assert got == want, f"family {cps}: got {got}, want {want}"
-    print(f"self-test OK ({len(_EDGE_CASES)} edges, {len(_FAMILY_CASES)} families)")
+    print(f"self-test OK ({len(CANONICAL_FUZZERS)} fuzzers, "
+          f"{len(_EDGE_CASES)} edges, {len(_FAMILY_CASES)} families)")
 
 
 # ---- pilot scan -------------------------------------------------------------

@@ -53,7 +53,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CSV_DIR   = REPO_ROOT / "csvs"
 DEFAULT_INPUT     = DEFAULT_CSV_DIR / "blocker_candidates.csv"
 
-CANONICAL_FUZZERS = ["naive", "cmplog", "value_profile", "value_profile_cmplog"]
+# Single source of truth (all 10 variants). The decisive-shape is one char
+# per fuzzer in this order; was a 4-char list before the 10-fuzzer campaign.
+from subject_significance import CANONICAL_FUZZERS  # noqa: E402
 
 
 def _suffix_from(input_path: Path) -> str:
@@ -201,10 +203,12 @@ def main():
               file=sys.stderr)
 
     sh_count = Counter(shape_for[id(r)] for r in rows)
+    fz_order = ",".join(CANONICAL_FUZZERS)
     print(f"\ndistinct shapes: {len(sh_count)}", file=sys.stderr)
-    print("top shapes (over input candidates):", file=sys.stderr)
+    print(f"top shapes (over input candidates); position order = {fz_order}:",
+          file=sys.stderr)
     for sh, n in sh_count.most_common(10):
-        print(f"  {sh}  (naive,cmp,vp,vpc): {n}", file=sys.stderr)
+        print(f"  {sh}  : {n}", file=sys.stderr)
 
     sizes = Counter(len(g) for g in groups.values())
     print("\ngroup-size distribution:", file=sys.stderr)

@@ -39,9 +39,11 @@ DEFAULT_MECHANISM_LIB   = PROJECT_DIR / "fuzzer_mechanism_library.md"
 DEFAULT_PER_ROLE_CACHE  = PROJECT_DIR / "db" / "per_role_coverage"
 DEFAULT_CALLERS_INDEX   = PROJECT_DIR / "db" / "callers_index"
 
-CANONICAL_FUZZERS_LIST = ["naive", "cmplog", "value_profile", "value_profile_cmplog"]
-
 sys.path.insert(0, str(TOOLS_DIR))
+
+# Single source of truth (all 10 variants); was a local 4-fuzzer list before
+# the 10-fuzzer campaign. Drives the TRIAL VECTOR rows + REFERENCE fuzzer set.
+from subject_significance import CANONICAL_FUZZERS as CANONICAL_FUZZERS_LIST  # noqa: E402
 from seed_utils import parse_count, format_seed_block, byte_diff_section  # noqa: E402
 
 
