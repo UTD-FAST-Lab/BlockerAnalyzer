@@ -1,0 +1,87 @@
+{
+  "branch_id": 2118,
+  "target": "lcms",
+  "summary_one_line": "Input must carry exact 4-byte ICC signature fields ('link' profile class at 0x0c-0x0f, magic bytes) so a tone curve allocates then frees interp params on the NULL-pointer path.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Exact 4-byte ICC literal fields: the profile device-class / signature token at offsets 0x0c-0x0f equal to ASCII 'link' (6c 69 6e 6b) and the magic-field byte at 0x05 = 0x61 ('a', i.e. 'lams' run) plus the flag byte at 0x2d = 0x01, which together steer the parser into a code path that allocates a tone-curve InterpParams structure and later frees it through _cmsFreeInterpParams, exercising the p != NULL guard's false branch on cleanup.",
+      "why_winner_satisfies": "Every winner-resolving seed places 'link' (6c 69 6e 6b) at 0x0c-0x0f, byte 0x61('a') at 0x05, and 0x01 at 0x2d; these exact-equality fields are what cmplog logged as CMP operands and I2SRandReplace spliced into the input verbatim.",
+      "why_loser_doesnt": "Loser-blocking seeds carry the unmatched values 'mntr' (6d 6e 74 72) at 0x0c-0x0f, byte 0x63('c') at 0x05 ('lcms' run), and 0x00 at 0x2d, so the parser never reaches the allocate-then-free path and _cmsFreeInterpParams stays unvisited.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile's CMP_MAP feedback: the per-execution CmpLogObserver buffers the exact comparand the ICC signature check expects, and I2SRandReplace substitutes it byte-for-byte at the input offset, jumping the exact-equality gate that value_profile's Hamming/prefix gradient could not climb without the substitution mutator."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The only decisive pair at this branch is value_profile_cmplog over value_profile with technique delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace while value_profile does not.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and relies on CMP_MAP distance buckets only.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Winner seeds carry the ASCII 'link' device-class field at offsets 0x0c-0x0f while loser seeds carry 'mntr'.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  6c(l)x8 00(.)x2                     6d(m)x9 6c(l)x1                     PARTIAL"
+    },
+    {
+      "claim": "Winner inputs show 'link' literal in the ASCII rendering of the first row.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0f46bd1d4a719e04 offset 0x00",
+      "exact_quote": "..b.lams.@..link"
+    },
+    {
+      "claim": "Loser inputs show 'mntr' literal instead of 'link' in the same region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0313315f3b972394 offset 0x00",
+      "exact_quote": "..b.lcms.@..mntr"
+    },
+    {
+      "claim": "Offset 0x05 cleanly differs: winners hold 'a' (0x61) ten times, losers hold 'c' (0x63) eight times.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0005",
+      "exact_quote": "0x0005  61(a)x10                            63(c)x8 00(.)x1 69(i)x1             DIFFER"
+    },
+    {
+      "claim": "Offset 0x2d is a flag byte that is 0x01 in all winners and 0x00 in all losers.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x002d",
+      "exact_quote": "0x002d  01(.)x10                            00(.)x10                            DIFFER"
+    },
+    {
+      "claim": "The blocker is the p != NULL guard whose false (blocked) side leads to freeing interp params.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsintrp.c:179",
+      "exact_quote": "if (p != NULL) _cmsFree(p ->ContextID, p);"
+    },
+    {
+      "claim": "The enclosing free function is reached far more often under the winner than the loser per call-chain divergence.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 cmsintrp.c:179",
+      "exact_quote": "d=1   L 179  T=20 F=10  T=134 F=0  if (p != NULL) _cmsFree(p ->ContextID, p);  <-- BLOCKER"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2118 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0f46bd1d4a719e04` and observed one I2S-floor dash row (mutation_op = -) at depth 14 of the 15-level ancestor chain, the ParentInfo-only signature of an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose only winner-vs-loser gate is the exact 4-byte 'link' signature equality where value_profile resolves the false branch as often as value_profile_cmplog, showing CMP_MAP gradient alone climbs the gate without I2S substitution."
+  },
+  "weakest_evidence_point": "Which of the differing fields (0x05, 0x0c-0x0f 'link', or 0x2d flag) is the actual exact-equality gate versus mere co-varying corpus provenance is not isolated; the 'link' device-class field is the most plausible but unconfirmed single gate.",
+  "confidence": "medium"
+}

@@ -74,13 +74,14 @@ name → list of (caller, file, line, c_start, c_end). Used by both
 per_role_coverage (to include caller files in the cov dump) and the
 overlay builder (to render cross-file 1-hop callers + call chain).
 
-`prompts/<group>/<NN>_<target>_<id>.prompt.md` — per-rep agent prompts.
-Default outdir for `tools/run_hypothesis_fanout.py`. Conventional
-subdirs:
-- `prompts/<shape>/` (e.g. `prompts/BRBR/`) — fan-out output grouped by
-  decisive-shape; the canonical home of agent-bound prompts.
-- `prompts/_smoke_v1/` — hand-picked smoke-test prompts used during
-  prompt-template iteration (5 reps spanning shape families).
+`prompts/<target>_<branch_id>.prompt.md` — per-rep agent prompts.
+Default outdir for `tools/run_hypothesis_fanout.py`. **Layout is FLAT**
+(2026-05-30): all prompts sit directly under `prompts/` with no
+subfolders (default `--group-by flat`). Filenames key on
+(target, branch_id), which is globally unique, so they are stable
+regardless of grouping. (`--group-by shape|target|target-delta` still
+exist as alternative FOLDER layouts but carry no dispatch meaning — see
+the dispatch note below.) Optional curated subdirs:
 - `prompts/_examples/` — GOLD-STANDARD reference pair (prompt +
   hand-written analysis.json) that passes every check in
   `tools/check_analysis.py`. Concrete reference of what a high-quality
@@ -88,7 +89,18 @@ subdirs:
   See `prompts/_examples/README.md`.
 
 Each agent-produced analysis lives as a sibling `.analysis.json` next
-to its `.prompt.md` (e.g. `prompts/BRBR/00_curl_19.analysis.json`).
+to its `.prompt.md` (e.g. `prompts/curl_19.analysis.json`).
+
+**Dispatch is FLAT PARALLEL** (analysis-only contract): under the
+analysis-only contract each branch is analyzed in isolation — no agent
+reads another's output — so all calls are mutually independent. The
+manifest exposes a flat `all_calls` list (`dispatch_plan.mode =
+flat_parallel`); shape/group is a cosmetic label, NOT an ordering axis.
+The old across-group-parallel / within-group-sequential scheme (whose
+only purpose was letting a later agent see earlier `template.c` on disk)
+is dead, since 4b no longer writes templates. **Operational note:**
+dispatch ≤25 agents per message — 40-wide fan-out saturates and triggers
+API stream-idle timeouts (observed 2026-05-30).
 
 ## Coverage Report Format
 
@@ -108,7 +120,7 @@ Specialized agents live in `.claude/agents/`:
 
 | Agent | Output | Purpose |
 |-------|--------|---------|
-| **feature-hypothesis-generator** (Opus) | `prompts/<group>/<NN>_<target>_<bid>.analysis.json` (one sibling per prompt) | Per-branch analysis step (step 4b) of the metaphorical-testing pipeline. Receives a structured prompt (push-mode) emitted by `tools/study_units.py evidence-per-branch` for ONE (target, branch). Diffs winner-resolving vs loser-blocking seed bytes at the highest-prob_div decisive pair, reads source CMP shape, and writes ONE `.analysis.json` (hypotheses + evidence_trail + falsifiability). Under the **analysis-only contract (2026-05-17)** it does NOT compare against `templates/`, NOT classify into existing categories, and NOT emit template files — classification + verification are deferred to steps 5a/5b to avoid anchoring bias. One per-branch prompt per call; designed for parallel fan-out across (target, branch_id) pairs. |
+| **feature-hypothesis-generator** (Opus) | `prompts/<target>_<bid>.analysis.json` (one sibling per prompt) | Per-branch analysis step (step 4b) of the metaphorical-testing pipeline. Receives a structured prompt (push-mode) emitted by `tools/study_units.py evidence-per-branch` for ONE (target, branch). Diffs winner-resolving vs loser-blocking seed bytes at the highest-prob_div decisive pair, reads source CMP shape, and writes ONE `.analysis.json` (hypotheses + evidence_trail + falsifiability). Under the **analysis-only contract (2026-05-17)** it does NOT compare against `templates/`, NOT classify into existing categories, and NOT emit template files — classification + verification are deferred to steps 5a/5b to avoid anchoring bias. One per-branch prompt per call; designed for parallel fan-out across (target, branch_id) pairs. |
 | **hypothesis-signature-distiller** (Sonnet) | `step5a/<family>/signatures.json` (one signature per card) | Pass-A distiller of **step 5a**. Reads ONE hypothesis card (built by `tools/build_signature_cards.py`, family-tagged by `tools/mechanism_family.py`) and normalizes it into ONE structured signature `{gate_structure, operand_kind, operand_literal, operand_width_bytes, byte_signature, mechanism_summary, one_line}` — closed-vocab gate slots plus an **open** `mechanism_summary` (the technique's effect in free text, no fixed taxonomy, so Pass B can *discover* categories rather than have them imposed). Does NOT cluster or read source/DB — **tool-restricted to Read+Write** so per-card isolation is enforced. |
 | **signature-feature-classifier** (Sonnet) | `step5a/<family>/clusters.json` (discovered feature clusters) | Pass-B classifier of **step 5a**. **Discovers** feature categories from a family's signatures — clusters branches by `mechanism_summary` similarity (gate slots secondary; opens member analyses via `analysis_path` when ambiguous), and coins an emergent `mechanism_label` + `feature_id` + definition per cluster. Applies NO pre-defined taxonomy (categories are the output, not an input). Does NOT author templates (that is 5b). Read+Write. |
 | **template-author** (Opus) | `step5b/<feature_id>/{template.c, params.json, feature_spec.json}` (verdict: pending) | **Author** stage of **step 5b**. Reads ONE cluster brief (`step5b/briefs/<feature_id>.json`, built by `tools/build_template_briefs.py`) and generates the synthetic program: ONE parameterized libFuzzer harness isolating the cluster's shared mechanism with exactly ONE compile-time `-D` knob = the program-feature axis. Does NOT run the sweep (`verify_template.py`) or judge verdicts (`verdict-adjudicator`). Read+Write. The macro↔params consistency + live-knob are enforced by `tools/check_template.py`. |
@@ -413,9 +425,10 @@ Claude session):
 
 ```bash
 python3 tools/run_hypothesis_fanout.py
-# → prompts/manifest.json + per-rep .prompt.md files under prompts/<group>/
-# Then: Claude reads manifest, fans out N parallel × M sequential
-# Agent(feature-hypothesis-generator) calls.
+# → prompts/manifest.json + flat per-rep .prompt.md files directly under prompts/
+# Then: Claude reads manifest.all_calls (flat list), fans out independent
+# Agent(feature-hypothesis-generator) calls — all parallel, no ordering.
+# Dispatch in batches of <=25 (40-wide saturates / times out).
 ```
 
 Default input is `csvs/blocker_representatives.csv`; pass
@@ -423,7 +436,7 @@ Default input is `csvs/blocker_representatives.csv`; pass
 
 **Step 4b — per-branch analysis (NEW DESIGN, 2026-05-17)**: each agent
 analyzes its assigned branch IN ISOLATION and writes a sibling
-`<NN>_<target>_<bid>.analysis.json` file. Critically: the agent does NOT
+`<target>_<bid>.analysis.json` file. Critically: the agent does NOT
 compare against `templates/`, NOT classify into existing categories, and
 NOT emit `template.c` — those are deferred to step 5+ so that
 classification happens AFTER all branches have independent hypotheses,
@@ -436,9 +449,19 @@ Analysis schema (enforced by `tools/check_analysis.py`):
 - `evidence_trail` — every hypothesis sub-claim must be backed by an
   entry with cited_section + cited_locator + **exact_quote that appears
   literally in the prompt** (mechanically verified by `check_analysis.py`).
-- `mechanism_consistency_check` — if claimed mechanism is I2S-specific,
-  the agent must invoke `db_query.py lineage` on a winning seed and
-  confirm `I2SRandReplace` appears (or explain why verification failed).
+- `mechanism_consistency_check.claimed_mechanism` — one of an **11-token
+  closed vocabulary** (extended 2026-05-30 from 5 → 11 for the 10-fuzzer
+  set): `I2SRandReplace`, `CMP_MAP gradient` (roadblock); `context-sensitive
+  coverage`, `ngram coverage` (feedback); `grimoire structural`, `mopt
+  mutation`, `calibrated energy`, `aflfast rarity` (mutation/scheduling);
+  `havoc-only`, `token-replace`, `other` (baseline/fallback — `other` only
+  when genuinely unclassifiable). If claimed = `I2SRandReplace`, the agent
+  must invoke `db_query.py lineage` on a winning seed and confirm the I2S
+  floor (dash-row) signal (or explain why verification failed) — this is the
+  only mechanism requiring lineage. The agent↔attribution consistency
+  cross-check (no hypothesis may name a different mechanism) applies ONLY to
+  `single_feature`; `multi_feature` legitimately carries a distinct mechanism
+  per hypothesis.
 - `falsifiability.would_be_refuted_by` — one concrete observation that
   would kill the hypothesis (Popper test).
 - `weakest_evidence_point` + `confidence` — forced self-criticism.

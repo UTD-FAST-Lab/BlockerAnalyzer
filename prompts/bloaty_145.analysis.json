@@ -1,0 +1,81 @@
+{
+  "branch_id": 145,
+  "target": "bloaty",
+  "summary_one_line": "A well-formed ELF whose parsed structural fields build a translator map then query CoversRange with an address outside that map.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "An ELF input (magic 7f 45 4c 46) whose header/structural fields parse far enough to populate translator_ and invoke RangeMap::CoversRange via RangeSink::AddRange (bloaty.cc:1331), supplying a vmaddr/vmsize whose first lookup iterator either reaches mappings_.end() or fails EntryContains, so the else-if at range_map.cc:315 takes its true side and returns false.",
+      "why_winner_satisfies": "Winner-resolving cmplog seeds carry a clean ELF magic plus concentrated structural bytes (e.g. 7f ff-marked fields at 0x09-0x0c and the PU/0x50 0x55 pair at 0x18-0x19) that satisfy the parser CMP gates so the translator_ branch is entered and CoversRange is reached, where the W-only lines 316-317 (return false) are hit and the branch true side covered.",
+      "why_loser_doesnt": "Loser-blocking naive seeds carry malformed/space-filled bytes after the magic (runs of 0x20 across 0x0a-0x1c, swapped ELF class/data at 0x04-0x06) that never drive the parser through the translator_-establishing path with an uncovered address; their CoversRange invocations stay on the false side (line 315 L T=0 F=1260000) and the branch true side is never taken.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads intercepted integer/string CMP operands from the CmpLogObserver buffer and substitutes the expected operand into matching input offsets, letting it reconstruct the exact ELF header field values that the bloaty parser compares against; naive must hit those multi-byte field values by blind havoc and never does within budget, so only cmplog drives the input through the translator map construction that exercises the CoversRange true side."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of an else-if in CoversRange that returns false when the iterator is at end or EntryContains fails.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "range_map.cc:315:16",
+      "exact_quote": "} else if (it == mappings_.end() || !EntryContains(it, addr)) {"
+    },
+    {
+      "claim": "The winning side covers the return-false lines 316-317 (W-only) while the loser only ever exercises the surrounding loop.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "range_map.cc:316-317",
+      "exact_quote": "[W]   316        return false;"
+    },
+    {
+      "claim": "CoversRange is reached through the translator_ guard at the call site bloaty.cc:1331.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "bloaty.cc:1330-1331",
+      "exact_quote": "if (!translator_->vm_map.CoversRange(vmaddr, vmsize) || <-- CALL"
+    },
+    {
+      "claim": "Winner-resolving cmplog seeds begin with a clean ELF magic and concentrated structural bytes including the 50 55 pair at offset 0x18.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 05a56c847ffbf4de offsets 0x00-0x1f",
+      "exact_quote": "0000: 7f 45 4c 46 01 02 0a 0a 0a ff ff ff 7f 24 20 0a   .ELF.........$ ."
+    },
+    {
+      "claim": "Loser-blocking naive seeds fill the post-magic region with runs of 0x20 spaces rather than valid structural fields.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 43b1a3ff84794b7e offset 0x0c onward",
+      "exact_quote": "0000: 7f 45 4c 46 02 01 01 00 00 00 00 7f ff 20 20 00   .ELF.........  ."
+    },
+    {
+      "claim": "W and L bytes diverge sharply across offsets 0x06-0x1c where the winner holds concentrated values and the loser holds spaces, the dataflow signal into the parser fields.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x19",
+      "exact_quote": "0x0018  50(P)x2                             9c(.)x8 20( )x7 ae(.)x1 35(5)x1     DIFFER"
+    },
+    {
+      "claim": "On the loser side the blocker true side is taken zero times against 1260000 false on the d=1 enclosing frame.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L315",
+      "exact_quote": "d=1   L 315  T=6 F=0  T=0 F=1260000  } else if (it == mappings_.end() || !EntryContains(it, ad...  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for a CMP operand and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mutator and must reach field values by blind havoc.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 145 --role W --fuzzer cmplog --trial 2 --seed 05a56c847ffbf4de` and observed the I2S-floor signal: 2 ancestor dash rows (mutation_op = -) at depths 34 and 35 of the 36-level chain. Since cmplog is the decisive winner and naive the loser, dash rows are I2S-exclusive in this 4-canonical comparison, giving lower-bound evidence of an I2SRandReplace contribution."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic ELF-parsing harness in which the CoversRange true side is reachable purely by a length/insert mutation with no multi-byte structural-field CMP gate would let naive resolve the branch as fast as cmplog, contradicting the I2S attribution."
+  },
+  "weakest_evidence_point": "The exact ELF field whose CMP gate I2S solves to enter the translator_ path is inferred from byte-diff concentration and source structure, not directly traced to a logged CMP operand.",
+  "confidence": "medium"
+}

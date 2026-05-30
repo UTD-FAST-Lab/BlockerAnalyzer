@@ -1,0 +1,87 @@
+{
+  "branch_id": 3820,
+  "target": "libpng",
+  "summary_one_line": "A 4-byte chunk-type tag at offset 0x35 must select a zlib-decompressing chunk whose inflate returns Z_OK in png_zstream_error.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A specific 4-byte PNG chunk-type FOURCC at file offset 0x35-0x38 (e.g. iTXt = 69 54 58 74 or kRGB-like variant) that routes the input into a zlib-inflate code path whose return code is Z_OK, so png_zstream_error(Z_OK) is reached and the true side of `case Z_OK:` (L1007) is taken.",
+      "why_winner_satisfies": "Winner cmplog seeds carry distinct chunk-type bytes at 0x35-0x38 (iTXt / kRGB) differing from the loser, and the per-role overlay marks line 1007 case Z_OK as [W] winner-only while the loser sits on [L] Z_STREAM_END / Z_BUF_ERROR arms — the winner exercises the exact ret==Z_OK switch arm 12 times (T=12 F=0) where the loser never does (T=0 F=225).",
+      "why_loser_doesnt": "Loser naive seeds hold the chunk type sRGB (73 52 47 42) at the same offset 0x35-0x38, which routes to chunk paths whose zlib calls return Z_STREAM_END or Z_BUF_ERROR instead of Z_OK, so they land on case Z_STREAM_END (L1011, T=216) and case Z_BUF_ERROR (L1041, T=9) and never on case Z_OK.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer where the chunk-type CMP operands were logged, finds the loser's chunk-type bytes in the input, and substitutes the operand that drives execution toward the Z_OK-returning chunk path; naive lacks I2S and must blunder onto the right 4-byte tag by havoc alone, which it fails to do in 8/10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is case Z_OK at png.c:1007, true side globally blocked, inside png_zstream_error.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "png.c:1007:7",
+      "exact_quote": "Source line:       case Z_OK:"
+    },
+    {
+      "claim": "cmplog resolves the branch 9/10 while naive resolves 0/10, with I2S as the technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The winner-only overlay puts case Z_OK on the W (winner-resolving) path.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1007",
+      "exact_quote": "[W]  1007        case Z_OK: <-- BLOCKER"
+    },
+    {
+      "claim": "Winner takes the Z_OK arm (T=12 F=0) while loser never does (T=0 F=225) and instead takes Z_STREAM_END and Z_BUF_ERROR.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1007/L1011/L1041",
+      "exact_quote": "d=1   L1007  T=12 F=0  T=0 F=225  case Z_OK:  <-- BLOCKER"
+    },
+    {
+      "claim": "The loser routes to the Z_STREAM_END switch arm 216 times, where the winner never goes.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1011",
+      "exact_quote": "d=1   L1011  T=0 F=12  T=216 F=9  case Z_STREAM_END:"
+    },
+    {
+      "claim": "At offset 0x35-0x38 the winner carries iTXt/kRGB chunk-type bytes while the loser carries sRGB.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x35-0x38",
+      "exact_quote": "0x0035  69(i)x6 6b(k)x5 73(s)x1             73(s)x20"
+    },
+    {
+      "claim": "The 4-byte tag is a chunk type; winner seed bytes show iTXt at offset 0x35.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed c7492b31f4f7e961",
+      "exact_quote": "05 00 00 00 01 69 54 58 74 01 d9 c9 2c 7f 00 00   .....iTXt...,..."
+    },
+    {
+      "claim": "Loser naive seeds carry the sRGB chunk type at the same offset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 20af14ddc952c142",
+      "exact_quote": "05 00 00 00 01 73 52 47 42 01 d9 c9 2c 7f 00 00   .....sRGB...,..."
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for one CMP operand and substitutes the other at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S, only havoc and token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 3820 --role W --fuzzer cmplog --trial 1 --seed c7492b31f4f7e961`; the chain has 11 levels and the tool reported 'I2S-floor signal: 1 ancestor dash row(s) at depth 10' (mutation_op = -, ParentInfo-only metadata), which is the lower-bound I2S contribution signal under the current cmplog build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on a 4-byte chunk-type literal at a fixed offset where naive resolves it as fast as cmplog (no cmplog>naive separation), showing the divergence is not driven by I2S substitution of that 4-byte tag."
+  },
+  "weakest_evidence_point": "The causal link from the 0x35-0x38 chunk type to a zlib path returning specifically Z_OK is inferred from switch-arm hit counts and source, not directly traced through the inflate return value.",
+  "confidence": "medium"
+}

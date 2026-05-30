@@ -1,0 +1,75 @@
+{
+  "branch_id": 2252,
+  "target": "lcms",
+  "summary_one_line": "Profile colorspace signature field must equal the FOURCC 'HLS ' (48 4c 53 20) to take the cmsSigHlsData switch arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The 4-byte colorspace-signature field at input offsets 0x10-0x13 must hold the exact magic literal 'HLS ' (bytes 48 4c 53 20) so that ProfileSpace == cmsSigHlsData selects the case at cmspcs.c:824; any other FOURCC routes to a different switch arm or the default.",
+      "why_winner_satisfies": "All five winner-resolving cmplog seeds carry 'HLS ' at offsets 0x10-0x13 (48 4c 53 20), placing the parsed signature exactly on the cmsSigHlsData value, and the blocker's true side fires (L824 W T=11).",
+      "why_loser_doesnt": "Every naive loser-blocking seed has 'RGB ' (52 47 42 20) at offsets 0x10-0x13 instead, so the switch lands on cmsSigRgbData and the cmsSigHlsData arm's true side is never taken (L824 L T=0).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the intercepted integer/string CMP operand for the switch dispatch, finds the seed's current 4-byte signature substring, and substitutes the logged 'HLS ' literal at that offset; naive has no CMP introspection and must blindly havoc its way onto the exact 4-byte magic, which is improbable, so naive stays blocked."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the cmsSigHlsData switch case returning PT_HLS at cmspcs.c:824, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmspcs.c:824:5",
+      "exact_quote": "case cmsSigHlsData:  return  PT_HLS;"
+    },
+    {
+      "claim": "The decisive pair is cmplog>naive with an I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "Winner-resolving cmplog seeds carry 'HLS ' at offsets 0x10-0x13.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 66120690646875c5 offset 0x10",
+      "exact_quote": "48 4c 53 20 4c 61 62 02 07 d9 00 0c 00 17 00 16   HLS Lab"
+    },
+    {
+      "claim": "Loser-blocking naive seeds carry 'RGB ' at offsets 0x10-0x13.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 05c646cb9928d9d9 offset 0x10",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ"
+    },
+    {
+      "claim": "Offsets 0x10-0x12 differ between W (HLS) and L (RGB) with concentrated byte sets, the informative dataflow signal.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x10-0x12",
+      "exact_quote": "0x0010  48(H)x7 4c(L)x1                     52(R)x10                            DIFFER"
+    },
+    {
+      "claim": "The blocker true side fires for W but never for L at line 824.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L824",
+      "exact_quote": "T=11 F=19  T=0 F=62  case cmsSigHlsData:  return  PT_HLS;"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at matching input offsets, a capability naive lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S mutation in its operator set.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2252 --role W --fuzzer cmplog --trial 2 --seed 66120690646875c5` and observed the I2S-floor signal: 2 ancestor dash rows (mutation_op = -) at depths 7 and 8 of the chain, which under the current build indicate unwrapped I2SRandReplace finds exclusive to cmplog/vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose only roadblock is an exact 4-byte colorspace-magic equality on input bytes where naive resolves the cmsSigHlsData arm as often as cmplog within the same budget, showing the magic gate is not the divergence driver."
+  },
+  "weakest_evidence_point": "The I2S attribution rests on the dash-row floor heuristic rather than a literal I2SRandReplace name, and the two dash rows are deep ancestors (depth 7-8) not the resolving leaf itself.",
+  "confidence": "high"
+}

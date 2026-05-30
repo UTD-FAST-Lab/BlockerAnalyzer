@@ -1,0 +1,75 @@
+{
+  "branch_id": 7288,
+  "target": "libxml2",
+  "summary_one_line": "Reaching an attribute node with no children requires a well-formed XML element-with-attribute structure that grimoire's structural recombination builds and re-tries.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["grimoire>cmplog (grimoire_structural)"],
+      "what_input_feature": "A syntactically valid XML element carrying an attribute whose value parses to an XML_ATTRIBUTE_NODE with an empty (children==NULL) value, e.g. element-open + attribute-name + quoted value markup such as `<l n=\"\"><b ...>`, so the reader loop reaches xmlTextReaderReadAttributeValue on a childless attribute node.",
+      "why_winner_satisfies": "The grimoire winner seeds carry intact XML element/attribute markup produced by structural splicing — `<l n=\"\"><b ...>` appears at offset 0x10 onward, and lineage shows the leaf was built by GrimoireRecursiveReplacementMutator recombining generalised token/gap structures rather than mangling raw bytes. The branch true side is taken 25 times (avg hitcount=25) and resolved in 10/10 trials.",
+      "why_loser_doesnt": "The cmplog loser seeds are byte/token mutations of a fixed `<?xml version=\"1.0\"?> <!DOCTYPE a SYSTEM \"dtds/...` skeleton (offsets 0x10-0x40 are DOCTYPE boilerplate), so the parser stays in DOCTYPE/external-entity territory and the attribute-node loop never produces a childless XML_ATTRIBUTE_NODE: at the blocker cmplog shows T=0 F=11 and blocked 9/10 trials for 23.30h.",
+      "mechanism_attribution": "Both fuzzers share the input-to-state comparison-solving stage, so the single-technique delta is grimoire's GeneralizationStage + Grimoire structural mutators: generalising corpus bytes into token/gap templates and recursively splicing them lets grimoire synthesise the nested element-with-attribute markup that constructs a childless attribute node, which per-offset byte substitution alone (cmplog) does not assemble."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker true side requires an attribute node whose children pointer is NULL.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L2826",
+      "exact_quote": "if (reader->curnode->children == NULL)"
+    },
+    {
+      "claim": "The winning grimoire seeds contain valid XML element-with-attribute markup.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0037c50e9826accb offset 0x10",
+      "exact_quote": "3c 6c 20 6e 3d 22 22 3e 3c 62 20 72 49 53 4f 2d   <l n=\"\"><b rISO-"
+    },
+    {
+      "claim": "The winning seed was produced by a Grimoire structural mutator.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0037c50e9826accb",
+      "exact_quote": "mutation_op=GrimoireRecursiveReplacementMutator"
+    },
+    {
+      "claim": "The loser cmplog seeds are byte/token mutations of a fixed DOCTYPE/dtds skeleton.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 2792bedfa11bd0f7 offset 0x30",
+      "exact_quote": "61 20 53 59 53 54 45 4d 20 22 64 74 64 73 2f 31   a SYSTEM \"dtds/1"
+    },
+    {
+      "claim": "At the blocker the loser never takes the true side while the winner does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2826",
+      "exact_quote": "d=1   L2826  T=9 F=1  T=0 F=11  if (reader->curnode->children == NULL)  <-- BLOCKER"
+    },
+    {
+      "claim": "grimoire resolves the branch in all trials while cmplog blocks in nine of ten.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "The single-technique delta is grimoire's generalization plus structural mutators on top of the shared cmplog/I2S stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire baseline relationship",
+      "exact_quote": "The single-technique delta is therefore\n`grimoire` vs `cmplog` (both have I2S; grimoire adds generalization +\nGrimoire mutators), not vs naive."
+    },
+    {
+      "claim": "Grimoire mutators splice and recurse on generalised token/gap structures, a grammar-free structural mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire mutators/stages",
+      "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "grimoire structural",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 7288 --role W --fuzzer grimoire --trial 1 --seed 0037c50e9826accb`; the leaf mutation_op is GrimoireRecursiveReplacementMutator (depth 0), confirming grimoire's structural mutator produced the winning seed. A dash row appears at depth 3 but per the 10-fuzzer caveat grimoire wraps all stages (incl. I2S) in LineageMutatorWrap with an empty names list, so the dash signal is NOT I2S-exclusive here and the meaningful evidence is the named Grimoire leaf op."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose only blocker is reaching a childless attribute node, where cmplog resolves it as often as grimoire (no grimoire advantage), would show the divergence is not driven by structural recombination."
+  },
+  "weakest_evidence_point": "The claim that cmplog stays stuck in DOCTYPE/external-entity parsing rather than the attribute loop is inferred from seed byte layout, not from a per-role trace of where cmplog inputs actually diverge in the parser.",
+  "confidence": "medium"
+}

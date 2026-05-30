@@ -1,0 +1,69 @@
+{
+  "branch_id": 87,
+  "target": "bloaty",
+  "summary_one_line": "Input must be a 64-bit ELF whose header e_shnum/e_shoff fields yield section_count() > 1 so the loop guard's true side fires",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A valid 64-bit ELF header (magic 7f 45 4c 46, ELFCLASS64 = 0x02 at offset 0x04) whose section-header-table fields (e_shoff at 0x28 and e_shnum near 0x3c) parse to a section_count() strictly greater than 1, so the loop guard i < elf.section_count() takes its true side and the body at lines 1194-1239 executes.",
+      "why_winner_satisfies": "Winner cmplog seeds set offset 0x04 to 0x02 (ELFCLASS64) and carry non-trivial header offset/count fields, so ElfFile::section_count() returns ~286000 hits in W vs ~230 in L and the blocker line reports T=16 in W versus T=0 in L; the loop body lines 1194-1239 are W-only.",
+      "why_loser_doesnt": "Loser naive seeds use offset 0x04 = 0x01 (ELFCLASS32) with mostly-zeroed or 0x20-padded section-table fields, so section_count() resolves to 0/1, the guard is always false (L1193 shows T=0 F=20), the loop body never runs, and ElfFile::section_count() is hit only ~230 times in L.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes one logged CMP operand at input offsets matching the other, letting it splice the precise section-count/offset comparand values into the header so the loop guard comparison passes; naive has only blind havoc and never solves the multi-field header constraint."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is a loop guard comparing the index against the ELF section count, with the true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L1193, elf.cc:1193:27",
+      "exact_quote": "for (Elf64_Xword i = 1; i < elf.section_count(); i++) {"
+    },
+    {
+      "claim": "Winner seeds set offset 0x04 to 0x02 (ELFCLASS64) while loser seeds use 0x01 (ELFCLASS32).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0005",
+      "exact_quote": "0x0005  02(.)x4 01(.)x2                     01(.)x10"
+    },
+    {
+      "claim": "The loop body executes only in the winner role; the body lines 1194-1239 are marked [W].",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1194-L1195",
+      "exact_quote": "[W]  1195      elf.ReadSection(i, &section);"
+    },
+    {
+      "claim": "section_count() is invoked ~286000 times in the winner versus ~230 in the loser, showing the count is non-zero only for winners.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "elf.cc:80 ElfFile::section_count()",
+      "exact_quote": "286000       230  elf.cc:bloaty::(anonymous namespace)::ElfFile::section_count() const"
+    },
+    {
+      "claim": "The blocker line takes its true side in the winner (T=16) but never in the loser (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1193",
+      "exact_quote": "d=1   L1193  T=16 F=12  T=0 F=20  for (Elf64_Xword i = 1; i < elf.section_count(); i++) {  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which scans the input for one CMP operand and substitutes the other at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S capability, only the havoc/token mutator stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 87 --role W --fuzzer cmplog --trial 1 --seed ac3ba2cbb00192e0`; the ancestor chain has 18 levels and the trailing I2S-floor signal reports 2 dash rows (mutation_op = -) at depths 16 and 17, the lower-bound signature of unwrapped I2SRandReplace finds in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic ELF-header harness where cmplog fails to resolve the section_count loop guard no faster than naive (no significant cmplog>naive divergence), indicating I2S substitution does not help solve the multi-field section-table comparison."
+  },
+  "weakest_evidence_point": "The exact offsets that feed section_count() (e_shoff/e_shnum) are inferred from ELF layout plus diffuse PARTIAL byte-diff signal rather than a single concentrated I2S-substituted offset, so the precise comparand splice point is uncertain.",
+  "confidence": "high"
+}

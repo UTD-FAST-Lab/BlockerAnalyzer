@@ -1,0 +1,75 @@
+{
+  "branch_id": 2276,
+  "target": "lcms",
+  "summary_one_line": "The 4-byte colorspace signature at offset 0x10 must equal the FOURCC 'MCHC' to take the cmsSigMCHCData switch case.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "A 4-byte profile-colorspace signature field at input offset 0x10-0x13 holding the exact FOURCC 'MCHC' (4d 43 48 43), which equals cmsSigMCHCData and selects the switch case at cmspcs.c:860.",
+      "why_winner_satisfies": "Both winner-resolving seeds carry 'MCHC' (4d 43 48 43) at offsets 0x10-0x13, the exact FOURCC the switch case cmsSigMCHCData compares against, so _cmsLCMScolorSpace takes the true branch at line 860.",
+      "why_loser_doesnt": "All loser-blocking seeds carry 'RGB ' (52 47 42 20) at offsets 0x10-0x13, which matches case cmsSigRgbData (line 815) instead, so the switch never reaches the cmsSigMCHCData case and the true side stays blocked.",
+      "mechanism_attribution": "value_profile adds CMP_MAP gradient feedback: each integer/string CMP against the colorspace signature writes a matching-prefix / Hamming-distance bucket, so an input whose signature bytes get progressively closer to 'MCHC' is preserved as corpus and the fuzzer climbs the gradient to the exact 4-byte match. naive has only edge-counter feedback and no signal that distinguishes a near-match signature from any other wrong value, so it must hit the exact FOURCC by blind havoc."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is the switch case cmsSigMCHCData in _cmsLCMScolorSpace at cmspcs.c:860.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmspcs.c:860:5",
+      "exact_quote": "Source line:     case cmsSigMCHCData:"
+    },
+    {
+      "claim": "Both winner-resolving seeds contain the FOURCC 'MCHC' at offsets 0x10-0x13.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 1 offset 0x10",
+      "exact_quote": "4d 43 48 43 74 66 6d 20 07 d9 00 0c 00 17 00 16   MCHCtfm ........"
+    },
+    {
+      "claim": "Loser-blocking seeds contain 'RGB ' at offsets 0x10-0x13 instead of the MCHC signature.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 1 offset 0x10",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "The byte diff shows W=MCHC vs L=RGB at the four offsets 0x10-0x13 as DIFFER (concentrated, informative dataflow signal).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x10-0x13",
+      "exact_quote": "0x0010  4d(M)x2                             52(R)x10                            DIFFER"
+    },
+    {
+      "claim": "In the loser run the RgbData case true side fires (T=47) while the MCHC blocker true side never fires (T=0), confirming the loser is diverted to the RGB case.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L815 and L860",
+      "exact_quote": "case cmsSigRgbData:  return  PT_RGB;"
+    },
+    {
+      "claim": "value_profile is the winner and naive is the loser at this decisive pair with prob_div=1.00.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "value_profile's mechanism is CMP_MAP gradient feedback keyed by operand-distance bucket (Hamming distance / matching-prefix length), which preserves inputs whose CMP operands move closer to matching.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile section",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile has no I2S substitution mutator, so the winning advantage is the CMP_MAP gradient and not input-to-state replacement.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators line",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile vs naive), not I2SRandReplace, so the mandatory lineage I2S-floor check does not apply. The value_profile MECHANISM CONTEXT confirms CMP-operand-distance bucket feedback and explicitly states 'No `I2SRandReplace`', so no dash-row lineage verification is warranted; the program-side FOURCC match is evidenced directly by the byte diff."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating a switch on an exact 4-byte FOURCC where value_profile and naive resolve the case at statistically indistinguishable rates would refute the CMP_MAP-gradient advantage."
+  },
+  "weakest_evidence_point": "Only two winner seeds are available, so the inference that the CMP_MAP gradient (rather than lucky havoc on a narrow 4-byte field) drives the 10/10 vs 0/10 split rests on the mechanism description rather than per-seed gradient evidence.",
+  "confidence": "high"
+}

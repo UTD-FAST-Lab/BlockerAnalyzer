@@ -1,0 +1,81 @@
+{
+  "branch_id": 2202,
+  "target": "lcms",
+  "summary_one_line": "Header fields (profile-class FOURCC at 0x0c, bytes at 0x2d/0x3d) must match magic values that route to a non-NULL Table CLUT allocation.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The ICC header must carry specific magic-valued fields: a profile-class FOURCC at offset 0x0c-0x0f that is one of spac/prtr/link (not mntr), plus the discriminator bytes 0x2d=0x01 and 0x3d=0x50, which together steer the profile-creation path into a CLUT stage invoked with a non-NULL Table argument so cmsStageAllocCLut16bitGranular takes the true branch at line 589.",
+      "why_winner_satisfies": "All five winner seeds carry exact magic values at the diff offsets: 0x2d=0x01 and 0x3d=0x50 in every winner, and the class FOURCC at 0x0c is spac/prtr/link; the W role hits lines 590-592 (the Table-copy loop) confirming the true branch is taken.",
+      "why_loser_doesnt": "Every loser seed has 0x2d=0x00 and 0x3d=0x00 and the class FOURCC fixed at mntr, never matching the magic combination; the L role takes the false branch (L 589 T=0 F=20) and never reaches the Table-copy body.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which logs the runtime CMP operand (the expected magic FOURCC / header constant) and splices it directly into the matching input bytes; value_profile lacks I2SRandReplace and only gets a CMP_MAP distance bucket, which cannot place the exact multi-byte magic constant, so it never flips these discrete equality gates."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the equality gate on Table being non-NULL at cmslut.c:589, whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmslut.c:589:9",
+      "exact_quote": "if (Table != NULL) {"
+    },
+    {
+      "claim": "Offset 0x3d holds 0x50 in all winners but 0x00 in all losers, a fully-discriminating DIFFER offset.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x003d",
+      "exact_quote": "0x003d  50(P)x10                            00(.)x10                            DIFFER"
+    },
+    {
+      "claim": "Offset 0x2d holds 0x01 in all winners but 0x00 in all losers, another fully-discriminating DIFFER offset.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x002d",
+      "exact_quote": "0x002d  01(.)x10                            00(.)x10                            DIFFER"
+    },
+    {
+      "claim": "The profile-class FOURCC at 0x0c differs: winners use spac/prtr/link-class bytes while losers are uniformly mntr.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c-0x000f",
+      "exact_quote": "0x000c  6c(l)x4 70(p)x4 73(s)x2             6d(m)x10                            DIFFER"
+    },
+    {
+      "claim": "Winner seeds carry the spac/prtr/link class signatures in their header bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 006035891e3a6630 offset 0x0c",
+      "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 73 70 61 63   ..b.lcms.@..spac"
+    },
+    {
+      "claim": "Loser seeds carry the mntr class signature and 0x00 at the discriminator offsets.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0313315f3b972394 offset 0x0c and 0x2d",
+      "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 6d 6e 74 72   ..b.lcms.@..mntr"
+    },
+    {
+      "claim": "The winner role takes the true branch (Table-copy loop), the loser role does not.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L 589",
+      "exact_quote": "d=1   L 589  T=10 F=11  T=0 F=20  if (Table != NULL) {  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog includes the I2SRandReplace mutator while value_profile does not.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and relies only on CMP_MAP distance buckets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2202 --role W --fuzzer value_profile_cmplog --trial 1 --seed 006035891e3a6630` and observed an I2S-floor dash row (mutation_op = -, ParentInfo-only) at depth 16 of the 17-level ancestor chain; tool reports '1 ancestor dash row(s) at depth 16', the I2S-floor signal exclusive to cmplog/vpc finds."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating line 589's true branch behind an exact multi-byte header magic, where value_profile resolves the branch as often as value_profile_cmplog would refute the I2S-specific attribution."
+  },
+  "weakest_evidence_point": "The semantic link from the magic bytes at 0x2d/0x3d and the class FOURCC to a non-NULL Table argument is inferred from the deep call chain rather than directly traced, so the exact field that selects the Table-supplying path is not pinned down.",
+  "confidence": "medium"
+}

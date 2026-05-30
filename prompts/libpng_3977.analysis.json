@@ -1,0 +1,75 @@
+{
+  "branch_id": 3977,
+  "target": "libpng",
+  "summary_one_line": "A length-32 cHRM chunk whose bluex fixed-point field (offset +24) overflows to PNG_FIXED_ERROR, which undirected havoc reaches but I2S steers away from.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A cHRM chunk of exactly length 32 (so png_handle_cHRM passes the length!=32 guard and reads all eight png_get_fixed_point values), with the bluex sub-field at chunk-data offset +24 carrying a 4-byte value that png_get_fixed_point rejects as PNG_FIXED_ERROR (an out-of-range/overflowing fixed-point integer).",
+      "why_winner_satisfies": "naive's undirected havoc (ByteRand/ByteInc/Word/DwordAdd, BytesSet) freely drives the 4 bluex bytes into the overflow range that decodes to PNG_FIXED_ERROR; the winner takes the true side (T=12) and resolves in all 10 trials with avg 17 hits on the branch.",
+      "why_loser_doesnt": "cmplog's input-to-state substitution copies operands logged from the png_get_fixed_point comparisons back into the input, biasing the bluex bytes toward valid (non-error) fixed-point magnitudes, so the loser never takes the true side (T=0 F=42) and stays blocked in 8/10 trials.",
+      "mechanism_attribution": "The WINNER is naive, whose enabling technique is havoc-only: raw undirected byte mutation (Byte/Word/Dword adds, BytesSet) stumbles the bluex field into the overflow range that decodes to the error sentinel, with no comparison introspection. cmplog's extra input-to-state substitution stage is the technique delta and acts as the hindrance — it pulls bluex toward in-range operands seen at the fixed-point comparison sites and away from the error branch (I2S-anti). The winning mechanism credited here is havoc-only."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the bluex==PNG_FIXED_ERROR test inside png_handle_cHRM and the globally-blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "pngrutil.c:1283",
+      "exact_quote": "xy.bluex  == PNG_FIXED_ERROR ||"
+    },
+    {
+      "claim": "Reaching the read of bluex requires the chunk to be exactly 32 bytes long.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1256",
+      "exact_quote": "if (length != 32)"
+    },
+    {
+      "claim": "bluex is decoded from the 4 chunk-data bytes at offset +24 via png_get_fixed_point.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1274",
+      "exact_quote": "xy.bluex  = png_get_fixed_point(NULL, buf + 24);"
+    },
+    {
+      "claim": "The winner naive takes the true side at the blocker while the loser cmplog never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1283",
+      "exact_quote": "d=1   L1283  T=12 F=17  T=0 F=42  xy.bluex  == PNG_FIXED_ERROR ||  <-- BLOCKER"
+    },
+    {
+      "claim": "naive resolves the branch in all 10 trials with avg 17 hits while cmplog is blocked in 8 with 0 hits.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "subject 21",
+      "exact_quote": "avg hitcount on branch: winner=17  loser=0"
+    },
+    {
+      "claim": "The decisive pair has naive as winner and cmplog as loser with delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "cmplog's distinguishing technique is I2SRandReplace, which substitutes one logged CMP operand at input offsets matching the other.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive uses only havoc and token mutators with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "The WINNER in this decisive pair is naive (delta: I2S, naive>cmplog), so the winning technique is undirected havoc/token mutation with NO I2S — claimed_mechanism is havoc-only, not I2SRandReplace. The lineage I2S-floor check is therefore not applicable to the winner: naive emits no dash rows by construction, and an I2S find in naive's chain is impossible. I2S is the loser's (cmplog) technique here and is the hindrance, not the enabler, so no lineage run was required."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic cHRM-style harness in which forcing bluex to an in-range value seen at the comparison (so I2S can substitute it) does NOT reduce cmplog's true-branch rate relative to naive — i.e. cmplog reaches the overflow/error branch as often as naive — would refute the I2S-steers-away mechanism."
+  },
+  "weakest_evidence_point": "The actual cHRM bytes are beyond the 0x40-byte seed window shown, so I infer the PNG_FIXED_ERROR overflow at offset +24 from source semantics rather than from a direct W-vs-L byte diff at the bluex offset.",
+  "confidence": "medium"
+}

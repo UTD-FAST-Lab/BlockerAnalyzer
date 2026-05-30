@@ -1,0 +1,87 @@
+{
+  "branch_id": 2199,
+  "target": "lcms",
+  "summary_one_line": "Exact 4-byte profile tag/signature literals steering parsing to allocate a CLUT stage whose Tab.T table pointer is NULL.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The header must carry specific 4-byte literals at the profile signature/color-space/PCS tag fields (offsets 0x05, 0x0c-0x16) that lcms compares against constants while parsing the ICC profile, so a CLUT (LUT) stage is constructed but its Tab.T table pointer ends up NULL — making CLutElemTypeFree take the false branch at cmslut.c:534.",
+      "why_winner_satisfies": "Winner-resolving seeds carry the exact byte set the parser CMPs demand: offset 0x05='a'(61), the color-space tag bytes 0x0c-0x0f='link', the 0x10-0x13 PCS field='8CLR'/variants, and 0x2d=01 — these drive parsing to a CLUT stage with an empty (NULL) table, so 'if (Data -> Tab.T)' is false (avg hitcount on winner=9, resolved 8/10).",
+      "why_loser_doesnt": "Loser-blocking seeds hold the alternative constants ('c'(63) at 0x05, 'mntr' at 0x0c-0x0f, 'RGB ' at 0x10-0x13, 0x2d=00); they never reach the CLUT-with-NULL-table configuration, so the false branch is never taken (resolved 0/10, hitcount 0, blocked 24h).",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile's CMP_MAP feedback. CmpLogObserver records the exact comparand constants the lcms tag/signature CMPs expect, and I2SRandReplace splices those logged literals back into the matching input-byte positions, jumping the gate in one mutation. value_profile lacks I2SRandReplace and can only hill-climb via Hamming/prefix CMP_MAP buckets, which does not land the exact multi-byte tag literals here within budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the false branch of a NULL-table test in CLutElemTypeFree at cmslut.c:534.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmslut.c:534:9",
+      "exact_quote": "Source line:     if (Data -> Tab.T)"
+    },
+    {
+      "claim": "Only value_profile_cmplog resolves the branch; value_profile stays blocked at all trials.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "value_profile vs value_profile_cmplog rows",
+      "exact_quote": "value_profile_cmplog             8        2          0  winner (I2S vs value_profile)"
+    },
+    {
+      "claim": "The decisive divergence between the pair is the I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner and loser inputs carry different concentrated byte literals at the profile color-space/signature tag fields.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x05, 0x0c-0x0f, 0x10-0x13",
+      "exact_quote": "0x0005  61(a)x10                            63(c)x10                            DIFFER"
+    },
+    {
+      "claim": "The color-space tag field 0x0c-0x0f differs between winner ('link') and loser ('mntr').",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0c",
+      "exact_quote": "0x000c  6c(l)x8 00(.)x2                     6d(m)x10                            DIFFER"
+    },
+    {
+      "claim": "Winner inputs differ from loser at offset 0x2d (01 vs 00), a discrete parsing flag.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x2d",
+      "exact_quote": "0x002d  01(.)x10                            00(.)x10                            DIFFER"
+    },
+    {
+      "claim": "Winner-resolving seeds were discovered by value_profile_cmplog and contain the 'link'/'8CLR' tag literals.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0f46bd1d4a719e04",
+      "exact_quote": "0000: 00 00 62 9c 6c 61 6d 73 03 40 00 00 6c 69 6e 6b   ..b.lams.@..link"
+    },
+    {
+      "claim": "Loser-blocking seeds were discovered by value_profile and carry the 'mntr'/'RGB ' tag literals.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0313315f3b972394",
+      "exact_quote": "0000: 00 00 62 9c 6c 63 6d 73 03 40 00 00 6d 6e 74 72   ..b.lcms.@..mntr"
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace which value_profile lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, only havoc + token stack and CMP_MAP gradient feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2199 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0f46bd1d4a719e04`; the 15-level ancestor chain contains 1 I2S-floor dash row (mutation_op = -) at depth 14, the unwrapped-I2SRandReplace signal under the current build, confirming an I2S find in the winner lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating the same NULL-table CLUT construction behind these exact tag/signature CMPs in which value_profile resolves the false branch as often as value_profile_cmplog would refute the claim that I2S substitution (not CMP_MAP gradient) is the decisive enabler."
+  },
+  "weakest_evidence_point": "Exactly which tag/signature CMP among offsets 0x05 and 0x0c-0x16 is the load-bearing gate that yields a NULL Tab.T is inferred from the byte diff, not pinned to a specific source comparison.",
+  "confidence": "medium"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 2114,
+  "target": "lcms",
+  "summary_one_line": "ICC profile whose colorspace/PCS FOURCC signatures (Lab/MCH3/XYZ) select a segmented tone-curve path whose domain check fails for all segments, exiting the loop.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "An ICC profile header whose data-colorspace / PCS FOURCC fields at offsets 0x10-0x17 carry signatures such as 'Lab Lab ' or 'MCH3XYZ ' (rather than 'RGB XYZ '), driving construction of a segmented tone curve (nSegments>0) whose per-segment domain test (R > x0 && R <= x1) fails for every segment, so EvalSegmentedFn runs the descending loop to exhaustion and takes the i<0 (false) loop-exit side at line 721.",
+      "why_winner_satisfies": "Winner-resolving seeds carry 'Lab Lab ' (4c 61 62 20) and 'MCH3XYZ ' colorspace signatures at offsets 0x10-0x17; on these the blocker false side is reached (W hits the loop-exit and the line 754 return), with W invoking EvalSegmentedFn 3.82M times vs L 204K and the L 721 row showing F=0.",
+      "why_loser_doesnt": "Loser-blocking seeds carry 'RGB XYZ ' (52 47 42 20 / 58 59 5a 20) at offsets 0x10-0x17; these drive a path where every loop iteration either matches a segment domain and returns early or the loop body never falls through, so the false (loop-exit) side of line 721 is never taken (L shows T=204000 F=0 at line 721).",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CMP operands recorded when the ICC parser compares the input colorspace FOURCC against expected literals, then substitutes those exact 4-byte signatures into the input at the matching offsets, deterministically producing the colorspace-tagged header naive/value_profile reach only by chance havoc; lineage shows I2S-floor dash rows on both winners."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the false (loop-exit) branch of the descending segment loop at line 721 in EvalSegmentedFn.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsgamma.c:721:38, Globally blocked side: F",
+      "exact_quote": "Source line:     for (i = (int) g->nSegments - 1; i >= 0; --i) {\nGlobally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Reaching the false side falls through the loop to return MINUS_INF, which only the winner hits.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 754",
+      "exact_quote": "[W]   754      return MINUS_INF;"
+    },
+    {
+      "claim": "Winner-resolving seeds carry 'Lab Lab ' / 'MCH3XYZ ' colorspace signatures at offsets 0x10-0x17.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0aedfccd0898c3ff offset 0x10; seed 263ed7bab1e89086 offset 0x10",
+      "exact_quote": "4c 61 62 20 4c 61 62 20 07 d9 00 0c 00 17 00 16   Lab Lab ........"
+    },
+    {
+      "claim": "Loser-blocking seeds carry 'RGB XYZ ' at offsets 0x10-0x17.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0313315f3b972394 offset 0x10",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "The byte diff concentrates W vs L divergence at the colorspace-FOURCC offsets 0x10-0x17.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0010",
+      "exact_quote": "0x0010  4c(L)x20 4d(M)x1 52(R)x1            52(R)x15 49(I)x2 b7(.)x1 4d(M)x1 +1u  PARTIAL"
+    },
+    {
+      "claim": "On winners EvalSegmentedFn is invoked vastly more (3.82M) than on losers (204K), and the L 721 false side count is zero.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L721",
+      "exact_quote": "d=1   L 721  T=3820000 F=1130000  T=204000 F=0  for (i = (int) g->nSegments - 1; i >= 0; --i) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Both decisive pairs differ from their loser by exactly the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace scans the input for byte sequences matching a logged CMP operand and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2114 --role W --fuzzer cmplog --trial 1 --seed 0aedfccd0898c3ff` and observed 1 I2S-floor dash row (mutation_op = -) at depth 16; corroborated with vpc seed 055e0c9e12c0c297 which has 2 dash rows at depths 11 and 12. Dash rows are exclusive to cmplog/vpc in the 4-fuzzer set, direct lower-bound evidence of I2S contribution in both winners' ancestor chains."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where flipping only the colorspace/PCS FOURCC bytes (Lab/MCH3 vs RGB) does NOT change whether the segmented-curve loop exits via its false side — i.e., naive reaches the loop-exit branch at the same rate as cmplog regardless of the FOURCC literal."
+  },
+  "weakest_evidence_point": "The causal link from the colorspace FOURCC bytes to a segmented tone curve whose domain check fails for every segment is inferred from the call chain and invocation-count divergence, not directly traced through the curve-construction dataflow.",
+  "confidence": "medium"
+}

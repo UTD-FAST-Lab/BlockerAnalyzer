@@ -1,0 +1,87 @@
+{
+  "branch_id": 2231,
+  "target": "lcms",
+  "summary_one_line": "Input PCS/colorspace signature must be 'Lab '/'Lab ' (not RGB/XYZ) so dwInput exits the InputFormatters16 scan via the false branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The ICC profile header's data-colorspace/PCS fields at offsets 0x10-0x16 must hold the four-char signatures 'Lab ' (0x4c 0x61 0x62) for both colorspace and PCS, instead of 'RGB '/'XYZ '. These bytes drive Type/channel computation so dwInput no longer equals (dwInput & ~Mask)==Type for any of the matching InputFormatters16 entries, causing the loop at L3516 to run to completion and take the blocked false side (loop exit, break at L3525, then fall through to L3543).",
+      "why_winner_satisfies": "Winner-resolving seeds carry 4c 61 62 20 (Lab ) at offsets 0x10-0x12 and again at 0x14-0x16, a colorspace pairing that does not satisfy the L3519 equality for any 16-bit input formatter, so the for-loop scans all entries (W: T=900 F=20) and the false/exit side is reached.",
+      "why_loser_doesnt": "Loser-blocking seeds carry 52 47 42 20 (RGB ) at 0x10-0x12 and 58 59 5a 20 (XYZ ) at 0x14-0x16; this colorspace matches an InputFormatters16 entry at L3519, so the loop returns early (L3520-3522) before ever exhausting the entries (L: T=340 F=0), never taking the false branch.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver buffer where the L3519 comparison's operands (the table entry's Type and the runtime-derived dwInput, plus the underlying 4-char signature compares in cmsGetColorSpace/header parsing) are logged, locates the matching colorspace bytes in the input, and substitutes the other operand at those offsets — flipping the signature toward a value that misses every InputFormatters16 row and forces the loop-exit (false) side. naive and value_profile lack I2SRandReplace; value_profile's CMP_MAP only rewards Hamming-closer operands, which biases toward MATCHING a formatter (taking true) rather than exhaustively missing all of them, so neither loser ever reaches the false side in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The globally blocked side is the false branch of the InputFormatters16 scan loop at cmspack.c:3516.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L3516, blocked side=F",
+      "exact_quote": "for (i=0; i < sizeof(InputFormatters16) / sizeof(cmsFormatters16); i++) {"
+    },
+    {
+      "claim": "The loop body matches an input formatter via an equality test on dwInput against the entry Type, returning early on a hit.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L3519-3521",
+      "exact_quote": "if ((dwInput & ~f ->Mask) == f ->Type) {"
+    },
+    {
+      "claim": "Winner inputs carry the 'Lab ' colorspace signature at offsets 0x10-0x16.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x10-0x16",
+      "exact_quote": "0x0010  4c(L)x20                            52(R)x20                            DIFFER"
+    },
+    {
+      "claim": "Loser inputs carry 'RGB' at 0x10-0x12 and 'XYZ' at 0x14-0x16.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x14-0x16",
+      "exact_quote": "0x0014  4c(L)x20                            58(X)x20                            DIFFER"
+    },
+    {
+      "claim": "Winner-resolving seed bytes show the 'Lab Lab ' signature in the header region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0aedfccd0898c3ff, offset 0x10",
+      "exact_quote": "4c 61 62 20 4c 61 62 20 07 d9 00 0c 00 17 00 16   Lab Lab ........"
+    },
+    {
+      "claim": "Loser-blocking seed bytes show the 'RGB XYZ ' signature in the header region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0313315f3b972394, offset 0x10",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "The winner runs the loop to exhaustion (false side reached) while the loser returns early before the false side is ever taken.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L3516",
+      "exact_quote": "d=1   L3516  T=900 F=20  T=340 F=0  for (i=0; i < sizeof(InputFormatters16) / sizeof(cmsForma...  <-- BLOCKER"
+    },
+    {
+      "claim": "Both decisive pairs differ from their loser by exactly the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which scans the input for one logged CMP operand and substitutes the other at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace; its CMP_MAP only rewards operand pairs closer to matching.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback/Mutators",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2231 --role W --fuzzer cmplog --trial 1 --seed 0aedfccd0898c3ff` and observed an I2S-floor dash row (mutation_op = -) at depth 16 (ancestor 5441efb6193a1a03). Also ran the vpc winner `--seed 143a446d794db4ae`, which shares the SAME dash-row ancestor 5441efb6193a1a03 at depth 16. Both decisive-pair winners trace to an I2SRandReplace floor find; dash rows are exclusive to cmplog/vpc in the canonical 4-fuzzer set used here."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A naive or value_profile trial reaching the false (loop-exit) side of L3516 within budget without any I2S stage, i.e. a havoc/CMP_MAP-only run that mutates the colorspace signature off every InputFormatters16 entry and resolves the branch, which would show I2S is not necessary."
+  },
+  "weakest_evidence_point": "The exact CMP whose operands I2S substitutes (the 4-char signature compare in header parsing vs. the L3519 Type equality) is inferred from source flow, not directly observed in the CmpLogObserver buffer.",
+  "confidence": "high"
+}

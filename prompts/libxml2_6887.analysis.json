@@ -1,0 +1,100 @@
+{
+  "branch_id": 6887,
+  "target": "libxml2",
+  "summary_one_line": "A 3-byte UTF-8 sequence (lead 0xE0-0xEF + two 0x80-0xBF continuations) decoding to an overlong value < 0x800",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "The input must reach xmlCurrentChar with a 3-byte UTF-8 lead byte (c & 0xf0 == 0xe0) followed by two valid continuation bytes (each (b & 0xc0)==0x80) such that the decoded value (cur0&0xf)<<12 | (cur1&0x3f)<<6 | (cur2&0x3f) is below 0x800 — i.e. an overlong 3-byte encoding that triggers the goto encoding_error true side at line 622.",
+      "why_winner_satisfies": "naive_ctx resolves the branch in 8/10 trials and actually executes the true side (W shows T=42 F=0 at line 622), reaching the 3-byte decode block (lines 617-624 marked [B] in the per-role overlay). Context-sensitive coverage indexes the same xmlCurrentChar edge by its distinct call context (e.g. the xmlParseCharDataComplex -> xmlCurrentChar path), so an input that lands a 3-byte sequence in a never-before-seen caller chain registers as new coverage and is retained, letting energy accumulate on the overlong-3-byte case.",
+      "why_loser_doesnt": "naive blocks the branch in 8/10 trials and never takes the true side (L shows T=0 F=1730 at line 622): it produces many 3-byte sequences but they all decode to >= 0x800, so they hit the same flat edge and never get extra retention. Without context indexing the overlong-3-byte input is not distinguished from the common valid-3-byte input, so naive lacks the corpus pressure to refine bytes toward val < 0x800.",
+      "mechanism_attribution": "naive_ctx's CtxHook folds the caller chain into the edge-map index, so the xmlCurrentChar 3-byte decode edge counts as new coverage when reached via a new call context; this extra granularity retains intermediate seeds that naive's bare-edge feedback discards, giving the schedule the foothold to drive the decoded value below 0x800. This is context-sensitive coverage, not comparison-solving."
+    },
+    {
+      "covers_pairs": ["naive_ngram4>naive (ngram_coverage)"],
+      "what_input_feature": "Identical program-side condition: a 3-byte UTF-8 lead byte (c & 0xf0 == 0xe0) with two valid continuation bytes decoding to a value < 0x800 (overlong 3-byte encoding), which takes the true branch (goto encoding_error) at parserInternals.c:622.",
+      "why_winner_satisfies": "naive_ngram4 resolves the branch in 8/10 trials with hitcount 8 on the branch, reaching the same [B]-marked 3-byte decode block and the [W]-marked true side at line 623. All five winner-resolving seeds were stored by naive_ngram4 (e.g. seed id=0020c73cfac74f46, fuzzer=naive_ngram4), and they carry the byte material (e.g. 0xe0 0x99 0x99 runs) that forms 3-byte UTF-8 sequences. The N=4 edge-tuple index turns the path leading into the overlong-3-byte decode into a previously-unseen n-gram, retaining the seed.",
+      "why_loser_doesnt": "naive blocks in 8/10 (L T=0 F=1730 at line 622) and stores the loser-blocking seeds (all fuzzer=naive). Its bare per-edge bucket collapses every route into xmlCurrentChar onto the same slots, so an input one mutation away from an overlong-3-byte sequence earns no novelty signal and is dropped before the bytes can be refined to val < 0x800.",
+      "mechanism_attribution": "naive_ngram4's NgramHook folds a rolling history of the last 4 edge IDs into the map index, so a length-4 edge path through the 3-byte decode block registers as a new bucket; this path-sensitive granularity retains seeds that naive's single-edge feedback discards, supplying the corpus pressure to reach val < 0x800. This is ngram coverage, not comparison-solving."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of `if (val < 0x800)` inside the 3-byte UTF-8 decode block of xmlCurrentChar.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L617-L624",
+      "exact_quote": "/* 3-byte code */\n[B]   618  \t    *len = 3;\n[B]   619  \t    val = (cur[0] & 0xf) << 12;\n[B]   620  \t    val |= (cur[1] & 0x3f) << 6;\n[B]   621  \t    val |= cur[2] & 0x3f;\n[B]   622  \t    if (val < 0x800) <-- BLOCKER"
+    },
+    {
+      "claim": "Reaching the 3-byte block requires a 0xE0-class lead byte and valid continuation bytes.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L593-L600",
+      "exact_quote": "if ((c & 0xe0) == 0xe0) {"
+    },
+    {
+      "claim": "naive_ctx wins pair 1 with ctx_coverage as the technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+    },
+    {
+      "claim": "naive_ngram4 wins pair 2 with ngram_coverage as the technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: naive_ngram4 > naive  [delta: ngram_coverage]"
+    },
+    {
+      "claim": "The winner takes the true side of line 622 while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L622",
+      "exact_quote": "L 622  T=42 F=0  T=0 F=1730  if (val < 0x800)  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner-resolving seeds were all stored by naive_ngram4 and carry 0xe0 0x99 0x99 byte runs forming 3-byte sequences.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0f3652878c4ac616 offsets 0x00-0x0d",
+      "exact_quote": "43 50 3e e0 9b 99 5c 0a 3c 50 3e e0 99 99 1e 99"
+    },
+    {
+      "claim": "The loser-blocking seeds were all stored by the naive fuzzer.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0ae9d40906f8d16e",
+      "exact_quote": "fuzzer=naive, trial=1, discovered_at=3168s"
+    },
+    {
+      "claim": "naive_ctx's CtxHook folds the caller chain into the edge-map index so the same edge is recorded at different slots per call path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx",
+      "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "naive_ngram4's NgramHook makes a map slot encode a length-4 edge path so a new bucket is a previously-unseen 4-edge path tuple.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ngram4",
+      "exact_quote": "A map slot\ntherefore encodes a length-4 edge path (an n-gram of N=4) rather than\na single edge."
+    },
+    {
+      "claim": "Neither involved winner uses I2S or CMP_MAP comparison-solving.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx mutators",
+      "exact_quote": "No `I2SRandReplace`, no\nCMP_MAP."
+    },
+    {
+      "claim": "The winner reaches the 3-byte decode block (lines 618-624) which is marked hit-by-both in the per-role overlay.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L623",
+      "exact_quote": "[W]   623  \t\tgoto encoding_error;"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "ngram coverage",
+    "verified_in_lineage": false,
+    "verification_method": "Both decisive deltas are feedback-granularity techniques (ctx_coverage and ngram_coverage), not I2SRandReplace, so the mandatory cmplog/vpc lineage check does not apply. The MECHANISM CONTEXT explicitly states naive_ctx and naive_ngram4 carry no I2SRandReplace and no CMP_MAP and emit no dash rows; I did not run db_query.py lineage because no I2S claim is being made and the winners are not cmplog/vpc-discovered seeds. claimed_mechanism is set to one of the two covered techniques (ngram coverage); the ctx_coverage hypothesis is the sister mechanism on pair 1."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose decode path to `if (val < 0x800)` is reached from a single fixed call context with no branching edge history would show naive_ctx and naive_ngram4 NOT outperform naive — if they still won there, the divergence is not attributable to coverage-indexing granularity."
+  },
+  "weakest_evidence_point": "The BYTE DIFF section reports no informative W-vs-L byte-level divergence, so the claim that the overlong-3-byte bytes specifically separate winner from loser rests on source structure plus the hit-count split rather than a direct byte contrast.",
+  "confidence": "medium"
+}

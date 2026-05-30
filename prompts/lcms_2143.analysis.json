@@ -1,0 +1,81 @@
+{
+  "branch_id": 2143,
+  "target": "lcms",
+  "summary_one_line": "DeviceClass FOURCC at bytes 0x0c-0x0f must equal 'prtr' (cmsSigOutputClass) to take the case-arm true side.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)", "value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "The 4-byte profile DeviceClass field at input offsets 0x0c-0x0f must spell the FOURCC 'prtr' (0x70 0x72 0x74 0x72 = cmsSigOutputClass). The switch in validDeviceClass routes to the line-751 case-arm only when cl == 'prtr'; loser inputs carry a different but valid FOURCC ('mntr' = cmsSigDisplayClass) that resolves at line 750 instead, never hitting the line-751 true side.",
+      "why_winner_satisfies": "Every winner-resolving seed has bytes 70 72 74 72 ('prtr') at offsets 0x0c-0x0f; the BYTE DIFF concentrates W at 0x0c=70(p)x11 and 0x0d=72(r)x11, and the DIVERGENT BRANCHES show the case cmsSigOutputClass arm taken by W (T=11 F=0) while case cmsSigDisplayClass is not.",
+      "why_loser_doesnt": "Every loser-blocking seed has bytes 6d 6e 74 72 ('mntr') at offsets 0x0c-0x0f; the BYTE DIFF concentrates L at 0x0c=6d(m)x20 and 0x0d=6e(n)x20, so the switch routes them to case cmsSigDisplayClass (L 750 T=20 F=0) and the line-751 true side stays blocked (L 751 T=0 F=20).",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient feedback: the switch on cl compiles to integer CMPs against the FOURCC constants; each CMP callback writes a Hamming-distance bucket into CMP_MAP, so an input whose DeviceClass dword is closer to 'prtr' than any seen before adds a new bucket and is preserved as corpus, letting VP ratchet the field from 'mntr' toward 'prtr' byte by byte. naive and cmplog (without the CMP_MAP distance signal) have no gradient toward the exact 4-byte literal and stall on the unrelated valid class 'mntr'."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the case cmsSigOutputClass arm of the switch in validDeviceClass.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsio0.c:751",
+      "exact_quote": "Source line:     case cmsSigOutputClass:"
+    },
+    {
+      "claim": "The blocked side is reached only via the switch on the DeviceClass value cl.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmsio0.c:747",
+      "exact_quote": "switch (cl)"
+    },
+    {
+      "claim": "Winner inputs concentrate byte 0x70 ('p') at offset 0x0c and 0x72 ('r') at offset 0x0d while losers concentrate 0x6d ('m') and 0x6e ('n').",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0d",
+      "exact_quote": "0x000c  70(p)x11                            6d(m)x20                            DIFFER"
+    },
+    {
+      "claim": "Offset 0x0d also differs decisively, W='r' vs L='n'.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0d",
+      "exact_quote": "0x000d  72(r)x11                            6e(n)x20                            DIFFER"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the FOURCC 'prtr' at the DeviceClass offset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 072456d8257084f6 offset 0x0c",
+      "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 70 72 74 72   ..b.lcms.@..prtr"
+    },
+    {
+      "claim": "Loser-blocking seeds carry the different valid FOURCC 'mntr' at the DeviceClass offset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 05c646cb9928d9d9 offset 0x0c",
+      "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 6d 6e 74 72   ..b.lcms.@..mntr"
+    },
+    {
+      "claim": "Winner takes the line-751 case true side; loser takes the line-750 case instead, leaving 751 blocked.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 cmsio0.c:750-751",
+      "exact_quote": "d=1   L 751  T=11 F=0  T=0 F=20  case cmsSigOutputClass:  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile's CMP_MAP records a Hamming-distance bucket per CMP, preserving inputs whose operand pair is closer to matching than any seen before.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile section",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile is the winner over both naive and cmplog with the technique delta being value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile distance feedback), not I2SRandReplace, so the mandatory I2S-floor lineage check does not apply. The byte-level evidence (W='prtr' vs L='mntr' at 0x0c-0x0f, four-byte FOURCC match against the switch constant) and the value_profile-vs-naive technique delta on both decisive pairs are the basis; no dash-row lineage query was run because the dash signal is an I2S floor, irrelevant to a VP-gradient claim."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating a case-arm on an exact 4-byte FOURCC equality where value_profile fails to resolve it any faster than naive (no dose-response on the distance-to-literal axis), which would show CMP_MAP gradient gives no advantage on this comparison shape."
+  },
+  "weakest_evidence_point": "Whether the FOURCC switch compiles to a distance-bucketable integer CMP that VP can ratchet (vs a jump table that emits no gradient-friendly CMP) is inferred from source, not confirmed against the compiled CMP_MAP behavior.",
+  "confidence": "high"
+}

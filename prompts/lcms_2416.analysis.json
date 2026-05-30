@@ -1,0 +1,81 @@
+{
+  "branch_id": 2416,
+  "target": "lcms",
+  "summary_one_line": "Input must encode a Lab profile connection colorspace ('Lab ' FOURCC) so PostColorSpace == cmsSigLabData and the false branch is taken",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The ICC profile header must declare a colorspace whose signature equals cmsSigLabData (the four bytes 'Lab ' = 0x4C 0x61 0x62 0x20) in the parsed colorspace field so that PostColorSpace == cmsSigLabData and the (PostColorSpace != cmsSigLabData) test at line 1019 evaluates false.",
+      "why_winner_satisfies": "Winner-resolving seeds carry the literal 'Lab ' FOURCC in the colorspace field around offsets 0x10-0x17 (e.g. 'link CMYKLab ', 'mntr Lab FCLR', 'MCH4Lab ', 'RGB Lab '), placing cmsSigLabData into PostColorSpace and driving the false branch.",
+      "why_loser_doesnt": "Every loser-blocking seed uniformly encodes 'RGB XYZ ' (mntr/RGB/XYZ), so PostColorSpace is XYZ/RGB, never Lab; the (PostColorSpace != cmsSigLabData) test stays true and the false side is never reached.",
+      "mechanism_attribution": "cmplog/vpc intercept the integer/string CMP of PostColorSpace against the cmsSigLabData constant, log the constant operand, and I2SRandReplace splices the exact 'Lab ' four-byte value into the input's colorspace field; naive/value_profile lack I2SRandReplace and must blindly mutate to land that precise FOURCC, which they do not in 24h."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the equality test (PostColorSpace != cmsSigLabData) whose false side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsxform.c:1019",
+      "exact_quote": "(PostColorSpace != cmsSigLabData);"
+    },
+    {
+      "claim": "The false branch is the globally blocked side that the winner must reach.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 7",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Winner seeds contain the literal 'Lab ' colorspace FOURCC in the header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1, offsets 0x10-0x17",
+      "exact_quote": "CMYKLab "
+    },
+    {
+      "claim": "Another winner seed encodes 'Lab ' as the source colorspace.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 2, offsets 0x10-0x17",
+      "exact_quote": "Lab FCLR"
+    },
+    {
+      "claim": "Loser-blocking seeds uniformly encode 'RGB XYZ ' and never carry the Lab signature.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1, offsets 0x10-0x17",
+      "exact_quote": "RGB XYZ "
+    },
+    {
+      "claim": "The byte diff shows the winner concentrates 'L'/'a'/'b' bytes at the colorspace offsets while the loser concentrates 'X'/'Y'/'Z'.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0014",
+      "exact_quote": "4c(L)x17 46(F)x1 4d(M)x1 58(X)x1    58(X)x16"
+    },
+    {
+      "claim": "cmplog/vpc gain I2SRandReplace which substitutes a logged CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the loser fuzzers cannot substitute the constant operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs differ from their loser by the I2S technique only.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta",
+      "exact_quote": "value_profile_cmplog > value_profile  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2416 --role W --fuzzer value_profile_cmplog --trial 1 --seed 00daa28620d77324` and observed an I2S-floor dash row (mutation_op = -) at depth 6 of the 7-level ancestor chain (ancestor 5441efb6193a1a03), confirming an unwrapped I2SRandReplace find in the vpc lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A naive or value_profile trial reaching the false branch within 24h without ever placing the 'Lab ' FOURCC at the colorspace offset, or a synthetic harness where cmplog cannot beat naive on an equality gate against the 4-byte cmsSigLabData constant."
+  },
+  "weakest_evidence_point": "The I2S-floor dash row appears at depth 6 of a chain whose leaf is havoc-tagged, so the dash row's specific contribution to placing the 'Lab ' bytes is inferred, not directly traced to that ancestor's byte edit.",
+  "confidence": "high"
+}

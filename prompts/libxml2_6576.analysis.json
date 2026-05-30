@@ -1,0 +1,75 @@
+{
+  "branch_id": 6576,
+  "target": "libxml2",
+  "summary_one_line": "Long character-data run with embedded CR/LF and printable bytes that re-iterates the do-while scan loop back to its true condition.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>naive_ctx (ctx_coverage)"],
+      "what_input_feature": "An XML element body containing a multi-character data run that keeps the do-while scan loop alive: printable ASCII / tab / newline content (0x20-0x7F, 0x09, 0x0A) plus at least one 0x0D carriage return followed by 0x0A so the in-loop CR handler executes `continue` and re-evaluates the loop condition at line 4609-4610 with `*in` still inside the accepted character class.",
+      "why_winner_satisfies": "Winner-resolving seeds carry long (1862/1898-byte) bodies with embedded CR/LF runs (e.g. Seed 2 bytes `0d 0d 0a` at offsets 0x07-0x09 and `0a 0a` pairs) and dense printable char data, so the loop reaches the 0xD handler and loops back to take the true side; the per-role overlay marks the 0xD/0xA continue block [W] only.",
+      "why_loser_doesnt": "naive_ctx loser-blocking seeds are short (247-527 bytes), front-loaded with binary/control noise and DTD/declaration tokens rather than long char-data bodies; they never reach the 0xD branch (loser takes it 0 times) so the loop falls through to xmlParseCharDataComplex and the true side stays blocked.",
+      "mechanism_attribution": "The winning technique is baseline naive's undiluted havoc/token budget. naive_ctx's CtxHook folds the call-context hash into the edge-map index, so the same scan-loop edges count as new coverage under many distinct call paths; this fragments the corpus and spreads mutation energy across context-duplicated edges, leaving naive_ctx unable to assemble the long CR/LF-bearing char-data run that naive builds with the same mutators. This is the context-sensitive-coverage feedback acting as a penalty on the loser."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is naive>naive_ctx with delta ctx_coverage; naive resolves 8/10, naive_ctx 2/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive > naive_ctx  [delta: ctx_coverage]"
+    },
+    {
+      "claim": "The blocked true side sits at the do-while loop condition testing the accepted char-data byte class.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "parser.c:4609-4610",
+      "exact_quote": "(*in == 0x09) || (*in == 0x0a));"
+    },
+    {
+      "claim": "The 0xD carriage-return handler that loops back via continue is exercised only by the winner.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L4589-4596",
+      "exact_quote": "[W]  4589              in++;"
+    },
+    {
+      "claim": "The loser never takes the 0xD branch while the winner takes it 138 times, and the blocker true side is taken only by the winner.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L4588 / L4610",
+      "exact_quote": "d=1   L4588  T=138 F=95  T=0 F=317  if (*in == 0xD) {"
+    },
+    {
+      "claim": "A winner-resolving seed contains embedded CR/LF bytes (0d 0d 0a) characteristic of the loop-continuing char-data run.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 2 (id=2c3a9685b4c37937) offsets 0x07-0x09",
+      "exact_quote": "0000: 66 0a 74 64 73 2b 31 0d 0d 0a 3c 0a 20 20 20 20   f.tds+1...<.    "
+    },
+    {
+      "claim": "Loser-blocking seeds are short and front-loaded with control/binary noise rather than long char-data bodies.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 (id=05c546a2afe6b91e, size=295)",
+      "exact_quote": "0020: 7e 96 16 16 16 16 16 16 16 16 16 16 16 16 16 16   ~..............."
+    },
+    {
+      "claim": "naive_ctx folds the call-context hash into the edge-map index so the same edge is recorded at different slots per call path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Instrumentation",
+      "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "naive_ctx uses the same havoc/token mutator stack as naive with no I2S or CMP_MAP, so the divergence is feedback-driven not mutation-driven.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "context-sensitive coverage",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is context-sensitive coverage (the ctx_coverage delta), not I2SRandReplace, so the mandatory lineage I2S-floor check does not apply. The MECHANISM CONTEXT section states naive_ctx uses 'naive's havoc + token stack. No I2SRandReplace, no CMP_MAP' and that its seed metadata shows 'no ParentInfo-only / dash rows', confirming there is no I2S signal to verify; divergence is attributed to the CtxHook feedback fragmenting the edge map, evidenced by the loser taking the 0xD branch 0 times (L4588 T=0 F=317)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where adding the CtxHook context-sensitive feedback to a naive fuzzer does NOT slow discovery of a long CR/LF-bearing char-data run (naive_ctx resolves the loop-continue true side as fast as or faster than plain naive), which would show context fragmentation is not the penalizing mechanism."
+  },
+  "weakest_evidence_point": "The causal link from context-map fragmentation to the loser's failure to build the long char-data run is inferential; the seeds confirm the byte feature but not directly that the CtxHook is what starved naive_ctx of that mutation path.",
+  "confidence": "medium"
+}

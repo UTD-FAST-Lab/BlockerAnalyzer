@@ -1,0 +1,75 @@
+{
+  "branch_id": 6818,
+  "target": "libxml2",
+  "summary_one_line": "A NUL byte (0x00) positioned as the first content byte after 4-byte encoding detection, satisfying cur == 0 in XML_PARSER_START.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The byte at the parser cursor when it reaches XML_PARSER_START with avail>=2 (i.e. the first content byte after the 4-byte encoding-detection prefix is consumed) must be 0x00, so that the comparison `cur == 0` at parser.c:11539 evaluates true and takes the document-empty/halt path.",
+      "why_winner_satisfies": "cmplog winner seeds carry embedded NUL bytes near the cursor region (e.g. Seed 3 has 00 at offset 0x2b, Seed 4 has 00 at offset 0x28), and on the branch the winner takes the true side (W L11539 T=8 F=0) reaching lines 11540-11551 marked [W]. cmplog's I2SRandReplace can read the intercepted `cur == 0` operand and splice a 0x00 byte at the matching input offset.",
+      "why_loser_doesnt": "naive never resolves (0/10, blocked=10/10); at the branch it takes only the false side (L L11539 T=0 F=73), so its cursor byte is non-zero at the moment the START case is evaluated. naive seeds contain NUL bytes only at non-cursor offsets (e.g. Seed 1 at 0x02-0x03, Seed 3 at 0x00-0x02) that get consumed or shifted out of the decisive cursor position; naive has no CMP introspection to deliberately place 0x00 there.",
+      "mechanism_attribution": "cmplog intercepts the single-byte comparison `cur == 0` via __sanitizer_cov_trace_cmp and records operand 0 in the CmpLogObserver buffer; I2SRandReplace then substitutes 0x00 into the input at the offset feeding the cursor, deterministically driving the true branch. naive can only reach 0x00 by blind havoc, which is improbable at the exact cursor position."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the comparison `cur == 0` at parser.c:11539, with the globally-blocked side being the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "parser.c:11539",
+      "exact_quote": "Source line: \t\tif (cur == 0) {"
+    },
+    {
+      "claim": "cur is the first content byte read from the parse cursor in the XML_PARSER_START state after encoding detection.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L11537-11539",
+      "exact_quote": "cur = ctxt->input->cur[0];"
+    },
+    {
+      "claim": "The decisive pair is cmplog>naive with a one-technique I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The cmplog winner takes the true side of the blocker (T=8) while naive loser takes only the false side (F=73).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L11539",
+      "exact_quote": "L11539  T=8 F=0  T=0 F=73  if (cur == 0) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner cmplog seed contains an embedded NUL byte near the cursor region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 4 offset 0x28",
+      "exact_quote": "3c 2f 3a 3e 0a 0a 5c 0a 00 74 64 73 2b 31 32 37"
+    },
+    {
+      "claim": "naive loser seeds carry no I2S capability and resolve in 0 of 10 trials, blocked in all 10.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive row",
+      "exact_quote": "naive                            0       10          0  loser (I2S vs cmplog)"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other operand at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has only havoc + token mutators and no I2S capability.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 6818 --role W --fuzzer cmplog --trial 5 --seed 2711b5ec00f0ee94` and observed I2S-floor dash rows (mutation_op = -) at depths 3 and 4 of the 5-level ancestor chain, the lower-bound signal of an unwrapped I2SRandReplace find under the current cmplog build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on a single-byte `cur == 0` comparison where cmplog shows no advantage over naive at reaching the true branch (i.e. naive resolves the 0x00-at-cursor gate at the same rate), which would mean I2S substitution is not what places the NUL byte."
+  },
+  "weakest_evidence_point": "The byte-diff section does not pinpoint a single fixed cursor offset where W carries 0x00 and L does not, since the cursor position depends on consumed prefix length, so the exact decisive offset is inferred rather than directly isolated.",
+  "confidence": "medium"
+}

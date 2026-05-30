@@ -1,0 +1,94 @@
+{
+  "branch_id": 2259,
+  "target": "lcms",
+  "summary_one_line": "Input must carry the 4-byte FOURCC 'MCH3' at the colorspace-signature field (offset 0x10) so the switch dispatches case cmsSigMCH3Data.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The 4 bytes at offset 0x10 must equal the FOURCC 'MCH3' (4d 43 48 33), the cmsSigMCH3Data colorspace signature read by _cmsLCMScolorSpace; loser inputs hold a different signature (e.g. 'RGB ' = 52 47 42 20).",
+      "why_winner_satisfies": "All cmplog winning seeds carry 'MCH3' (4d 43 48 33) at offsets 0x10-0x13; the byte-diff shows W concentrated on 4d/43/48/33 while L holds 52/47/42 at those offsets, and the source case cmsSigMCH3Data resolves only on that exact 32-bit match.",
+      "why_loser_doesnt": "naive's loser-blocking seeds all hold 'RGB ' (52 47 42 20) at offsets 0x10-0x13 and never reach the MCH3 case; with no CMP introspection, naive must guess the exact 4-byte signature by blind havoc and fails across all 10 trials.",
+      "mechanism_attribution": "cmplog's I2SRandReplace intercepts the 32-bit signature comparison, logs the target operand cmsSigMCH3Data, finds the current signature bytes in the input, and substitutes the logged 'MCH3' value at offset 0x10, directly solving the switch gate that naive's blind havoc cannot."
+    },
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "Same 4-byte FOURCC 'MCH3' (4d 43 48 33) required at offset 0x10 to enter case cmsSigMCH3Data; the difference is reachable incrementally because the signature comparison is a multi-byte CMP whose partial-match distance is observable.",
+      "why_winner_satisfies": "value_profile's winning seed (id=f19a84dd4836f1a8) carries 'MCH3' (4d 43 48 33) at offsets 0x10-0x13 and resolves all 10 trials; the CMP_MAP records matching-prefix length on the signature comparison, so each additional correct byte of 'MCH3' is rewarded as new coverage.",
+      "why_loser_doesnt": "naive holds 'RGB ' (52 47 42) at the signature offsets and has no distance feedback, so a 3-of-4 byte match toward 'MCH3' is invisible and never preserved, leaving naive blocked on the branch for all 24h.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient buckets the matching-prefix length of the 32-bit signature comparison, rewarding inputs that get progressively closer to 'MCH3'; this hill-climbs the multi-byte gate that naive's plain edge feedback cannot sense."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the switch case cmsSigMCH3Data returning PT_MCH3 in _cmsLCMScolorSpace.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmspcs.c:834",
+      "exact_quote": "case cmsSigMCH3Data: return PT_MCH3;"
+    },
+    {
+      "claim": "The winning side (true) is taken only by reaching the cmsSigMCH3Data case, which the W coverage overlay marks at line 834.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L834",
+      "exact_quote": "[W]   834      case cmsSigMCH3Data: return PT_MCH3; <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog winning seeds carry the ASCII 'MCH3' bytes at the signature field.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 3216f2b70a893768, offset 0x10",
+      "exact_quote": "4d 43 48 33 58 59 5a 20 07 d9 00 0c 00 17 00 16   MCH3XYZ ........"
+    },
+    {
+      "claim": "At offsets 0x10-0x12 the winner bytes are 4d/43/48 (MCH) while the loser bytes are 52/47/42 (RGB).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x10-0x12",
+      "exact_quote": "0x0010  4d(M)x11 4c(L)x1                    52(R)x10                            DIFFER"
+    },
+    {
+      "claim": "Loser-blocking naive seeds hold 'RGB ' at the signature offsets and take the false side.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 05c646cb9928d9d9, offset 0x10",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "naive blocked the branch in all 10 trials while cmplog and value_profile resolved it.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive/cmplog/value_profile rows",
+      "exact_quote": "naive                            0       10          0  loser (value_profile vs value_profile); loser (I2S vs cmplog)"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for one CMP operand and substitutes the other at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile encodes CMP operand closeness (matching-prefix length for string/memory CMPs) into CMP_MAP buckets and rewards inputs closer to matching.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation/Feedback",
+      "exact_quote": "matching-prefix length for string/memory CMPs"
+    },
+    {
+      "claim": "value_profile preserves an input whose CMP-operand pair is closer to matching than any previously seen.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "naive has only havoc + token mutators with no I2S and no CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators/Observed",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2259 --role W --fuzzer cmplog --trial 1 --seed 3216f2b70a893768` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 2 and 3; corroborated with seed 425b15324a773a88 which shows a dash row at depth 9. Both winning cmplog chains contain ParentInfo-only (NULL mutation_op) ancestors, the lower-bound I2S signal for the current build. (value_profile pair uses CMP_MAP gradient, not I2S — covered by the second hypothesis.)"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on the exact 4-byte 'MCH3' signature where naive resolves the branch as often as cmplog/value_profile within the same budget, showing neither I2S substitution nor CMP_MAP distance feedback is needed to solve the multi-byte gate."
+  },
+  "weakest_evidence_point": "The value_profile hypothesis rests on a single winning seed (f19a84dd4836f1a8) and assumes the 32-bit signature comparison is instrumented as a distance-bucketed CMP rather than an integer switch that yields no partial-match gradient.",
+  "confidence": "high"
+}

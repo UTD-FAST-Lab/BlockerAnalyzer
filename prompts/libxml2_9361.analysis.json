@@ -1,0 +1,94 @@
+{
+  "branch_id": 9361,
+  "target": "libxml2",
+  "summary_one_line": "Reach an empty element (<x/>) that carries namespace declarations so ctxt->nsNr changed, requiring both I2S and CMP_MAP gradient to assemble the tag",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A self-closing empty element whose start tag declares at least one namespace (e.g. a prefixed/xmlns attribute) so that ctxt->nsNr is incremented before the `/>` is consumed, making nsNr != ctxt->nsNr true at line 10185.",
+      "why_winner_satisfies": "The vpc winner assembles a well-formed XML prolog plus angle-bracketed markup (`?>.<!`, `version=\"1.0\"?>`, `<!DOCTY`) so the parser advances into xmlParseStartTag2/xmlParseElementStart and reaches the empty-element close where the namespace count diverges; vpc's I2SRandReplace splices logged comparands (element/attribute name and `xmlns`-style literal bytes) into the input so the upstream name/CMP gates pass.",
+      "why_loser_doesnt": "The value_profile loser (no I2S) blocks 10/10 and never takes the true side; lacking I2SRandReplace it cannot substitute the exact logged literal bytes that the upstream name/attribute comparisons require, so it rarely builds an empty element that actually declares a namespace.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the per-execution CmpLogObserver buffer and substitutes one CMP operand for the other at matching input offsets, planting the exact literal bytes needed by upstream name/markup comparisons so the parser reaches the namespaced empty-element close; this technique is present in vpc but absent in the value_profile loser."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "The same namespaced empty element, but reached via incremental progress on the upstream byte-level comparisons (matching prefixes of markup literals such as <?xml, DOCTYPE, attribute names and quote/`/>` delimiters).",
+      "why_winner_satisfies": "The vpc winner retains intermediate inputs that get progressively closer to the required markup literals; the CMP_MAP gradient preserves a seed whenever a CMP-operand pair is closer to matching than any seen before, letting vpc climb toward the multi-character markup tokens (`<!DOCTY`, `version=`) that gate entry to the empty-element branch.",
+      "why_loser_doesnt": "The cmplog loser (no value_profile) blocks 9/10; it has I2S substitution but no Hamming/prefix-distance feedback, so partially-matching markup inputs earn no new coverage bucket and are discarded, and it stalls before assembling the full namespaced empty tag.",
+      "mechanism_attribution": "value_profile's CMP_MAP records a coarse operand-distance bucket per CMP and rewards inputs that get closer to matching, preserving partial-match intermediates as corpus; this gradient is present in vpc but absent in the cmplog loser, so only vpc keeps climbing the multi-byte markup comparisons."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side at line 10185 requires the namespace count to have changed during the element, inside the empty-element (`<x/>`) case.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L10170, L10185-10186",
+      "exact_quote": "if (nsNr != ctxt->nsNr) <-- BLOCKER"
+    },
+    {
+      "claim": "The blocker sits under the self-closing empty-element guard `(RAW == '/') && (NXT(1) == '>')`.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L10170",
+      "exact_quote": "if ((RAW == '/') && (NXT(1) == '>')) {"
+    },
+    {
+      "claim": "Pair 2 isolates the I2S technique: vpc winner beats the value_profile loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Pair 1 isolates the value_profile technique: vpc winner beats the cmplog loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The value_profile loser never resolves the branch across all 10 trials.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 loser",
+      "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "The cmplog loser resolves the branch in zero of ten trials.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 loser",
+      "exact_quote": "loser:  resolved=0/10  blocked=9  unreached=1"
+    },
+    {
+      "claim": "The winning vpc seed contains well-formed XML markup including a prolog and DOCTYPE opening.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id f97f950fbd784430",
+      "exact_quote": "3d 22 31 2e 30 22 3f 3e 0a 3c 21 44 4f 43 54 59   =\"1.0\"?>.<!DOCTY"
+    },
+    {
+      "claim": "I2SRandReplace substitutes one CMP operand for the other at matching input offsets, planting exact literal bytes.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile preserves an input whose CMP-operand pair is closer to matching than any seen before, climbing partial markup matches.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "cmplog lacks the CMP_MAP gradient feedback that value_profile provides.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 9361 --role W --fuzzer value_profile_cmplog --trial 4 --seed f97f950fbd784430` and observed 1 I2S-floor dash row (mutation_op = -) at depth 7 of the 8-level ancestor chain, the lower-bound signal of an I2SRandReplace find under the current vpc build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness reaching this namespaced empty-element branch where cmplog (I2S only) resolves it as often as value_profile_cmplog, showing the value_profile CMP_MAP gradient was not separately required; or where value_profile alone matches vpc, showing I2S was not required."
+  },
+  "weakest_evidence_point": "Whether each single technique is independently necessary (true synergy) versus one technique dominating cannot be fully separated from the data, since vpc carries both and only one I2S-floor dash row appears in the verified winning chain.",
+  "confidence": "medium"
+}

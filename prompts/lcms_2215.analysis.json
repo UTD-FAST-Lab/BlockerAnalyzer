@@ -1,0 +1,81 @@
+{
+  "branch_id": 2215,
+  "target": "lcms",
+  "summary_one_line": "A valid ICC profile header whose colorspace/PCS signature fields (offsets 0x0c-0x16) match the Lab-conversion pipeline path that exercises _Remove2Op.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must be an ICC profile whose header signature fields are substituted to exact magic-string values: a profile-class/colorspace tag region around offsets 0x0c-0x0f and the colorspace/PCS signatures at 0x10-0x16 (e.g. 'CMY '/'Lab ' or 'Lab '/'Lab ' rather than 'RGB '/'XYZ '). These exact 4-byte FOURCC values steer pipeline construction down the XYZ2Lab/Lab2XYZ optimization path so that _Remove2Op is invoked and its element list reaches the *pt1 == NULL state, taking the True branch.",
+      "why_winner_satisfies": "Winner-resolving seeds carry colorspace bytes 'CMY '/'Lab ' or 'Lab '/'Lab ' at 0x10-0x16 and 'prtr'/zeroed class bytes at 0x0c-0x0f, and the winner hits the blocker True side 63 times (T=63 F=153) while invoking the deeper optimization machinery (XFormSampler16 W=35900 vs L=0).",
+      "why_loser_doesnt": "Loser-blocking seeds all carry 'mntr' at 0x0c-0x0f and the fixed 'RGB '/'XYZ ' signature at 0x10-0x16; they never take the True side of the blocker (L: T=0 F=924) — the fixed RGB/XYZ profile keeps execution off the Lab-conversion optimization path that drives _Remove2Op to the NULL-element state.",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator on top of value_profile. The colorspace/PCS FOURCC fields are compared against hard-coded constants during profile parsing; cmplog logs those comparison operands and I2SRandReplace splices the exact 4-byte values into the matching input offsets, flipping the header from RGB/XYZ to the Lab-conversion signatures in a single targeted substitution. value_profile lacks this mutator and must hit the 4-byte literals by chance, which it never does in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the *pt1 == NULL early-return in _Remove2Op and its globally-blocked side is the True branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsopt.c:146",
+      "exact_quote": "if (*pt1 == NULL) return AnyOpt;"
+    },
+    {
+      "claim": "The only decisive pair is value_profile_cmplog beating value_profile with an I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The winner takes the blocker True side 63 times while the loser never takes it.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L146",
+      "exact_quote": "d=1   L 146  T=63 F=153  T=0 F=924  if (*pt1 == NULL) return AnyOpt;  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner-resolving seeds carry Lab-conversion colorspace signatures rather than RGB/XYZ.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 2 offset 0x10",
+      "exact_quote": "43 4d 59 20 4c 61 62 20 07 d9 00 0c 00 17 00 16   CMY Lab ........"
+    },
+    {
+      "claim": "Loser-blocking seeds all carry the fixed RGB/XYZ colorspace signature and 'mntr' class.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 1 offset 0x00-0x16",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "The colorspace/PCS signature offsets 0x10-0x16 differ between W and L with W concentrated on Lab-path values.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x14-0x16",
+      "exact_quote": "0x0014  4c(L)x7                             58(X)x31                            DIFFER"
+    },
+    {
+      "claim": "The profile-class/colorspace bytes at offset 0x0c differ between W and L.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0c",
+      "exact_quote": "0x000c  00(.)x6 70(p)x1                     6d(m)x31                            DIFFER"
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator that value_profile lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator and relies on havoc/token only.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2215 --role W --fuzzer value_profile_cmplog --trial 1 --seed aad94b131ccba396` and observed 1 I2S-floor dash row (mutation_op = -) at depth 17 of the 18-level ancestor chain, the characteristic unwrapped I2SRandReplace find for vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where parsing the colorspace/PCS FOURCC fields uses no exact integer/string comparison against hard-coded constants (e.g. a runtime-table dispatch with no comparand cmplog can log) yet value_profile_cmplog still resolves the branch far more than value_profile — that would show the win is not from I2S substitution of those 4-byte literals."
+  },
+  "weakest_evidence_point": "The causal link from the specific Lab/CMY colorspace FOURCC substitution to _Remove2Op reaching the *pt1 == NULL state is inferred from byte concentration plus call-chain hit counts, not from a direct trace of which header field gates the Lab-conversion pipeline path.",
+  "confidence": "medium"
+}

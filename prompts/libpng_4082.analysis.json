@@ -1,0 +1,75 @@
+{
+  "branch_id": 4082,
+  "target": "libpng",
+  "summary_one_line": "Input must carry a parseable tRNS chunk so png_ptr->num_trans is set non-zero, with PNG_EXPAND active.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A PNG whose chunk stream includes a valid tRNS chunk (FOURCC 0x74 0x52 0x4e 0x53 = 'tRNS') that png_handle_tRNS parses, setting png_ptr->num_trans != 0, combined with an expand transformation so (png_ptr->transformations & PNG_EXPAND) != 0 — making the compound condition at L4533/L4534 true.",
+      "why_winner_satisfies": "Winner cmplog seeds drive png_handle_tRNS 10 times (W hits) vs 0 in the loser, and the blocker L4533 evaluates true in all 10 winner trials (T=10 F=0); the upstream num_trans checks L4459 and L4477 also take their true sides only in the winner. The winner byte sets at the chunk-FOURCC offsets 0x25-0x28 carry non-default values (e.g. 69/54/58/74) showing chunk-type bytes were mutated toward real ancillary chunks.",
+      "why_loser_doesnt": "Loser naive seeds never invoke png_handle_tRNS (L hits = 0), so num_trans stays zero, and the blocker L4533 evaluates false in all 10 loser trials (T=0 F=10); at the FOURCC offsets 0x25-0x28 every loser seed keeps the default 67 41 4d 41 ('gAMA') bytes with no tRNS variant.",
+      "mechanism_attribution": "cmplog's I2SRandReplace intercepts the FOURCC comparison in png_read_chunk dispatch, reads the expected 'tRNS' literal from the CmpLog buffer, and substitutes it into input bytes at the chunk-type offset, manufacturing a parseable tRNS chunk that sets num_trans non-zero; naive must hit the exact 4-byte FOURCC by blind havoc and never does in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the num_trans!=0 condition at L4533, requiring num_trans non-zero (with PNG_EXPAND).",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L4533",
+      "exact_quote": "(png_ptr->num_trans != 0 &&"
+    },
+    {
+      "claim": "The full compound gate also requires PNG_EXPAND set on the next source line.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L4534",
+      "exact_quote": "(png_ptr->transformations & PNG_EXPAND) != 0) ||"
+    },
+    {
+      "claim": "The winner takes the blocker true side in all 10 trials while the loser takes false in all 10.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L4533",
+      "exact_quote": "d=1   L4533  T=10 F=0  T=0 F=10"
+    },
+    {
+      "claim": "png_handle_tRNS fires 10 times in the winner set and 0 times in the loser set, so num_trans is set only in the winner.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "OSS_FUZZ_png_handle_tRNS",
+      "exact_quote": "10         0  OSS_FUZZ_png_handle_tRNS"
+    },
+    {
+      "claim": "Upstream num_trans check L4477 takes its true side only in the winner.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L4477",
+      "exact_quote": "d=1   L4477  T=8 F=0  T=0 F=0  if (png_ptr->num_trans != 0)"
+    },
+    {
+      "claim": "Winner seeds carry mutated chunk-FOURCC bytes at offsets 0x25-0x28 while losers keep the default gAMA bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "0x0025-0x0028",
+      "exact_quote": "0x0025  67(g)x8 69(i)x2                     67(g)x10"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which scans the input for one CMP operand and substitutes the other operand at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S and relies on blind havoc/token byte mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 4082 --role W --fuzzer cmplog --trial 1 --seed 230924cbdaa2cc5c` and observed an I2S-floor dash row (mutation_op = -) at depth 3 of the ancestor chain (tool reported '1 ancestor dash row(s) at depth 3'), the lower-bound signal of an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a naive-only campaign reaches the L4533 true side at the same rate as cmplog within the budget (showing blind havoc can place the 4-byte tRNS FOURCC unaided), the I2S attribution is wrong."
+  },
+  "weakest_evidence_point": "The byte-diff evidence ties winner seeds to mutated chunk-FOURCC bytes but does not directly prove the substituted literal is exactly 'tRNS' rather than another expand-triggering ancillary chunk.",
+  "confidence": "medium"
+}

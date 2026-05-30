@@ -1,0 +1,69 @@
+{
+  "branch_id": 3833,
+  "target": "libpng",
+  "summary_one_line": "A parsed cHRM green-x chromaticity value driven out of [0, PNG_FP_1=100000] so the greenx>PNG_FP_1 guard takes its true (reject) branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Input must reach png_XYZ_from_xy with a green chromaticity field whose fixed-point value satisfies greenx<0 OR greenx>PNG_FP_1 (100000 = 0x000186A0), i.e. the multi-byte greenx operand must be pushed above the 100000 magnitude threshold so the line-1288 guard takes its true side and returns 1.",
+      "why_winner_satisfies": "The value_profile_cmplog winner reaches line 1288 and takes the true side (W shows T=1 F=0 at L1288 while the loser shows T=0 F=40), resolves the branch in 9/10 trials, and accumulates 56 hits versus the loser's 3 — its chromaticity bytes land greenx outside the [0,PNG_FP_1] window.",
+      "why_loser_doesnt": "The cmplog loser only ever takes the false side at L1288 (T=0 F=40), blocks in 8/10 trials, and never drives greenx above the 100000 threshold; it stalls 21.10h on the branch with only 3 hits, so its green chromaticity stays inside the in-range window.",
+      "mechanism_attribution": "Both fuzzers carry the same input-to-state substitution mutator (cmplog and vpc are identical except for value_profile), so the comparison-solving mutator is held constant; the winning technique is value_profile's CMP_MAP gradient. The comparison greenx>PNG_FP_1 is a magnitude inequality against the multi-byte constant 100000 (0x000186A0) that literal-substitution mutation cannot directly solve, but the CMP_MAP Hamming/prefix-distance buckets reward inputs whose greenx operand creeps progressively closer to and past 100000, giving the gradient that lets vpc overshoot the threshold where plain cmplog cannot."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the inequality guard greenx>PNG_FP_1 at png.c:1288 whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "png.c:1288:26",
+      "exact_quote": "if (xy->greenx < 0 || xy->greenx > PNG_FP_1) return 1;"
+    },
+    {
+      "claim": "The single decisive pair is value_profile_cmplog beating cmplog with the technique delta being value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The winner resolves 9/10 and the loser blocks 8/10 with a large hitcount gap.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 stats",
+      "exact_quote": "avg hitcount on branch: winner=56  loser=3"
+    },
+    {
+      "claim": "The winner takes the true side of the line-1288 guard while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1288",
+      "exact_quote": "T=1 F=0  T=0 F=40  if (xy->greenx < 0 || xy->greenx > PNG_FP_1) return 1;  <-- BLOCKER"
+    },
+    {
+      "claim": "The loser stalls far longer on the branch than the winner.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 durations",
+      "exact_quote": "avg duration blocked: winner=6.30h  loser=21.10h"
+    },
+    {
+      "claim": "value_profile_cmplog's feedback adds CMP_MAP gradient buckets on top of the edge and CMP-buffer signals.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Feedback",
+      "exact_quote": "edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    },
+    {
+      "claim": "cmplog and value_profile_cmplog share the same I2SRandReplace mutator stack, so I2S is not the differentiator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient, not I2SRandReplace, so lineage dash-row verification is not the relevant signal here. The decisive delta is value_profile (DECISIVE PAIRS Pair 1), and both involved fuzzers (cmplog, value_profile_cmplog) carry identical I2SRandReplace mutators per MECHANISM CONTEXT, so I2S is held constant and the only difference is value_profile's CMP_MAP gradient feedback; no I2S lineage check is mandated for this mechanism."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on an out-of-range multi-byte greenx>100000 magnitude inequality where value_profile_cmplog does NOT outperform cmplog (no dose-response separation), which would show the CMP_MAP gradient is not what drives the divergence."
+  },
+  "weakest_evidence_point": "The exact greenx byte offsets that the winner pushes out of range are not isolated in the BYTE DIFF (the cHRM chromaticity field is buried in a later chunk), so the attribution rests on the value_profile delta plus the inequality-against-100000 source shape rather than a pinpointed seed-byte gradient.",
+  "confidence": "medium"
+}

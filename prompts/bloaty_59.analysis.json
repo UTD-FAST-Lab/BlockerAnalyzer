@@ -1,0 +1,81 @@
+{
+  "branch_id": 59,
+  "target": "bloaty",
+  "summary_one_line": "ELF e_machine field must equal EM_AARCH64 (0x00B7 little-endian) at the 16-bit machine offset to take the switch arm",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The ELF header e_machine half-word must hold the exact 16-bit value EM_AARCH64 = 0x00B7 (low byte 0xB7, high byte 0x00) so that `switch (e_machine)` dispatches to `case EM_AARCH64:` at elf.cc:798. In the winner this lands at input bytes 0x12=0xB7, 0x13=0x00.",
+      "why_winner_satisfies": "The cmplog winner seed carries the bytes 01 d5 b7 00 at offsets 0x10-0x13, placing 0xB7 at offset 0x12; the per-role overlay marks line 798 case EM_AARCH64 as [W] (winner-only) and the divergent-branch table shows W takes the true side (T=3 F=0) while L never does (T=0 F=29).",
+      "why_loser_doesnt": "Every naive loser seed misses the EM_AARCH64 constant: the byte-diff shows offset 0x12 is 0xB7 only in W while L holds 00x8/03/01, so the switch falls through to `default:` (line 822, marked [L]) which returns false; the divergent-branch table shows L takes default true 26 times and EM_AARCH64 never.",
+      "mechanism_attribution": "cmplog's CMP-interception logs the `e_machine == EM_AARCH64` integer comparison operands into the CmpLogObserver buffer; I2SRandReplace then scans the input for the observed operand and substitutes the magic 0xB7 directly at the matching offset, solving the exact-equality roadblock in one step. naive has only havoc/token mutators with no CMP introspection, so it must blind-guess the 2-byte magic and never lands it across 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the case EM_AARCH64 switch arm whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "elf.cc:798:5",
+      "exact_quote": "Source line:     case EM_AARCH64:"
+    },
+    {
+      "claim": "The arm is reached only by an exact-equality switch on e_machine.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L782, L798",
+      "exact_quote": "switch (e_machine) {"
+    },
+    {
+      "claim": "The winner seed places 0xB7 at offset 0x12 within the ELF header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 86809c70eeb052ac offset 0x10-0x13",
+      "exact_quote": "01 d5 b7 00 08 00 f5 ff 01 00 20 20 07 90 99 12"
+    },
+    {
+      "claim": "Only the winner exercises the EM_AARCH64 arm; line 798 is winner-only in the per-role overlay.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L798",
+      "exact_quote": "[W]   798      case EM_AARCH64: <-- BLOCKER"
+    },
+    {
+      "claim": "Winner takes the EM_AARCH64 true side while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 elf.cc:798",
+      "exact_quote": "d=1   L 798  T=3 F=0  T=0 F=29  case EM_AARCH64:  <-- BLOCKER"
+    },
+    {
+      "claim": "At offset 0x12 the magic byte 0xB7 is present only in W; loser seeds hold other values.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0012",
+      "exact_quote": "0x0012  b7(.)x1                             00(.)x8 03(.)x1 01(.)x1             DIFFER"
+    },
+    {
+      "claim": "Loser seeds fall through to the default arm rather than EM_AARCH64.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 elf.cc:822",
+      "exact_quote": "d=1   L 822  T=0 F=3  T=26 F=3  default:"
+    },
+    {
+      "claim": "cmplog logs CMP operands and I2SRandReplace substitutes the matching operand into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S capability — only havoc/token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 59 --role W --fuzzer cmplog --trial 1 --seed 86809c70eeb052ac` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 19 and 20 of the 21-level ancestor chain, the lower-bound signal of an I2SRandReplace find under the current build"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on the EM_AARCH64 16-bit magic where naive resolves the branch as often as cmplog, or where cmplog fails to resolve it — showing the I2S CMP substitution is not what solves the exact-equality gate."
+  },
+  "weakest_evidence_point": "The decisive seed was stored by cmplog with a BytesCopyMutator leaf op, so the I2S substitution is inferred from dash-row ancestors rather than a labeled I2SRandReplace mutation directly on the magic byte.",
+  "confidence": "high"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 2183,
+  "target": "lcms",
+  "summary_one_line": "Profile PCS-signature field must hold a non-Lab FOURCC so cmsGetPCS()==cmsSigLabData fails and the false branch executes.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The 4-byte profile-header signature field driving cmsGetPCS (around offsets 0x10-0x13, the colorspace/PCS FOURCC) must equal a non-Lab signature value (e.g. 'Lab ' replaced by 'XYZ'/'MCH7'/'MCHC'/'3CLR'-style FOURCCs), so the equality comparison cmsGetPCS(hProfile)==cmsSigLabData evaluates false; the loser keeps the Lab-matching FOURCC and is pinned on the true side.",
+      "why_winner_satisfies": "Every winner-resolving vpc seed carries a varied, non-uniform FOURCC at offsets 0x10-0x13 ('Lab ', 'MCH7', 'MCHC', '3CLR') and reaches the blocker's false side (line 775 W shows T=9 F=10), evidence the PCS comparand was driven off the Lab literal.",
+      "why_loser_doesnt": "All loser-blocking value_profile seeds hold the identical uniform bytes 52 47 42 20 ('RGB ') at 0x10-0x13 and PCS resolves to Lab, so they always take the true side (line 775 L shows T=20 F=0) and never resolve the false branch.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile: the CmpLogObserver records the runtime operands of cmsGetPCS()==cmsSigLabData, and I2SRandReplace splices the logged comparand into the input FOURCC bytes, flipping the equality off Lab in one mutation. value_profile lacks I2SRandReplace and only gets a CMP_MAP Hamming bucket, which cannot synthesize the exact 4-byte substitution to clear the gate."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the false branch of an exact equality comparison on the profile PCS signature.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7",
+      "exact_quote": "if (cmsGetPCS(hProfile) == cmsSigLabData)"
+    },
+    {
+      "claim": "Globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Winner-resolving seeds carry varied non-Lab FOURCC bytes at the colorspace/PCS field offsets 0x10-0x13.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0010-0x0013",
+      "exact_quote": "0x0010  4c(L)x3 33(3)x3 4d(M)x2 52(R)x1 +1u  52(R)x10                            PARTIAL"
+    },
+    {
+      "claim": "Loser-blocking seeds hold a uniform RGB FOURCC at 0x10-0x13.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 0313315f3b972394 offset 0x0010",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "A winner seed at offset 0x10-0x13 holds the Lab FOURCC variant 'Lab ' distinct from the loser pin.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 18b267ad30349d2b offset 0x0010",
+      "exact_quote": "4c 61 62 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   Lab XYZ ........"
+    },
+    {
+      "claim": "At the blocker line 775 the winner explores the false side (F=10) while the loser never does (F=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L775",
+      "exact_quote": "d=1   L 775  T=9 F=10  T=20 F=0  if (cmsGetPCS(hProfile) == cmsSigLabData)  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog has I2SRandReplace plus a per-execution CMP buffer; value_profile has neither.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and only writes coarse CMP_MAP distance buckets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2183 --role W --fuzzer value_profile_cmplog --trial 1 --seed 18b267ad30349d2b` and observed 1 I2S-floor dash row (mutation_op = -) at depth 12 of the 13-level ancestor chain, the ParentInfo-only signature of an unwrapped I2SRandReplace find under the current build"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating a non-equality predicate (e.g. PCS != Lab) or a comparand with no input-byte pre-image where value_profile_cmplog shows no advantage over value_profile, or value_profile resolving the false branch as fast as vpc, would refute the I2S-substitution attribution."
+  },
+  "weakest_evidence_point": "The exact source byte offset of the PCS FOURCC is inferred from the colorspace-style field at 0x10-0x13 rather than confirmed against the lcms header parser, since cmsGetPCS reads the PCS slot which may sit at a different header offset than the device colorspace shown in the dump.",
+  "confidence": "medium"
+}

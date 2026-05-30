@@ -1,0 +1,75 @@
+{
+  "branch_id": 7,
+  "target": "bloaty",
+  "summary_one_line": "Input must produce a vmsize field equal to the kUnknownSize sentinel (UINT64_MAX) to take the true branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "An input that drives the vmsize argument of IsVerboseForVMRange to exactly RangeMap::kUnknownSize (the all-ones UINT64_MAX sentinel), i.e. a parsed 8-byte size field set to 0xFFFFFFFFFFFFFFFF rather than any concrete range length.",
+      "why_winner_satisfies": "value_profile_cmplog resolves the branch in 10/10 trials, taking the true side (W: T=70 F=0 at L1103) and reaching the sentinel-only code at L1104-1105; its seeds carry concentrated 0xff bytes (e.g. offset 0x34 ff x6) inside the parsed header region, exactly the byte value the kUnknownSize equality wants substituted.",
+      "why_loser_doesnt": "value_profile blocks the branch in 10/10 trials, always taking the false side (L: T=0 F=2170 at L1103) and never executing the sentinel rewrite at L1104; lacking I2SRandReplace it cannot place the exact 8-byte UINT64_MAX sentinel into the size field, so the equality never holds.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace to value_profile's stack; I2S logs the runtime CMP operand kUnknownSize (UINT64_MAX) and substitutes it directly into the matching input bytes, satisfying the exact-equality gate. value_profile's CMP_MAP only buckets operand distance and cannot synthesize the all-ones constant, so it stalls at the false side."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is an exact-equality comparison of vmsize against the kUnknownSize sentinel constant.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L1103",
+      "exact_quote": "if (vmsize == RangeMap::kUnknownSize) {"
+    },
+    {
+      "claim": "The winning side (true branch) leads to the sentinel-only rewrite vmsize = UINT64_MAX - vmaddr at L1104, confirming the constant is the all-ones sentinel.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1104",
+      "exact_quote": "vmsize = UINT64_MAX - vmaddr;"
+    },
+    {
+      "claim": "value_profile_cmplog is the decisive winner resolving in 10/10 trials while value_profile is the loser blocked in 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "The loser value_profile never reaches the true side and is blocked across all trials.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "At the blocker line the winner takes the true side and the loser only ever takes the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1103",
+      "exact_quote": "L1103  T=70 F=0  T=0 F=2170  if (vmsize == RangeMap::kUnknownSize) {"
+    },
+    {
+      "claim": "Winner seeds carry concentrated 0xff bytes in the parsed header region, the value the sentinel equality demands.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x34",
+      "exact_quote": "0x0034  ff(.)x6 80(.)x4"
+    },
+    {
+      "claim": "Only value_profile_cmplog carries I2SRandReplace; value_profile explicitly lacks it.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace and only buckets CMP operand distance, not exact constants.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": false,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 7 --role W --fuzzer value_profile_cmplog --trial 1 --seed <id>` on all four available winning seeds (007b5827d861c66f, 007c2cba25c7ebe1, 00543fe52d18cbcf, 003dc3258ece2f1a). Every chain showed all-havoc mutator lists for all 50 recorded levels with no I2S-floor (mutation_op = -) rows; the tool reports the 50-level cap is a lower bound so deeper ancestors are not visible. I2S contribution may still exist above depth 50 or in the leaked havoc bucket; the exact-equality-against-fixed-constant shape and the vpc-only I2SRandReplace technique delta remain the structural basis for the attribution."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with an exact 8-byte equality gate against UINT64_MAX in which value_profile resolves the gate as often as value_profile_cmplog, showing CMP_MAP distance feedback alone suffices and I2S substitution is not the decisive factor."
+  },
+  "weakest_evidence_point": "Lineage could not confirm an I2S-floor row in any winning seed chain (all-havoc within the 50-level cap), so the I2SRandReplace attribution rests on the exact-equality CMP shape plus the vpc-vs-vp technique delta rather than direct mutator-chain evidence.",
+  "confidence": "medium"
+}

@@ -1,0 +1,93 @@
+{
+  "branch_id": 6411,
+  "target": "libxml2",
+  "summary_one_line": "Take the false branch by forcing a hash-slot collision: insert two DTD entries whose keys collide so table[key].valid is already 1.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["grimoire>cmplog (grimoire_structural)"],
+      "what_input_feature": "An input that drives xmlHashUpdateEntry3 to a key slot that is already populated (valid != 0), reaching the else-branch insertion-chain walk at lines 687-728. This requires a second DTD/attribute structure that hash-collides with a prior entry, i.e. structurally repeated/recursive markup, not a single linear declaration.",
+      "why_winner_satisfies": "Grimoire-produced winner seeds are compact (219-235 bytes) and carry a repeated/spliced token structure (the '<?l ?>' fragment plus the duplicated 'dtds/127772.dtd' run appearing twice in the dump), reflecting grimoire's structural recombination of generalized gaps; these reach the else-branch (W-only coverage at lines 687-728) and hit the branch 76 times.",
+      "why_loser_doesnt": "Cmplog loser seeds are larger linear DTDs (368-377 bytes) with a single well-formed '<?xml version=\"1.0\"?>' prolog; they only ever take the true branch (L 684 T=30 F=0, insert=NULL) and never enter the else-chain, so they never produce a colliding second entry that flips valid==0 to false.",
+      "mechanism_attribution": "Both fuzzers run input-to-state comparison-solving, so the single-technique delta is grimoire's GeneralizationStage + structural Grimoire mutators (string/recursive replacement and extension). Grimoire splices generalized token/gap structures to synthesize repeated/recursive declarations that collide on the same hash key, exercising the populated-slot else-branch that cmplog's linear comparison-solving and havoc mutations do not assemble."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the false branch of the slot-occupancy test in xmlHashUpdateEntry3.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hash.c:684:9",
+      "exact_quote": "Source line:     if (table->table[key].valid == 0) {"
+    },
+    {
+      "claim": "Globally the false branch is the blocked side.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Only the winner reaches the else-branch insertion-chain walk after an occupied slot.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L686-L688",
+      "exact_quote": "[B]   686      } else {\n[W]   687          if (table ->dict) {\n[W]   688  \t    for (insert = &(table->table[key]); insert->next != NULL;"
+    },
+    {
+      "claim": "The loser only ever takes the true branch at 684 (false count zero), never reaching the populated-slot path.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L684",
+      "exact_quote": "d=1   L 684  T=30 F=30  T=30 F=0  if (table->table[key].valid == 0) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser code never enters the dict else-branch at line 687.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L687",
+      "exact_quote": "d=1   L 687  T=30 F=0  T=0 F=0  if (table ->dict) {"
+    },
+    {
+      "claim": "Winner is grimoire and loser is cmplog with a large prob divergence and high winner hitcount.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: grimoire > cmplog  [delta: grimoire_structural] ---"
+    },
+    {
+      "claim": "Winner hits the branch 76 times while loser hits it zero times.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "avg hitcount",
+      "exact_quote": "avg hitcount on branch: winner=76  loser=0"
+    },
+    {
+      "claim": "Winner grimoire seeds are compact and carry repeated/spliced DTD token structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 2bc0de3a6d70d34a",
+      "exact_quote": "Seed 1 (id=2bc0de3a6d70d34a, size=219 bytes, fuzzer=grimoire, trial=2, discovered_at=15759s, mutation_op=I2SRandReplace):"
+    },
+    {
+      "claim": "Loser cmplog seeds are larger linear DTDs with a well-formed xml prolog.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0be939129cb3ca8a",
+      "exact_quote": "Seed 1 (id=0be939129cb3ca8a, size=377 bytes, fuzzer=cmplog, trial=1, discovered_at=3s, mutation_op=BytesInsertCopyMutator):"
+    },
+    {
+      "claim": "The single-technique delta is grimoire generalization plus structural mutators on top of shared cmplog/I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire baseline relationship",
+      "exact_quote": "The single-technique delta is therefore\n`grimoire` vs `cmplog` (both have I2S; grimoire adds generalization +\nGrimoire mutators), not vs naive."
+    },
+    {
+      "claim": "Grimoire mutators splice and recurse on generalized token/gap structures.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire mutators/stages",
+      "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "grimoire structural",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is grimoire structural, not I2SRandReplace, so the mandatory I2S lineage check does not apply. The single-technique delta between winner and loser is grimoire's GeneralizationStage + structural mutators (both fuzzers already run I2S per MECHANISM CONTEXT), so an I2S-floor dash-row signal would not distinguish the pair. Note also that for grimoire, dash rows are NOT I2S-exclusive per the 10-fuzzer caveat, so lineage names cannot separate I2S from structural finds here."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where cmplog (I2S only, no grimoire structural stage) reaches the populated-slot false branch at comparable rate to grimoire, showing structural recombination is not required to produce the colliding second hash entry."
+  },
+  "weakest_evidence_point": "I infer hash-slot collision from the W-only else-branch coverage and the repeated 'dtds/127772.dtd' run, but the seed dumps shown (64 bytes) do not directly prove two key-colliding entries are present in the full 219-byte input.",
+  "confidence": "medium"
+}

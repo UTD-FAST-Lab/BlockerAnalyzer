@@ -1,0 +1,75 @@
+{
+  "branch_id": 6809,
+  "target": "libxml2",
+  "summary_one_line": "A 1-byte ASCII control char (0x0A/0x0D/0x09) inside CDATA content so xmlCheckCdataPush takes the whitespace true branch instead of returning error.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "CDATA-scanned content bytes that include one of the three exact control codepoints 0x0A, 0x0D, or 0x09 at a position where xmlCheckCdataPush evaluates a sub-0x20 1-byte char; the byte must equal one of those three values, otherwise the else arm at L11353 returns -ix and the blocker true side at L11351 is never taken.",
+      "why_winner_satisfies": "value_profile_cmplog's winning seed carries a 0x0A (newline) byte at offset 0x0f embedded in xml-prefixed content, and the per-role overlay shows the winner reaching the call site (L11861-11870 marked [W]) while the true-branch line L11351 was hit, so the control-char equality is satisfied on the winner's path.",
+      "why_loser_doesnt": "value_profile cannot reliably plant the exact 0x0A/0x0D/0x09 comparand on the scanned path; its blocking seeds stall on the false side (L11351 shows T=2 F=2 / T=3 F=15 for the loser i.e. the false arm dominates) and fall through to the else at L11353/L11354 which is marked [L] (loser-only) and returns -ix.",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator on top of value_profile: the cmplog CMP buffer records the literal comparands 0x0A/0x0D/0x09 from the equality CMPs at L11351, and I2SRandReplace splices one of those logged bytes directly into the input at the offset feeding c, deterministically satisfying the equality that value_profile's distance-bucket feedback plus havoc cannot land on a single exact byte."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is an equality test of a single byte c against the three control codepoints 0xA, 0xD, 0x9 in xmlCheckCdataPush.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "parser.c:11351",
+      "exact_quote": "else if ((c == 0xA) || (c == 0xD) || (c == 0x9))"
+    },
+    {
+      "claim": "When the control-char equality fails the code falls through to the loser-only else returning -ix.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L11353-11354",
+      "exact_quote": "[L] 11353  \telse\n[L] 11354  \t        return(-ix);"
+    },
+    {
+      "claim": "The winner-resolving seed contains a 0x0A byte in its content.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 008ff29e17e42a70 offset 0x0f",
+      "exact_quote": "6e 78 6d 6c 5c 0a"
+    },
+    {
+      "claim": "The winner reaches the xmlCheckCdataPush call site while it is loser-unreached.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L11865",
+      "exact_quote": "[W] 11865  \t\t    tmp = xmlCheckCdataPush(ctxt->input->cur, base, 1); <-- CALL"
+    },
+    {
+      "claim": "At the blocker line the loser's false arm dominates over the true arm.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L11351",
+      "exact_quote": "d=1   L11351  T=2 F=2  T=3 F=15  else if ((c == 0xA) || (c == 0xD) || (c == 0x9))  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog has I2SRandReplace while value_profile does not.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile's mutators lack I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog over value_profile with an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 6809 --role W --fuzzer value_profile_cmplog --trial 2 --seed 008ff29e17e42a70` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 10 and 11 of the 12-level ancestor chain, the cmplog/vpc-exclusive signal of an unwrapped I2SRandReplace find."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating a 1-byte equality against 0x0A/0x0D/0x09 reached only after a multi-byte CDATA prefix where value_profile resolves the branch as often as value_profile_cmplog (no I2S advantage)."
+  },
+  "weakest_evidence_point": "The single winner seed shows 0x0A but I cannot directly confirm that exact byte landed at the offset feeding c via I2S substitution rather than incidental havoc, since the byte-diff offsets do not isolate the scanned-content position.",
+  "confidence": "medium"
+}

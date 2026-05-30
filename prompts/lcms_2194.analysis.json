@@ -1,0 +1,81 @@
+{
+  "branch_id": 2194,
+  "target": "lcms",
+  "summary_one_line": "ICC header device-class FOURCC at offset 0x0c must be a CLUT-bearing class (e.g. prtr/spac), not the loser's uniform mntr.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The 4-byte ICC profile device-class field at input offset 0x0c-0x0f must hold a class whose profile triggers cmsIsCLUT()==TRUE (e.g. 'prtr', 'spac', 'pamc'), distinct from the loser's uniformly-present 'mntr' class. This is a magic-FOURCC equality gate inside cmsIsCLUT reached from cmsIsIntentSupported line 868.",
+      "why_winner_satisfies": "Every winner-resolving seed carries a non-'mntr' device-class FOURCC at 0x0c-0x0f: 'prtr', 'spac', and the byte-diff shows 0x0c set to 70(p)/73(s) and 0x0d set to 72(r)/70(p) in winners. The vpc-discovered seeds drive the blocker true side (hit_div=266) and all 10 winner trials resolve.",
+      "why_loser_doesnt": "All 10 loser-blocking seeds carry exactly 'mntr' (6d 6e 74 72) at offset 0x0c-0x0f and never vary it; the byte diff shows loser offset 0x0c is 6d(m)x10 and 0x0d is 6e(n)x10 with zero variation, so cmsIsCLUT never returns TRUE and the true branch stays blocked across all 10 trials.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace over value_profile's CMP_MAP-only signal. I2SRandReplace splices the device-class comparand FOURCC logged at the cmsIsCLUT equality check back into the input bytes at the offset where the old FOURCC sat, flipping 'mntr' to a CLUT-bearing class in one step; value_profile has no I2S mutator and only gets a Hamming-distance bucket, which does not place the exact FOURCC at the right offset."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is the cmsIsCLUT gate at cmsio1.c:868 inside cmsIsIntentSupported.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsio1.c:868",
+      "exact_quote": "if (cmsIsCLUT(hProfile, Intent, UsedDirection)) return TRUE;"
+    },
+    {
+      "claim": "Winner seeds carry non-mntr device-class FOURCCs at offset 0x0c (prtr, spac).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 / Seed 5 offset 0x0c",
+      "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 70 72 74 72   ..b.lcms.@..prtr"
+    },
+    {
+      "claim": "A winner seed places 'spac' at offset 0x0c, another non-monitor class.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 5 offset 0x0c",
+      "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 73 70 61 63   ..b.lcms.@..spac"
+    },
+    {
+      "claim": "All loser seeds carry exactly 'mntr' at offset 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 offset 0x0c",
+      "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 6d 6e 74 72   ..b.lcms.@..mntr"
+    },
+    {
+      "claim": "The byte diff shows offset 0x0c differs decisively: winners 70(p)/73(s), losers uniformly 6d(m).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  70(p)x8 00(.)x1 73(s)x1             6d(m)x10                            DIFFER"
+    },
+    {
+      "claim": "The byte diff shows offset 0x0d differs decisively: winners 72(r)/70(p), losers uniformly 6e(n).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000d",
+      "exact_quote": "0x000d  72(r)x8 00(.)x1 70(p)x1             6e(n)x10                            DIFFER"
+    },
+    {
+      "claim": "The winner resolves the blocker on all 10 trials with high hitcount while the loser stays blocked on all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 prob_div/hit_div",
+      "exact_quote": "prob_div=1.00  dur_div=20.80h  hit_div=266"
+    },
+    {
+      "claim": "The winner technique delta over the loser is the addition of I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "The loser value_profile has no I2SRandReplace, only CMP_MAP distance buckets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2194 --role W --fuzzer value_profile_cmplog --trial 1 --seed 072456d8257084f6`; the 14-level ancestor chain contains 1 I2S-floor dash row (mutation_op = -, ParentInfo-only) at depth 13, the current-build signal for an unwrapped I2SRandReplace find in vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose CLUT gate keys on the device-class FOURCC at offset 0x0c that value_profile resolves as fast as value_profile_cmplog, showing the CMP_MAP gradient alone places the exact FOURCC without I2S substitution."
+  },
+  "weakest_evidence_point": "I infer the gate keys specifically on the device-class FOURCC at 0x0c-0x0f rather than the colorspace field at 0x10-0x16, which also varies in winners; cmsIsCLUT internals are not shown so the exact comparand offset is partly inferred from the concentrated DIFFER signal.",
+  "confidence": "medium"
+}

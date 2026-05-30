@@ -1,0 +1,75 @@
+{
+  "branch_id": 6930,
+  "target": "libxml2",
+  "summary_one_line": "Input must parse into a namespaced XML document whose freed doc carries a non-NULL oldNs reconciled-namespace list.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed XML document that parses successfully AND declares/uses namespaces (xmlns / prefixed names like xlink) so that xmlReadMemory builds a document whose cur->oldNs reconciled-namespace list is non-NULL at xmlFreeDoc time.",
+      "why_winner_satisfies": "Winner-resolving seeds carry a valid XML prolog plus namespace markup (xmlns(, xlink, CDATA) and the winner-side coverage runs the namespace-splitting machinery heavily (xmlSplitQName2 106 vs 0, xmlSplitQName3 33 vs 0, xmlNewNsPropEatName 30 vs 0), so the parsed doc accumulates old namespaces and the true branch is taken (W T=8 F=0 at L1248).",
+      "why_loser_doesnt": "Loser-blocking seeds are smaller/garbled (leading binary bytes, mangled http:////// runs, broken tag fragments) that never build a document with a populated oldNs, so the namespace functions get zero invocations on the L side and the branch stays false (L T=0 F=20 at L1248).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads logged CMP operands and substitutes them at matching input offsets, repairing the literal string/structural comparands (xmlns prefixes, attribute keywords, the version/DOCTYPE prolog) that gate a successful namespaced parse; naive lacks I2S and must hit those multi-byte literals by blind havoc, so it almost never assembles a document that populates oldNs."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side at the blocker line is the namespace-list-free guard cur->oldNs != NULL.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "tree.c:1248",
+      "exact_quote": "if (cur->oldNs != NULL) xmlFreeNsList(cur->oldNs);"
+    },
+    {
+      "claim": "The winner takes the true branch in all resolving runs while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1248",
+      "exact_quote": "d=1  L1248  T=8 F=0  T=0 F=20  if (cur->oldNs != NULL) xmlFreeNsList(cur->oldNs);"
+    },
+    {
+      "claim": "Namespace-splitting functions run heavily for the winner and not at all for the loser, evidencing namespaced-document construction.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "xmlSplitQName2 / xmlSplitQName3",
+      "exact_quote": "106         0  xmlSplitQName2  (/src/libxml2/tree.c:267-312)"
+    },
+    {
+      "claim": "Namespace-property construction (xmlNewNsPropEatName) is exercised only on the winner side.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "xmlNewNsPropEatName",
+      "exact_quote": "30         0  xmlNewNsPropEatName  (/src/libxml2/tree.c:2016-2027)"
+    },
+    {
+      "claim": "Winner-resolving seeds contain a valid XML prolog and namespace markup (xmlns / xlink).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id f32dee7a138d773b",
+      "exact_quote": "xmlns("
+    },
+    {
+      "claim": "Loser-blocking seeds contain garbled non-XML byte runs rather than well-formed namespaced markup.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00187c32cbdbd121",
+      "exact_quote": "ttp:u////+//////"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at input offsets matching the other operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S mutator, so it must reach literal/structural comparands by blind byte mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 6930 --role W --fuzzer cmplog --trial 1 --seed 51fd9b36079604e3`; the ancestor chain shows 2 I2S-floor dash rows (mutation_op = -) at depth 3 and depth 4, the lower-bound signal of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness that parses a namespace-free but otherwise valid XML document still taking the true branch (oldNs populated) would refute the namespace requirement; equivalently, cmplog failing to out-resolve naive on a target whose only gate is a non-CMP structural namespace property would refute the I2S attribution."
+  },
+  "weakest_evidence_point": "It is inferred but not directly shown that cur->oldNs is populated specifically by namespace reconciliation rather than by some other code path also exercised only by the winner.",
+  "confidence": "medium"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 2232,
+  "target": "lcms",
+  "summary_one_line": "ICC data-colorspace signature at offset 0x10 must be an unsupported tag so cmsChannelsOfColorSpace returns negative, taking the unsupported-space branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The 4-byte data-colorspace signature in the ICC profile header (offset 0x10-0x13) must be a value that cmsGetColorSpace returns and that cmsChannelsOfColorSpace does not recognize, so nOutputChans is negative (< 0). Supported tags like 'RGB ' yield a positive channel count and miss the branch; an unsupported/unmapped signature drives nOutputChans negative.",
+      "why_winner_satisfies": "Winner seeds carry varied non-RGB colorspace tags at offset 0x10-0x16 ('MDHC'/'XYZ ', 'Luvl'/'Lab ', 'B.LR') and differing profile-class bytes at 0x0c-0x0f ('prtr' or zeroed vs 'mntr'), producing a ColorSpace whose channel lookup returns negative; the branch (nOutputChans < 0) TRUE side is taken (winner hitcount 3 on branch, resolved 9/10).",
+      "why_loser_doesnt": "All five loser seeds carry the identical fixed signature '52 47 42 20' (\"RGB \") at offset 0x10-0x13 and 'mntr' at 0x0c-0x0f, a fully supported colorspace whose channel count is positive, so nOutputChans < 0 is always FALSE; loser blocked 10/10 with branch hitcount 0.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile's CMP_MAP feedback. lcms compares the parsed colorspace signature against a fixed table of supported FOURCC literals; I2SRandReplace logs those comparison operands and splices the literal directly into the input bytes at the signature offset, letting vpc reach unsupported-signature values that flip nOutputChans negative. value_profile, having only Hamming-bucket gradient feedback and no I2S substitution, stays anchored to the seed's 'RGB ' signature."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked TRUE side guards an unsupported-colorspace early return driven by nOutputChans.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmspack.c:3851",
+      "exact_quote": "if (nOutputChans < 0) return 0;"
+    },
+    {
+      "claim": "nOutputChans is the channel count of the profile's colorspace, derived from the parsed input.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmspack.c:3845-3847",
+      "exact_quote": "cmsInt32Number         nOutputChans    = cmsChannelsOfColorSpace(ColorSpace);"
+    },
+    {
+      "claim": "Loser seeds carry a fixed supported 'RGB ' colorspace signature at the colorspace offset.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x10-0x12",
+      "exact_quote": "0x0010  4d(M)x1 4c(L)x1 00(.)x1 42(B)x1     52(R)x10                            DIFFER"
+    },
+    {
+      "claim": "Winner seeds carry varied non-RGB colorspace signatures at the same offset while losers are concentrated on R.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner Seed 1 offset 0x10",
+      "exact_quote": "4d 44 48 43 58 59 5a 20 07 d9 00 0c 00 17 00 16   MDHCXYZ ........"
+    },
+    {
+      "claim": "All loser-blocking seeds share the identical RGB XYZ header layout taking the false branch.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser Seed 1 offset 0x10",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "At the blocker branch the winner takes the true side while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L3851",
+      "exact_quote": "d=1   L3851  T=4 F=4  T=0 F=20  if (nOutputChans < 0) return 0;  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog uniquely adds I2SRandReplace substitution over value_profile.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, so it cannot splice colorspace literals.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2232 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0cae0d2f5478842f`; the ancestor chain has 16 levels and the tool reports the I2S-floor signal: 1 dash row (mutation_op = -, ParentInfo-only) at depth 15, the floor-signal for an unwrapped I2SRandReplace find in vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If value_profile (no I2S) also resolves the branch at a comparable rate when given only a positive-channel 'RGB ' seed — i.e. CMP_MAP gradient alone reaches an unsupported colorspace signature without I2S substitution — the I2S attribution is wrong."
+  },
+  "weakest_evidence_point": "Whether cmsChannelsOfColorSpace actually returns a negative value for the winner's specific tags is inferred from the branch hit divergence rather than shown directly in source; the exact unsupported-signature-to-negative mapping is not in the prompt.",
+  "confidence": "medium"
+}

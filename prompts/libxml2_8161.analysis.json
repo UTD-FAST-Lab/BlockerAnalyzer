@@ -1,0 +1,112 @@
+{
+  "branch_id": 8161,
+  "target": "libxml2",
+  "summary_one_line": "An XML element carrying two or more namespace declarations so xmlNewNs sees a non-NULL node->nsDef and appends a second namespace",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Input must produce an element node that already has a first namespace (node->nsDef != NULL) and then declare a SECOND, distinctly-prefixed namespace on the same element, requiring well-formed multi-byte tokens like \"<?xml version=\\\"1.0\\\"?>\", \"<!DOCTYPE\", and a parseable xmlns attribute chain so SAX2 calls xmlNewNs twice on the same node.",
+      "why_winner_satisfies": "The value_profile_cmplog winner seeds carry an intact, in-order XML prologue (\"<?xml version=\\\"1.0\\\"?>\", \"<!DOCTYPE a SYSTEM\") at offsets 0x08+, which the I2SRandReplace mutator assembled by substituting CMP operands; the prologue parses far enough to drive a second xmlNewNs call and take the false (non-NULL nsDef) side, hitting it 6 times on average.",
+      "why_loser_doesnt": "The value_profile loser seeds are shorter and structurally mangled (e.g. 97/156-byte seeds with byte runs like 0x13 repeats and corrupted prologue ordering), so the parser at most reaches the first namespace declaration; the loser only resolves the branch in 2/10 trials with avg hitcount 1.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the per-execution CmpLogObserver buffer and splices logged comparison operands (XML keyword/token bytes) into the input at matching offsets, repairing the multi-byte structural tokens that gate reaching a second xmlNewNs call; value_profile lacks I2SRandReplace and cannot reconstruct those exact token sequences."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Same structural target (an element whose node->nsDef is already non-NULL when a second xmlns is declared), but here the winning edge is value-profile gradient feedback that preserves intermediate inputs whose CMP operands are progressively closer to matching the XML structural literals, letting the corpus climb toward a parseable two-namespace document.",
+      "why_winner_satisfies": "value_profile_cmplog resolves 9/10 trials versus cmplog's 0/10; the CMP_MAP bucket feedback retains near-miss inputs (Hamming/prefix-distance closer to the xmlns and prologue token comparisons), so the corpus accumulates the structural progress needed to reach and append the second namespace at the blocker false side (avg hitcount winner=6, loser=0).",
+      "why_loser_doesnt": "cmplog has the same I2SRandReplace mutator but only the edge-bucket feedback signal; it never retains the gradient intermediates, so across all 10 trials it stays blocked (resolved=0/10, blocked=10) and the branch hitcount is 0.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient: each integer/string CMP writes a distance-bucket into CMP_MAP, and an input producing an operand pair closer to matching than any seen before is preserved as new coverage; this gradient is the only technique differing between vpc and cmplog and is what lets the corpus accumulate toward the two-namespace document."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the false branch of node->nsDef == NULL, taken only when the element already has a namespace, i.e. a second namespace is being added.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "tree.c:774",
+      "exact_quote": "if (node->nsDef == NULL) {"
+    },
+    {
+      "claim": "The false-side body that appends a second namespace (the winner-only region) is the else clause walking node->nsDef and linking cur via prev->next.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L776-L792",
+      "exact_quote": "[W]   777  \t    xmlNsPtr prev = node->nsDef;"
+    },
+    {
+      "claim": "value_profile_cmplog beats value_profile on the I2S delta, resolving 9/10 vs 2/10 with higher branch hitcount.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile_cmplog beats cmplog on the value_profile delta, resolving 9/10 vs 0/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The I2S winner pair shows winner hitcount 6 vs loser hitcount 1 on the branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 avg hitcount",
+      "exact_quote": "avg hitcount on branch: winner=6  loser=1"
+    },
+    {
+      "claim": "The value_profile winner pair shows winner hitcount 6 vs loser hitcount 0 on the branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 avg hitcount",
+      "exact_quote": "avg hitcount on branch: winner=6  loser=0"
+    },
+    {
+      "claim": "Winner seeds carry an intact in-order XML prologue with version declaration and DOCTYPE tokens.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 offset 0x20",
+      "exact_quote": "72 73 69 6f 6e 3d 22 31 2e 30 22 3f 3e 0a 3c 21   rsion=\"1.0\"?>.<!"
+    },
+    {
+      "claim": "Winner seeds contain the DOCTYPE SYSTEM structural tokens needed to parse far enough to reach a second xmlNewNs call.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 offset 0x30",
+      "exact_quote": "44 4f 43 54 59 50 45 0a 61 20 53 59 53 54 45 4d   DOCTYPE.a SYSTEM"
+    },
+    {
+      "claim": "Loser seeds are short and structurally mangled, with corrupted byte runs rather than a clean parseable two-namespace document.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 5 offset 0x10",
+      "exact_quote": "20 27 20 13 13 13 13 13 13 13 13 13 13 13 13 13    ' ............."
+    },
+    {
+      "claim": "cmplog's I2SRandReplace splices CMP operands into the input at matching offsets to reconstruct exact token sequences.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so it cannot perform input-to-state substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile's CMP_MAP retains inputs whose operand pair is closer to matching than any previously seen, providing gradient feedback that cmplog lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile_cmplog unions cmplog and value_profile so its advantage over cmplog isolates the CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Instrumentation",
+      "exact_quote": "union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 8161 --role W --fuzzer value_profile_cmplog --trial 1 --seed a425477316d1bc9c` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 3 and depth 4 of the 5-level ancestor chain, direct lower-bound evidence of an I2SRandReplace find in this vpc winner. Note this covers the I2S-delta hypothesis (Pair 2); the value_profile-delta hypothesis (Pair 1) attributes the winner to CMP_MAP gradient, not I2S."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the second xmlns declaration shares the prefix of the first (so the false-side equality check at L779-780 frees cur and returns NULL before linking) still showing vpc resolving the branch far above value_profile and cmplog would refute that reaching the non-NULL-nsDef append path is the decisive program feature."
+  },
+  "weakest_evidence_point": "The Pair 1 (value_profile delta) attribution to CMP_MAP gradient is inferred from feedback-mechanism reasoning, not from a lineage signal, since gradient retention leaves no dash-row trace in seed metadata.",
+  "confidence": "medium"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 2092,
+  "target": "lcms",
+  "summary_one_line": "ICC profile bytes encoding a non-PCS color space (e.g. device-class MCHx / link) so switch(InPCS) falls to the default arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The ICC header must declare a profile-class / color-space whose InPCS signature is neither cmsSigXYZData nor cmsSigLabData, so the switch(InPCS) at line 427 falls through to the default arm at line 481. In the winner seeds this is driven by the 4-byte class field at offset 0x0c ('link') and the color-space FOURCC at 0x10-0x13 ('MCH7'/'MCH5'/'MCHD'/'MCHC') rather than the loser's 'mntr'+'RGB ' XYZ/Lab-PCS layout.",
+      "why_winner_satisfies": "Winner seeds carry the literal bytes 6c 69 6e 6b ('link') at offset 0x0c-0x0f and multi-channel device color-space tags ('MCH7','MCH5','MCHD','MCHC') at 0x10-0x13, which make InPCS resolve to a non-XYZ/non-Lab signature and route execution into the default: arm; the per-role overlay marks line 481 [W] and the winner hits the branch 55 times.",
+      "why_loser_doesnt": "Loser seeds carry 6d 6e 74 72 ('mntr', a display-device monitor class) at 0x0c-0x0f and 'RGB ' / 'XYZ ' fields at 0x10-0x17, producing an InPCS of cmsSigXYZData so the switch resolves to the XYZ case (line 429) and never reaches the default arm; the winner true-hitcount is 55 while the loser is 0.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which value_profile lacks. The InPCS dispatch is a switch over exact 4-byte signature constants; value_profile's distance-bucket feedback gives no smooth path toward an unrelated FOURCC, but I2SRandReplace logs the compared signature constant and splices it directly into the matching input-byte position, planting the exact non-PCS color-space token that drives execution to the default arm."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of the switch(InPCS) dispatch in AddConversion at line 481, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmscnvrt.c:481",
+      "exact_quote": "Location: /src/Little-CMS/src/cmscnvrt.c:481:5"
+    },
+    {
+      "claim": "The default arm is selected when InPCS is neither XYZ nor Lab, and it then checks InPCS != OutPCS.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L480-L482",
+      "exact_quote": "// On colorspaces other than PCS, check for same space"
+    },
+    {
+      "claim": "Winner seeds carry the 'link' profile-class bytes at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 1a518b8c45d1aba2 offset 0x0c",
+      "exact_quote": "6c 69 6e 6b   ..b.lcms.@..link"
+    },
+    {
+      "claim": "Winner seed carries a multi-channel device color-space FOURCC 'MCH7' at offset 0x10.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 10c7bbdb8b079566 offset 0x10",
+      "exact_quote": "4d 43 48 37 58 59 5a 20 07 d9 00 0c 00 17 00 16   MCH7XYZ ........"
+    },
+    {
+      "claim": "Loser seeds carry 'mntr' monitor class at 0x0c and 'RGB ' XYZ-PCS layout, differing from winners exactly at 0x0c-0x0f.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "   0x000c  6c(l)x10                            6d(m)x10                            DIFFER"
+    },
+    {
+      "claim": "The winner resolves the branch (true hitcount 55) while the loser never does (0).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "pair 1 avg hitcount",
+      "exact_quote": "avg hitcount on branch: winner=55  loser=0"
+    },
+    {
+      "claim": "value_profile_cmplog's mutator set adds I2SRandReplace, which value_profile lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, only havoc + token.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2092 --role W --fuzzer value_profile_cmplog --trial 1 --seed 1a518b8c45d1aba2` and observed an I2S-floor dash row (mutation_op = -) at depth 10 of the 11-level ancestor chain (ancestor 5441efb6193a1a03), the ParentInfo-only signal characteristic of an unwrapped I2SRandReplace find in vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the same switch(InPCS) default dispatch in which value_profile resolves the default arm as often as value_profile_cmplog, showing CMP_MAP gradient alone reaches the non-PCS signature without I2S substitution."
+  },
+  "weakest_evidence_point": "I cannot directly confirm that the spliced 'link'/'MCHx' FOURCC at 0x0c-0x13 is what flips InPCS to the default arm rather than some downstream parsing of those bytes, since the source overlay shows the dispatch but not the header-to-InPCS decoding.",
+  "confidence": "medium"
+}

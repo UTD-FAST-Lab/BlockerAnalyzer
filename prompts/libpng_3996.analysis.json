@@ -1,0 +1,95 @@
+{
+  "branch_id": 3996,
+  "target": "libpng",
+  "summary_one_line": "IHDR color_type byte (offset 0x19) must equal 3 (PNG_COLOR_TYPE_PALETTE) so the bKGD out-of-place check takes the true side.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The IHDR color_type byte at file offset 0x19 must hold the literal value 0x03 (PNG_COLOR_TYPE_PALETTE), which makes png_ptr->color_type == PNG_COLOR_TYPE_PALETTE true at L1932.",
+      "why_winner_satisfies": "Every cmplog winner-resolving seed carries 08 03 at offsets 0x18-0x19; the byte diff shows offset 0x0019 is 03 in all 34 winner samples, and W takes L1932 with T=55 F=0.",
+      "why_loser_doesnt": "Loser-blocking naive seeds carry color_type 06/04/00 at offset 0x19 (06x5 04x5 00x4); they never set 0x03, so L1932 stays false (T=0 F=20) and the branch is blocked.",
+      "mechanism_attribution": "cmplog logs the color_type == PNG_COLOR_TYPE_PALETTE comparison operands into the CmpLogObserver buffer; I2SRandReplace then substitutes the constant 3 into the input byte where the live color_type value appears, directly flipping the equality without random search."
+    },
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "The IHDR color_type byte at offset 0x19 must reach the exact value 3; value_profile is rewarded for each input that gets the compared operand closer to the constant.",
+      "why_winner_satisfies": "value_profile resolves the branch in 8/10 trials and the winner color_type byte at 0x0019 is concentrated on 03 (03x34), the matching constant.",
+      "why_loser_doesnt": "naive losers stall on color_type values 06/04/00 at 0x0019 with no distance feedback, so they cannot iteratively close toward 3 and remain blocked (resolved=1/10).",
+      "mechanism_attribution": "value_profile's CMP_MAP records the operand-distance bucket for the color_type == 3 comparison; a near-value (e.g. 2 or 4) that is closer to 3 than any prior input adds a new CMP_MAP bucket and is retained, giving a Hamming/distance gradient that ratchets the byte to exactly 3."
+    },
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "The IHDR color_type byte at offset 0x19 must equal 3 so the bKGD handler reaches the palette-out-of-place body; the same edge is newly rewarded under a distinct call context.",
+      "why_winner_satisfies": "naive_ctx resolves 10/10 and its winner-resolving seeds (stored under naive_ctx) carry 08 03 at 0x18-0x19, taking the W-only out-of-place body at L1934-L1938.",
+      "why_loser_doesnt": "naive (no context indexing) keeps color_type at 06/04/00, never produces 0x03, and blocks the branch in 9/10 trials with avg duration 21.60h.",
+      "mechanism_attribution": "naive_ctx's CtxHook folds the caller chain into the edge-map index, so reaching the bKGD comparison via a new call context counts as new coverage; this preserves intermediate inputs that naive discards, retaining more parent material whose havoc mutation eventually lands color_type=3 at offset 0x19."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the true side of color_type == PNG_COLOR_TYPE_PALETTE at L1932.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L1932",
+      "exact_quote": "(png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&"
+    },
+    {
+      "claim": "Winner inputs take L1932 true while losers take it false.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1932",
+      "exact_quote": "(png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&  <-- BLOCKER"
+    },
+    {
+      "claim": "All winner samples set the color_type byte at offset 0x19 to 03 while losers set 06/04/00.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0019",
+      "exact_quote": "0x0019  03(.)x34                            06(.)x5 04(.)x5 00(.)x4"
+    },
+    {
+      "claim": "cmplog winning seeds carry 08 03 at offsets 0x18-0x19.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "offset 0x0018-0x0019",
+      "exact_quote": "00 00 00 5b 00 00 00 45 08 03 00 00 01 52 ed aa"
+    },
+    {
+      "claim": "A loser-blocking naive seed carries 08 06 at offsets 0x18-0x19 (color_type 6).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 loser offset 0x0018-0x0019",
+      "exact_quote": "00 00 00 5b 00 00 00 45 08 06 00 00 01 52 ed aa"
+    },
+    {
+      "claim": "cmplog intercepts integer CMPs and I2SRandReplace substitutes one operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile preserves inputs that bring CMP operands closer to matching via a distance bucket.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "naive_ctx folds the call context into the edge-map index so the same edge under a new context is new coverage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx instrumentation",
+      "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "cmplog wins 10/10 over naive's 1/10, value_profile 8/10, naive_ctx 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pairs 1-3",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 3996 --role W --fuzzer cmplog --trial 1 --seed 14ddd5a497528d88` and observed 1 I2S-floor row (mutation_op = -) at depth 3 of the 4-level ancestor chain; the tool's trailing 'I2S-floor signal' line confirmed one dash row at depth 3, lower-bound evidence of an I2SRandReplace find in the cmplog winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on color_type == 3 in which cmplog resolves no faster than naive (no I2S advantage), or in which winners reach the branch with color_type bytes other than 0x03, would refute the offset-0x19==3 feature hypothesis."
+  },
+  "weakest_evidence_point": "The value_profile and naive_ctx attributions are inferred from mechanism descriptions and the shared 0x19==3 byte requirement; no value_profile/naive_ctx lineage was run to confirm those techniques (not I2S leakage) drove their wins.",
+  "confidence": "high"
+}

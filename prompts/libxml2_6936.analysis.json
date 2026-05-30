@@ -1,0 +1,75 @@
+{
+  "branch_id": 6936,
+  "target": "libxml2",
+  "summary_one_line": "Input must declare a DTD ATTLIST attribute of type ID and instantiate it so an attribute node carries XML_ATTRIBUTE_ID at free time",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed-enough DTD that declares an attribute of type ID (an <!ATTLIST ... ID> / xml:id-style construct) plus an element instance carrying that attribute, so the parser stamps cur->atype = XML_ATTRIBUTE_ID on the attribute node; only then does xmlFreeProp take the true branch at tree.c:2125 calling xmlRemoveID.",
+      "why_winner_satisfies": "Winner-resolving seeds reach the true branch (T=20) and carry the literal DTD/ID lexical scaffolding: byte-stable DOCTYPE keyword at offsets 0x20-0x27 ('DOCTYPE') and an 'xml:id=\"' / ':id=\"' token run, plus 34 hits on the branch; the vpc-only I2SRandReplace mutator splices the logged keyword/attribute-name comparison operands into the input bytes so the parser's string CMPs against 'ID'/the declared attribute name succeed.",
+      "why_loser_doesnt": "value_profile seeds stay on the false branch (T=0 F=19, resolved 0/10): their byte content drifts to xlink/SYSTEM/CDATA/IMPLIED scaffolding and never assembles the ATTLIST-ID declaration plus matching attribute instance, so atype never becomes XML_ATTRIBUTE_ID; lacking I2SRandReplace, vp can only push CMP_MAP distance buckets and never lands the exact multi-byte keyword equalities the ID path requires.",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace input-to-state mutator that value_profile lacks; I2S copies logged comparison operands (the 'ID' attribute-type keyword and declared attribute names parsed from the DTD) verbatim into input positions, solving the exact-string equality chain that gates atype==XML_ATTRIBUTE_ID. value_profile's distance-bucket feedback alone cannot synthesize the exact byte sequences, so it stalls."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side requires both cur->doc != NULL and cur->atype == XML_ATTRIBUTE_ID.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "tree.c:2125",
+      "exact_quote": "if ((cur->doc != NULL) && (cur->atype == XML_ATTRIBUTE_ID)) {"
+    },
+    {
+      "claim": "Taking the true branch enters the xmlRemoveID body, the ID-removal path.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "tree.c:2126",
+      "exact_quote": "xmlRemoveID(cur->doc, cur);"
+    },
+    {
+      "claim": "The winner resolved the branch in all 10 trials while the loser was blocked in all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 subject 34",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "Winner-resolving seeds carry DTD scaffolding including the DOCTYPE keyword.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed c20581314eb72916 offset 0x20",
+      "exact_quote": "44 4f 43 54 59 50 45 3a 61 00 3c 59 53 54 45 3e   DOCTYPE:a.<YSTE>"
+    },
+    {
+      "claim": "A winner seed contains an xml:id attribute token, matching the ID-attribute requirement.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 31a0f4cf800d3991 offset 0x10",
+      "exact_quote": "6c 3a 69 64 3d 22 20 3a 69 64 3d 22 26 26 73 69   l:id=\" :id=\"&&si"
+    },
+    {
+      "claim": "The winner takes the blocker true side (T=20) while the loser never does (T=0 F=19).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L2125",
+      "exact_quote": "T=20 F=0  T=0 F=19  if ((cur->doc != NULL) && (cur->atype == XML_ATTRIBUTE_ID..."
+    },
+    {
+      "claim": "value_profile_cmplog is the only involved fuzzer that has the I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and only has havoc plus token mutations.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 6936 --role W --fuzzer value_profile_cmplog --trial 1 --seed c20581314eb72916` and observed 1 I2S-floor dash row (mutation_op = -) at depth 6 of the 7-level ancestor chain, the ParentInfo-only signature of an I2SRandReplace find under the current vpc build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with an ATTLIST-declared ID attribute where value_profile resolves the atype==XML_ATTRIBUTE_ID branch as often as value_profile_cmplog, showing CMP_MAP gradient alone suffices and I2S substitution is not the decisive factor."
+  },
+  "weakest_evidence_point": "The exact comparison operand I2S splices (the literal 'ID' keyword vs the declared attribute name) is inferred from source semantics, not directly observed in the seed-byte diff at a single fixed offset.",
+  "confidence": "medium"
+}

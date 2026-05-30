@@ -1,0 +1,106 @@
+{
+  "branch_id": 2323,
+  "target": "lcms",
+  "summary_one_line": "Profile color-space signature at offset 0x10 must equal the exact 4-byte FOURCC 'MCHF' to take the case arm.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The 4 bytes at input offsets 0x10-0x13 must equal the literal FOURCC 'MCHF' (4D 43 48 46), the cmsSigMCHFData color-space signature parsed from the profile header.",
+      "why_winner_satisfies": "All cmplog winner-resolving seeds carry MCHF at offset 0x10-0x13 (4D 43 48 46), and one was produced by TokenReplace placing the MCHF token verbatim.",
+      "why_loser_doesnt": "Every naive loser-blocking seed has 'RGB ' (52 47 42 20) at offsets 0x10-0x13 instead, so the switch falls to a different/default arm and the MCHF case stays blocked.",
+      "mechanism_attribution": "cmplog intercepts the integer/string CMP of the parsed signature against cmsSigMCHFData, logs both operands, and I2SRandReplace substitutes the constant 'MCHF' at the matching input offset; naive has no such substitution and must hit the 4-byte literal by blind havoc."
+    },
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "The 4 bytes at input offsets 0x10-0x13 must equal the literal FOURCC 'MCHF' (4D 43 48 46); value_profile reaches it by climbing the prefix-distance gradient toward this 4-byte constant.",
+      "why_winner_satisfies": "The value_profile winner-resolving seed has MCHF at offset 0x10-0x13 (4D 43 48 46), reached after CMP_MAP buckets rewarded progressively-closer signature bytes.",
+      "why_loser_doesnt": "naive loser seeds keep 'RGB ' (52 47 42 20) at 0x10-0x13 and never approach MCHF, because naive lacks the per-CMP distance feedback that preserves partial-match progress.",
+      "mechanism_attribution": "value_profile's CMP_MAP records the matching-prefix length of the signature compare against cmsSigMCHFData and a new closer-prefix bucket is preserved as corpus, providing the gradient that naive's edge-only feedback cannot supply."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the cmsSigMCHFData case arm of the color-space switch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmspcs.c:935",
+      "exact_quote": "case cmsSigMCHFData:"
+    },
+    {
+      "claim": "The enclosing function switches on the parsed ColorSpace signature.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmspcs.c:879",
+      "exact_quote": "switch (ColorSpace) {"
+    },
+    {
+      "claim": "Winner seeds carry MCHF at offset 0x10-0x13 while losers carry RGB+space there.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x10-0x13",
+      "exact_quote": "0x0010  4d(M)x11                            52(R)x10"
+    },
+    {
+      "claim": "Offset 0x13 differs: winners have F (0x46), losers have a space (0x20).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x13",
+      "exact_quote": "0x0013  46(F)x11                            20( )x10"
+    },
+    {
+      "claim": "A cmplog winner-resolving seed has MCHF in its bytes and was mutated by TokenReplace.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id ad558b0fdb94c806",
+      "exact_quote": "MCHFXYZ...e....."
+    },
+    {
+      "claim": "A cmplog winner seed was produced solely by TokenReplace.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 13b3cd7b0cb830ae",
+      "exact_quote": "fuzzer=cmplog, trial=2, discovered_at=850s, mutation_op=TokenReplace"
+    },
+    {
+      "claim": "A value_profile winner-resolving seed carries MCHF.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id d1a716500a673c9c",
+      "exact_quote": "fuzzer=value_profile, trial=1, discovered_at=3353s"
+    },
+    {
+      "claim": "naive loser-blocking seeds carry RGB+space at offset 0x10.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 05c646cb9928d9d9",
+      "exact_quote": "RGB XYZ ........"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile preserves an input that produces a CMP pair closer to matching than any seen before.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "naive uses edge counters only with no I2S substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "naive blocked the branch in all 10 trials while cmplog and value_profile resolved it.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive row",
+      "exact_quote": "naive                            0       10          0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2323 --role W --fuzzer cmplog --trial 1 --seed bef582fa0bd38d3c` and observed one I2S-floor dash row (mutation_op = -) at depth 9 of the ancestor chain (tool reported '1 ancestor dash row(s) at depth 9'), the floor signal for an unwrapped I2SRandReplace find in cmplog."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose switch arm requires the exact 4-byte signature 'MCHF' at a fixed offset shows naive resolving it as fast as cmplog/value_profile (no cmplog or value_profile advantage), refuting that the 4-byte-literal gate is what blocks naive."
+  },
+  "weakest_evidence_point": "The value_profile gradient claim is inferred from mechanism description plus one winner seed; no per-CMP_MAP-bucket distance trace is shown proving prefix-distance climbing on this specific signature compare.",
+  "confidence": "high"
+}

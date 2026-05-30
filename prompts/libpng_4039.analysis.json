@@ -1,0 +1,94 @@
+{
+  "branch_id": 4039,
+  "target": "libpng",
+  "summary_one_line": "Input must contain a tIME chunk whose 4-byte type fourcc dispatches png_handle_tIME with a declared length other than 7",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A PNG chunk whose 4-byte type field equals the literal fourcc 'tIME' (74 49 4d 45), so the chunk dispatcher routes into OSS_FUZZ_png_handle_tIME, with the chunk's 4-byte big-endian declared length != 7 so line 2490 takes the true branch.",
+      "why_winner_satisfies": "Winning cmplog/vpc seeds reach OSS_FUZZ_png_handle_tIME and hit line 2490's true side (W: T=56 F=3), and the byte-diff chunk-type region (0x35-0x38) shows W carrying varied chunk fourccs (74 't', 52 'R', etc.) that I2SRandReplace can splice exact known fourccs into; the chunk-dispatch CMP against 'tIME' is solved by substitution rather than blind search.",
+      "why_loser_doesnt": "Naive/value_profile losers never take line 2490's true branch (L: T=0 F=36) and never invoke png_handle_tIME on a non-7-length tIME chunk; without I2S they cannot reliably stamp the exact 'tIME' fourcc, so their chunk-type bytes at 0x35-0x38 stay fixed at a single value (52(R)x27, 47(G)x27, 42(B)x27).",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver entry for the chunk-type-vs-'tIME' comparison and substitutes the recorded operand into the input at the matching offset, manufacturing the exact fourcc that routes to png_handle_tIME; naive/value_profile lack I2SRandReplace so cannot perform this targeted operand substitution."
+    },
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "Reaching the tIME-handling path (line 2490 true branch) via a particular call context, where the same edge counted under its caller chain registers as new coverage even though plain naive already saw the bare edge elsewhere.",
+      "why_winner_satisfies": "naive_ctx resolves 10/10 and the per-role overlay shows the true side at lines 2491-2495 fired as winner-only [W]; its CtxHook folds the call context into the edge-map index so the tIME-dispatch edge under png_handle_tIME's caller chain is a new (call-context, edge) bucket, giving energy to inputs progressing toward the chunk handler.",
+      "why_loser_doesnt": "Plain naive blocks the branch 8/10 (T=0 F=36) and spends 19.50h blocked; its bare per-edge MaxMapFeedback does not distinguish the tIME-dispatch edge by call context, so reaching png_handle_tIME with a non-7-length chunk earns no new bucket and the path is not rewarded.",
+      "mechanism_attribution": "naive_ctx's context-sensitive coverage (CtxHook running call-context hash folded into the edge-map slot) makes the (call-context, edge) pair leading into the tIME handler count as new coverage, rescuing the input that plain naive's context-blind edge map treats as already-covered."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the conditional length != 7 inside OSS_FUZZ_png_handle_tIME and the globally blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "pngrutil.c:2490",
+      "exact_quote": "Source line:    if (length != 7)\nGlobally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "Reaching this branch requires entering png_handle_tIME, i.e. the chunk dispatcher must route a tIME chunk.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "pngrutil.c:2490",
+      "exact_quote": "2490     if (length != 7) <-- BLOCKER"
+    },
+    {
+      "claim": "Winners hit the true branch of line 2490 while losers never do.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L2490",
+      "exact_quote": "d=1   L2490  T=56 F=3  T=0 F=36  if (length != 7)  <-- BLOCKER"
+    },
+    {
+      "claim": "The chunk-type fourcc region of the input diverges between winners and losers, with losers fixed at a single value.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x35-0x38",
+      "exact_quote": "0x0036  52(R)x20 49(I)x10 45(E)x10 54(T)x2 +1u  52(R)x27"
+    },
+    {
+      "claim": "cmplog and vpc add I2SRandReplace which substitutes a recorded CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive and value_profile lack I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "naive_ctx's CtxHook folds the call context into the edge-map index so the same edge counts at different slots per call path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx instrumentation",
+      "exact_quote": "The hook\nkeeps a running hash of the current call context (caller chain) and\nfolds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "naive_ctx treats a new (call-context, edge) pair as new coverage, unlike plain naive.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx feedback",
+      "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+    },
+    {
+      "claim": "naive_ctx wins the pair 10/10 while naive loses, blocked for 19.50h.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 3 naive_ctx > naive",
+      "exact_quote": "avg duration blocked: winner=0.40h  loser=19.50h"
+    },
+    {
+      "claim": "The true-branch body (2491-2495) fired only in the winner role per the coverage overlay.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "pngrutil.c:2491-2495",
+      "exact_quote": "[W]  2491     {\n[W]  2492        png_crc_finish(png_ptr, length);"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 4039 --role W --fuzzer cmplog --trial 1 --seed 015f9b31905f8499`; the ancestor chain (16 levels) contains one I2S-floor dash row (mutation_op = -) at depth 15, the lower-bound signal of an I2SRandReplace find under the current cmplog/vpc build. Covers I2S pairs 1 and 2; pair 3 (ctx_coverage) is a distinct non-I2S mechanism."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a tIME-style chunk whose 4-byte type fourcc is checked by an exact equality CMP shows no cmplog/vpc advantage over naive/value_profile at reaching the non-7-length branch (equal resolve rates), refuting the I2S-fourcc-substitution claim."
+  },
+  "weakest_evidence_point": "The I2S target offset is inferred to be the chunk-type fourcc rather than the length field; the byte diff shows fourcc-region divergence but does not directly prove I2S spliced 'tIME' versus solving the length compare.",
+  "confidence": "medium"
+}

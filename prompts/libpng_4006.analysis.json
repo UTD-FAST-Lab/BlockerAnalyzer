@@ -1,0 +1,75 @@
+{
+  "branch_id": 4006,
+  "target": "libpng",
+  "summary_one_line": "Input must carry an 'eXIf' chunk-type tag whose 4-byte chunk-length field is 0 or 1.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A PNG chunk whose 4-byte type field equals the literal 'eXIf' (so OSS_FUZZ_png_handle_eXIf dispatches) AND whose preceding 4-byte big-endian chunk-length field is < 2 (i.e. 0 or 1), forcing the length<2 TRUE branch at pngrutil.c:2047.",
+      "why_winner_satisfies": "Winner seeds are cmplog/vpc-discovered and reach the blocker at very low wall-clock time (discovered_at=4s), and the per-role overlay marks the length<2 TRUE arm (lines 2048-2052) as winner-only [W]; cmplog/vpc's I2SRandReplace can splice the logged 'eXIf' chunk-type operand and set the length operand directly so dispatch + length<2 are reached, with the branch hit 29 (vpc) / 7 (cmplog) times.",
+      "why_loser_doesnt": "naive and value_profile blocked in 10/10 trials taking only the FALSE arm (length>=2, the [L] else-branch at 2054+); without I2S substitution they must stumble on both the exact 'eXIf' type tag and a length field below 2 by blind havoc, which never happened in 23+h.",
+      "mechanism_attribution": "cmplog/vpc add I2SRandReplace which reads the post-execution CmpLogObserver buffer, finds the chunk-type comparison against 'eXIf' (and the length comparison), and substitutes the matching operand into the input bytes; naive and value_profile lack I2SRandReplace, so the only difference between each winner/loser pair is the I2S technique."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the length<2 test in png_handle_eXIf and the globally blocked (winning) side is TRUE.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "pngrutil.c:2047, blocked side T",
+      "exact_quote": "Source line:    if (length < 2)\nGlobally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "The winner-resolving arm is the length<2 TRUE branch (lines 2048-2052), exercised only by winner seeds.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L2047-L2052",
+      "exact_quote": "[B]  2047     if (length < 2) <-- BLOCKER\n[W]  2048     {\n[W]  2049        png_crc_finish(png_ptr, length);"
+    },
+    {
+      "claim": "Both decisive pairs differ solely by the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta tags",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "naive and value_profile blocked this branch in all 10 trials while their I2S-enabled counterparts resolved it.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive/value_profile rows",
+      "exact_quote": "naive                            0       10          0  loser (I2S vs cmplog)"
+    },
+    {
+      "claim": "Winner seeds reach the branch within seconds of fuzzing start.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id db598a5afacbd5af",
+      "exact_quote": "fuzzer=cmplog, trial=1, discovered_at=4s"
+    },
+    {
+      "claim": "The loser arm taken in blocking trials is the length>=2 else-branch (2054 onward), marked loser-only.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2047 W/L T/F counts",
+      "exact_quote": "d=1   L2047  T=23 F=0  T=0 F=35  if (length < 2)  <-- BLOCKER"
+    },
+    {
+      "claim": "I2SRandReplace scans the input for byte sequences matching one CMP operand and substitutes the other, the substitution mechanism enabling the winner.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive and value_profile have no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 4006 --role W --fuzzer cmplog --trial 1 --seed db598a5afacbd5af` and observed 1 I2S-floor dash row (mutation_op = -) at depth 4; corroborated with `--fuzzer value_profile_cmplog --seed e947de9b33d09385` showing 2 dash rows at depths 8 and 9. Both decisive winners' ancestor chains contain I2S-floor rows."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on an 'eXIf' type tag plus a length<2 field where naive/value_profile resolve the length<2 branch as fast as cmplog/vpc (no I2S advantage), which would mean the divergence is not driven by I2S substitution of the chunk-type/length operands."
+  },
+  "weakest_evidence_point": "Whether the I2S advantage primarily comes from splicing the 'eXIf' chunk-type tag versus the length operand itself is not separable from the byte evidence, since the length field is a runtime-parsed chunk header value that may have no stable input-byte pre-image for I2S to target.",
+  "confidence": "medium"
+}

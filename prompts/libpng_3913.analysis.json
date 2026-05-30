@@ -1,0 +1,57 @@
+{
+  "branch_id": 3913,
+  "target": "libpng",
+  "summary_one_line": "IHDR color_type byte (offset 0x19) must equal 0x03 (PNG_COLOR_TYPE_PALETTE) to take the winning true branch",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The IHDR color_type field at input offset 0x19 must hold the exact byte 0x03 (PNG_COLOR_TYPE_PALETTE); the branch at pngrtran.c:1947 compares info_ptr->color_type against the constant PNG_COLOR_TYPE_PALETTE and the true side fires only on an exact match.",
+      "why_winner_satisfies": "All 10 cmplog winner-resolving seeds carry byte 0x03 at offset 0x19 (W bytes = 03(.)x10), so the IHDR color_type equals PNG_COLOR_TYPE_PALETTE and the true side at L1947 fires (W T=10 F=0).",
+      "why_loser_doesnt": "naive loser-blocking seeds hold 0x00 or 0x04 at offset 0x19 (L bytes = 00(.)x8 04(.)x2), never the required 0x03, so the equality fails and the false side is taken every time (L T=0 F=10).",
+      "mechanism_attribution": "cmplog's CMP interception logs the runtime operand PNG_COLOR_TYPE_PALETTE (0x03) of the trace_cmp at L1947, and I2SRandReplace scans the input for the live color_type byte and substitutes 0x03 at offset 0x19, solving an exact-equality roadblock that naive's blind havoc must hit by chance over a 1-in-256 single byte."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is an equality test of color_type against PNG_COLOR_TYPE_PALETTE at pngrtran.c:1947.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "pngrtran.c:1947",
+      "exact_quote": "if (info_ptr->color_type == PNG_COLOR_TYPE_PALETTE)"
+    },
+    {
+      "claim": "All winner seeds carry byte 0x03 at offset 0x19 while loser seeds carry 0x00 or 0x04 there.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0019",
+      "exact_quote": "0x0019  03(.)x10                            00(.)x8 04(.)x2"
+    },
+    {
+      "claim": "The winner takes the true side ten of ten times while the loser takes it zero of ten.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1947",
+      "exact_quote": "L1947  T=10 F=0  T=0 F=10  if (info_ptr->color_type == PNG_COLOR_TYPE_PALETTE)  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at matching input offsets, enabling exact-match roadblock solving over naive havoc.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S mutator, only blind havoc/token mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 3913 --role W --fuzzer cmplog --trial 1 --seed 282c4c4b85d3af6c` and observed an I2S-floor row (mutation_op = -) at depth 3 of the 4-level ancestor chain. Since the decisive pair is cmplog vs naive (naive emits zero dash rows in 6000 samples), this dash row is I2S-exclusive lower-bound evidence of an I2SRandReplace find in the winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on color_type==PNG_COLOR_TYPE_PALETTE in which naive resolves the branch as fast as cmplog (no cmplog advantage), showing the single-byte exact-equality gate is not what cmplog's I2S substitution is solving."
+  },
+  "weakest_evidence_point": "The I2S-floor dash row is a lower-bound proxy (the build does not log the literal I2SRandReplace string), so the depth-3 dash ancestor is presumptive rather than definitive proof that the 0x19 byte was set by I2S substitution specifically.",
+  "confidence": "high"
+}

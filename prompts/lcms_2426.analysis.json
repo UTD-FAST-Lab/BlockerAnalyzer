@@ -1,0 +1,87 @@
+{
+  "branch_id": 2426,
+  "target": "lcms",
+  "summary_one_line": "ICC profile colorspace signatures at offsets 0x10-0x16 must be 'Lab '/'Lab ' (matching PCS), not the seeds' 'RGB '/'XYZ '.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The ICC profile header data/PCS colorspace-signature fields at byte offsets 0x10-0x12 and 0x14-0x16 must hold the literal four-char tags 'Lab ' / 'Lab ' (or another self-consistent pair like the 'link'/'lams' devicelink variant) rather than the default seed 'RGB ' / 'XYZ ', so that profile parsing drives cmsCreateExtendedTransform down a code path where AllocEmptyTransform(...) returns NULL and the blocked true branch at line 1182 is taken.",
+      "why_winner_satisfies": "Every winner-resolving seed carries 'Lab ' at 0x10-0x16 (4c 61 62 .. 4c 61 62), and the W-only coverage of lines 1183-1184 plus the L1182 divergence T=20 (W) vs T=0 (L) shows the winner alone reaches the xform==NULL true branch.",
+      "why_loser_doesnt": "Every loser-blocking seed has 'RGB ' at 0x10-0x12 and 'XYZ ' at 0x14-0x16, never the matching 'Lab '/'Lab ' pair, so it stays on the false branch (L1182 L(T/F): T=0 F=60) and the true branch remains blocked across all 10 trials.",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the post-execution CmpLogObserver buffer where lcms's four-char colorspace-signature comparisons logged the expected 'Lab ' operand, then substitutes those exact 4-byte tags into the input at the offsets where the old 'RGB '/'XYZ ' bytes appeared; naive and value_profile lack I2SRandReplace and cannot place these magic four-char tags by chance, so they never satisfy the colorspace gate."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs differ only by the I2S technique (cmplog>naive and value_profile_cmplog>value_profile).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "The second decisive pair adds I2S to a value_profile baseline.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "The blocked side is the true branch of the xform==NULL test at line 1182.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsxform.c:1182",
+      "exact_quote": "Source line:     if (xform == NULL) {"
+    },
+    {
+      "claim": "Winner-resolving seeds carry 'Lab ' at offsets 0x10-0x16 in the profile header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 row 0x0010",
+      "exact_quote": "4c 61 62 20 4c 61 62 20 07 d9 00 0c 00 17 00 16   Lab Lab"
+    },
+    {
+      "claim": "Loser-blocking seeds carry 'RGB '/'XYZ ' at offsets 0x10-0x16 instead.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1 row 0x0010",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ"
+    },
+    {
+      "claim": "Offsets 0x10-0x16 fully differ between W (Lab/Lab) and L (RGB/XYZ).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x10-0x16",
+      "exact_quote": "0x0010  4c(L)x20                            52(R)x20                            DIFFER"
+    },
+    {
+      "claim": "Only the winner takes the true branch at line 1182 while the loser only takes the false branch.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1182",
+      "exact_quote": "d=1   L1182  T=20 F=24  T=0 F=60  if (xform == NULL) {  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner-only coverage of the return path at lines 1183-1184 confirms the winner reaches the blocked true side.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmsxform.c:1183-1184",
+      "exact_quote": "[W]  1183          return NULL;"
+    },
+    {
+      "claim": "I2SRandReplace substitutes one logged CMP operand into the input at byte offsets matching the other operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive and value_profile lack the I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2426 --role W --fuzzer cmplog --trial 1 --seed 0aedfccd0898c3ff` and observed one I2S-floor dash row (mutation_op = -) at depth 16 (ancestor 5441efb6193a1a03). The same dash-row ancestor (5441efb6193a1a03 at depth 16) also appears in the vpc winner seed 143a446d794db4ae chain, corroborating I2S contribution for both decisive pairs."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness that gates the true branch on a four-char colorspace-signature equality where cmplog/vpc still fail to flip 'RGB '/'XYZ ' to 'Lab ' more often than naive/value_profile, showing the magic-tag substitution is not what resolves the branch."
+  },
+  "weakest_evidence_point": "The exact in-program comparison that AllocEmptyTransform/profile-parse performs on the 'Lab ' tag is inferred from the colorspace bytes and source context, not directly observed as a logged CMP operand.",
+  "confidence": "high"
+}

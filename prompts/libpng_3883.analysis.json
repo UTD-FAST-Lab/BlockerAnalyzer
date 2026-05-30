@@ -1,0 +1,63 @@
+{
+  "branch_id": 3883,
+  "target": "libpng",
+  "summary_one_line": "IHDR color_type byte at offset 0x19 must equal 0x03 (PNG_COLOR_TYPE_PALETTE) for the line-119 true branch to fire.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The IHDR color_type byte at file offset 0x19 must hold the exact value 0x03 (PNG_COLOR_TYPE_PALETTE). The blocker line 119 compares png_ptr->color_type, derived directly from that IHDR byte, against the PNG_COLOR_TYPE_PALETTE constant; only color_type==3 takes the true side.",
+      "why_winner_satisfies": "All 10 cmplog winning seeds carry 03 at offset 0x19 (the byte-diff shows 03(.)x10 for W with no other values), so png_handle_IHDR records color_type=PALETTE and line 119 evaluates true (W branch fires T=10 F=0).",
+      "why_loser_doesnt": "The naive loser seeds hold 00 or 04 at offset 0x19 (byte-diff shows L 00(.)x8 04(.)x2), neither of which is PNG_COLOR_TYPE_PALETTE, so line 119 is always false for the loser (L branch fires T=0 F=10) and it stays blocked all 24h.",
+      "mechanism_attribution": "cmplog's I2SRandReplace intercepts the integer CMP at line 119 (color_type vs PNG_COLOR_TYPE_PALETTE constant 3), logs the constant operand into the CmpLogObserver buffer, then substitutes that value into the matching input byte at offset 0x19; naive has no CMP introspection and must land color_type==3 by blind havoc, which it never does in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of a comparison of png_ptr->color_type against PNG_COLOR_TYPE_PALETTE at pngread.c:119.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L119",
+      "exact_quote": "else if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&"
+    },
+    {
+      "claim": "All winner seeds hold byte 0x03 at offset 0x19 while losers hold 0x00 or 0x04.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0019",
+      "exact_quote": "0x0019  03(.)x10                            00(.)x8 04(.)x2"
+    },
+    {
+      "claim": "The winner takes the true side of line 119 in all 10 trials while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L119",
+      "exact_quote": "else if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog resolves the branch in all 10 trials and naive in none, with the loser blocked the full 24h.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 subject 21",
+      "exact_quote": "avg duration blocked: winner=0.90h  loser=24.00h"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace scans the input for an operand match and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S mutator and only blind havoc/token mutations.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 3883 --role W --fuzzer cmplog --trial 1 --seed <ID>` for two winning seeds. Seed 14ddd5a497528d88 shows an I2S-floor dash row (mutation_op = -) at depth 3 (ancestor 94c47bff5687a0c9); seed 414b4a1157e93507 shows the same dash-row ancestor 94c47bff5687a0c9 at depth 21. Both winning chains descend from an unwrapped I2SRandReplace find under the current build, confirming I2S contribution (lower bound)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on color_type==3 where naive resolves the branch as readily as cmplog (no I2S advantage), i.e. cmplog does not significantly out-resolve naive at the color_type==PALETTE gate."
+  },
+  "weakest_evidence_point": "The mode & PNG_HAVE_PLTE == 0 second conjunct on line 120 is also required for the chunk-error path, but the byte controlling PLTE-absence is not isolated in the byte diff, so the single-feature claim assumes color_type is the sole limiting factor.",
+  "confidence": "high"
+}

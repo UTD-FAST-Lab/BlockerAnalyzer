@@ -59,8 +59,15 @@ VALID_CITED_SECTIONS = {
 }
 VALID_CONFIDENCE = {"high", "medium", "low"}
 VALID_MECHANISMS = {
-    "I2SRandReplace", "CMP_MAP gradient", "havoc-only",
-    "token-replace", "other",
+    # comparison-solving (roadblock)
+    "I2SRandReplace", "CMP_MAP gradient",
+    # coverage-granularity (feedback)
+    "context-sensitive coverage", "ngram coverage",
+    # mutation/scheduling
+    "grimoire structural", "mopt mutation", "calibrated energy",
+    "aflfast rarity",
+    # baseline / fallback
+    "havoc-only", "token-replace", "other",
 }
 # When claimed_mechanism is in this set, verified_in_lineage must be true OR
 # verification_method must explain (>= MIN_VMETHOD_LEN chars) why not.
@@ -236,7 +243,15 @@ def validate(analysis_path, prompt_path=None):
         # flag the obvious case where the agent contradicts itself by
         # naming a different technique outright (e.g., claim="havoc-only"
         # but mechanism_attribution mentions I2SRandReplace).
-        if claim in VALID_MECHANISMS:
+        #
+        # Only meaningful for single_feature: the top-level claimed_mechanism
+        # describes the whole branch, so a hypothesis naming a DIFFERENT
+        # technique is a contradiction. For multi_feature, distinct hypotheses
+        # legitimately attribute distinct mechanisms (e.g. one I2S hypothesis +
+        # one "grimoire structural" hypothesis on the same gate), so a global
+        # "must all match the one claimed_mechanism" check would false-positive.
+        pair_decision = data.get("pair_decision")
+        if claim in VALID_MECHANISMS and pair_decision == "single_feature":
             other_mechs = VALID_MECHANISMS - {claim, "other"}
             for i, h in enumerate(hyps if isinstance(hyps, list) else []):
                 if not isinstance(h, dict):

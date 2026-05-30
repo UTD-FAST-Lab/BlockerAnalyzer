@@ -1,0 +1,69 @@
+{
+  "branch_id": 3817,
+  "target": "libpng",
+  "summary_one_line": "A structurally valid IHDR plus a parseable PLTE chunk so libpng internally allocates the palette and sets the PNG_FREE_PLTE free_me bit.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed PNG header whose IHDR fields (width 0x5b, height 0x45, bit_depth 0x08, color_type 0x06) and chunk length/CRC bytes survive validation so that downstream PLTE-chunk handling internally allocates info_ptr->palette and sets the PNG_FREE_PLTE bit in info_ptr->free_me; only then does (mask & PNG_FREE_PLTE) & free_me evaluate non-zero (the blocked true side at png.c:649).",
+      "why_winner_satisfies": "All 10 winner seeds carry an intact IHDR — offset 0x13 is 0x5b ([) in 10/10, 0x17 is 0x45 (E) in 10/10, 0x18 is 0x08 in 9/10, 0x1d is 0x52 (R) in 10/10, 0x1e is 0xed in 10/10 — yielding a consistent dimensions/color-type/CRC region that parses cleanly; the per-role overlay shows the true side at 649 is reached only in W (T=10 F=28 for W vs T=0 F=23 for L) and the palette-freeing body lines 650-654 are W-only.",
+      "why_loser_doesnt": "Loser seeds scatter those same header fields — offset 0x16 is a0/00/80/02, 0x17 is 86/00/45/03, 0x18 is 10/08/04/02, 0x1d is 7f/00/52/ff, 0x1e adds ff/00 — corrupting IHDR length/dimensions/CRC so the parse never reaches a valid PLTE allocation; at png.c:649 the loser only ever takes the false side (T=0 F=23), so info_ptr->palette is never internally allocated and PNG_FREE_PLTE stays clear in free_me.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer of operands from libpng's chunk-length/CRC/signature integer comparisons and substitutes the expected operand at the matching input offsets, repairing the IHDR/chunk fields so the PNG parses far enough to allocate the palette; naive has only havoc/token mutators and no CMP introspection, so it cannot reliably reconstruct the multi-field valid header and stays blocked in 10/10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a bitmask test of mask & PNG_FREE_PLTE against info_ptr->free_me whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "png.c:649",
+      "exact_quote": "if (((mask & PNG_FREE_PLTE) & info_ptr->free_me) != 0)"
+    },
+    {
+      "claim": "The true (palette-freeing) side at 649 and its body are reached only by winner-resolving seeds.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "png.c:649-654",
+      "exact_quote": "[W]   651        png_free(png_ptr, info_ptr->palette);"
+    },
+    {
+      "claim": "At branch 649 the winner takes the true side ten times while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L 649",
+      "exact_quote": "d=1   L 649  T=10 F=28  T=0 F=23  if (((mask & PNG_FREE_PLTE) & info_ptr->free_me) != 0)  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner seeds carry a consistent intact IHDR field region.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0013, 0x0017",
+      "exact_quote": "0x0013  5b([)x10                            5b([)x2 55(U)x1 0a(.)x1 05(.)x1 +5u  PARTIAL"
+    },
+    {
+      "claim": "Loser seeds scatter the IHDR dimension/length bytes that winners hold constant.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0016",
+      "exact_quote": "0x0016  00(.)x10                            a0(.)x4 00(.)x3 80(.)x2 02(.)x1     PARTIAL"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes one logged CMP operand at offsets where the other operand matches.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has only havoc and token mutators with no I2S capability.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 3817 --role W --fuzzer cmplog --trial 1 --seed 013b9f2a08a04135` and observed one I2S-floor dash row (mutation_op = -, ParentInfo-only) at depth 6 of the 7-level ancestor chain; the tool's trailing summary reported `1 ancestor dash row(s) at depth 6`, direct lower-bound evidence of an I2SRandReplace find in this cmplog seed's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A naive (no-I2S) trial reaching the true side at png.c:649 in a comparable fraction of trials, or a synthetic harness where corrupting only IHDR/chunk-length CMP-checked fields fails to gate cmplog's advantage over naive."
+  },
+  "weakest_evidence_point": "The mapping from input header bytes to the runtime info_ptr->free_me PNG_FREE_PLTE bit is inferred from source structure and per-role coverage, not directly traced, so I cannot prove the specific CMP whose operands I2S repaired.",
+  "confidence": "medium"
+}

@@ -1,0 +1,87 @@
+{
+  "branch_id": 7038,
+  "target": "libxml2",
+  "summary_one_line": "The reference URI's path component must begin with a literal '/' so ref->path[0]=='/' takes the absolute-path branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A parsed reference-URI path whose first character is a slash: the systemId/URI string must contain a path token beginning with '/' (e.g. SYSTEM \"/tds/1\"), so that after URI parsing ref->path != NULL and ref->path[0] == '/' (0x2f).",
+      "why_winner_satisfies": "Every cmplog winner seed carries a SYSTEM-id path that starts with '/': seed 1 has SYSTEM \"/tds/1, seed 2 has SYSTEM \"/////=, seed 3 has SYSTEM \"/t@.'', seed 5 has SYSTEM \"/tds//. The slash at the path start makes ref->path[0]=='/' true, taking the blocked T side (W-only lines 2065-2067 are hit).",
+      "why_loser_doesnt": "The naive loser seeds put a non-slash first character in the path: seeds 1 and 2 have SYSTEM \"dtds/1 (path begins with 'd'), so ref->path[0] != '/'. The branch evaluates false and execution falls into the relative-path merge block (L-only lines 2078-2133).",
+      "mechanism_attribution": "cmplog intercepts the single-byte comparison ref->path[0]=='/' via __sanitizer_cov_trace_cmp1 and logs operand 0x2f ('/'); I2SRandReplace then scans the input and substitutes '/' at the path-start offset, directly synthesizing the absolute-path prefix. naive has no CMP introspection and must hit the exact slash by blind havoc, which it largely fails to do (1/10 resolved)."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the true side of ref->path[0]=='/', the absolute-path test.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "uri.c:2064:32",
+      "exact_quote": "if ((ref->path != NULL) && (ref->path[0] == '/')) {"
+    },
+    {
+      "claim": "Taking the true side jumps to step_7 (the W-only path-copy), confirming this branch gates the absolute-path resolution.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L2065-2067",
+      "exact_quote": "[W]  2065  \tres->path = xmlMemStrdup(ref->path);"
+    },
+    {
+      "claim": "Winner cmplog seeds contain a SYSTEM-id whose path begins with '/'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 1 id=6c78d3f922fb9894 offset 0x30",
+      "exact_quote": "61 20 53 59 53 54 45 4d 20 22 2f 74 64 73 2f 31   a SYSTEM \"/tds/1"
+    },
+    {
+      "claim": "Another winner seed has a run of slashes at the path start.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 2 id=0a8ffe5adb5dead8 offset 0x30",
+      "exact_quote": "61 20 53 59 53 54 45 4d 20 22 2f 2f 2f 2f 2f 3d   a SYSTEM \"/////="
+    },
+    {
+      "claim": "Loser naive seeds put 'd' (not '/') as the first path character.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 1 id=022872fb8319f510 offset 0x30",
+      "exact_quote": "61 20 53 59 53 54 45 4d 20 22 64 74 64 73 2f 31   a SYSTEM \"dtds/1"
+    },
+    {
+      "claim": "The loser falls into the relative-path merge block instead of the absolute-path copy.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L2078",
+      "exact_quote": "[L]  2078      len = 2; /* extra / and 0 */"
+    },
+    {
+      "claim": "At the blocker line the winner takes T while the loser never does (W T=10 F=0, L T=0 F=13).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L2064",
+      "exact_quote": "L2064  T=10 F=0  T=0 F=13  if ((ref->path != NULL) && (ref->path[0] == '/')) {  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog intercepts integer CMP operands and I2SRandReplace substitutes the matched operand into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mutator and so cannot solve the CMP except by blind havoc.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog resolves the branch in all 10 trials while naive resolves only 1.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 7038 --role W --fuzzer cmplog --trial 1 --seed 6c78d3f922fb9894` and observed two I2S-floor dash rows (mutation_op = -) at depths 1 and 2 of the ancestor chain; the tool reports 'I2S-floor signal: 2 ancestor dash row(s) at depth 1, 2.'"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on ref->path[0]=='/' where naive resolves the branch as fast as cmplog (no cmplog advantage), or where forcing a non-slash first path byte still takes the true side — either would refute the single-byte '/' I2S substitution as the divergence cause."
+  },
+  "weakest_evidence_point": "The single-byte comparison ref->path[0]=='/' is a 1-byte CMP, which is also reachable by blind havoc; the attribution rests on cmplog's 10/10 vs naive's 1/10 plus the dash-row lineage floor rather than a direct I2SRandReplace name in metadata.",
+  "confidence": "high"
+}

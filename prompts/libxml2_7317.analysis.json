@@ -1,0 +1,94 @@
+{
+  "branch_id": 7317,
+  "target": "libxml2",
+  "summary_one_line": "Input must declare a DEFAULT namespace (xmlns with no prefix, cur->prefix==NULL) so serialization writes \"xmlns\" not \"xmlns:\".",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)", "value_profile>naive (value_profile)"],
+      "what_input_feature": "An XML element bearing a namespace declaration whose prefix is NULL (a default namespace, e.g. xmlns=\"...\"), rather than a prefixed namespace (xmlns:foo=\"...\"). The serializer reaches line 603 and the cur->prefix!=NULL test is FALSE, so it writes the 5-byte \"xmlns\" at line 607 instead of \"xmlns:\"+prefix at 604-605.",
+      "why_winner_satisfies": "value_profile / value_profile_cmplog winners resolve the false side (only [W] hits line 607 'xmlns'); their CMP_MAP gradient feedback rewards inputs that drive the parser progressively closer to constructing a namespace node with prefix==NULL, so they synthesize a well-formed default-namespace declaration that round-trips into the dump path with cur->prefix NULL.",
+      "why_loser_doesnt": "naive and cmplog losers only ever take the true side (line 603 BLOCKER shows W F=43 vs L T=11, and [L] marks lines 604-605 'xmlns:'); they reach xmlNsDumpOutput only with prefixed namespaces, so cur->prefix is non-NULL and the false branch is never executed (loser hitcount on branch = 0/1).",
+      "mechanism_attribution": "CMP_MAP gradient: value_profile's per-CMP Hamming/prefix-distance buckets give partial credit on the comparison sequence that the parser must satisfy to construct a default-namespace node, letting it ratchet toward the prefix==NULL structure that naive (no gradient) and cmplog (gradient absent) cannot incrementally discover."
+    },
+    {
+      "covers_pairs": ["grimoire>cmplog (grimoire_structural)"],
+      "what_input_feature": "Same program-side condition (a default namespace declaration so cur->prefix==NULL at line 603), but reached by structural recombination: a generalized XML token/gap structure spliced to place a bare xmlns (no prefix) on an element.",
+      "why_winner_satisfies": "grimoire resolves the false side in 10/10 trials with a very high branch hitcount (625), consistent with its GeneralizationStage + Grimoire structural mutators repeatedly splicing generalized markup tokens into many valid default-namespace declarations that all flow into xmlNsDumpOutput with prefix==NULL.",
+      "why_loser_doesnt": "cmplog (the single-technique baseline for this pair, sharing I2S but lacking generalization + Grimoire mutators) stays blocked 8/10 with branch hitcount 0; its byte-level havoc+I2S mutations do not assemble the structural default-namespace element needed to take the false branch.",
+      "mechanism_attribution": "grimoire structural: the GeneralizationStage replaces concrete byte runs with <GAP> placeholders and the Grimoire mutators splice/recurse on these generalized token structures, building syntactically valid XML that carries a prefix-less (default) namespace declaration, which byte-level cmplog mutation does not reach."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the false branch of the cur->prefix!=NULL test, i.e. the default-namespace path.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "xmlsave.c:603:6, false branch",
+      "exact_quote": "Source line: \tif (cur->prefix != NULL) {\nGlobally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "The false branch writes the 5-byte string xmlns (default namespace), the true branch writes xmlns: plus the prefix.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L604-607",
+      "exact_quote": "[L]   604  \t    xmlOutputBufferWrite(buf, 6, \"xmlns:\");"
+    },
+    {
+      "claim": "Only the winner-resolving role hits line 607 (the xmlns default-namespace write); the loser role hits the prefixed lines.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L607",
+      "exact_quote": "[W]   607  \t    xmlOutputBufferWrite(buf, 5, \"xmlns\");"
+    },
+    {
+      "claim": "At the blocker line the winner role takes the false side while the loser role only takes the true side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L603",
+      "exact_quote": "d=1   L 603  T=0 F=43  T=11 F=0  if (cur->prefix != NULL) {  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile beats naive and value_profile_cmplog beats cmplog, both on the value_profile technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 3",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "value_profile's distance buckets give partial credit measuring how close two CMP operands were to matching.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile",
+      "exact_quote": "each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket). The distance bucket is a coarse encoding of how close the two\noperands were"
+    },
+    {
+      "claim": "grimoire wins over cmplog on the grimoire_structural delta and produces a very high branch hitcount.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "--- Pair 2: grimoire > cmplog  [delta: grimoire_structural] ---"
+    },
+    {
+      "claim": "grimoire resolves the branch in 10/10 trials with hitcount 625 while cmplog stays at 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 hitcount",
+      "exact_quote": "avg hitcount on branch: winner=625  loser=0"
+    },
+    {
+      "claim": "grimoire's GeneralizationStage and Grimoire mutators splice generalized token/gap structures (string-based structural mutation).",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire",
+      "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+    },
+    {
+      "claim": "The single-technique delta for the grimoire pair is grimoire vs cmplog (both have I2S; grimoire adds generalization + Grimoire mutators).",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire baseline relationship",
+      "exact_quote": "The single-technique delta is therefore\n`grimoire` vs `cmplog` (both have I2S; grimoire adds generalization +\nGrimoire mutators), not vs naive."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Neither decisive technique is I2SRandReplace (Pairs 1/3 isolate the value_profile CMP_MAP gradient; Pair 2 isolates grimoire_structural), so the mandatory I2S lineage check does not apply. I primary-claim the CMP_MAP gradient for the value_profile pairs. The displayed winner-resolving seeds were stored by grimoire (some tagged I2SRandReplace in mutation_op), which is auxiliary provenance under seed_bisect's lex-min storing-fuzzer note, not the value_profile winner's chain; I did not run lineage because the value_profile mechanism is not I2S and dash rows are non-exclusive against grimoire."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the only namespace form reachable is a default (prefix-less) namespace, yet naive/cmplog still fail to resolve the false branch while value_profile/grimoire do — showing the divergence is not driven by the prefix==NULL structural feature but by some unrelated property."
+  },
+  "weakest_evidence_point": "The exact CMP sequence whose Hamming/prefix-distance gradient value_profile exploits to construct a prefix==NULL namespace is inferred from the source path, not directly observed in a value_profile winner seed's lineage.",
+  "confidence": "medium"
+}

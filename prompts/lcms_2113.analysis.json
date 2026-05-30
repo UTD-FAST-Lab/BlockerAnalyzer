@@ -1,0 +1,75 @@
+{
+  "branch_id": 2113,
+  "target": "lcms",
+  "summary_one_line": "Input must encode parametric-curve Type==5 so the switch(Type) dispatches into the case 5 arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A tone-curve descriptor in the ICC profile whose parametric-curve Type field equals exactly 5, so the switch(Type) at cmsgamma.c:344 selects the case 5: arm at line 542 instead of any of the other ~22 arms.",
+      "why_winner_satisfies": "cmplog/vpc winners drive the case 5: true side (DIVERGENT BRANCHES shows L 542 T=607000 in W vs T=0 in L), having substituted the exact integer 5 into the Type field via I2S; W coverage marks case 5: and its body lines 543-553 as winner-only [W].",
+      "why_loser_doesnt": "naive/value_profile losers never reach the true side of case 5: (L 542 T=0 F=204000), so they exercise some other Type arm (case 1/4/-4 are [B]) but never produce the discrete Type value 5 within the 10-trial budget.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the switch comparison operand (the constant 5) from the CmpLogObserver buffer and splices it into the input bytes that feed the Type field; the equality jump on a discrete switch constant is exactly the roadblock I2S solves and naive/value_profile (lacking I2S) cannot reliably hit through blind byte mutation. value_profile_cmplog shares the same I2SRandReplace stage, which is why it wins over plain value_profile."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the case 5: arm of a switch(Type) dispatcher in DefaultEvalParametricFn.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsgamma.c:542:5",
+      "exact_quote": "Source line:     case 5:"
+    },
+    {
+      "claim": "The arm is selected by switch(Type), making the required input feature a specific discrete Type value.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L344",
+      "exact_quote": "switch (Type) {"
+    },
+    {
+      "claim": "Winners take the case 5: true side at high count while losers never do.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L542",
+      "exact_quote": "case 5:  <-- BLOCKER"
+    },
+    {
+      "claim": "The case 5: arm and its body are winner-only coverage.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L542-L553",
+      "exact_quote": "[W]   542  case 5: <-- BLOCKER"
+    },
+    {
+      "claim": "Both decisive pairs are I2S-technique deltas with the loser fully blocked.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 / Pair 2",
+      "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "cmplog augments naive with I2SRandReplace, which substitutes one CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive (a loser) has no I2S stage, so it cannot solve the switch-constant equality directly.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile_cmplog includes I2SRandReplace whereas plain value_profile does not.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2113 --role W --fuzzer cmplog --trial 1 --seed 71d06d31108d6fe2` and observed an I2S-floor dash row (mutation_op = -) at depth 3 of the 4-level ancestor chain; tool reported '1 ancestor dash row(s) at depth 3', direct lower-bound evidence of an I2SRandReplace find in this cmplog winner."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic switch(Type) harness gated on the discrete constant 5 in which naive resolves the case 5: arm as fast as cmplog/vpc, showing I2S substitution is not the differentiator."
+  },
+  "weakest_evidence_point": "The exact input offset carrying the Type field is not isolated in the BYTE DIFF (all offsets are PARTIAL with mixed bytes), so the precise byte that I2S substitutes 5 into is inferred from source/lineage rather than directly seen.",
+  "confidence": "high"
+}

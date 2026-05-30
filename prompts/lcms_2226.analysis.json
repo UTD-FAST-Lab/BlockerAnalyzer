@@ -1,0 +1,63 @@
+{
+  "branch_id": 2226,
+  "target": "lcms",
+  "summary_one_line": "An ICC profile whose embedded tone curve evaluates to y >= 131072.0 at some sample point, forcing the false branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "An ICC profile carrying a tone-curve (Curve1) whose cmsEvalToneCurveFloat output for at least one of the 256 samples is >= 131072.0, so the comparison `if (y < 131072.0)` takes its false side. Reaching this requires a well-formed profile header (`acsp`/`mntr` magic, valid colorspace tag e.g. Lab/XYZ) plus curve-tag bytes whose decoded float magnitude is enormous.",
+      "why_winner_satisfies": "Winner-resolving seeds reach the curve evaluation and take the false branch 5580/5599 times (W shows F=5580 on the blocker), and the BYTE DIFF shows winners carrying alternate colorspace/tag bytes (4c 'L', 61 'a', 62 'b' at offsets 0x14-0x16) and a `63 'c'` at 0x2c absent in losers, i.e. a distinct parsed-profile configuration that drives the curve into the large-output regime.",
+      "why_loser_doesnt": "Loser-blocking seeds execute the curve evaluation but the false side is never taken (L shows T=15300 F=0 on the blocker); their bytes hold only the unmodified `58 'X' 59 'Y' 5a 'Z'` colorspace and zeros at the differentiating offsets, so the tone curve always evaluates below 131072.0.",
+      "mechanism_attribution": "cmplog/vpc carry I2SRandReplace, which reads the per-execution CmpLogObserver and substitutes one comparison operand for the other at matching input offsets, planting the exact tag/curve bytes whose decoded float clears the 131072.0 magnitude threshold; the two winners (cmplog, value_profile_cmplog) both add I2S over their non-I2S sibling (naive, value_profile), so the divergence is attributable to the I2S technique delta."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the false branch of a float comparison against 131072.0 driven by the tone-curve evaluation.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1572-L1575",
+      "exact_quote": "if (y < 131072.0) <-- BLOCKER"
+    },
+    {
+      "claim": "y is the output of cmsEvalToneCurveFloat over a parsed Curve, so the input must shape that curve.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1570",
+      "exact_quote": "y   = cmsEvalToneCurveFloat(Curve, R);"
+    },
+    {
+      "claim": "Winner-resolving seeds carry distinct colorspace/tag bytes (Lab) where loser seeds keep XYZ, marking a different parsed-profile configuration.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0014",
+      "exact_quote": "58(X)x11 4c(L)x4                    58(X)x20"
+    },
+    {
+      "claim": "Loser-blocking seeds take only the true side of the blocker (F=0), never reaching the large-output regime.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1572",
+      "exact_quote": "T=5930 F=5580  T=15300 F=0"
+    },
+    {
+      "claim": "Both decisive winners differ from their loser only by the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta",
+      "exact_quote": "value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "cmplog/vpc add the I2SRandReplace mutator that substitutes a logged comparison operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2226 --role W --fuzzer cmplog --trial 1 --seed 71deaabf621459a6` and observed one I2S-floor row (mutation_op = -) at depth 6 of the 7-level ancestor chain; the tool's trailing signal confirms `1 ancestor dash row(s) at depth 6`, characteristic of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the float-comparand threshold is reachable only via input bytes that have no pre-image in the comparison-operand stream (e.g. the large y is computed from buffer length, not from any input-byte sequence) should show cmplog/vpc NOT beating naive/value_profile; if I2S still wins there, the attribution to operand-substitution is wrong."
+  },
+  "weakest_evidence_point": "The byte-diff offsets (0x14-0x16 colorspace tag, 0x2c) are correlated with the winning configuration but the prompt does not directly show that those bytes are the comparison operand I2S planted to push y past 131072.0.",
+  "confidence": "medium"
+}

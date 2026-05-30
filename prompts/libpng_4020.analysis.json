@@ -1,0 +1,75 @@
+{
+  "branch_id": 4020,
+  "target": "libpng",
+  "summary_one_line": "Input must contain a pHYs chunk (FOURCC 'pHYs' = 70 48 59 73) so png_handle_pHYs is dispatched and the length!=9 test is reached.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A chunk whose 4-byte type field equals the ASCII literal 'pHYs' (70 48 59 73). The PNG chunk-type dispatcher only calls png_handle_pHYs when the chunk type matches 'pHYs'; without that exact FOURCC the code at pngrutil.c:2180 (if (length != 9)) is never reached, let alone resolved.",
+      "why_winner_satisfies": "Winner-resolving seed 2 (vpc, trial 1) carries the literal bytes 70 48 59 73 ('pHYs') at offset 0x25-0x28, so the dispatcher invokes png_handle_pHYs and the branch is exercised 103 times; W reaches line 2180 with T=15/F=6.",
+      "why_loser_doesnt": "Every loser-blocking seed has 67 41 4d 41 ('gAMA') at offset 0x25-0x28 and no pHYs FOURCC, so png_handle_pHYs is never dispatched; L records T=0 F=13 at line 2180 (the branch is never reached) and the loser blocks 9/10 trials.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile: the chunk-type comparison against the 'pHYs' constant is logged in the CmpLogObserver, and I2SRandReplace splices that logged 4-byte constant directly into the input where the (mutated) chunk-type bytes sit, manufacturing a valid 'pHYs' FOURCC in seconds. value_profile lacks I2SRandReplace and must blunder the exact 4-byte token by chance, which it fails to do."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the length test inside png_handle_pHYs and the globally-blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "pngrutil.c:2180:8",
+      "exact_quote": "Source line:    if (length != 9)"
+    },
+    {
+      "claim": "A winner-resolving seed carries the literal 'pHYs' FOURCC at offset 0x25.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0997284f41d33d90, offset 0x25-0x28",
+      "exact_quote": "e4 00 00 00 04 70 48 59 73 00 00 b1 8f 0b fc 61   .....pHYs......a"
+    },
+    {
+      "claim": "Loser-blocking seeds carry 'gAMA' rather than 'pHYs' at the same chunk-type offset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 024188c1a0b8a2c2, offset 0x25-0x28",
+      "exact_quote": "e4 00 00 00 04 67 41 4d 41 00 00 b1 8f 3a 3a 3a   .....gAMA....:::"
+    },
+    {
+      "claim": "The winner reaches and exercises line 2180 while the loser never reaches it.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2180",
+      "exact_quote": "d=1   L2180  T=15 F=6  T=0 F=13  if (length != 9)  <-- BLOCKER"
+    },
+    {
+      "claim": "The branch dispatch into png_handle_pHYs is gated on the chunk type and the byte-diff shows winners flipping the chunk-type bytes toward a different FOURCC.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x25-0x28",
+      "exact_quote": "0x0025  67(g)x14 70(p)x1                    67(g)x12 66(f)x1                    PARTIAL"
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace while value_profile does not, which is the single technique delta of the decisive pair.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog over value_profile with an I2S technique delta and large divergence.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 4020 --role W --fuzzer value_profile_cmplog --trial 1 --seed 60e9d782d27cdf4b` and observed an I2S-floor dash row (mutation_op = -, ParentInfo-only) at depth 4 of the ancestor chain, the floor signal for an unwrapped I2SRandReplace find in vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the pHYs chunk-type comparison is replaced by a runtime-derived (non-input-byte) dispatch key showing value_profile_cmplog losing its advantage over value_profile would refute the I2S-substitution mechanism; conversely, if value_profile resolves the branch at the same rate as vpc once an exact-FOURCC token gate is present, the I2S attribution is wrong."
+  },
+  "weakest_evidence_point": "Only one of five winner seeds shows the literal 'pHYs' FOURCC (the rest carry 'gAMA'), so the byte evidence that the FOURCC is the resolving feature rather than a co-occurring length/IHDR change rests on a single seed plus the dispatch-gating source logic.",
+  "confidence": "medium"
+}

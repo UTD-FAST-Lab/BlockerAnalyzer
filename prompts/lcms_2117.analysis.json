@@ -1,0 +1,99 @@
+{
+  "branch_id": 2117,
+  "target": "lcms",
+  "summary_one_line": "ICC profile bytes that route parsing into ReadSetOfCurves with a failed curve slot, freeing a NULL Curve (true branch)",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "An ICC profile whose header signature bytes form a class/tag combination (device class 'link' at offsets 0x0c-0x0f) that dispatches parsing into ReadSetOfCurves, where at least one ReadEmbeddedCurve call returns NULL so the Error cleanup loop calls cmsFreeToneCurve(Curves[i]) on a NULL slot, taking the Curve==NULL true branch.",
+      "why_winner_satisfies": "Winner seeds carry the bytes 6c 69 6e 6b ('link') at offsets 0x0c-0x0f and reach the ReadSetOfCurves caller (its full body is marked [W] winner-resolving only), so the NULL-init array slots (Curves[i]=NULL at line 2505, left NULL after a goto Error) are passed to cmsFreeToneCurve, hitting the true branch (W shows T=81 on line 910).",
+      "why_loser_doesnt": "Loser seeds carry 6d 6e 74 72 ('mntr') at offsets 0x0c-0x0f and never enter the ReadSetOfCurves caller (its body lines are [L]-absent), so cmsFreeToneCurve is only ever invoked on non-NULL curves elsewhere (L shows T=0 F=110 on line 910), never reaching the NULL early-return true side.",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator that value_profile lacks; the I2S stage substitutes the exact 4-byte signature operands the ICC parser compares against (e.g. the 'link' device-class FOURCC) into the input at the offsets where those bytes already appear, flipping 'mntr' to 'link' and steering parsing into the ReadSetOfCurves dispatch that value_profile's distance-bucket feedback alone never crossed."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the true branch of Curve==NULL inside cmsFreeToneCurve.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsgamma.c:910",
+      "exact_quote": "if (Curve == NULL) return;"
+    },
+    {
+      "claim": "The globally blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 7",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog over value_profile with an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The caller ReadSetOfCurves initializes the curve array to NULL and frees every slot in an Error cleanup loop.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmstypes.c:2505,2519",
+      "exact_quote": "Curves[i] = NULL;"
+    },
+    {
+      "claim": "The cleanup loop calls cmsFreeToneCurve on each slot, including NULL ones, reaching the blocker.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmstypes.c:2519",
+      "exact_quote": "cmsFreeToneCurve(Curves[i]); <-- CALL"
+    },
+    {
+      "claim": "The winner takes the true branch (T=81) on line 910 while the loser never does (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 910",
+      "exact_quote": "d=1   L 910  T=81 F=21  T=0 F=110  if (Curve == NULL) return;  <-- BLOCKER"
+    },
+    {
+      "claim": "The ReadSetOfCurves caller body is hit only by winner-resolving seeds.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmstypes.c:2495",
+      "exact_quote": "[W]  2495  {"
+    },
+    {
+      "claim": "Winner seeds carry the device-class bytes 'link' at offsets 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 1b224ee16a374e60 offsets 0x0c-0x0f",
+      "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 6c 69 6e 6b   ..b.lcms.@..link"
+    },
+    {
+      "claim": "Loser seeds carry the device-class bytes 'mntr' at offsets 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0313315f3b972394 offsets 0x0c-0x0f",
+      "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 6d 6e 74 72   ..b.lcms.@..mntr"
+    },
+    {
+      "claim": "The byte sets at offsets 0x0c-0x0f differ between W (link) and L (mntr), a concentrated dataflow signal.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  6c(l)x10                            6d(m)x9 6c(l)x1"
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace over value_profile's CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2117 --role W --fuzzer value_profile_cmplog --trial 1 --seed 1b224ee16a374e60` and observed an I2S-floor dash row (mutation_op = -) at depth 9 of the 10-level ancestor chain; tool reported '1 ancestor dash row(s) at depth 9', characteristic of an unwrapped I2SRandReplace find in vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile resolves the Curve==NULL true branch as often as value_profile_cmplog despite the FOURCC dispatch gate, showing the I2S substitution of the signature bytes is not what unlocks the ReadSetOfCurves NULL-free path."
+  },
+  "weakest_evidence_point": "That the specific 'link' vs 'mntr' device-class FOURCC is the exact CMP operand I2S substitutes is inferred from the byte diff and caller [W]-only coverage, not confirmed by reading the lcms profile-class dispatch source in the prompt.",
+  "confidence": "medium"
+}

@@ -1,0 +1,69 @@
+{
+  "branch_id": 7250,
+  "target": "libxml2",
+  "summary_one_line": "Input must parse as namespaced XML so the document carries a non-NULL oldNs list reached at free time.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed XML prolog (<?xml version=\"1.0\"?>, DOCTYPE) followed by namespace-bearing constructs (xmlns / xlink:href) so the parser builds a document whose cur->oldNs list is non-NULL when xmlTextReaderFreeDoc frees it.",
+      "why_winner_satisfies": "Winner cmplog seeds carry intact structural literals at fixed offsets: the '<?xml version=\"1' header at 0x10-0x1f and 'DOCTYPE a SYSTEM \"dtds/1' at 0x20+, plus xmlns(xlink and xlink:href tokens; these drive a successful parse that constructs the namespace list, and on the branch the winner takes the True side (T=4 F=0).",
+      "why_loser_doesnt": "Loser naive seeds corrupt the leading/structural bytes (e.g. 0x00 run, '88888I\"1', long '////' runs at offset 0) so the prolog/namespace machinery never builds an oldNs list; on the blocker line the loser is T=0 F=10, never taking the True side.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads logged CMP operands (the XML keyword/literal byte sequences the parser compares against) from the CmpLogObserver buffer and substitutes the expected operand at matching input offsets, repairing the structural literals so the parse reaches namespace construction; naive lacks CMP introspection and must hit the same multi-byte literals by blind havoc."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the True side of a NULL-check on cur->oldNs inside the document-free path.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L496, globally blocked side T",
+      "exact_quote": "if (cur->oldNs != NULL) xmlFreeNsList(cur->oldNs);"
+    },
+    {
+      "claim": "On the blocker line the winner always takes the True side while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L496",
+      "exact_quote": "d=1   L 496  T=4 F=0  T=0 F=10  if (cur->oldNs != NULL) xmlFreeNsList(cur->oldNs);"
+    },
+    {
+      "claim": "Winner seeds contain an intact XML prolog and DOCTYPE structural literals.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 51fd9b36079604e3 offsets 0x10-0x2f",
+      "exact_quote": "3c 3f 78 6d 6c 20 76 65 72 73 69 6f 6e 3d 22 31   <?xml version=\"1"
+    },
+    {
+      "claim": "Winner seeds carry xmlns / xlink namespace tokens that drive namespace-list construction.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed f32dee7a138d773b offset 0x10-0x20",
+      "exact_quote": "78 6c 69 6e 6b 20 20 43 44 41 54 41 20 20 20 20   xlink  CDATA    "
+    },
+    {
+      "claim": "Loser seeds corrupt the leading bytes so the structural parse never establishes the namespace list.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 003a9c177fd1ad1c offset 0x00",
+      "exact_quote": "38 38 38 38 38 49 22 31 00 31 32 37 37 37 32 2e   88888I\"1.127772."
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which scans the input for one logged CMP operand and substitutes the other at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S and must reach the structural literals by blind havoc/token mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 7250 --role W --fuzzer cmplog --trial 1 --seed 51fd9b36079604e3` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 3 and depth 4 of the ancestor chain, the floor signal for an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating the same oldNs-non-NULL branch behind a multi-byte XML literal where cmplog and naive resolve at statistically indistinguishable rates would refute the I2S attribution."
+  },
+  "weakest_evidence_point": "The byte diff shows W/L differing across nearly all offsets (frame shift from BytesDelete/Insert), so I cannot isolate one CMP operand offset that I2S specifically repaired.",
+  "confidence": "medium"
+}

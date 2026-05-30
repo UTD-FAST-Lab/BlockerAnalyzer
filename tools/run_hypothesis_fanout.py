@@ -18,16 +18,29 @@ the parallel/sequential dispatch plan.
 
 This script does NOT invoke the agent — feature-hypothesis-generator
 is a Claude Code subagent dispatched from a Claude session. The
-manifest is the contract Claude reads to drive dispatch:
-- across groups: parallel (one Agent call per group running concurrently)
-- within group: sequential (each call sees prior templates on disk)
+manifest is the contract Claude reads to drive dispatch.
 
-Grouping. By default, groups are `(target, primary_delta)` where
-primary_delta is the delta of the highest-prob_div decisive pair on
-the branch. Most branches have all decisive pairs under one delta, so
-this is a clean partition. Use `--group-by target` to merge all deltas
-for a target into one group (fewer parallel groups, longer sequential
-chains).
+DISPATCH IS FLAT PARALLEL (analysis-only contract, 2026-05-17). Each
+branch is analyzed IN ISOLATION — the agent does NOT read another
+agent's output, does NOT compare against templates/, and does NOT emit
+template.c. So there is NO sequential dependency between calls: all
+`all_calls` entries are mutually independent and may run in any order at
+full parallelism (the harness caps concurrency). The manifest exposes a
+flat `all_calls` list as the dispatch unit; `groups` is retained ONLY as
+a cosmetic prompt-folder organization (findability), carrying no
+ordering or sequencing meaning.
+
+(Historically dispatch was across-groups-parallel / within-group-
+sequential so a later agent could see earlier agents' template.c on disk
+and match-existing. That rationale died with the analysis-only contract:
+classification + template authoring moved to steps 5a/5b, so 4b agents
+no longer share on-disk state and need not be sequenced. Shape grouping
+is therefore vestigial — kept as a folder label, not a dispatch axis.)
+
+Grouping (folder label only). `--group-by shape` (default) buckets
+prompts by decisive shape for findability; `--group-by target` /
+`target-delta` are alternative folder layouts. NONE of these change
+dispatch semantics — every call is independent regardless of grouping.
 
 Skipping. By default reads `templates/branch_index.json` and skips any
 (target, branch_id) already covered by an existing template. Pass
@@ -99,6 +112,8 @@ def shape_from_row(row, winner_thr=8, loser_thr=8):
 
 
 def group_key(row, group_by):
+    if group_by == "flat":
+        return ()  # no subfolder — all prompts directly under outdir
     if group_by == "shape":
         return (shape_from_row(row),)
     if group_by == "shape-target":
@@ -112,7 +127,7 @@ def group_key(row, group_by):
 
 
 def group_id(key):
-    return "__".join(key)
+    return "__".join(key) if key else ""
 
 
 def load_skip_index(path):
@@ -154,12 +169,15 @@ def main():
     ap.add_argument("--outdir", default=str(DEFAULT_OUTDIR),
                     help=f"manifest + prompts root (default {DEFAULT_OUTDIR})")
     ap.add_argument("--group-by",
-                    choices=["shape", "shape-target", "target", "target-delta"],
-                    default="shape",
-                    help="grouping key for the dispatch plan. Default 'shape': "
-                         "branches with the same decisive shape go in one "
-                         "sequential chain so later agents see prior templates "
-                         "and can match-existing rather than re-create.")
+                    choices=["flat", "shape", "shape-target", "target",
+                             "target-delta"],
+                    default="flat",
+                    help="prompt-FOLDER organization only (findability); does "
+                         "NOT affect dispatch. Default 'flat' = all prompts "
+                         "directly under outdir (no subfolders). 'shape'/"
+                         "'target'/etc. bucket into subfolders. All calls are "
+                         "independent and run in flat parallel regardless "
+                         "(analysis-only contract).")
     ap.add_argument("--skip-existing", default=str(DEFAULT_SKIP_INDEX),
                     help=f"branch index JSON for skip-already-covered "
                          f"(default {DEFAULT_SKIP_INDEX}; /dev/null to disable)")
@@ -201,13 +219,16 @@ def main():
         "skip_index": str(skip_path),
         "group_by": args.group_by,
         "dispatch_plan": {
-            "across_groups": "parallel",
-            "within_group": "sequential",
-            "rationale": "across-group calls are independent (different "
-                         "(target, delta) cells); within-group is sequential "
-                         "so each agent sees prior templates on disk and can "
-                         "match-existing rather than re-create.",
+            "mode": "flat_parallel",
+            "dispatch_unit": "all_calls",
+            "rationale": "analysis-only contract (2026-05-17): each branch is "
+                         "analyzed in isolation — no agent reads another's "
+                         "output, no template comparison, no template.c. All "
+                         "calls are mutually independent and run at full "
+                         "parallelism (harness caps concurrency). `groups` is a "
+                         "cosmetic prompt-folder label with no ordering meaning.",
         },
+        "all_calls": [],
         "groups": [],
         "skipped": [],
         "errors": [],
@@ -238,8 +259,10 @@ def main():
                 total_skipped += 1
                 continue
 
-            order = len(ordered_calls)
-            prompt_path = group_dir / f"{order:02d}_{target}_{branch_id}.prompt.md"
+            order = len(ordered_calls)  # retained for the folder-view index only
+            # Filename is keyed on (target, branch_id) — globally unique — so it
+            # is stable regardless of grouping/folder (flat or shape).
+            prompt_path = group_dir / f"{target}_{branch_id}.prompt.md"
             wrote = "skipped (exists)"
             if args.force or not prompt_path.is_file():
                 if args.dry_run:
@@ -261,10 +284,10 @@ def main():
 
             decisive_pairs = json.loads(r["decisive_pairs"])
             involved_fuzzers = json.loads(r["involved_fuzzers"])
-            ordered_calls.append({
-                "order": order,
+            call = {
                 "target": target,
                 "branch_id": branch_id,
+                "group_id": gid,
                 "n_decisive_pairs": int(r["n_decisive_pairs"]),
                 "primary_delta": primary_delta(decisive_pairs),
                 "involved_fuzzers": involved_fuzzers,
@@ -279,11 +302,15 @@ def main():
                 "source_line": r["source_line"],
                 "prompt_path": _rel_to_repo(prompt_path),
                 "prompt_status": wrote,
-            })
+            }
+            # Flat dispatch unit: every call independent, no ordering.
+            manifest["all_calls"].append(call)
+            # Folder view retains a within-folder index for readability only.
+            ordered_calls.append({"order": order, **call})
             total_calls += 1
 
         group_entry = {
-            "id": gid,
+            "id": gid or "(flat)",
             "n_calls": len(ordered_calls),
             "ordered_calls": ordered_calls,
         }
@@ -301,7 +328,10 @@ def main():
 
     manifest["dispatch_plan"]["total_calls_planned"] = total_calls
     manifest["dispatch_plan"]["total_skipped"] = total_skipped
-    manifest["dispatch_plan"]["max_parallel_groups"] = sum(
+    # Every call is independent → the parallelism ceiling is the call count
+    # itself (harness caps actual concurrency). Folder count is incidental.
+    manifest["dispatch_plan"]["independent_calls"] = total_calls
+    manifest["dispatch_plan"]["prompt_folders"] = sum(
         1 for g in manifest["groups"] if g["n_calls"] > 0
     )
 
@@ -314,7 +344,8 @@ def main():
     print(f"  agent calls planned : {total_calls}", file=sys.stderr)
     print(f"  skipped (covered)   : {total_skipped}", file=sys.stderr)
     print(f"  errors              : {len(manifest['errors'])}", file=sys.stderr)
-    print(f"  parallel groups     : {manifest['dispatch_plan']['max_parallel_groups']}",
+    print(f"  independent calls   : {total_calls} (flat parallel)", file=sys.stderr)
+    print(f"  prompt folders      : {manifest['dispatch_plan']['prompt_folders']}",
           file=sys.stderr)
     if manifest["errors"]:
         print(f"\nerrors written to manifest.json under .errors", file=sys.stderr)

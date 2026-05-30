@@ -1,0 +1,69 @@
+{
+  "branch_id": 6654,
+  "target": "libxml2",
+  "summary_one_line": "A DTD element content model with two or more children joined by a ',' or '|' separator, so the loop sets both cur and last.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "The input must drive parsing deep into a DTD <!ELEMENT (...) content declaration where xmlParseElementChildrenContentDeclPriv parses a first element, then takes the while-loop body on a ',' or '|' separator to parse a SECOND element, so that both cur and last are non-NULL at line 6513.",
+      "why_winner_satisfies": "The winner-resolving seed contains a parenthesized content group with element names and an actual separator path: the W overlay hits the '|' branch at 6418 and the second-child parsing at 6484-6508, and the per-role DIVERGENT BRANCHES show W taking the true side of the 6513 blocker (T=6 F=0 and T=3 F=3) where L never does.",
+      "why_loser_doesnt": "The loser-blocking seeds stall in DTD/external-subset setup (<!DOCTYPE a SYSTEM \"dtds/1...\") and either never reach the content loop or exit it after a single element: at 6513 the loser is T=0 F=65, i.e. it always takes the false branch because last stays NULL.",
+      "mechanism_attribution": "value_profile_cmplog adds CMP_MAP gradient feedback (Hamming/prefix-distance buckets) on top of the I2S that cmplog already has; this gradient rewards partial progress on the long multi-byte literal comparisons (e.g. the #PCDATA CMP7 and DOCTYPE/encoding string compares on the path), letting vpc assemble the structurally deeper multi-child content model that enters the loop a second time, whereas cmplog (I2S only, same as the winner) lacks the gradient and cannot build that depth."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side requires both cur and last to be non-NULL at line 6513.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "parser.c:6513",
+      "exact_quote": "if ((cur != NULL) && (last != NULL)) {"
+    },
+    {
+      "claim": "last is only assigned inside the while loop after a separator and a second element are parsed.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L6491",
+      "exact_quote": "last = xmlNewDocElementContent(ctxt->myDoc, elem, XML_ELEMENT_CONTENT_ELEMENT);"
+    },
+    {
+      "claim": "The winner takes the '|' separator branch of the content loop that the loser never enters.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L6418",
+      "exact_quote": "[W]  6418 \t} else if (RAW == '|') {"
+    },
+    {
+      "claim": "At the blocker the winner takes the true side while the loser only ever takes the false side (last NULL).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L6513",
+      "exact_quote": "if ((cur != NULL) && (last != NULL)) {  <-- BLOCKER\n  d=1   L6515  T=3 F=0"
+    },
+    {
+      "claim": "The loser-blocking seeds are stuck in external-subset DTD setup rather than a deep content model.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00f7af173db700b0 offset 0x20-0x3f",
+      "exact_quote": "61 20 53 59 53 54 45 4d 20 22 64 74 64 73 2f 31   a SYSTEM \"dtds/1"
+    },
+    {
+      "claim": "value_profile_cmplog adds CMP_MAP gradient buckets on top of the per-execution CMP buffer that cmplog also has.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Instrumentation",
+      "exact_quote": "union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    },
+    {
+      "claim": "Both the winner and the loser carry I2SRandReplace, so I2S is not the differentiating technique.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 6654 --role W --fuzzer value_profile_cmplog --trial 2 --seed ae2d760d094b65d2`; the chain shows I2S-floor dash rows at depth 5 and 6, but the decisive pair delta is value_profile (both vpc AND cmplog have I2SRandReplace), so the dash rows do NOT explain the divergence. The differentiator is the CMP_MAP gradient feedback unique to value_profile_cmplog, which lineage does not directly tag; thus the value_profile mechanism could not be confirmed via dash-row lineage and rests on source/structure plus the union-instrumentation note."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating line 6513's true side behind a single shallow multi-byte literal compare (no nested/structural depth) where cmplog reaches the true side as often as value_profile_cmplog, showing the gradient confers no advantage."
+  },
+  "weakest_evidence_point": "The attribution to CMP_MAP gradient is inferential: the prompt confirms vpc has the gradient and cmplog does not, but I could not directly observe a gradient-driven find in lineage (dash rows present are I2S, shared by both fuzzers).",
+  "confidence": "medium"
+}

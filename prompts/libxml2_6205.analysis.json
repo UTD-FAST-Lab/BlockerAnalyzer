@@ -1,0 +1,75 @@
+{
+  "branch_id": 6205,
+  "target": "libxml2",
+  "summary_one_line": "A prefixed attribute whose namespace prefix is NOT the literal 'xmlns' (e.g. 'x', 'xlink'), so the 6-byte ns=='xmlns' gate falls false.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "An attribute carrying a non-NULL namespace prefix (ns != NULL) whose first six bytes do NOT spell 'x','m','l','n','s',0 — i.e. a prefixed attribute like 'x:ink' or 'xlink:...' rather than a literal 'xmlns:' namespace declaration. Taking the FALSE side of the ns[0..5]=='xmlns' gate at line 1235-1236 routes execution past line 1303 (ns != NULL search) into the winner-only block.",
+      "why_winner_satisfies": "The winner-resolving cmplog seeds contain prefixed-attribute tokens whose prefix is not 'xmlns': seed f32dee7a138d773b carries 'x:ink' and 'xmlns(xlink' near offset 0x0b-0x1e. At line 1236 the winner takes the FALSE side (W(T/F): T=0 F=6) and then enters the winner-only branch where xmlSearchNs / the undefined-namespace-prefix error path runs (lines 1306-1309 marked [W]).",
+      "why_loser_doesnt": "The loser-blocking naive seeds instead supply a prefix that satisfies the equality, so at line 1236 the loser takes the TRUE side (L(T/F): T=5 F=0) and is consumed entirely inside the 'standard namespace definition' block (lines 1237-1301 marked [L]), never falling through to the winner-only code at line 1303+.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the per-execution CmpLogObserver buffer logged by the byte-wise comparisons against the 'xmlns' literal (ns[0]=='x' ... ns[5]==0) and substitutes the captured operand bytes into the input at the matching offsets, letting cmplog construct an attribute prefix that is byte-distinct from 'xmlns' yet structurally a valid prefixed attribute — solving the multi-byte string roadblock that naive's blind havoc rarely lands on."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the 6-byte equality test ns[0..5]=='x','m','l','n','s',0 inside xmlSAX2AttributeInternal, and the globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "SAX2.c:1236",
+      "exact_quote": "(ns[3] == 'n') && (ns[4] == 's') && (ns[5] == 0)) {"
+    },
+    {
+      "claim": "The blocked side that the winner must reach is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "blocked side",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "At line 1236 the winner takes the false side six times while the loser takes the true side five times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1236",
+      "exact_quote": "L1236  T=0 F=6  T=5 F=0  (ns[3] == 'n') && (ns[4] == 's') && (ns[5] == 0)) {  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner-only code reached after the false branch is the xmlSearchNs / undefined-namespace-prefix error path at lines 1306-1309.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "SAX2.c:1303-1309",
+      "exact_quote": "[W]  1307  \t    xmlNsErrMsg(ctxt, XML_NS_ERR_UNDEFINED_NAMESPACE,"
+    },
+    {
+      "claim": "The loser executes the standard-namespace-definition block (true side, lines 1237-1301) and does not fall through.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "SAX2.c:1282",
+      "exact_quote": "[L]  1282  \tnsret = xmlNewNs(ctxt->node, val, name);"
+    },
+    {
+      "claim": "A winner-resolving cmplog seed contains a non-'xmlns' prefixed-attribute token 'x:ink'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed f32dee7a138d773b offset 0x0b",
+      "exact_quote": "33 2e 6f 72 67 00 02 39 39 39 2f 78 3a 69 6e 6b   3.org..999/x:ink"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes one logged CMP operand at offsets where the other operand is found in the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S; its mutators are havoc + token only.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 6205 --role W --fuzzer cmplog --trial 1 --seed 51fd9b36079604e3`; the ancestor chain has I2S-floor dash rows (mutation_op = -) at depth 3 and depth 4, and the tool reported 'I2S-floor signal: 2 ancestor dash row(s) at depth 3, 4.' — the lower-bound signal of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the 6-byte ns=='xmlns' equality gate where cmplog and naive resolve the false (non-'xmlns' prefix) branch at statistically indistinguishable rates — i.e. naive reaches the prefixed-attribute path as fast as cmplog despite no I2S substitution."
+  },
+  "weakest_evidence_point": "The byte-diff offsets are scattered/PARTIAL rather than a single concentrated run, so the exact input offset where I2S substitutes the prefix bytes is inferred from the seed token 'x:ink' rather than pinned by a clean per-offset W-vs-L concentration.",
+  "confidence": "medium"
+}

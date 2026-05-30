@@ -1,0 +1,81 @@
+{
+  "branch_id": 2085,
+  "target": "lcms",
+  "summary_one_line": "Input profile PCS field at offset 0x10 must spell 'Lab ' (not 'XYZ'/'RGB') so InPCS != cmsSigXYZData and the false branch is taken",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The ICC profile's connection-space signature at byte offset 0x10-0x13 must NOT equal the literal 'XYZ ' (cmsSigXYZData = 0x58595A20). When it spells 'Lab ' (0x4C616220) or another non-XYZ space, the switch on InPCS at line 429 falls through cmsSigXYZData and InPCS takes the false side of the case test, routing into the cmsSigLabData / default arms.",
+      "why_winner_satisfies": "All winning-resolving seeds carry a non-XYZ PCS literal at 0x10: seed 1/3/5 (cmplog) and seed 2 hold 'Lab' / 'MCH4Lab', and the BYTE DIFF shows W bytes 4c(L)/61(a)/62(b) at offsets 0x10/0x11/0x12 versus L bytes 52(R)/47(G)/42(B). The W per-role overlay reaches the cmsSigLabData arm (lines 454-477) that only executes on the false side of the XYZ case.",
+      "why_loser_doesnt": "Every loser-blocking seed has 'RGB XYZ' at 0x10-0x17, so InPCS resolves to cmsSigXYZData and the true side of line 429 is taken (DIVERGENT BRANCHES shows L T=60 F=0 at line 429). The loser never reaches the Lab-input arm and the false branch stays globally blocked.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the intercepted profile-signature CMP (the switch on InPCS compiles to integer comparisons against the cmsSigXYZData constant 0x58595A20), finds the matching 'XYZ ' bytes in the input, and substitutes the other observed operand ('Lab '/etc.) at offset 0x10, directly flipping the PCS field. naive and value_profile lack I2SRandReplace and cannot reliably synthesize the exact 4-byte FOURCC at that offset; value_profile's Hamming-distance feedback gives no monotone path to a discrete FOURCC literal, so both losers stall."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked false side at line 429 is the XYZ-input case of a switch on InPCS, so the false side requires InPCS != cmsSigXYZData.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L429 cmscnvrt.c:429:5",
+      "exact_quote": "case cmsSigXYZData: // Input profile operates in XYZ"
+    },
+    {
+      "claim": "Winner seeds resolve the branch by reaching the Lab-input arm (lines 454-477) which only runs on the false side of the XYZ case.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L454",
+      "exact_quote": "[W]   454          switch (OutPCS) {"
+    },
+    {
+      "claim": "Winners carry a non-XYZ PCS literal 'Lab' at the profile-signature offset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 044d3fc2a2e1afbd offset 0x10",
+      "exact_quote": "4c 61 62 20 4c 61 62 20 07 d9 00 0c 00 17 00 16   Lab Lab"
+    },
+    {
+      "claim": "At offsets 0x10-0x12 winning bytes are L/a/b while losing bytes are R/G/B, the discriminating PCS field.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x10-0x12",
+      "exact_quote": "0x0010  4c(L)x14 33(3)x2 43(C)x2 4d(M)x1 +1u  52(R)x20                            DIFFER"
+    },
+    {
+      "claim": "Loser seeds hold 'RGB XYZ' at the PCS field, making InPCS = cmsSigXYZData (true side).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0313315f3b972394 offset 0x10",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ"
+    },
+    {
+      "claim": "Losers take only the true side of line 429 and never the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L429",
+      "exact_quote": "d=1   L 429  T=23 F=26  T=60 F=0  case cmsSigXYZData: // Input profile operates in XYZ  <-- BLOCKER"
+    },
+    {
+      "claim": "Both decisive pairs differ from their loser by the I2S technique only.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace which substitutes one observed CMP operand for the matching input bytes, enabling FOURCC literal placement.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the vpc>vp pair's win is attributable to I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2085 --role W --fuzzer cmplog --trial 1 --seed 044d3fc2a2e1afbd`; the chain has 18 ancestor levels and the tool reports 'I2S-floor signal: 1 ancestor dash row(s) at depth 17' (ancestor 5441efb6193a1a03 with mutation_op = -), the ParentInfo-only signature of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with an input-derived PCS FOURCC compared against the constant cmsSigXYZData where naive/value_profile resolve the non-XYZ branch at the same rate as cmplog/vpc would refute the claim that I2S substitution is the enabling technique."
+  },
+  "weakest_evidence_point": "I cannot directly observe that I2SRandReplace substituted the FOURCC at offset 0x10 specifically; the dash-row floor confirms I2S contribution somewhere in the ancestor chain but the leaf metadata shows only havoc/token ops.",
+  "confidence": "high"
+}

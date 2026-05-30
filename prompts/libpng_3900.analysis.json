@@ -1,0 +1,69 @@
+{
+  "branch_id": 3900,
+  "target": "libpng",
+  "summary_one_line": "Input must contain a PNG chunk whose 4-byte type field equals the iCCP FOURCC so chunk_name == png_iCCP holds.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A PNG chunk-header whose 32-bit type field byte-equals the ASCII FOURCC 'iCCP', so the dispatcher's else-if equality test chunk_name == png_iCCP resolves true and png_handle_iCCP runs.",
+      "why_winner_satisfies": "cmplog resolves the branch in 9/10 trials and is the only winner; the dispatch comparison chunk_name == png_iCCP is an exact 4-byte integer equality that I2SRandReplace can satisfy by substituting the logged png_iCCP operand into the chunk-type bytes of an existing valid PNG seed (header magic 89 50 4e 47 present in every winning seed).",
+      "why_loser_doesnt": "naive blocks the true side in all 10 trials (resolved=0/10), reaching only the false arm: in DIVERGENT BRANCHES line 897 shows L T=0 F=80, i.e. naive's havoc mutation never lands the exact iCCP type-word so the equality test stays false.",
+      "mechanism_attribution": "cmplog intercepts the integer CMP at the dispatch and records both operands into the CmpLogObserver buffer; I2SRandReplace then scans the input for the matched operand and substitutes the other (the iCCP literal) at the chunk-type offset, hitting the magic-number equality that naive's blind byte mutation cannot brute-force."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is an exact equality test against the iCCP chunk constant.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "pngread.c:897",
+      "exact_quote": "else if (chunk_name == png_iCCP)"
+    },
+    {
+      "claim": "cmplog is the decisive winner over naive on this branch via the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "cmplog resolves the branch in 9 of 10 trials while naive never does.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "cmplog / naive rows",
+      "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+    },
+    {
+      "claim": "naive blocks the true side in every trial, never matching the iCCP type word.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "loser row",
+      "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "At line 897 the winner takes the true side 10 times while the loser takes it zero times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L 897",
+      "exact_quote": "d=1   L 897  T=10 F=58  T=0 F=80  else if (chunk_name == png_iCCP)"
+    },
+    {
+      "claim": "Winning seeds carry the valid PNG header magic that anchors I2S substitution of the chunk-type bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 winner offset 0x00",
+      "exact_quote": "0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes a logged CMP operand at matching input offsets, the mechanism that lands the exact iCCP literal.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 3900 --role W --fuzzer cmplog --trial 1 --seed db0befcb8f71d9dd` and observed two I2S-floor rows (mutation_op = -) at depth 5 and depth 6 of the ancestor chain, the dash-row signal of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose dispatch compares chunk_name against the iCCP constant where naive resolves the true branch as often as cmplog within the same budget, showing the exact 4-byte equality is not an I2S-specific roadblock."
+  },
+  "weakest_evidence_point": "The byte-diff section shows W/L differences clustered in the IHDR width/height region (0x13-0x2e) rather than directly exposing the iCCP type-word offset, so the precise substituted-byte location is inferred from the dispatch equality rather than directly visible in BYTE DIFF.",
+  "confidence": "high"
+}

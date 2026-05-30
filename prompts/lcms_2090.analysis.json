@@ -1,0 +1,87 @@
+{
+  "branch_id": 2090,
+  "target": "lcms",
+  "summary_one_line": "Profile PCS signature must resolve to Lab-input/XYZ-output (cmsSigLabData->cmsSigXYZData) so the Lab2XYZ stage is inserted.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "The decoded ICC profile must drive the InPCS=cmsSigLabData / OutPCS=cmsSigXYZData combination at AddConversion (the 'Lab -> XYZ' switch arm at line 458). This requires the 4-byte color-space / PCS signature fields in the profile header (e.g. the data-color-space token around offset 0x10 such as 'Lab ') and the device-class token (offset 0x0c) to land on the exact FOURCC values that select the Lab-input case and an XYZ output connection space.",
+      "why_winner_satisfies": "value_profile_cmplog resolves the branch in 9/10 trials and hits the true side; the CMP_MAP gradient gives Hamming/prefix-distance feedback on the 4-byte signature compares, letting the fuzzer climb partial matches of the Lab/XYZ FOURCC tokens incrementally rather than needing a single exact substitution, so it lands the Lab->XYZ arm and takes line 459 ([W]).",
+      "why_loser_doesnt": "cmplog (I2S only) resolves the branch in just 2/10 trials and is blocked in 8; its loser seeds park on signature tokens like 'mntr'+'RGB' or 'MCHF' (offsets 0x0c-0x13) that do NOT select the Lab-input/XYZ-output arm, and without value-profile gradient feedback it cannot reward the partial progress toward the exact Lab/XYZ FOURCC needed, so it falls through to line 460 ([L]).",
+      "mechanism_attribution": "The single technique delta between winner and loser is value_profile. value_profile adds CMP_MAP gradient buckets that reward Hamming/prefix similarity on the multi-byte FOURCC signature comparisons; this lets value_profile_cmplog incrementally solve the Lab/XYZ color-space-signature gate that cmplog's exact I2S substitution alone fails to reach reliably."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the Lab-input / XYZ-output switch arm whose true side inserts the Lab2XYZ stage.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 / cmscnvrt.c:458",
+      "exact_quote": "if (!cmsPipelineInsertStage(Result, cmsAT_END, _cmsStageAllocLab2XYZ(Result ->ContextID)))"
+    },
+    {
+      "claim": "Reaching the blocker requires the InPCS=Lab case and the OutPCS=XYZ inner case.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmscnvrt.c:452 and 456",
+      "exact_quote": "case cmsSigLabData: // Input profile operates in Lab"
+    },
+    {
+      "claim": "The inner switch arm selecting the blocker is the Lab -> XYZ output case.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmscnvrt.c:456",
+      "exact_quote": "case cmsSigXYZData:  // Lab -> XYZ"
+    },
+    {
+      "claim": "The winner takes the true side of the blocker (line 459 marked W) while the loser falls through to line 460/461 (marked L).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmscnvrt.c:459-461",
+      "exact_quote": "[W]   459                  return FALSE;"
+    },
+    {
+      "claim": "The decisive pair's single technique difference is value_profile, with value_profile_cmplog winning over cmplog.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "value_profile_cmplog resolves the branch in 9/10 trials; cmplog resolves only 2/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 winner/loser counts",
+      "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0\n  loser:  resolved=2/10  blocked=8  unreached=0"
+    },
+    {
+      "claim": "The color-space / signature token fields around offsets 0x0c-0x13 differ between winner and loser inputs.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x13",
+      "exact_quote": "0x000c  73(s)x1 6c(l)x1                     6d(m)x15                            DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds carry signature tokens like 'mntr' + 'RGB' that do not select the Lab-input arm.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser-blocking Seed 1 id=0ea475929b6941e5",
+      "exact_quote": "6d 6e 74 72   ..b.lcms.@..mntr"
+    },
+    {
+      "claim": "value_profile_cmplog instrumentation adds CMP_MAP gradient buckets on top of the cmplog CMP buffer.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Instrumentation",
+      "exact_quote": "per-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets"
+    },
+    {
+      "claim": "value_profile_cmplog feedback uses both edge-bucket and CMP_MAP-bucket signals, the latter absent in plain cmplog.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Feedback",
+      "exact_quote": "**Feedback**: edge-bucket + CMP_MAP-bucket signals."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (the value_profile delta), not I2SRandReplace, so the mandatory dash-row lineage query does not apply. The winner value_profile_cmplog also carries I2S, but the SINGLE technique difference versus the loser cmplog is value_profile/CMP_MAP feedback (both fuzzers have I2S), so attribution of the divergence is the gradient signal, which seed-metadata lineage cannot directly evidence."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a 4-byte FOURCC color-space-signature equality gate selecting a Lab->XYZ-style arm in which cmplog resolves the gate as often as value_profile_cmplog (no value_profile advantage), which would refute the claim that CMP_MAP gradient feedback is what enables the winner."
+  },
+  "weakest_evidence_point": "The exact input-byte field that the InPCS/OutPCS decision derives from is inferred from header-region byte diffs and the FOURCC token interpretation; the precise dataflow from those offsets to the Lab/XYZ signature comparands is not directly traced in the prompt.",
+  "confidence": "medium"
+}
