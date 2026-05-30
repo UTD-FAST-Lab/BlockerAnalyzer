@@ -131,8 +131,11 @@ files under `out/coverage_ts/`.
 ## Tools
 
 Full CLI, flags, and the DB schema for every tool live in
-[`docs/TOOLS.md`](docs/TOOLS.md). One-line index below, grouped by pipeline
-phase (see "Typical Workflow" further down for the phase ordering):
+[`docs/TOOLS.md`](docs/TOOLS.md). A compact **step → tool map** is at the top of
+that file and mirrored in [`tools/README.md`](tools/README.md) (filenames are
+NOT step-prefixed — the tools import each other as flat siblings, so the mapping
+is documented rather than baked into names). One-line index below, grouped by
+pipeline phase (see "Typical Workflow" further down for the phase ordering):
 
 **Schema & shared libraries**
 - `blocker_db.py` — `db/blockers.sqlite` schema + `init` (full schema table in docs/TOOLS.md).
@@ -159,13 +162,15 @@ phase (see "Typical Workflow" further down for the phase ordering):
 - `db_query.py` — agent-facing pull queries (lineage, more-seeds).
 
 **Step 5a — cross-branch classification**
-- `mechanism_family.py` — deterministic `coarse_family(covers_pairs)` → 6 mechanism families; first-pass bucketing + self-test/scan.
+- `mechanism_family.py` — deterministic `coarse_family(covers_pairs)` → per-technique `<T>_pro`/`<T>_anti` families (all 10 techniques) plus the I2S×VP `synergy`/`independent` composite; first-pass bucketing + self-test/scan.
 - `build_signature_cards.py` — build per-family distiller cards (family-tagged, with `analysis_path` back-pointers; analysis fields + candidates-CSV locators) for the `hypothesis-signature-distiller` agent. Pass B (the classifier) reads the signatures + cards directly — no group-by tool.
 
 **Step 5b — author + verify loop**
 - `build_template_briefs.py` — per-cluster authoring brief (cluster def + members' signatures + full analyses incl. the falsifiability harness-blueprint) → `step5b/briefs/<feature_id>.json` for the `template-author` agent.
 - `check_template.py` — deterministic preflight gating the sweep: schema/fuzzer sanity + every `scan_value` compiles + **dead-knob detection** (min vs max scan value must yield different assembly, else the `-D` macro/params drifted). Catches mechanical defects so an author retry isn't spent on a refutation.
 - `verify_template.py` — synthetic-harness sweep runner. Builds `step5b/<feature_id>/template.c` under each involved fuzzer (`<fuzzer>_cc --libafl -D<knob>=<val>` in the `libafl-base` image), sweeps `params.json:scan_values`, counts crashes (`<corpus>/crashes/`), scores a dose-response verdict. **Serial by default (`--jobs 1`) — host runs other campaigns.**
+- `run_full_verify.py` — full PARALLEL verification driver: runs the complete `params.json` budget for every `step5b/` template across a worker pool (reuses `verify_template`'s run_cell + judge). `--jobs` must not exceed cores (wall-clock duration).
+- `screen_templates.py` — fast SCREENING sweep across all `step5b/` templates: 1 trial, short duration, decisive pair + 3 scan points. 1-trial `reproduced` is PROVISIONAL — confirm before promoting.
 
 **Auxiliary**
 - `plot_coverage_curves.py` — coverage-by-time spaghetti plot → `out/coverage_curves.png`.

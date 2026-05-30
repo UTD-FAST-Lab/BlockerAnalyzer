@@ -5,6 +5,41 @@ one-line index per tool plus the pipeline phase map; this file carries the
 flags, schemas, and per-tool detail. See the "Typical Workflow" section of
 `CLAUDE.md` for the phase ordering that strings these together.
 
+## Step → tool map
+
+Which tool belongs to which pipeline step (filenames are NOT step-prefixed —
+the tools import each other as flat siblings; this table is the mapping). The
+same table lives in `tools/README.md`. Agents (not tools) are in the Agents
+table in `CLAUDE.md`.
+
+| Step | Tool | One-liner |
+|------|------|-----------|
+| shared lib | `blocker_db.py` | SQLite schema owner + `init` (population done by study_units / seed_bisect) |
+| shared lib | `seed_utils.py` | Dependency-free seed/byte helpers (parse_count, hex_dump, read_seed_bytes, format_seed_block, byte_diff_section) |
+| shared lib | `extract_functions.py` | `llvm-cov export` → (file, name, start, end) ranges; library (no CLI) |
+| **1** significance | `subject_significance.py` | Per-(target, A, B) AUC + final-coverage MW U-test; **source of truth for CANONICAL_TARGETS / FUZZERS / PAIRS** |
+| **2** DB population | `study_units.py` | Per-target coverage walk + per-subject admission (`add-canonical`); hosts the `evidence-per-branch` CLI |
+| **3a** candidates | `build_candidates.py` | Per-branch ≥8/≥8 decisive aggregation → `blocker_candidates.csv` |
+| **3b** representatives | `select_representatives.py` | Decisive-shape × region dedup → `blocker_representatives.csv` + dedup map |
+| **3.5** seeds | `seed_bisect.py` | Docker 10-bucket bisection → resolving/blocking seed tables |
+| **3.6** callers | `callers_index.py` | One-time per-target source-grep callers index |
+| **3.7** per-role cov | `per_role_coverage.py` | W (resolving) / L (blocking) llvm-cov dumps → SOURCE CONTEXT overlay |
+| **4a** fan-out | `run_hypothesis_fanout.py` | Manifest + per-rep prompt builder (does NOT dispatch agents) |
+| **4a** prompt | `evidence_prompt.py` | Per-branch structured-prompt assembly; registers `evidence-per-branch` into study_units |
+| **4c** validate | `check_analysis.py` | Validate agent `.analysis.json` vs sibling prompt (exact_quote hallucination filter) |
+| **4** agent pull | `db_query.py` | Agent-facing pull queries (lineage, more-seeds) |
+| **5a** classify | `mechanism_family.py` | `coarse_family(covers_pairs)` → per-technique pro/anti families (10 techniques) + I2S×VP synergy/independent |
+| **5a** classify | `build_signature_cards.py` | Per-family distiller cards for the signature-distiller agent |
+| **5b** author/verify | `build_template_briefs.py` | Per-cluster authoring brief → `step5b/briefs/<id>.json` |
+| **5b** author/verify | `check_template.py` | Preflight: schema/fuzzer sanity + scan_value compile + dead-knob detection |
+| **5b** author/verify | `verify_template.py` | Synthetic-harness sweep runner (serial `--jobs 1`) → `verification_run.json` |
+| **5b** author/verify | `run_full_verify.py` | Full parallel verification driver over all `step5b/` templates (reuses verify_template) |
+| **5b** author/verify | `screen_templates.py` | Fast 1-trial screening sweep (decisive pair only) across templates |
+| auxiliary | `plot_coverage_curves.py` | Coverage-by-time spaghetti plot → `out/coverage_curves.png` |
+
+(Data, not a tool: `fuzzer_mechanism_library.md` — per-fuzzer mechanism
+paragraphs spliced into Step-4 prompts.)
+
 ## `tools/blocker_db.py`
 
 Schema-management for `db/blockers.sqlite`. Owns the schema definition

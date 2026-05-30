@@ -81,13 +81,29 @@ def check_branches_from_profdata(profdata_path, fuzz_bin, branch_specs):
     # Also build a set of target files to skip irrelevant sections quickly
     target_files = {file for file, _, _, _, _ in branch_specs}
 
-    try:
-        result = subprocess.run(
+    # Scope llvm-cov to just the blocker source files: passing them as source
+    # args makes llvm-cov render ONLY those files instead of the whole binary's
+    # source (a 5-20x speedup on large targets like libxml2/bloaty). llvm-cov
+    # matches these against the paths baked into the binary at build time.
+    sources = sorted(target_files)
+
+    def _run(source_args):
+        return subprocess.run(
             ['llvm-cov-18', 'show', fuzz_bin,
              '-instr-profile=' + profdata_path,
-             '-show-branches=count', '-format=text'],
-            capture_output=True, text=True, timeout=60
+             '-show-branches=count', '-format=text', *source_args],
+            capture_output=True, text=True, timeout=120
         )
+
+    try:
+        result = _run(sources)
+        # Safety net: if scoping yielded NOTHING (e.g. a source-path mismatch
+        # between the DB file paths and the binary's recorded paths), fall back
+        # to a full render so we never silently miss branches. A file with no
+        # hits still prints its header+zero counts, so empty stdout means the
+        # source filter matched nothing — not "no coverage".
+        if not result.stdout.strip():
+            result = _run([])
     except subprocess.TimeoutExpired:
         return set()
 

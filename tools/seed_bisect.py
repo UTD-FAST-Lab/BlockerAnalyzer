@@ -163,53 +163,67 @@ def insert_seeds_and_lineage(branch_id, fuzzer, trial, queue_dir, seed_names,
 # Orchestration
 # ---------------------------------------------------------------------------
 
-def _trial_sets_for_branch(conn, branch_id):
-    """Return {fuzzer: {'resolved': [trial,...], 'blocked': [trial,...]}}.
+def _decisive_fuzzers_for_branch(conn, branch_id, winner_thr=8, loser_thr=8):
+    """From the branch's DECISIVE pairs, return (resolving, blocking) where
+    each is {fuzzer: sorted([trial, ...])}.
 
-    Assembled by cross-subject join on subject_branches. Each canonical
-    fuzzer appears in 2 of 4 canonical subjects; whichever ones admit the
-    branch contribute its trial sets. UNION DISTINCT collapses duplicates
-    since per-fuzzer trial outcomes are deterministic across subjects.
+    A canonical pair (subject A,B) is decisive at this branch iff
+    (n_A_resolved >= winner_thr AND n_B_blocked >= loser_thr) — winner A, loser B
+    — or the symmetric B>A case (anti-direction). resolving = the decisive
+    WINNERS (with their resolved-trial lists), blocking = the decisive LOSERS
+    (with their blocked-trial lists). This matches build_candidates' >=8/8 rule,
+    so we scan exactly the fuzzers that define the branch's divergence — not all
+    10, and not the arbitrary lex-min one. A fuzzer cannot be both winner and
+    loser here (>=8 resolved AND >=8 blocked is impossible at n=10). Trials are
+    unioned across pairs where a fuzzer wins/loses in more than one subject.
     """
     rows = conn.execute("""
-        SELECT s.A AS fuzzer, sb.A_resolved_trials AS res, sb.A_blocked_trials AS blk
+        SELECT s.A, s.B,
+               sb.n_A_resolved, sb.n_A_blocked, sb.n_B_resolved, sb.n_B_blocked,
+               sb.A_resolved_trials, sb.A_blocked_trials,
+               sb.B_resolved_trials, sb.B_blocked_trials
           FROM subject_branches sb JOIN study_subjects s USING (subject_id)
          WHERE sb.branch_id = ?
-        UNION
-        SELECT s.B AS fuzzer, sb.B_resolved_trials AS res, sb.B_blocked_trials AS blk
-          FROM subject_branches sb JOIN study_subjects s USING (subject_id)
-         WHERE sb.branch_id = ?
-    """, (branch_id, branch_id)).fetchall()
-    out = {}
+    """, (branch_id,)).fetchall()
+
+    resolving, blocking = {}, {}
     for r in rows:
-        out[r['fuzzer']] = {
-            'resolved': json.loads(r['res'] or '[]'),
-            'blocked':  json.loads(r['blk'] or '[]'),
-        }
-    return out
+        if r['n_A_resolved'] >= winner_thr and r['n_B_blocked'] >= loser_thr:
+            w, wtr = r['A'], json.loads(r['A_resolved_trials'] or '[]')
+            l, ltr = r['B'], json.loads(r['B_blocked_trials'] or '[]')
+        elif r['n_B_resolved'] >= winner_thr and r['n_A_blocked'] >= loser_thr:
+            w, wtr = r['B'], json.loads(r['B_resolved_trials'] or '[]')
+            l, ltr = r['A'], json.loads(r['A_blocked_trials'] or '[]')
+        else:
+            continue  # pair not decisive at this branch
+        if wtr:
+            resolving.setdefault(w, set()).update(wtr)
+        if ltr:
+            blocking.setdefault(l, set()).update(ltr)
 
-
-def _pick_lex_min(trial_sets, kind):
-    """Lex-min (fuzzer, trial) where trial ∈ trial_sets[fuzzer][kind].
-    Returns None if no fuzzer has any trial of that kind."""
-    candidates = [(fz, t) for fz, sets in trial_sets.items() for t in sets[kind]]
-    return min(candidates) if candidates else None
+    return ({fz: sorted(ts) for fz, ts in resolving.items()},
+            {fz: sorted(ts) for fz, ts in blocking.items()})
 
 
 def get_branches_to_process(target, branch_id=None, db_path=None,
-                            branch_ids=None):
-    """Pull branch metadata + one (fuzzer, trial) per direction from DB.
+                            branch_ids=None, winner_thr=8, loser_thr=8,
+                            trial_rank=0):
+    """Pull branch metadata + the DECISIVE-pair (fuzzer, trial)s per direction.
 
     Args:
         target: target name (e.g. "curl").
         branch_id: single branch id, or None.
         branch_ids: iterable of branch ids to scope work, or None for ALL
                     branches in the target. Mutually exclusive with branch_id.
+        winner_thr/loser_thr: decisive-pair thresholds (default 8/8, matching
+                    build_candidates).
 
-    Each branch yields exactly ONE resolving (fuzzer, trial) and ONE
-    blocking (fuzzer, trial) (lex-min). One queue per direction is
-    sufficient evidence for the bisection; scanning every (fuzzer, trial)
-    wastes time on huge queues.
+    Each branch yields ALL decisive WINNERS as resolving (fuzzer, trial)s and
+    ALL decisive LOSERS as blocking (fuzzer, trial)s — one representative trial
+    (lex-min) per fuzzer. This scans exactly the fuzzers that define the
+    branch's divergence (so per-fuzzer positives/negatives + lineage are
+    captured for every decisive arm), not the single arbitrary lex-min fuzzer
+    the previous version picked, and not all 10.
     """
     conn = get_db(db_path)
 
@@ -236,17 +250,27 @@ def get_branches_to_process(target, branch_id=None, db_path=None,
 
     result = []
     for b in branches:
-        trial_sets = _trial_sets_for_branch(conn, b['branch_id'])
-        resolving = _pick_lex_min(trial_sets, 'resolved')
-        blocking  = _pick_lex_min(trial_sets, 'blocked')
-        if resolving:
-            result.append({
-                'branch_id': b['branch_id'],
-                'file': b['file'], 'line': b['line'], 'col': b['col'],
-                'blocked_side': b['blocked_side'],
-                'resolving_trials': [resolving],
-                'blocking_trials':  [blocking] if blocking else [],
-            })
+        resolving, blocking = _decisive_fuzzers_for_branch(
+            conn, b['branch_id'], winner_thr, loser_thr)
+        if not resolving:
+            continue  # no decisive pair at this branch (shouldn't happen for reps)
+        # The trial_rank-th trial (lex-min order) per decisive fuzzer per
+        # direction. rank 0 = primary; rank 1+ = fallback for branches whose
+        # primary-trial queue returned no hitting seed. Fuzzers with fewer than
+        # trial_rank+1 trials of that outcome are skipped at this rank.
+        resolving_trials = sorted((fz, ts[trial_rank]) for fz, ts in resolving.items()
+                                  if len(ts) > trial_rank)
+        blocking_trials  = sorted((fz, ts[trial_rank]) for fz, ts in blocking.items()
+                                  if len(ts) > trial_rank)
+        if not resolving_trials and not blocking_trials:
+            continue  # no fuzzer has a trial at this rank
+        result.append({
+            'branch_id': b['branch_id'],
+            'file': b['file'], 'line': b['line'], 'col': b['col'],
+            'blocked_side': b['blocked_side'],
+            'resolving_trials': resolving_trials,
+            'blocking_trials':  blocking_trials,
+        })
 
     conn.close()
     return result
@@ -326,7 +350,7 @@ def _build_sampled_queue_mirror(queue_target_dir, queue_subdirs,
 
 def scan_bisection(target, queue_base, branch_id=None,
                    max_seeds=10, batch_size=500, db_path=None,
-                   branch_ids=None, queue_sample_size=None):
+                   branch_ids=None, queue_sample_size=None, trial_rank=0):
     """Run Docker bisection only — write results.json, no DB writes.
 
     queue_sample_size: if set, randomly sample at most this many seeds per
@@ -346,9 +370,11 @@ def scan_bisection(target, queue_base, branch_id=None,
               file=sys.stderr)
         sys.exit(1)
 
-    branches = get_branches_to_process(target, branch_id, db_path, branch_ids)
+    branches = get_branches_to_process(target, branch_id, db_path, branch_ids,
+                                       trial_rank=trial_rank)
     if not branches:
-        print(f"No branches with resolving trials for '{target}'", file=sys.stderr)
+        print(f"No branches with resolving trials for '{target}' (trial_rank={trial_rank})",
+              file=sys.stderr)
         return
 
     queue_jobs = build_jobs(branches, queue_base, target)
@@ -473,18 +499,84 @@ def insert_results(target, results_path, queue_base, db_path=None):
           f"for '{target}'", file=sys.stderr)
 
 
+def _all_branch_ids(target, db_path):
+    conn = get_db(db_path)
+    ids = [r[0] for r in conn.execute(
+        "SELECT branch_id FROM branches WHERE target = ?", (target,))]
+    conn.close()
+    return ids
+
+
+def _branches_missing_seeds(target, ids, db_path):
+    """Subset of `ids` with 0 resolving seeds OR 0 blocking seeds — i.e. a
+    branch that didn't get at least one seed in each direction."""
+    if not ids:
+        return []
+    conn = get_db(db_path)
+    ph = ",".join("?" * len(ids))
+    have_r = {r[0] for r in conn.execute(
+        f"SELECT DISTINCT branch_id FROM resolving_seeds WHERE branch_id IN ({ph})", list(ids))}
+    have_b = {r[0] for r in conn.execute(
+        f"SELECT DISTINCT branch_id FROM blocking_seeds WHERE branch_id IN ({ph})", list(ids))}
+    conn.close()
+    return [i for i in ids if i not in have_r or i not in have_b]
+
+
+def _total_seeds(target, ids, db_path):
+    if not ids:
+        return 0
+    conn = get_db(db_path)
+    ph = ",".join("?" * len(ids))
+    n = 0
+    for t in ("resolving_seeds", "blocking_seeds"):
+        n += conn.execute(
+            f"SELECT COUNT(*) FROM {t} WHERE branch_id IN ({ph})", list(ids)).fetchone()[0]
+    conn.close()
+    return n
+
+
 def run_bisection(target, queue_base, branch_id=None,
                   max_seeds=10, batch_size=500, db_path=None,
-                  branch_ids=None, queue_sample_size=None):
-    """Convenience: scan + insert in one step."""
-    scan_bisection(target, queue_base, branch_id=branch_id,
-                   max_seeds=max_seeds, batch_size=batch_size, db_path=db_path,
-                   branch_ids=branch_ids, queue_sample_size=queue_sample_size)
-
+                  branch_ids=None, queue_sample_size=None, fallback_ranks=3):
+    """Scan + insert, with a trial-fallback: branches whose primary
+    decisive-fuzzer queue returns no hitting seed are re-scanned against
+    successive trials of the same fuzzers until they get a seed in each
+    direction or the fallback budget / available trials run out."""
+    db_path = db_path or str(DB_PATH)
     suffix = f'_{branch_id}' if branch_id else ''
     results_path = RESULTS_DIR / f'{target}{suffix}_results.json'
-    if results_path.exists():
-        insert_results(target, str(results_path), queue_base, db_path=db_path)
+
+    def scan_insert(ids, rank):
+        # Clear any stale results so a no-op scan can't re-insert a prior phase.
+        if results_path.exists():
+            results_path.unlink()
+        scan_bisection(target, queue_base, branch_id=branch_id,
+                       max_seeds=max_seeds, batch_size=batch_size, db_path=db_path,
+                       branch_ids=ids, queue_sample_size=queue_sample_size,
+                       trial_rank=rank)
+        if results_path.exists():
+            insert_results(target, str(results_path), queue_base, db_path=db_path)
+
+    # Phase 0: primary (lex-min) trial per decisive fuzzer.
+    scan_insert(branch_ids, 0)
+
+    # Trial-fallback (multi-branch path only).
+    if branch_id is None and fallback_ranks > 0:
+        pool = list(branch_ids) if branch_ids else _all_branch_ids(target, db_path)
+        for rank in range(1, fallback_ranks + 1):
+            missing = _branches_missing_seeds(target, pool, db_path)
+            if not missing:
+                print(f"  fallback: all {len(pool)} branches have seeds in both "
+                      f"directions (after rank {rank-1})", file=sys.stderr)
+                break
+            print(f"  fallback rank {rank}: {len(missing)} branches still missing "
+                  f"a direction; retrying next trial", file=sys.stderr)
+            before = _total_seeds(target, missing, db_path)
+            scan_insert(sorted(missing), rank)
+            if _total_seeds(target, missing, db_path) == before:
+                print(f"  fallback: no new seeds at rank {rank} (trials exhausted); "
+                      f"stopping", file=sys.stderr)
+                break
 
 
 def plan_bisection(target, queue_base, branch_id=None, db_path=None,
@@ -560,6 +652,10 @@ def main():
     p_run.add_argument('--queue-sample-size', type=int, default=0,
                        help='If >0, randomly sample at most N seeds per '
                             'queue before bisection. 0 = no sampling.')
+    p_run.add_argument('--fallback-ranks', type=int, default=3,
+                       help='Trial-fallback budget: re-scan branches missing a '
+                            'direction against up to N successive trials of '
+                            'their decisive fuzzers (default 3; 0 = disable).')
     p_run.add_argument('--db')
 
     p_plan = sub.add_parser('plan', help='Dry-run: show queues and branch counts')
@@ -615,6 +711,7 @@ def main():
             db_path=args.db,
             branch_ids=branch_ids,
             queue_sample_size=args.queue_sample_size,
+            fallback_ranks=args.fallback_ranks,
         )
     elif args.command == 'plan':
         plan_bisection(args.target, args.queue_base,
