@@ -73,21 +73,12 @@ def check_branches_from_profdata(profdata_path, fuzz_bin, branch_specs):
     branch_specs: list of (file, line, col, side, branch_id)
     Returns: set of branch_ids that are hit.
     """
-    # Build lookup: (file, line, col) -> [(side, bid), ...]
-    targets = {}
+    # Group branch_specs by file: {file: {(line, col): [(side, bid), ...]}}.
+    by_file = {}
     for file, line, col, side, bid in branch_specs:
-        targets.setdefault((file, line, col), []).append((side, bid))
+        by_file.setdefault(file, {}).setdefault((line, col), []).append((side, bid))
 
-    # Also build a set of target files to skip irrelevant sections quickly
-    target_files = {file for file, _, _, _, _ in branch_specs}
-
-    # Scope llvm-cov to just the blocker source files: passing them as source
-    # args makes llvm-cov render ONLY those files instead of the whole binary's
-    # source (a 5-20x speedup on large targets like libxml2/bloaty). llvm-cov
-    # matches these against the paths baked into the binary at build time.
-    sources = sorted(target_files)
-
-    def _run(source_args):
+    def _scoped(source_args):
         return subprocess.run(
             ['llvm-cov-18', 'show', fuzz_bin,
              '-instr-profile=' + profdata_path,
@@ -95,44 +86,68 @@ def check_branches_from_profdata(profdata_path, fuzz_bin, branch_specs):
             capture_output=True, text=True, timeout=120
         )
 
-    try:
-        result = _run(sources)
-        # Safety net: if scoping yielded NOTHING (e.g. a source-path mismatch
-        # between the DB file paths and the binary's recorded paths), fall back
-        # to a full render so we never silently miss branches. A file with no
-        # hits still prints its header+zero counts, so empty stdout means the
-        # source filter matched nothing — not "no coverage".
-        if not result.stdout.strip():
-            result = _run([])
-    except subprocess.TimeoutExpired:
-        return set()
-
     hit_bids = set()
-    current_file = None
-    skip_file = True
+    missed_files = []  # files whose scoped render came back empty
 
-    for text_line in result.stdout.splitlines():
-        # Track current source file from headers like "/src/bloaty/src/elf.cc:"
-        hm = _FILE_HEADER_RE.match(text_line)
-        if hm:
-            current_file = hm.group(1)
-            skip_file = current_file not in target_files
+    # Scope llvm-cov to ONE file per call. Passing source args makes llvm-cov
+    # render only that file (a 5-20x speedup on large targets), but it also
+    # OMITS the "/src/...:" filename header that a full render prints — so we
+    # must NOT rely on the header to know which file we're in. Because the whole
+    # output IS this one file's source, every Branch line belongs to `file`.
+    # (Per-file calls cost one llvm-cov each, but blockers span few files per
+    # queue, so this stays cheap while being correct for single-file scopes —
+    # the case the previous single-call/header-tracking version silently missed.)
+    for file, targets in by_file.items():
+        try:
+            result = _scoped([file])
+        except subprocess.TimeoutExpired:
             continue
-
-        if skip_file:
+        if not result.stdout.strip():
+            # Source-path mismatch between DB file path and the binary's
+            # recorded path: defer to a single full render below.
+            missed_files.append(file)
             continue
+        for text_line in result.stdout.splitlines():
+            m = _BRANCH_RE.search(text_line)
+            if m:
+                key = (int(m.group(1)), int(m.group(2)))
+                if key in targets:
+                    t_hits = _parse_count(m.group(3))
+                    f_hits = _parse_count(m.group(4))
+                    for side, bid in targets[key]:
+                        if (t_hits if side == 'T' else f_hits) > 0:
+                            hit_bids.add(bid)
 
-        m = _BRANCH_RE.search(text_line)
-        if m:
-            ln, col = int(m.group(1)), int(m.group(2))
-            key = (current_file, ln, col)
-            if key in targets:
-                t_hits = _parse_count(m.group(3))
-                f_hits = _parse_count(m.group(4))
-                for side, bid in targets[key]:
-                    hits = t_hits if side == 'T' else f_hits
-                    if hits > 0:
-                        hit_bids.add(bid)
+    # Fallback: any file whose scoped render was empty gets resolved from ONE
+    # full (unscoped) render, which DOES print per-file headers — so here we
+    # track the current file the original way and only inspect missed files.
+    if missed_files:
+        missed = set(missed_files)
+        try:
+            full = _scoped([])
+        except subprocess.TimeoutExpired:
+            full = None
+        if full is not None:
+            current_file = None
+            skip_file = True
+            for text_line in full.stdout.splitlines():
+                hm = _FILE_HEADER_RE.match(text_line)
+                if hm:
+                    current_file = hm.group(1)
+                    skip_file = current_file not in missed
+                    continue
+                if skip_file:
+                    continue
+                m = _BRANCH_RE.search(text_line)
+                if m:
+                    key = (int(m.group(1)), int(m.group(2)))
+                    targets = by_file.get(current_file, {})
+                    if key in targets:
+                        t_hits = _parse_count(m.group(3))
+                        f_hits = _parse_count(m.group(4))
+                        for side, bid in targets[key]:
+                            if (t_hits if side == 'T' else f_hits) > 0:
+                                hit_bids.add(bid)
 
     return hit_bids
 
