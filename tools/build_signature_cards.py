@@ -2,9 +2,10 @@
 """
 build_signature_cards.py — build Pass-A distiller input cards for ONE mechanism family.
 
-Selects every hypothesis whose `covers_pairs` maps (via
-`mechanism_family.coarse_family`) to --family, and emits one "card" per
-hypothesis: the deterministic locators (target/branch/file/function/line,
+Selects every hypothesis that routes (via `mechanism_family.route_branch`, which
+applies the branch-level synergy override on top of per-hyp `coarse_family`) to
+--family, and emits one "card" per hypothesis: the deterministic locators
+(target/branch/file/function/line,
 joined from the candidates CSV) plus the four free-text fields the distiller
 normalizes into a structured signature.
 
@@ -26,7 +27,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mechanism_family import coarse_family  # noqa: E402
+from mechanism_family import route_branch  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIELDS = ["what_input_feature", "why_winner_satisfies",
@@ -52,8 +53,8 @@ def build_cards(family, glob_pat, candidates_csv):
             continue
         d = json.load(open(f))
         hyps = d.get("hypotheses", [])
-        for i, h in enumerate(hyps):
-            fam = coarse_family(h.get("covers_pairs", []))
+        fams = route_branch(hyps)  # branch-aware: synergy override (see mechanism_family)
+        for i, (h, fam) in enumerate(zip(hyps, fams)):
             if fam != family:
                 continue
             key = (d["target"], int(d["branch_id"]))

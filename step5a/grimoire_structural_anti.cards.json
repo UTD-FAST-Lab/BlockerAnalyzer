@@ -1,0 +1,56 @@
+[
+  {
+    "id": "libpng_3892_h1",
+    "family": "grimoire_structural_anti",
+    "target": "libpng",
+    "branch_id": 3892,
+    "analysis_path": "prompts/libpng_3892.analysis.json",
+    "file": "/src/libpng/pngread.c",
+    "function": "OSS_FUZZ_png_read_end",
+    "line": "787",
+    "source_line": "   if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&",
+    "covers_pairs": [
+      "cmplog>grimoire (grimoire_structural)"
+    ],
+    "what_input_feature": "The same byte-precise condition (color_type byte at 0x19 == 0x03) must survive intact in the produced input; the structural/generalization machinery that distinguishes grimoire from cmplog must not perturb or generalize away that exact byte.",
+    "why_winner_satisfies": "cmplog (no generalization/Grimoire mutators) keeps the I2S-planted color_type=03 byte intact and resolved the branch in 9/10 trials with avg hitcount 7; the byte-diff confirms W bytes 03(.)x4 fixed at offset 0x19.",
+    "why_loser_doesnt": "grimoire shares the full cmplog I2S stack yet loses (resolved 1/10, blocked 9/10), so the divergence is attributable to grimoire's added GeneralizationStage + Grimoire structural mutators; its grimoire-blocking seed at offset 0x19 carries non-palette bytes, indicating the generalization/structural recombination disrupts the byte-precise palette color_type that bare I2S would otherwise plant and retain.",
+    "mechanism_attribution": "grimoire structural: grimoire adds GeneralizationStage (replacing concrete byte runs with <GAP>) plus Grimoire string/structural mutators on top of the identical I2S stage; that structural recombination dilutes the per-byte I2S fix of the color_type field, so the single-technique delta (grimoire_structural) actively penalizes resolution relative to plain cmplog."
+  },
+  {
+    "id": "libxml2_6597_h2",
+    "family": "grimoire_structural_anti",
+    "target": "libxml2",
+    "branch_id": 6597,
+    "analysis_path": "prompts/libxml2_6597.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "xmlParseComment",
+    "line": "4985",
+    "source_line": "\t       (*in == 0x09)) {",
+    "covers_pairs": [
+      "cmplog>grimoire (grimoire_structural)"
+    ],
+    "what_input_feature": "A byte-exact tab (0x09) preserved inside a concrete <!-- comment body; the gate rewards a specific literal byte rather than a generalizable structural token.",
+    "why_winner_satisfies": "cmplog keeps the concrete bytes its I2S stage placed, so the exact 0x09 survives and the True side fires (resolved 8/10).",
+    "why_loser_doesnt": "grimoire runs the same I2S stage but its GeneralizationStage replaces concrete byte runs with <GAP> placeholders and spends extra re-execution validating those generalizations; for a byte-exact 0x09 gate the generalized tokens erase the specific tab and the throughput tax leaves grimoire blocked 9/10 \u2014 both loser-blocking grimoire seeds were produced by Grimoire structural mutators (GrimoireExtensionMutator).",
+    "mechanism_attribution": "grimoire structural (anti-direction): grimoire's GeneralizationStage + structural mutators abstract away the concrete tab byte and add re-execution cost, so the structural technique HURTS on a byte-exact literal gate where plain cmplog's concrete bytes win."
+  },
+  {
+    "id": "libxml2_6869",
+    "family": "grimoire_structural_anti",
+    "target": "libxml2",
+    "branch_id": 6869,
+    "analysis_path": "prompts/libxml2_6869.analysis.json",
+    "file": "/src/libxml2/parserInternals.c",
+    "function": "xmlParserInputGrow",
+    "line": "309",
+    "source_line": "    if (xmlBufUse(in->buf->buffer) > (unsigned int) indx + INPUT_CHUNK) {",
+    "covers_pairs": [
+      "cmplog>grimoire (grimoire_structural)"
+    ],
+    "what_input_feature": "An input that drives xmlCurrentChar/parser deep into a coherent XML document so that xmlBufUse(in->buf->buffer) exceeds (indx + INPUT_CHUNK) at the grow check on line 309 (true side), i.e. enough buffered, well-formed content remains ahead of the cursor that the buffer need not be grown. cmplog's plain havoc+I2S budget reaches this; grimoire's generalization/structural budget does not.",
+    "why_winner_satisfies": "The winning cmplog seed (458 bytes) is large and ends in a coherent XML/namespace token run ('?xmlnstxlink'), and on the W path the parser reaches xmlCurrentChar (W hits 351 vs L 0) and xmlCopyCharMultiByte (W 309 vs L 0) and takes the line-309 true side (L309 W: T=6 F=1). cmplog spends its execution budget on havoc byte mutation plus efficient I2S substitution rather than on generalization re-runs, so it builds inputs that progress far enough to satisfy the buffer-ahead condition.",
+    "why_loser_doesnt": "The grimoire (loser) seeds are short (13-52 bytes) and structurally fragmented (e.g. repeated '////////', truncated 'http://~tp://~'); they never reach xmlCurrentChar (L hits 0) and at line 309 take only the false side (L309 L: T=0 F=48). grimoire pays an extra-execution tax: the GeneralizationStage validates each <GAP> candidate by re-running, and the Grimoire structural mutators recombine generalised token/gap fragments, producing short, non-progressing inputs that keep the buffer under indx+INPUT_CHUNK so the parser falls through to the actual grow path instead of the true skip branch.",
+    "mechanism_attribution": "cmplog wins because its I2SRandReplace stage plus havoc operates without grimoire's generalization + structural-recombination energy tax. The single-technique delta grimoire_structural is a net negative at this branch: grimoire's GeneralizationStage re-runs and Grimoire structural mutators spend executions on short fragmented generalised inputs, while cmplog's I2S substitution (confirmed by I2S-floor dash rows in the winner's lineage) efficiently grows coherent content that buffers more than INPUT_CHUNK ahead, taking the line-309 true branch."
+  }
+]

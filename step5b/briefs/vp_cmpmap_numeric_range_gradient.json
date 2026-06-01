@@ -1,0 +1,804 @@
+{
+  "feature_id": "vp_cmpmap_numeric_range_gradient",
+  "mechanism_family": "VP_pro",
+  "mechanism_label": "cmpmap_numeric_range_gradient",
+  "definition": "VP's CMP_MAP operand-distance gradient drives a numeric or character-class value past a magnitude boundary or into/out of a range (inequality gate, threshold, or character-class test); the gradient preserves inputs that are numerically or bitwise closer to the boundary, ratcheting toward a threshold crossing that naive/cmplog edge feedback cannot sense.",
+  "n_members": 7,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "value_profile"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "value_profile",
+    "has_axis": [
+      "value_profile",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "cmplog",
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "lcms_2446",
+      "target": "lcms",
+      "branch_id": 2446,
+      "analysis_path": "prompts/lcms_2446.analysis.json",
+      "file": "/src/Little-CMS/src/cmsio0.c",
+      "function": "_cmsReadHeader",
+      "line": "827",
+      "source_line": "    if (TagCount > MAX_TABLE_TAG) {",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": 4,
+        "byte_signature": "length_field",
+        "mechanism_summary": "CMP_MAP intercepts the integer comparison at line 827 and writes an operand-distance bucket; inputs whose TagCount is numerically closer to crossing MAX_TABLE_TAG are retained, providing a gradient that drives TagCount above the threshold while naive's edge-only feedback cannot.",
+        "one_line": "VP CMP_MAP numeric gradient drives TagCount above MAX_TABLE_TAG threshold"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "The 4-byte big-endian TagCount field read at offset just after the header must exceed MAX_TABLE_TAG.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>naive (value_profile)"
+            ],
+            "what_input_feature": "The TagCount value parsed by _cmsReadUInt32Number at line 826 (a 4-byte big-endian integer in the tag-directory region of the ICC profile) must be numerically larger than MAX_TABLE_TAG so the comparison at line 827 takes its TRUE side and reaches the 'Too many tags' error path.",
+            "why_winner_satisfies": "value_profile resolves the branch in all 10 trials (W shows T=9 F=0 at line 827) and reaches the W-only error block at lines 829-831; the CMP at line 827 gives value_profile an operand-distance gradient that drives TagCount upward until it crosses MAX_TABLE_TAG.",
+            "why_loser_doesnt": "naive blocks in all 10 trials (L shows T=0 F=10 at line 827) and instead falls into the tag-reading loop (L-only lines 835-885 with L=T=181 iterations at line 836), meaning its mutated TagCount values stayed at or below MAX_TABLE_TAG; pure havoc never landed a large-enough value.",
+            "mechanism_attribution": "value_profile intercepts the integer comparison at line 827 and writes an operand-distance bucket into CMP_MAP; an input whose TagCount is numerically closer to crossing MAX_TABLE_TAG adds a new CMP_MAP bucket and is retained, providing a gradient that naive's edge-only feedback lacks, so value_profile climbs to TagCount > MAX_TABLE_TAG while naive cannot."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the TagCount > MAX_TABLE_TAG comparison whose TRUE side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmsio0.c:827",
+            "exact_quote": "if (TagCount > MAX_TABLE_TAG) {"
+          },
+          {
+            "claim": "TagCount is read from the input as a 4-byte unsigned integer immediately before the blocker.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L826",
+            "exact_quote": "if (!_cmsReadUInt32Number(io, &TagCount)) return FALSE;"
+          },
+          {
+            "claim": "value_profile is the winner and naive is the loser of the single decisive pair.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile > naive  [delta: value_profile]"
+          },
+          {
+            "claim": "value_profile resolves the branch in all 10 trials while naive blocks in all 10.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "naive vs value_profile rows",
+            "exact_quote": "value_profile                   10        0          0  winner (value_profile vs naive)"
+          },
+          {
+            "claim": "At line 827 the winner takes the TRUE side and the loser takes the FALSE side.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L827",
+            "exact_quote": "d=1   L 827  T=9 F=0  T=0 F=10  if (TagCount > MAX_TABLE_TAG) {"
+          },
+          {
+            "claim": "The winner reaches the 'Too many tags' error block while the loser enters the tag-reading loop.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L829-836",
+            "exact_quote": "cmsSignalError(Icc ->ContextID, cmsERROR_RANGE, \"Too many tags (%d)\", TagCount);"
+          },
+          {
+            "claim": "value_profile feeds an operand-distance bucket from intercepted CMPs into CMP_MAP, retaining inputs that get closer to matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "naive has only per-edge hit-count feedback with no CMP introspection.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive",
+            "exact_quote": "**Feedback**: per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating TagCount > MAX_TABLE_TAG on a value read from input where value_profile fails to resolve the TRUE side significantly more often than naive across trials would refute the CMP_MAP-gradient attribution."
+        },
+        "weakest_evidence_point": "MAX_TABLE_TAG's concrete numeric value is not shown in the prompt, so the exact distance value_profile's gradient must climb is inferred from the comparison being an inequality rather than measured.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3833",
+      "target": "libpng",
+      "branch_id": 3833,
+      "analysis_path": "prompts/libpng_3833.analysis.json",
+      "file": "/src/libpng/png.c",
+      "function": "png.c:png_XYZ_from_xy",
+      "line": "1288",
+      "source_line": "   if (xy->greenx < 0 || xy->greenx > PNG_FP_1) return 1;",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": "100000",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "CMP_MAP Hamming/prefix-distance buckets reward inputs whose multi-byte greenx fixed-point operand creeps progressively toward and past the 100000 magnitude threshold, building a gradient that cmplog's literal substitution cannot follow.",
+        "one_line": "VP gradient walks multi-byte fixed-point operand past magnitude threshold"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A parsed cHRM green-x chromaticity value driven out of [0, PNG_FP_1=100000] so the greenx>PNG_FP_1 guard takes its true (reject) branch.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "Input must reach png_XYZ_from_xy with a green chromaticity field whose fixed-point value satisfies greenx<0 OR greenx>PNG_FP_1 (100000 = 0x000186A0), i.e. the multi-byte greenx operand must be pushed above the 100000 magnitude threshold so the line-1288 guard takes its true side and returns 1.",
+            "why_winner_satisfies": "The value_profile_cmplog winner reaches line 1288 and takes the true side (W shows T=1 F=0 at L1288 while the loser shows T=0 F=40), resolves the branch in 9/10 trials, and accumulates 56 hits versus the loser's 3 \u2014 its chromaticity bytes land greenx outside the [0,PNG_FP_1] window.",
+            "why_loser_doesnt": "The cmplog loser only ever takes the false side at L1288 (T=0 F=40), blocks in 8/10 trials, and never drives greenx above the 100000 threshold; it stalls 21.10h on the branch with only 3 hits, so its green chromaticity stays inside the in-range window.",
+            "mechanism_attribution": "Both fuzzers carry the same input-to-state substitution mutator (cmplog and vpc are identical except for value_profile), so the comparison-solving mutator is held constant; the winning technique is value_profile's CMP_MAP gradient. The comparison greenx>PNG_FP_1 is a magnitude inequality against the multi-byte constant 100000 (0x000186A0) that literal-substitution mutation cannot directly solve, but the CMP_MAP Hamming/prefix-distance buckets reward inputs whose greenx operand creeps progressively closer to and past 100000, giving the gradient that lets vpc overshoot the threshold where plain cmplog cannot."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the inequality guard greenx>PNG_FP_1 at png.c:1288 whose true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "png.c:1288:26",
+            "exact_quote": "if (xy->greenx < 0 || xy->greenx > PNG_FP_1) return 1;"
+          },
+          {
+            "claim": "The single decisive pair is value_profile_cmplog beating cmplog with the technique delta being value_profile.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "The winner resolves 9/10 and the loser blocks 8/10 with a large hitcount gap.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 stats",
+            "exact_quote": "avg hitcount on branch: winner=56  loser=3"
+          },
+          {
+            "claim": "The winner takes the true side of the line-1288 guard while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L1288",
+            "exact_quote": "T=1 F=0  T=0 F=40  if (xy->greenx < 0 || xy->greenx > PNG_FP_1) return 1;  <-- BLOCKER"
+          },
+          {
+            "claim": "The loser stalls far longer on the branch than the winner.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 durations",
+            "exact_quote": "avg duration blocked: winner=6.30h  loser=21.10h"
+          },
+          {
+            "claim": "value_profile_cmplog's feedback adds CMP_MAP gradient buckets on top of the edge and CMP-buffer signals.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Feedback",
+            "exact_quote": "edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+          },
+          {
+            "claim": "cmplog and value_profile_cmplog share the same I2SRandReplace mutator stack, so I2S is not the differentiator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on an out-of-range multi-byte greenx>100000 magnitude inequality where value_profile_cmplog does NOT outperform cmplog (no dose-response separation), which would show the CMP_MAP gradient is not what drives the divergence."
+        },
+        "weakest_evidence_point": "The exact greenx byte offsets that the winner pushes out of range are not isolated in the BYTE DIFF (the cHRM chromaticity field is buried in a later chunk), so the attribution rests on the value_profile delta plus the inequality-against-100000 source shape rather than a pinpointed seed-byte gradient.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3974_h1",
+      "target": "libpng",
+      "branch_id": 3974,
+      "analysis_path": "prompts/libpng_3974.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_cHRM",
+      "line": "1280",
+      "source_line": "       xy.redy   == PNG_FIXED_ERROR ||",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "derived_integer",
+        "operand_literal": "PNG_FIXED_ERROR",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "CMP_MAP Hamming/prefix-distance buckets reward inputs whose redy integer value approaches the PNG_FIXED_ERROR sentinel bitwise, accumulating near-misses and walking arithmetic mutation to the exact 0x7fffffff value that cmplog's edge-only feedback treats as undifferentiated.",
+        "one_line": "VP CMP_MAP gradient walks redy integer toward PNG_FIXED_ERROR sentinel"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A short cHRM-bearing PNG reaching png_handle_cHRM whose redy fixed-point at buf+12 parses to the PNG_FIXED_ERROR sentinel (0x7fffffff).",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "Same structural requirement: a cHRM-bearing PNG whose redy fixed-point at buf+12 evaluates to PNG_FIXED_ERROR, reaching the L1280 equality comparison so it can resolve true.",
+            "why_winner_satisfies": "value_profile_cmplog resolves 8/10 and takes the L1280 true side (hitcount 4 on the branch), aided by the CMP_MAP gradient that gives partial-progress credit on the integer comparison xy.redy == PNG_FIXED_ERROR, letting Hamming-distance-closer inputs survive in the corpus and be refined toward the exact 0x7fffffff value.",
+            "why_loser_doesnt": "cmplog (lacking the value_profile CMP_MAP feedback) gets no partial-progress signal on the redy comparison, resolves only 1/10 with hitcount 0 on the branch, and stays blocked an average 22.30h.",
+            "mechanism_attribution": "the one-technique delta vs cmplog is value_profile's CMP_MAP gradient: per-CMP Hamming/prefix-distance buckets reward inputs whose redy value is bitwise closer to PNG_FIXED_ERROR, so the corpus accumulates near-misses and arithmetic mutation walks them to the exact sentinel \u2014 cmplog's edge-only feedback treats every not-yet-equal redy as identical."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the redy==PNG_FIXED_ERROR equality test, true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngrutil.c:1280",
+            "exact_quote": "Source line:        xy.redy   == PNG_FIXED_ERROR ||"
+          },
+          {
+            "claim": "redy is parsed from the cHRM 32-byte buffer at offset 12.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1271",
+            "exact_quote": "xy.redy   = png_get_fixed_point(NULL, buf + 12);"
+          },
+          {
+            "claim": "Reaching the comparison requires a 32-byte cHRM chunk arriving before IDAT/PLTE.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1256/L1249",
+            "exact_quote": "if (length != 32)"
+          },
+          {
+            "claim": "naive wins the I2S-delta pair over cmplog with strong probability divergence.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+          },
+          {
+            "claim": "naive resolved 9/10, cmplog blocked 9/10 on this branch.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "naive/cmplog rows",
+            "exact_quote": "winner (I2S vs cmplog)"
+          },
+          {
+            "claim": "Winner invokes png_handle_cHRM far more often than the loser (64 vs 20).",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "OSS_FUZZ_png_handle_cHRM",
+            "exact_quote": "64        20  OSS_FUZZ_png_handle_cHRM"
+          },
+          {
+            "claim": "The winner takes the L1280 true side 12 times while the loser takes it zero times.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1280",
+            "exact_quote": "d=1   L1280  T=12 F=45  T=0 F=19  xy.redy   == PNG_FIXED_ERROR ||  <-- BLOCKER"
+          },
+          {
+            "claim": "Loser seeds are large and spend budget in IDAT/read-row decode machinery the winner never enters.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "png_read_finish_row",
+            "exact_quote": "0      1860  OSS_FUZZ_png_read_finish_row"
+          },
+          {
+            "claim": "naive winning seeds are short (656-1314 bytes).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 2 winner",
+            "exact_quote": "size=656 bytes, fuzzer=naive"
+          },
+          {
+            "claim": "cmplog blocking seeds are large (up to 8759 bytes).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 1 loser",
+            "exact_quote": "size=8759 bytes, fuzzer=cmplog"
+          },
+          {
+            "claim": "naive has no I2S and relies on havoc + token mutation throughput.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive section",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "value_profile_cmplog wins the value_profile-delta pair over cmplog.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+          },
+          {
+            "claim": "value_profile_cmplog resolved 8/10 with hitcount 4 on the branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 winner",
+            "exact_quote": "winner: resolved=8/10  blocked=2  unreached=0"
+          },
+          {
+            "claim": "vpc adds CMP_MAP gradient buckets over cmplog's edge feedback.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog section",
+            "exact_quote": "edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+          },
+          {
+            "claim": "cmplog feedback is the same edge-bucket signal as naive, with no value-profile gradient.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog section",
+            "exact_quote": "**Feedback**: same edge-bucket signal as naive."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on redy==PNG_FIXED_ERROR where cmplog resolves as fast as or faster than naive and value_profile_cmplog, i.e. adding CMP interception does NOT slow reaching the sentinel \u2014 would refute both the throughput-tax (pair 1) and the CMP_MAP-gradient-helps (pair 2) attributions."
+        },
+        "weakest_evidence_point": "I cannot directly see the 4 bytes at cHRM-data offset 12 in the seed dumps (the cHRM chunk lies beyond the 64-byte window), so the claim that the redy field decodes to exactly 0x7fffffff is inferred from the L1280 true-side hitcounts rather than observed bytes.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6325_h1",
+      "target": "libxml2",
+      "branch_id": 6325,
+      "analysis_path": "prompts/libxml2_6325.analysis.json",
+      "file": "/src/libxml2/encoding.c",
+      "function": "encoding.c:UTF16LEToUTF8",
+      "line": "533",
+      "source_line": "        if ((c & 0xFC00) == 0xD800) {    /* surrogates */",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "derived_integer",
+        "operand_literal": "0xD800",
+        "operand_width_bytes": 2,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "CMP_MAP intercepts the masked integer comparison (c & 0xFC00) == 0xD800; inputs whose masked operand is Hamming-closer to 0xD800 add a new distance bucket and are kept, gradient-climbing to the surrogate equality that naive's edge feedback cannot sense.",
+        "one_line": "VP CMP_MAP gradient climbs masked 16-bit operand toward 0xD800 surrogate constant"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must be routed to the UTF16LE decoder and contain a 16-bit code unit whose top six bits equal the 0xD800 high-surrogate pattern.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>naive (value_profile)"
+            ],
+            "what_input_feature": "A 16-bit code unit c reaching the comparison (c & 0xFC00) == 0xD800, i.e. a value whose top six bits move toward the 0xD800 constant; satisfying it requires the masked operand to equal 0xD800 exactly.",
+            "why_winner_satisfies": "value_profile resolved 9/10 and drove the branch true with the highest hitcount (96 vs loser 4); the integer-CMP at line 533 is intercepted into the CMP_MAP, so inputs whose (c & 0xFC00) value is closer to 0xD800 add a new distance bucket and are kept, gradient-climbing to the exact match.",
+            "why_loser_doesnt": "Plain naive has no CMP_MAP, so an input that gets c & 0xFC00 near but not equal to 0xD800 yields no new edge and is discarded; naive stayed blocked 8/10 with branch true count 0 and average hitcount 4.",
+            "mechanism_attribution": "value_profile adds an integer-CMP interception writing a (PC, operand-distance bucket) entry into the CMP_MAP; a Hamming-distance-closer (c & 0xFC00) vs 0xD800 pair is preserved as corpus, giving a gradient toward the equality that naive's plain edge feedback cannot sense."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the UTF-16LE high-surrogate test in UTF16LEToUTF8.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "encoding.c:533:13",
+            "exact_quote": "if ((c & 0xFC00) == 0xD800) {    /* surrogates */"
+          },
+          {
+            "claim": "naive_ngram4 resolved every trial while naive was mostly blocked.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 subject 36",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+          },
+          {
+            "claim": "The loser naive resolved only one trial and was blocked in eight.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 loser",
+            "exact_quote": "loser:  resolved=1/10  blocked=8  unreached=1"
+          },
+          {
+            "claim": "Only the winner explores the surrogate-decoding lines 534-545 below the blocker.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L 534 / L 545",
+            "exact_quote": "d=1   L 534  T=25 F=12  T=0 F=0  if (in >= inend) {           /* handle split mutli-byte c..."
+          },
+          {
+            "claim": "At the blocker the winner takes true 37 times while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L 533",
+            "exact_quote": "d=1   L 533  T=37 F=735  T=0 F=149  if ((c & 0xFC00) == 0xD800) {    /* surrogates */  <-- BLOCKER"
+          },
+          {
+            "claim": "Winning seeds carry a UTF-16 byte-order-mark-like prefix and 0x00-interleaved code units.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 4 id=991dd70f7b9ba189 offset 0x0b-0x0f",
+            "exact_quote": "ff 5c 0a 3c 00 3f 00"
+          },
+          {
+            "claim": "The loser-blocking seed is dominated by ASCII space runs that cannot form a 0xD8xx code unit.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser seed id=98e939dda23e141f offset 0x10",
+            "exact_quote": "20 20 20 20 20 20 20 20 20 20 20 78 6c 69 6e 6b"
+          },
+          {
+            "claim": "naive_ngram4 indexes the coverage map by a length-4 edge path so a new path tuple is new coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ngram4 Feedback",
+            "exact_quote": "a \"new\nbucket\" is a previously-unseen 4-edge path tuple."
+          },
+          {
+            "claim": "value_profile resolved nine trials and reached the highest branch hitcount.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 subject 32",
+            "exact_quote": "avg hitcount on branch: winner=96  loser=4"
+          },
+          {
+            "claim": "value_profile intercepts integer CMPs into a CMP_MAP keyed by operand-distance bucket.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Instrumentation",
+            "exact_quote": "each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket)"
+          },
+          {
+            "claim": "A closer-to-matching CMP operand pair adds a CMP_MAP bucket and is preserved as corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile uses naive's mutators with no I2S substitution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic UTF16LEToUTF8-style harness gated on (c & 0xFC00)==0xD800 where value_profile and naive_ngram4 resolve at the same rate as plain naive, showing neither CMP_MAP distance feedback nor 4-edge n-gram coverage gives an advantage on this surrogate gate."
+        },
+        "weakest_evidence_point": "Attributing the naive_ngram4 win specifically to 4-edge path coverage (rather than to incidental extra corpus diversity) is the least directly evidenced claim, since no mutation_op lineage was inspected for the n-gram seeds.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6429",
+      "target": "libxml2",
+      "branch_id": 6429,
+      "analysis_path": "prompts/libxml2_6429.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "parser.c:xmlFatalErr",
+      "line": "256",
+      "source_line": "        case XML_ERR_INVALID_HEX_CHARREF:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "XML_ERR_INVALID_HEX_CHARREF",
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "CMP_MAP distance-bucket feedback scores chained hex-digit range comparisons, preserving inputs whose bytes approach then cross the hex-digit boundary, enabling incremental construction of a &#x reference with a non-hex terminator.",
+        "one_line": "Gradient walks bytes through hex-digit range to produce invalid hex-charref"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A hexadecimal character reference (&#x...) whose digit run is terminated by a non-hex-digit byte, driving xmlParseCharRef into the invalid-hex-charref error arm.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>naive (value_profile)"
+            ],
+            "what_input_feature": "A hex character-reference construct that enters xmlParseCharRef's hex loop (lines 2327-2332) and then presents a byte that fails ALL three hex-digit range tests ([0-9], [a-f], [A-F]), so control reaches the else arm at line 2333 which calls xmlFatalErr(ctxt, XML_ERR_INVALID_HEX_CHARREF, NULL) and lands on case 256.",
+            "why_winner_satisfies": "value_profile winner seeds carry char-ref/markup material (e.g. '(#PCD', '-UCS-4', ';link9href') and the per-role overlay marks the hex-digit range comparisons and the else->xmlFatalErr arm (lines 2327, 2329, 2331, 2333-2337) as [W] winner-only, and the blocker case 256 itself as [W]; the branch true side is taken 12 times for W but 0 times for L.",
+            "why_loser_doesnt": "naive loser seeds are well-formed '<?xml version=\"1.0\"?>' DOCTYPE/SYSTEM documents that never assemble a hex char-ref terminated by a non-hex byte; at line 256 the loser takes the false side 147 times and the true side 0 times, so the invalid-hex-charref arm is never reached.",
+            "mechanism_attribution": "value_profile's CMP_MAP distance-bucket feedback scores the chained hex-digit range comparisons (RAW vs '0'/'9'/'a'/'f'/'A'/'F') in xmlParseCharRef, preserving inputs that drive operands toward and then just past the hex-digit boundary; this gradient lets value_profile incrementally construct a &#x reference whose terminating byte fails the range tests, while naive's edge-only feedback gives no signal on how close a byte is to a hex digit and cannot stage that construction."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the XML_ERR_INVALID_HEX_CHARREF switch case at parser.c:256 inside xmlFatalErr, with the true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "parser.c:256:9",
+            "exact_quote": "case XML_ERR_INVALID_HEX_CHARREF:"
+          },
+          {
+            "claim": "value_profile resolves the branch in all 10 trials while naive blocks in 9 of 10, a prob_div of 0.90.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "prob_div=0.90  dur_div=12.90h  hit_div=21"
+          },
+          {
+            "claim": "The blocker is reached from xmlParseCharRef's hex loop when a byte fails all three hex-digit range tests, hitting the else arm that calls xmlFatalErr with XML_ERR_INVALID_HEX_CHARREF.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2334",
+            "exact_quote": "xmlFatalErr(ctxt, XML_ERR_INVALID_HEX_CHARREF, NULL); <-- CALL"
+          },
+          {
+            "claim": "The winner-only overlay marks the hex-digit range comparison that gates entry to the fatal-error arm.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2329",
+            "exact_quote": "else if ((RAW >= 'a') && (RAW <= 'f') && (count < 20))"
+          },
+          {
+            "claim": "At the blocker line the winner takes the true side 12 times while the loser never takes it (0 true, 147 false).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L256",
+            "exact_quote": "T=12 F=20  T=0 F=147  case XML_ERR_INVALID_HEX_CHARREF:"
+          },
+          {
+            "claim": "Winner seeds carry char-ref/markup fragments rather than clean well-formed documents.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 4 id=c7c229096902818b",
+            "exact_quote": "g&/:o..6-UCS-4(s"
+          },
+          {
+            "claim": "Loser seeds are well-formed XML declaration / DOCTYPE documents that do not build an invalid hex char-ref.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 1 id=0357b7fe9410b932",
+            "exact_quote": "<?xml version=\"1"
+          },
+          {
+            "claim": "value_profile's mechanism is CMP_MAP distance-bucket feedback that preserves inputs whose operand pair is closer to matching than any seen before.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile uses no I2S substitution mutator, so the divergence is attributable to the CMP_MAP feedback technique only.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with a single isolated hex char-ref loop where value_profile and naive resolve the invalid-hex-charref arm at indistinguishable rates (no value_profile advantage), which would refute that CMP_MAP gradient feedback on the hex-digit range comparisons is the divergence driver."
+        },
+        "weakest_evidence_point": "The seed bytes show char-ref/markup material but no offset shows a literal '&#x' digit-then-non-digit run, so the exact byte path into xmlParseCharRef's else arm is inferred from the [W] overlay rather than read directly from a winner seed.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6467_h1",
+      "target": "libxml2",
+      "branch_id": 6467,
+      "analysis_path": "prompts/libxml2_6467.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "xmlParseCharRef",
+      "line": "2353",
+      "source_line": "\t    if (count++ > 20) {",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": "20",
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "CMP_MAP distance feedback on digit-range comparisons rewards bytes progressively closer to valid decimal digits, driving longer digit runs that eventually push the loop counter past 20.",
+        "one_line": "CMP_MAP digit-range gradient lengthens run until count exceeds 20"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Take true side requires a decimal char-ref (&#) whose digit run drives the count++ loop past 20 iterations.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>naive (value_profile)"
+            ],
+            "what_input_feature": "A decimal character reference (`&#` then a long ASCII-digit run) where each digit satisfies the `(RAW >= '0') && (RAW <= '9')` range comparison, so the loop keeps advancing through enough digits to push count past 20.",
+            "why_winner_satisfies": "The loop body compares each byte against the '0'..'9' range at L2359; value_profile's CMP_MAP records how close each byte is to those bounds, so inputs whose bytes approach valid digits are preserved and extended, lengthening the digit run. The value_profile pair resolves 9/10 with branch hitcount 8 versus the loser's 1.",
+            "why_loser_doesnt": "naive's loser seeds reach the loop only 4 times (L2352 T=4) and average hitcount 1 on the branch; without CMP-distance feedback naive gets no gradient toward filling the run with in-range digit bytes, so the loop exits early via the invalid-char break before count exceeds 20.",
+            "mechanism_attribution": "value_profile adds per-CMP CMP_MAP distance buckets on the digit-range comparisons at L2359, giving a Hamming/prefix gradient that rewards bytes closer to valid decimal digits. This drives progressively longer digit runs that eventually trip the count++>20 reset branch \u2014 a CMP_MAP gradient effect."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the count overflow guard inside the decimal char-ref loop, and its true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "parser.c:2353:10",
+            "exact_quote": "Source line: \t    if (count++ > 20) {\nGlobally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "The blocker sits inside the decimal-branch while loop reached when input is `&#` without `x`.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2349-L2353",
+            "exact_quote": "} else if  ((RAW == '&') && (NXT(1) == '#')) {"
+          },
+          {
+            "claim": "naive_ctx winner drives the loop header True 111 times while the naive loser reaches it only 4 times.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L2352",
+            "exact_quote": "d=1   L2352  T=111 F=0  T=4 F=0  while (RAW != ';')"
+          },
+          {
+            "claim": "The winner takes the count-overflow true side 9 times while the loser takes it 0 times.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L2353",
+            "exact_quote": "d=1   L2353  T=9 F=102  T=0 F=4  if (count++ > 20) {  <-- BLOCKER"
+          },
+          {
+            "claim": "The naive_ctx pair resolves 10/10 vs naive 2/10 with a large branch hitcount gap.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 subject 35",
+            "exact_quote": "avg hitcount on branch: winner=57  loser=1"
+          },
+          {
+            "claim": "naive_ctx's mechanism makes each (call-context, edge) pair a distinct coverage event.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge"
+          },
+          {
+            "claim": "The loop compares each byte against the decimal-digit range, the comparison value_profile rewards approaching.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2359",
+            "exact_quote": "if ((RAW >= '0') && (RAW <= '9'))"
+          },
+          {
+            "claim": "The value_profile pair resolves 9/10 vs naive 2/10 with hitcount 8 vs 1.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 subject 32",
+            "exact_quote": "avg hitcount on branch: winner=8  loser=1"
+          },
+          {
+            "claim": "value_profile records a coarse operand-distance bucket per CMP, preserving inputs whose operands approach matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the same count++>20 decimal-loop where naive resolves the true side as often as naive_ctx and value_profile across trials, showing neither context-sensitive coverage nor CMP_MAP gradient is needed to grow the digit run past 20 iterations."
+        },
+        "weakest_evidence_point": "The byte-diff seeds are single-provenance (naive_ctx/naive) so the value_profile hypothesis leans on the loop's digit-range comparison plus hitcount divergence rather than on a value_profile-stored seed.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_7143_h0",
+      "target": "libxml2",
+      "branch_id": 7143,
+      "analysis_path": "prompts/libxml2_7143.analysis.json",
+      "file": "/src/libxml2/valid.c",
+      "function": "valid.c:xmlValidateNmtokensValueInternal",
+      "line": "3779",
+      "source_line": "    if (!xmlIsDocNameChar(doc, val))",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "CMP_MAP distance-bucket feedback on integer character-class comparisons inside xmlIsDocNameChar rewards inputs whose leading byte edges toward a rejected-class value, letting the fuzzer incrementally synthesize an attribute value with a non-NameChar leading character.",
+        "one_line": "VP gradient evolves leading byte outside NameChar acceptance set via char-class CMP feedback"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        },
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Reach an ATTLIST NMTOKENS/ENUMERATION attribute whose validated value begins with a non-NameChar, so xmlIsDocNameChar fails and the function returns early.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)",
+              "value_profile>naive (value_profile)"
+            ],
+            "what_input_feature": "A DTD declaring an attribute of type NMTOKENS or ENUMERATION (so xmlValidateNmtokensValueInternal is invoked) whose attribute value's first non-blank character is NOT a doc NameChar, driving the !xmlIsDocNameChar test true and the early return(0) at line 3780.",
+            "why_winner_satisfies": "value_profile/value_profile_cmplog winners resolve the branch (10/10 and 8/10) and hit the true side (W: line 3780 [W], L3779 T=29 F=0), i.e. they synthesise an attribute value whose leading char is rejected by xmlIsDocNameChar; the CMP_MAP gradient over the character-class comparisons inside xmlIsDocNameChar lets value_profile incrementally evolve a byte that lands in the rejected class.",
+            "why_loser_doesnt": "naive and cmplog losers stay blocked (8/10) and instead take the false side, falling into the xmlIsDocNameChar acceptance loop at line 3782 onward (L marks 3782-3810, L3779 T=0 F=58); their attribute values keep starting with an accepted NameChar so the true branch is never reached.",
+            "mechanism_attribution": "value_profile (and value_profile_cmplog) add a CMP_MAP keyed by operand-distance buckets; the integer-CMP comparisons that implement xmlIsDocNameChar's character-class test produce new distance buckets as a candidate byte approaches a value outside the accepted NameChar set, preserving intermediate inputs as corpus and letting the fuzzer climb to a rejected leading character. The single-technique delta in both pairs is value_profile (vpc vs cmplog and vp vs naive both add only the CMP_MAP gradient)."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the !xmlIsDocNameChar test in xmlValidateNmtokensValueInternal and the globally blocked side is the true branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "valid.c:3779",
+            "exact_quote": "Source line:     if (!xmlIsDocNameChar(doc, val))"
+          },
+          {
+            "claim": "The function is reached only for NMTOKENS or ENUMERATION attribute types via the caller switch.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L3874-3876",
+            "exact_quote": "case XML_ATTRIBUTE_NMTOKENS:\n[B]  3875  \tcase XML_ATTRIBUTE_ENUMERATION:\n[B]  3876  \t    return(xmlValidateNmtokensValueInternal(doc, value)); <-- CALL"
+          },
+          {
+            "claim": "Winners take the true side (early return 0); losers fall into the acceptance loop.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L3779/L3782",
+            "exact_quote": "d=1   L3779  T=29 F=0  T=0 F=58  if (!xmlIsDocNameChar(doc, val))  <-- BLOCKER"
+          },
+          {
+            "claim": "value_profile wins over naive and value_profile_cmplog wins over cmplog, both with delta value_profile.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 3",
+            "exact_quote": "--- Pair 1: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+          },
+          {
+            "claim": "value_profile resolves 8/10 against naive's 2/10 with the value_profile delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3",
+            "exact_quote": "--- Pair 3: value_profile > naive  [delta: value_profile] ---"
+          },
+          {
+            "claim": "The value_profile technique adds a CMP_MAP distance-bucket feedback that preserves inputs whose operands get closer to a target.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile section",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "grimoire wins over cmplog with the grimoire_structural single-technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "--- Pair 2: grimoire > cmplog  [delta: grimoire_structural] ---"
+          },
+          {
+            "claim": "grimoire resolves the branch almost immediately (0.10h, hitcount 333) versus cmplog (19.10h, hitcount 2).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "avg duration blocked: winner=0.10h  loser=19.10h\n  avg hitcount on branch: winner=333  loser=2"
+          },
+          {
+            "claim": "grimoire builds on the full cmplog stack and adds GeneralizationStage + Grimoire structural mutators, so the single-technique delta vs cmplog is structural.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire section",
+            "exact_quote": "The single-technique delta is therefore\n`grimoire` vs `cmplog` (both have I2S; grimoire adds generalization +\nGrimoire mutators), not vs naive."
+          },
+          {
+            "claim": "grimoire winner seeds carry Grimoire structural mutator ops.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 03ed72aae69e1480 / 9ac54fe3dd9be284",
+            "exact_quote": "mutation_op=GrimoireExtensionMutator"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose attribute-value first-character rejection is gated by a single equality/character-class CMP that value_profile resolves no faster than naive (no per-execution CMP_MAP distance-bucket progress), so value_profile shows no resolution advantage over naive at this branch."
+        },
+        "weakest_evidence_point": "Whether the value_profile advantage comes from a true CMP_MAP distance gradient over xmlIsDocNameChar's character-class comparisons rather than from incidental faster corpus growth is inferred from mechanism text, not directly observed at the CMP level.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

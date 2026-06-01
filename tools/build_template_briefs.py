@@ -22,6 +22,7 @@ for 5a.
 import argparse
 import json
 import re
+import sys
 from collections import OrderedDict
 from pathlib import Path
 
@@ -29,15 +30,56 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 STEP5A = REPO_ROOT / "step5a"
 OUT_DIR = REPO_ROOT / "step5b" / "briefs"
 
-FAMILIES = ["I2S_pro", "I2S_anti", "VP_pro", "synergy", "independent"]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mechanism_family import TECH, TECH_ALIAS  # noqa: E402
+
+# Every fuzzer name in the 10-fuzzer set (not just the canonical 4). involved_fuzzers
+# is intersected with THIS, so the technique families' arms (fast/minimizer/naive_ctx/
+# naive_ngram4/mopt/grimoire) survive instead of being filtered to the canonical 4.
+ALL_FUZZERS = set(TECH)
+
+HYP_SUFFIX = re.compile(r"_h(\d+)$")
+
+
+def member_hyp_index(mid):
+    """Hypothesis a member id refers to: '<branch>_h<i>' -> i, else 0 (single-hyp
+    branch; build_signature_cards omits the suffix). Each cluster member is ONE
+    hypothesis, so the brief must read only that hyp's covers_pairs — not every
+    hypothesis of the branch (which would leak sibling features' fuzzers/techniques)."""
+    m = HYP_SUFFIX.search(mid)
+    return int(m.group(1)) if m else 0
+
+
+def fuzzers_with(axis):
+    """Fuzzers whose technique content carries `axis` (the '-D knob ON' side).
+    Normalizes the value_profile->VP alias so it works for all 10 techniques."""
+    tok = TECH_ALIAS.get(axis, axis)
+    return {f for f, techs in TECH.items() if tok in techs}
+
+def discover_families():
+    """Families = step5a/<family>/ subdirs that actually carry a clusters.json.
+
+    Auto-discovered (not hardcoded) so it never drifts from the Pass-B output.
+    As of 2026-05-31 the 12 families are: I2S_pro, I2S_anti, VP_pro,
+    grimoire_structural_pro, grimoire_structural_anti, ctx_coverage_pro,
+    ctx_coverage_anti, ngram_coverage_pro, ngram_coverage_anti,
+    calibrated_energy_pro, aflfast_rarity_anti, havoc_anti.
+    """
+    if not STEP5A.is_dir():
+        return []
+    return sorted(p.parent.name for p in STEP5A.glob("*/clusters.json"))
+
+
+FAMILIES = discover_families()
+
+# Note: synergy de-dup is no longer done here. As of 2026-06-01 synergy is an
+# AUTHORITATIVE family in mechanism_family.route_branch — synergy branches route
+# their hypotheses to `synergy` at card-build time, so I2S_pro/VP_pro never contain
+# them and there is nothing to strip. independent is not built (route_branch sends
+# its arms per-hyp to I2S_pro/VP_pro, where each technique genuinely works alone).
 
 # "cmplog>naive (I2S)" -> winner, loser, technique
 PAIR_RE = re.compile(r"\s*(\w+)\s*>\s*(\w+)\s*\(([^)]*)\)")
-
-# axis partition of the canonical 4 fuzzers (see feature_spec.template.json)
-AXIS_HAS = {"I2S": {"cmplog", "value_profile_cmplog"},
-            "value_profile": {"value_profile", "value_profile_cmplog"}}
-CANON = {"naive", "cmplog", "value_profile", "value_profile_cmplog"}
 
 
 def parse_pair(s):
@@ -50,15 +92,20 @@ def parse_pair(s):
     return {"winner": w, "loser": l, "technique": tech, "axis": axis}
 
 
-def analysis_excerpt(apath):
+def analysis_excerpt(apath, hyp_index=None):
     p = REPO_ROOT / apath
     if not p.is_file():
         return {"_missing": str(apath)}
     a = json.loads(p.read_text())
+    hyps = a.get("hypotheses", [])
+    # A brief member is ONE hypothesis; show only that hyp so the author focuses on
+    # this feature (a multi_feature branch's other hyps belong to other clusters).
+    if hyp_index is not None and 0 <= hyp_index < len(hyps):
+        hyps = [hyps[hyp_index]]
     return {
         "summary_one_line": a.get("summary_one_line"),
         "pair_decision": a.get("pair_decision"),
-        "hypotheses": a.get("hypotheses", []),
+        "hypotheses": hyps,
         "evidence_trail": [e for e in a.get("evidence_trail", [])
                            if e.get("exact_quote")],
         "falsifiability": a.get("falsifiability"),
@@ -73,9 +120,9 @@ def build_brief(cluster, sigs_by_id):
     for m in cluster["members"]:
         mid = m["id"]
         sig = sigs_by_id.get(mid, {})
-        exc = analysis_excerpt(m["analysis_path"])
+        exc = analysis_excerpt(m["analysis_path"], member_hyp_index(mid))
         pairs = []
-        for h in exc.get("hypotheses", []):
+        for h in exc.get("hypotheses", []):  # the member hyp only (excerpt is filtered)
             for cp in h.get("covers_pairs", []):
                 pp = parse_pair(cp)
                 if pp:
@@ -100,15 +147,16 @@ def build_brief(cluster, sigs_by_id):
             ("analysis", exc),
         ]))
 
-    involved = sorted((winners | losers) & CANON)
+    involved = sorted((winners | losers) & ALL_FUZZERS)
     primary_axis = (sorted(techniques)[0] if len(techniques) == 1
                     else "multi" if len(techniques) > 1 else None)
     suggested = {}
-    if primary_axis in AXIS_HAS:
+    if primary_axis and primary_axis != "multi":
+        has = sorted(set(involved) & fuzzers_with(primary_axis))
         suggested = {
             "axis_differ": primary_axis,
-            "has_axis": sorted(set(involved) & AXIS_HAS[primary_axis]),
-            "lacks_axis": sorted(set(involved) - AXIS_HAS[primary_axis]),
+            "has_axis": has,
+            "lacks_axis": sorted(set(involved) - set(has)),
         }
 
     return OrderedDict([

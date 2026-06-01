@@ -24,8 +24,9 @@ the phase ordering is the "Typical Workflow" section of [`../CLAUDE.md`](../CLAU
 | **4a** prompt | `evidence_prompt.py` | Per-branch structured-prompt assembly; registers `evidence-per-branch` into study_units |
 | **4c** validate | `check_analysis.py` | Validate agent `.analysis.json` vs sibling prompt (exact_quote hallucination filter) |
 | **4** agent pull | `db_query.py` | Agent-facing pull queries (lineage, more-seeds) |
-| **5a** classify | `mechanism_family.py` | `coarse_family(covers_pairs)` → per-technique pro/anti families (10 techniques) + I2S×VP synergy/independent |
-| **5a** classify | `build_signature_cards.py` | Per-family distiller cards for the signature-distiller agent |
+| **5a** classify | `mechanism_family.py` | per-hyp `coarse_family` (10 techniques, pro/anti) + branch-level `route_branch` (synergy AUTHORITATIVE; independent not built; mixed escape) |
+| **5a** classify | `build_signature_cards.py` | Per-family distiller cards (routed via `route_branch`) for the signature-distiller agent |
+| **5a** verify synergy | `check_synergy_clusters.py` | deterministic coverage + `_h0`/`_h1` co-cluster invariant on synergy Pass-B output |
 | **5b** author/verify | `build_template_briefs.py` | Per-cluster authoring brief → `step5b/briefs/<id>.json` |
 | **5b** author/verify | `check_template.py` | Preflight: schema/fuzzer sanity + scan_value compile + dead-knob detection |
 | **5b** author/verify | `verify_template.py` | Synthetic-harness sweep runner (serial `--jobs 1`) → `verification_run.json` |

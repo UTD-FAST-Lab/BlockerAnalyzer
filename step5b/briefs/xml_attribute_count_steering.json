@@ -1,0 +1,127 @@
+{
+  "feature_id": "xml_attribute_count_steering",
+  "mechanism_family": "I2S_pro",
+  "mechanism_label": "xml_attribute_count_steering",
+  "definition": "I2S plants a high-value byte at a leading document offset to steer the document toward an attribute-rich parse state where the attribute count exceeds the namespace-slot count, satisfying a loop guard.",
+  "n_members": 1,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog"
+    ],
+    "lacks_axis": [
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libxml2_7287",
+      "target": "libxml2",
+      "branch_id": 7287,
+      "analysis_path": "prompts/libxml2_7287.analysis.json",
+      "file": "/src/libxml2/xmlreader.c",
+      "function": "xmlTextReaderMoveToAttributeNo",
+      "line": "2540",
+      "source_line": "    for (;i < no;i++) {",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace substitutes CMP operands at the leading header byte offset (0x00), setting 0xf9 where losers have small values, steering the document toward an attribute-rich state where the loop condition i < no is satisfied.",
+        "one_line": "I2S sets leading header byte to produce attribute-count exceeding namespace count"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "An element with enough attributes that the requested index exceeds the namespace-def count, forcing the property-list walk loop to iterate.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "XML whose parsed element carries enough attributes that the attribute index `no` (driven by the harness loop `for (i=0; i<n; i++)` over xmlTextReaderAttributeCount) exceeds the namespace-definition count, so after the ns loop at 2529 leaves `i < no` true and the property-list walk loop `for (;i < no;i++)` at 2540 must iterate. The leading 4-byte little-endian header at offset 0x00 (f9 00 00 00) sets parser options/sizes that produce this attribute-rich document state.",
+            "why_winner_satisfies": "Winner-resolving seeds carry f9 at offset 0x00 (vs the losers' small 06/10), and the winner-only lines 2541-2543 (cur = cur->next; if (cur == NULL) return(0);) are taken only on the W role, showing the property-list walk loop body executes. Hit-count on the branch is winner=5 vs loser=0.",
+            "why_loser_doesnt": "Loser-blocking seeds have small leading-byte values (06, 10, 01) at offset 0x00, and on the L role line 2540 shows T=0 F=9 \u2014 the loop condition is never true, so the requested index never forces a property-list step; loser resolves only 2/10.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes one CMP operand for the other at matching input offsets, letting it set the leading header/comparand bytes that steer the document toward the attribute-rich state; naive must reach the same state by blind havoc byte mutation and largely fails (2/10 vs 9/10). I2S-floor dash rows in the winning seed's lineage confirm an I2S contribution."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the property-list walk loop that runs only when the requested attribute index still exceeds traversal after the namespace loop.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L2540",
+            "exact_quote": "for (;i < no;i++) {"
+          },
+          {
+            "claim": "The attribute index `no` is supplied by the harness loop iterating over the element's attribute count.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "fuzz/xml.c:81-83",
+            "exact_quote": "int i, n = xmlTextReaderAttributeCount(reader);"
+          },
+          {
+            "claim": "The winner-only lines 2541-2543 (property-list walk body) are taken on the W role, evidencing the loop iterating.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2541-2543",
+            "exact_quote": "[W]  2541  \tcur = cur->next;"
+          },
+          {
+            "claim": "Winner-resolving seeds carry f9 at offset 0x00 while loser-blocking seeds carry small values.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0000",
+            "exact_quote": "0x0000  f9(.)x2                             06(.)x1 10(.)x1 45(E)x1 01(.)x1 +5u  DIFFER"
+          },
+          {
+            "claim": "On the loser role the blocker loop condition is never true (T=0 F=9).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L2540",
+            "exact_quote": "d=1   L2540  T=6 F=6  T=0 F=9  for (;i < no;i++) {  <-- BLOCKER"
+          },
+          {
+            "claim": "The winner hits the branch 5 times while the loser hits it 0 times, and the winner resolves 9/10 vs loser 2/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog>naive",
+            "exact_quote": "avg hitcount on branch: winner=5  loser=0"
+          },
+          {
+            "claim": "cmplog enables the winner via I2SRandReplace operand substitution at matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S and reaches states only by havoc/token byte mutation.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Mutators",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where forcing the attribute index `no` above the namespace-def count (so line 2540 must iterate) shows naive resolving the branch as often as cmplog, with no f9/header-byte dependence \u2014 meaning I2S operand substitution gives no advantage in reaching the property-list walk."
+        },
+        "weakest_evidence_point": "The causal link from the offset-0x00 leading byte (f9 vs 06/10) to a large attribute count is inferred from the harness header convention, not directly traced through xmlReaderForMemory option parsing.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

@@ -1,0 +1,127 @@
+{
+  "feature_id": "grimoire_structural_budget_tax_short_inputs",
+  "mechanism_family": "grimoire_structural_anti",
+  "mechanism_label": "generalization_reexecution_starves_coherent_progress",
+  "definition": "Grimoire's GeneralizationStage re-execution and structural recombination mutators produce short, fragmented inputs that fail to advance the parser far enough to satisfy a buffer-fullness threshold, while cmplog's I2S plus havoc builds coherent long inputs that pass it.",
+  "n_members": 1,
+  "involved_fuzzers": [
+    "cmplog",
+    "grimoire"
+  ],
+  "techniques_seen": [
+    "grimoire_structural"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "grimoire_structural",
+    "has_axis": [
+      "grimoire"
+    ],
+    "lacks_axis": [
+      "cmplog"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libxml2_6869",
+      "target": "libxml2",
+      "branch_id": 6869,
+      "analysis_path": "prompts/libxml2_6869.analysis.json",
+      "file": "/src/libxml2/parserInternals.c",
+      "function": "xmlParserInputGrow",
+      "line": "309",
+      "source_line": "    if (xmlBufUse(in->buf->buffer) > (unsigned int) indx + INPUT_CHUNK) {",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "Grimoire's GeneralizationStage re-runs and structural recombination mutators spend executions on short, fragmented inputs that never advance the parser far enough to accumulate sufficient buffered content; cmplog's I2S plus havoc builds coherent long inputs that satisfy the buffer-ahead threshold.",
+        "one_line": "structural energy tax produces short fragmented inputs that never fill the buffer"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "grimoire",
+          "technique": "grimoire_structural",
+          "axis": "grimoire_structural"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A coherent XML body long enough that the parser buffers more than INPUT_CHUNK bytes ahead of the cursor, taking the grow-skip true branch.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>grimoire (grimoire_structural)"
+            ],
+            "what_input_feature": "An input that drives xmlCurrentChar/parser deep into a coherent XML document so that xmlBufUse(in->buf->buffer) exceeds (indx + INPUT_CHUNK) at the grow check on line 309 (true side), i.e. enough buffered, well-formed content remains ahead of the cursor that the buffer need not be grown. cmplog's plain havoc+I2S budget reaches this; grimoire's generalization/structural budget does not.",
+            "why_winner_satisfies": "The winning cmplog seed (458 bytes) is large and ends in a coherent XML/namespace token run ('?xmlnstxlink'), and on the W path the parser reaches xmlCurrentChar (W hits 351 vs L 0) and xmlCopyCharMultiByte (W 309 vs L 0) and takes the line-309 true side (L309 W: T=6 F=1). cmplog spends its execution budget on havoc byte mutation plus efficient I2S substitution rather than on generalization re-runs, so it builds inputs that progress far enough to satisfy the buffer-ahead condition.",
+            "why_loser_doesnt": "The grimoire (loser) seeds are short (13-52 bytes) and structurally fragmented (e.g. repeated '////////', truncated 'http://~tp://~'); they never reach xmlCurrentChar (L hits 0) and at line 309 take only the false side (L309 L: T=0 F=48). grimoire pays an extra-execution tax: the GeneralizationStage validates each <GAP> candidate by re-running, and the Grimoire structural mutators recombine generalised token/gap fragments, producing short, non-progressing inputs that keep the buffer under indx+INPUT_CHUNK so the parser falls through to the actual grow path instead of the true skip branch.",
+            "mechanism_attribution": "cmplog wins because its I2SRandReplace stage plus havoc operates without grimoire's generalization + structural-recombination energy tax. The single-technique delta grimoire_structural is a net negative at this branch: grimoire's GeneralizationStage re-runs and Grimoire structural mutators spend executions on short fragmented generalised inputs, while cmplog's I2S substitution (confirmed by I2S-floor dash rows in the winner's lineage) efficiently grows coherent content that buffers more than INPUT_CHUNK ahead, taking the line-309 true branch."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is a buffer-fill comparison: take the true side when buffered bytes exceed the cursor index plus INPUT_CHUNK.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "parserInternals.c:309",
+            "exact_quote": "if (xmlBufUse(in->buf->buffer) > (unsigned int) indx + INPUT_CHUNK) {"
+          },
+          {
+            "claim": "The decisive pair is cmplog beating grimoire with the single-technique delta grimoire_structural.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: cmplog > grimoire  [delta: grimoire_structural]"
+          },
+          {
+            "claim": "On the winner path the parser reaches xmlCurrentChar and xmlCopyCharMultiByte, which the loser never executes.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "xmlCurrentChar / xmlCopyCharMultiByte",
+            "exact_quote": "     351         0  xmlCurrentChar  (/src/libxml2/parserInternals.c:558-701)"
+          },
+          {
+            "claim": "At the blocker line the winner takes the true side while the loser takes only the false side.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L309",
+            "exact_quote": "d=1   L 309  T=6 F=1  T=0 F=48  if (xmlBufUse(in->buf->buffer) > (unsigned int) indx + IN..."
+          },
+          {
+            "claim": "The winning cmplog seed is large (458 bytes) and ends in a coherent XML namespace token run.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 9c2cb638eada1a5c",
+            "exact_quote": "Seed 1 (id=9c2cb638eada1a5c, size=458 bytes, fuzzer=cmplog, trial=3"
+          },
+          {
+            "claim": "The loser grimoire seeds are short and structurally fragmented.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 072de3970265e315",
+            "exact_quote": "Seed 1 (id=072de3970265e315, size=13 bytes, fuzzer=grimoire, trial=1"
+          },
+          {
+            "claim": "cmplog runs I2SRandReplace on top of havoc, substituting CMP operands found in the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "grimoire adds a GeneralizationStage plus structural mutators on top of the cmplog stack, incurring extra validation re-runs.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire Per-execution cost",
+            "exact_quote": "plus extra executions\nduring generalization (each candidate gap is validated by a re-run)."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness in which disabling grimoire's GeneralizationStage and structural mutators (leaving plain cmplog I2S+havoc) does NOT improve reach of the buffer-ahead true branch versus full grimoire, i.e. grimoire matches or beats cmplog at this grow-skip condition."
+        },
+        "weakest_evidence_point": "Whether grimoire's loss is caused by its structural-mutation execution tax rather than by an unrelated seed-size or scheduling artifact is inferred from seed sizes and per-execution cost notes, not directly measured.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

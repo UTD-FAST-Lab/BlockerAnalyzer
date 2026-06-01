@@ -1,0 +1,266 @@
+{
+  "feature_id": "grimoire_generalization_erases_i2s_literal",
+  "mechanism_family": "grimoire_structural_anti",
+  "mechanism_label": "generalization_erases_concrete_byte",
+  "definition": "Grimoire's GeneralizationStage replaces an I2S-planted concrete byte with a <GAP> abstraction, destroying the exact byte-value that bare cmplog retains, so a single-byte equality gate goes unresolved.",
+  "n_members": 2,
+  "involved_fuzzers": [
+    "cmplog",
+    "grimoire"
+  ],
+  "techniques_seen": [
+    "grimoire_structural"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "grimoire_structural",
+    "has_axis": [
+      "grimoire"
+    ],
+    "lacks_axis": [
+      "cmplog"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libpng_3892_h1",
+      "target": "libpng",
+      "branch_id": 3892,
+      "analysis_path": "prompts/libpng_3892.analysis.json",
+      "file": "/src/libpng/pngread.c",
+      "function": "OSS_FUZZ_png_read_end",
+      "line": "787",
+      "source_line": "   if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x03",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "Grimoire's GeneralizationStage replaces the I2S-planted concrete byte (color_type=0x03) with a <GAP> abstraction; structural recombination mutators then prevent the exact palette byte from being retained, so the single-byte fix that bare cmplog holds is erased.",
+        "one_line": "structural generalization erases the I2S-planted palette color_type byte"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "grimoire",
+          "technique": "grimoire_structural",
+          "axis": "grimoire_structural"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "IHDR color_type byte at offset 0x19 must equal 3 (PNG_COLOR_TYPE_PALETTE) for png_read_end to take the true branch",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>grimoire (grimoire_structural)"
+            ],
+            "what_input_feature": "The same byte-precise condition (color_type byte at 0x19 == 0x03) must survive intact in the produced input; the structural/generalization machinery that distinguishes grimoire from cmplog must not perturb or generalize away that exact byte.",
+            "why_winner_satisfies": "cmplog (no generalization/Grimoire mutators) keeps the I2S-planted color_type=03 byte intact and resolved the branch in 9/10 trials with avg hitcount 7; the byte-diff confirms W bytes 03(.)x4 fixed at offset 0x19.",
+            "why_loser_doesnt": "grimoire shares the full cmplog I2S stack yet loses (resolved 1/10, blocked 9/10), so the divergence is attributable to grimoire's added GeneralizationStage + Grimoire structural mutators; its grimoire-blocking seed at offset 0x19 carries non-palette bytes, indicating the generalization/structural recombination disrupts the byte-precise palette color_type that bare I2S would otherwise plant and retain.",
+            "mechanism_attribution": "grimoire structural: grimoire adds GeneralizationStage (replacing concrete byte runs with <GAP>) plus Grimoire string/structural mutators on top of the identical I2S stage; that structural recombination dilutes the per-byte I2S fix of the color_type field, so the single-technique delta (grimoire_structural) actively penalizes resolution relative to plain cmplog."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker at pngread.c:787 tests color_type == PNG_COLOR_TYPE_PALETTE.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngread.c:787:8",
+            "exact_quote": "if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&"
+          },
+          {
+            "claim": "cmplog winner seeds carry 03 at offset 0x19 while losers carry non-palette bytes there.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  03(.)x4                             00(.)x13 06(.)x9 04(.)x1 02(.)x1    DIFFER"
+          },
+          {
+            "claim": "cmplog winner-resolving seeds take the true branch.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner-resolving seeds header",
+            "exact_quote": "Winner-resolving seeds (take true branch)"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace scans the input for one CMP operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S; it can only mutate via havoc/token stack.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "cmplog beats naive at this branch with prob_div 0.90.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog > naive",
+            "exact_quote": "prob_div=0.90  dur_div=18.30h  hit_div=7"
+          },
+          {
+            "claim": "grimoire shares the full cmplog I2S stack and adds generalization plus Grimoire mutators.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire Baseline relationship",
+            "exact_quote": "grimoire builds on the full cmplog stack \u2014\nit includes the `CmpLogObserver`, the `TracingStage`, and the\n`I2SRandReplace` (i2s) stage \u2014 and ADDS a `GeneralizationStage` plus\nGrimoire structural mutators."
+          },
+          {
+            "claim": "The single-technique delta for grimoire vs cmplog is the added generalization plus Grimoire mutators.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire Baseline relationship",
+            "exact_quote": "The single-technique delta is therefore\n`grimoire` vs `cmplog` (both have I2S; grimoire adds generalization +\nGrimoire mutators), not vs naive."
+          },
+          {
+            "claim": "GeneralizationStage replaces concrete byte runs with <GAP> placeholders.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire Mutators / stages",
+            "exact_quote": "`GeneralizationStage`\nreplaces concrete byte runs in a corpus entry with `<GAP>` placeholders"
+          },
+          {
+            "claim": "cmplog wins over grimoire at this branch with prob_div 0.80.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 cmplog > grimoire",
+            "exact_quote": "prob_div=0.80  dur_div=15.90h  hit_div=6"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on color_type==PALETTE where naive resolves the branch as fast as cmplog (i.e. the single color_type byte is reachable by blind havoc), which would refute that I2S byte-substitution is what gives cmplog its edge."
+        },
+        "weakest_evidence_point": "The grimoire>loss attribution to GeneralizationStage perturbation is inferential \u2014 both grimoire and cmplog have I2S, so I cannot directly observe in the seeds why grimoire fails to retain the color_type=3 byte, only that it shares the I2S stack yet loses.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6597_h2",
+      "target": "libxml2",
+      "branch_id": 6597,
+      "analysis_path": "prompts/libxml2_6597.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "xmlParseComment",
+      "line": "4985",
+      "source_line": "\t       (*in == 0x09)) {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x09",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "Grimoire's GeneralizationStage abstracts the concrete tab byte (0x09) to a <GAP> placeholder and adds re-execution overhead; both effects destroy the byte-exact literal that I2S would retain, causing the tab gate to remain unresolved.",
+        "one_line": "GeneralizationStage erases the exact tab byte and adds throughput cost"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "grimoire",
+          "technique": "grimoire_structural",
+          "axis": "grimoire_structural"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A well-formed XML comment opener <!-- whose body contains a literal 0x09 tab byte, so the loop's third disjunct fires.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>grimoire (grimoire_structural)"
+            ],
+            "what_input_feature": "A byte-exact tab (0x09) preserved inside a concrete <!-- comment body; the gate rewards a specific literal byte rather than a generalizable structural token.",
+            "why_winner_satisfies": "cmplog keeps the concrete bytes its I2S stage placed, so the exact 0x09 survives and the True side fires (resolved 8/10).",
+            "why_loser_doesnt": "grimoire runs the same I2S stage but its GeneralizationStage replaces concrete byte runs with <GAP> placeholders and spends extra re-execution validating those generalizations; for a byte-exact 0x09 gate the generalized tokens erase the specific tab and the throughput tax leaves grimoire blocked 9/10 \u2014 both loser-blocking grimoire seeds were produced by Grimoire structural mutators (GrimoireExtensionMutator).",
+            "mechanism_attribution": "grimoire structural (anti-direction): grimoire's GeneralizationStage + structural mutators abstract away the concrete tab byte and add re-execution cost, so the structural technique HURTS on a byte-exact literal gate where plain cmplog's concrete bytes win."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the third disjunct *in == 0x09 of the comment-content while loop, whose globally blocked side is True.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L4985",
+            "exact_quote": "(*in == 0x09)) { <-- BLOCKER"
+          },
+          {
+            "claim": "0x09 is below the 0x20 lower bound of the second disjunct, so the byte must be exactly a tab to reach the True side.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L4983-4985",
+            "exact_quote": "((*in >= 0x20) && (*in < '-')) ||"
+          },
+          {
+            "claim": "naive_ctx is the winner and naive the loser in the ctx_coverage pair, with naive_ctx resolving 10/10 and naive only 2/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "Winner-resolving seeds are all naive_ctx and carry 0x09 tab bytes alongside comment-opener bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1",
+            "exact_quote": "8<!--------...!"
+          },
+          {
+            "claim": "Loser-blocking naive seeds contain '--' runs but the dumped bytes show no tab inside a comment body.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 5",
+            "exact_quote": "-Gex>.<!t\">b --A"
+          },
+          {
+            "claim": "naive_ctx's CtxHook folds the call context into the edge-map index so the same edge is recorded at different slots per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "cmplog beats naive on the I2S delta, resolving 8/10 vs naive's 2/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3",
+            "exact_quote": "Pair 3: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "naive has no I2S and only havoc+token mutators.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "grimoire loses to cmplog despite both running the I2S stage; grimoire adds GeneralizationStage and Grimoire mutators.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: cmplog > grimoire  [delta: grimoire_structural]"
+          },
+          {
+            "claim": "grimoire's GeneralizationStage replaces concrete byte runs with <GAP> placeholders by repeated re-execution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire",
+            "exact_quote": "replaces concrete byte runs in a corpus entry with `<GAP>` placeholders"
+          },
+          {
+            "claim": "grimoire incurs extra executions during generalization, each gap validated by a re-run.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire",
+            "exact_quote": "plus extra executions\nduring generalization (each candidate gap is validated by a re-run)."
+          },
+          {
+            "claim": "The loser-blocking grimoire seeds were produced by Grimoire structural mutators.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 2",
+            "exact_quote": "mutation_op=GrimoireExtensionMutator"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic comment-content gate testing a byte-exact 0x09 tab where cmplog does NOT outpace naive, and grimoire matches or beats cmplog, and naive_ctx shows no advantage over naive \u2014 i.e. all three deltas vanish, showing the divergence is not technique-driven."
+        },
+        "weakest_evidence_point": "The cmplog>naive I2S attribution is unverified in lineage because only naive_ctx winner seeds are stored, so I2S's role rests on mechanism reasoning rather than a confirmed dash-row ancestor.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

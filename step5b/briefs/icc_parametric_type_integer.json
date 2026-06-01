@@ -1,0 +1,468 @@
+{
+  "feature_id": "icc_parametric_type_integer",
+  "mechanism_family": "I2S_pro",
+  "mechanism_label": "icc_parametric_type_integer",
+  "definition": "I2S logs a small integer type discriminant (Type = 2, 3, 4, or 5) from the ICC parametric-curve switch CMP and substitutes it at the Type field in the input, dispatching a specific curve case arm that blind havoc never reaches.",
+  "n_members": 4,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "naive",
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "lcms_2110",
+      "target": "lcms",
+      "branch_id": 2110,
+      "analysis_path": "prompts/lcms_2110.analysis.json",
+      "file": "/src/Little-CMS/src/cmsgamma.c",
+      "function": "cmsgamma.c:DefaultEvalParametricFn",
+      "line": "380",
+      "source_line": "    case 2:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "2",
+        "operand_width_bytes": null,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts the switch(Type) comparison against the integer literal 2, finds the current Type byte in the input, and substitutes 2 at that offset; naive and value_profile lack I2SRandReplace and never land on the exact discriminant in 24h.",
+        "one_line": "I2S substitutes exact integer 2 into parametric curve Type field"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must encode a parametric tone-curve Type field equal to 2 so the switch dispatches to case 2.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "An ICC parametric curve whose stored Type selector decodes to the integer 2, so the switch(Type) at line 344 dispatches to case 2 (line 380). The blocker is the true side of the case-2 dispatch; the input must carry a parametricCurveType field exactly equal to 2 somewhere in the parsed profile bytes.",
+            "why_winner_satisfies": "Winner seeds reach case 2 at runtime (line 380 fires T=602000 in W vs T=0 in L) and the whole case-2 body (lines 380-404) is marked [W] winner-resolving-only, with the branch hit 304270/391450 times by the winners. The cmplog/vpc winners can place the exact byte value 2 into the Type field via I2SRandReplace because the switch(Type) comparison logs the constant operand 2.",
+            "why_loser_doesnt": "Loser seeds never take case 2: line 380 shows T=0 F=204000 for L, and the entire case-2 body is not marked [L]. naive/value_profile have no I2S substitution to plant the discriminant integer 2 into the Type field, so they stay blocked on this side for the full 24h (avg duration blocked loser=24.00h).",
+            "mechanism_attribution": "cmplog and value_profile_cmplog add I2SRandReplace, which reads the post-execution CmpLogObserver buffer for the switch(Type) comparison, finds where the current Type bytes appear in the input, and substitutes the logged constant operand (2) at those offsets, satisfying case 2 directly. naive and value_profile lack I2SRandReplace and must hit the exact discriminant by chance, which does not happen in 24h."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true side of the switch arm case 2 inside DefaultEvalParametricFn, selected by the Type discriminant.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmsgamma.c:380:5",
+            "exact_quote": "Source line:     case 2:"
+          },
+          {
+            "claim": "The case-2 dispatch is governed by switch(Type).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L344",
+            "exact_quote": "switch (Type) {"
+          },
+          {
+            "claim": "Winners take case 2 while losers never do, per per-role branch divergence.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L380",
+            "exact_quote": "L 380  T=602000 F=2140000  T=0 F=204000  case 2:  <-- BLOCKER"
+          },
+          {
+            "claim": "The entire case-2 body is exclusively winner-resolving coverage.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L380-L404",
+            "exact_quote": "[W]   380      case 2: <-- BLOCKER"
+          },
+          {
+            "claim": "Winners hit the branch hundreds of thousands of times; losers zero.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "avg hitcount on branch: winner=304270  loser=0"
+          },
+          {
+            "claim": "Losers stay blocked the full campaign duration.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "avg duration blocked: winner=3.10h  loser=24.00h"
+          },
+          {
+            "claim": "cmplog/vpc add I2SRandReplace which substitutes a logged CMP operand at matching input offsets, enabling the discriminant value.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive and value_profile lack I2SRandReplace.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with switch(Type) on an input-derived integer where cmplog/vpc fail to reach case 2 while naive reaches it at the same rate, i.e. no I2S advantage for hitting an exact switch discriminant."
+        },
+        "weakest_evidence_point": "The exact input offset encoding the Type discriminant is not isolated in the BYTE DIFF (offsets show profile-tag differences like RGB/Lab/XYZ, not a clearly distinguishable Type=2 field), so the precise substituted offset is inferred from source, not directly observed.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2111",
+      "target": "lcms",
+      "branch_id": 2111,
+      "analysis_path": "prompts/lcms_2111.analysis.json",
+      "file": "/src/Little-CMS/src/cmsgamma.c",
+      "function": "cmsgamma.c:DefaultEvalParametricFn",
+      "line": "432",
+      "source_line": "    case 3:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "3",
+        "operand_width_bytes": null,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts the switch dispatch against literal 3, logs the constant operand, and splices 3 into the input's Type field; both losers lack I2SRandReplace and produce no coverage gradient toward this specific integer, staying blocked all trials.",
+        "one_line": "I2S splices integer 3 into parametric curve Type to enter case 3"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A parametric tone-curve whose Type field equals the exact literal 3, dispatching the switch to case 3:.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "An ICC parametric curve tag whose stored curve-Type integer equals the exact value 3 (the IEC 61966-3 form). The switch(Type) at line 344 must dispatch to case 3: (line 432); no other case arm reaches this branch.",
+            "why_winner_satisfies": "Winner seeds drive DefaultEvalParametricFn 2,330,000 times and case 3: is taken with W T=694000 vs L T=0, i.e. the winner produces inputs whose decoded Type field is exactly 3; the cmplog/vpc winners discover the matching literal by substituting the logged comparison operand into the input.",
+            "why_loser_doesnt": "Loser seeds never take case 3: (L T=0 F=204000 at line 432) and resolve=0/10, blocked=10/10; havoc-only mutation of the Type field never lands on the exact integer 3 because there is no coverage gradient guiding it toward that single value.",
+            "mechanism_attribution": "I2SRandReplace (present in both cmplog and value_profile_cmplog, absent in naive and value_profile) intercepts the switch dispatch comparison against the literal 3, logs the operand, and splices it into the input bytes so the Type field decodes to exactly 3; both losers lack I2SRandReplace and cannot solve the equality gate."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is case 3: of a switch on Type inside DefaultEvalParametricFn.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmsgamma.c:432",
+            "exact_quote": "Source line:     case 3:"
+          },
+          {
+            "claim": "The case 3: arm is dispatched by a switch(Type) statement.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L344",
+            "exact_quote": "switch (Type) {"
+          },
+          {
+            "claim": "Winner inputs take case 3: while losers never do.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L432",
+            "exact_quote": "T=694000 F=1630000  T=0 F=204000  case 3:  <-- BLOCKER"
+          },
+          {
+            "claim": "Both decisive pairs are I2S deltas with the cmplog/vpc side winning 10/10 and the loser blocked 10/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+          },
+          {
+            "claim": "The winners drive the enclosing function far more than losers, consistent with them reaching the case 3: body repeatedly.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "DefaultEvalParametricFn",
+            "exact_quote": " 2330000    204000  cmsgamma.c:DefaultEvalParametricFn"
+          },
+          {
+            "claim": "I2SRandReplace is the mutator that scans input for one CMP operand and substitutes the other, present in cmplog.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "The losing value_profile fuzzer has no I2SRandReplace mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "The losing naive fuzzer has no I2S capability.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating case 3: on an exact equality with literal 3 where naive/value_profile resolve the branch as often as cmplog/value_profile_cmplog, showing the equality gate is solvable without I2S substitution."
+        },
+        "weakest_evidence_point": "The exact input offset and width of the decoded Type field is not isolated in the BYTE DIFF (all offsets are tagged PARTIAL with no clean concentrated W-vs-L split pinpointing the Type bytes), so the literal-3 placement is inferred from the source dispatch rather than directly read off the seed bytes.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "lcms_2112",
+      "target": "lcms",
+      "branch_id": 2112,
+      "analysis_path": "prompts/lcms_2112.analysis.json",
+      "file": "/src/Little-CMS/src/cmsgamma.c",
+      "function": "cmsgamma.c:DefaultEvalParametricFn",
+      "line": "497",
+      "source_line": "            if (e > 0)",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace substitutes logged magic/tag-table CMP operands (profile header constants gating parametric curve Type 4 selection) into input bytes, assembling the multi-field profile structure; downstream mutation then drives the computed float e to a non-positive value, reaching the false side of e>0 that plain havoc cannot approach.",
+        "one_line": "I2S assembles multi-field ICC profile enabling Type-4 non-positive e path"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "An ICC profile embedding a Type-4 parametric tone curve whose coefficients drive e = Params[1]*R + Params[2] non-positive at R >= Params[4].",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)",
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "Input bytes parsed into an ICC profile that selects parametric curve Type 4 (case 4, sRGB) and supplies Params[4]/Params[1]/Params[2] coefficients such that for some sample R>=Params[4] the linear form e = Params[1]*R + Params[2] evaluates to <= 0, taking the False side of the e>0 gate at cmsgamma.c:497. The structural precondition is a magic-byte-laden profile header (acsp 'acspAPPL', profile-class/colorspace tags) whose downstream tag table points at a Type-4 parametricCurveType.",
+            "why_winner_satisfies": "Winning seeds carry the lcms/acsp profile skeleton with valid header magic and varying colorspace tags (RGB/Lab) at offsets 0x14-0x16, and they drive the blocker's enclosing function 941000 times vs 204000 for losers, with the False side actually taken (W F=59900 at line 497 vs L F=0); cmplog/vpc reached this via I2S substitution (dash-row ancestors).",
+            "why_loser_doesnt": "Loser-blocking seeds reach case 4 far less (DefaultEvalParametricFn 204000 invocations) and never take the False side (L 497 F=0): they hit the e>0 True side only, so the non-positive-e configuration of a Type-4 curve is never assembled by plain havoc/CMP_MAP mutation.",
+            "mechanism_attribution": "cmplog/value_profile_cmplog I2SRandReplace substitutes logged CMP operands (the magic/tag-table integers gating the parametric-curve dispatch and the Type-4 selection) directly into the input bytes, assembling the multi-field profile structure that naive havoc and value_profile's Hamming-gradient feedback cannot synthesize, then letting downstream mutation drive e non-positive."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "Both decisive pairs at this branch are I2S-delta pairs.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 headers",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "The second decisive pair cmplog>naive is also an I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 header",
+            "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "The blocker is the e>0 gate inside case 4 (sRGB parametric curve) where e is the linear form Params[1]*R + Params[2].",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L492-L497",
+            "exact_quote": "case 4:\n[B]   493          if (R >= Params[4]) {\n[ ]   494  \n[B]   495              e = Params[1]*R + Params[2];\n[ ]   496  \n[B]   497              if (e > 0) <-- BLOCKER"
+          },
+          {
+            "claim": "The globally blocked side is the False branch (e <= 0).",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L7",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "Winners exercise the False side of line 497 while losers never do.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L497",
+            "exact_quote": "d=1   L 497  T=333000 F=59900  T=78600 F=0  if (e > 0)  <-- BLOCKER"
+          },
+          {
+            "claim": "Winners invoke the enclosing parametric-curve function far more than losers, indicating they assemble the curve-dispatch structure.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "DefaultEvalParametricFn row",
+            "exact_quote": "941000    204000  cmsgamma.c:DefaultEvalParametricFn"
+          },
+          {
+            "claim": "Winning seeds carry the lcms/acsp ICC profile skeleton with colorspace tags varying across RGB/Lab.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner-resolving Seed 2/3 offset 0x10-0x17",
+            "exact_quote": "52 47 42 20 4c 61 62 20 07 d9 00 0c 00 17 00 16   RGB Lab ........"
+          },
+          {
+            "claim": "Loser-blocking seeds also carry the acsp profile skeleton but concentrate on XYZ colorspace and the same header magic.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser-blocking Seed 1 offset 0x10-0x17",
+            "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+          },
+          {
+            "claim": "cmplog supplies the I2SRandReplace mutator that substitutes logged CMP operands into the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator, only havoc/token.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "value_profile relies on CMP_MAP Hamming-distance feedback and has no I2S mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness exposing the same e>0 gate inside a Type-4 parametric curve whose selection/coefficient fields are NOT pre-images of input bytes (e.g. fixed at compile time) shows cmplog and value_profile_cmplog resolving the False side no faster than naive and value_profile."
+        },
+        "weakest_evidence_point": "The exact CMP operand that I2S substitutes (the parametric-curve Type selector / tag-table offset vs the header magic) is inferred from structure and hit-count divergence rather than read directly from a logged CMP entry.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2113",
+      "target": "lcms",
+      "branch_id": 2113,
+      "analysis_path": "prompts/lcms_2113.analysis.json",
+      "file": "/src/Little-CMS/src/cmsgamma.c",
+      "function": "cmsgamma.c:DefaultEvalParametricFn",
+      "line": "542",
+      "source_line": "    case 5:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "derived_integer",
+        "operand_literal": "5",
+        "operand_width_bytes": null,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace reads the integer constant 5 from the CmpLogObserver buffer and splices it into the input bytes at the Type field position, directly satisfying the switch equality check.",
+        "one_line": "I2S splices integer 5 into Type field to hit switch case 5"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must encode parametric-curve Type==5 so the switch(Type) dispatches into the case 5 arm.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A tone-curve descriptor in the ICC profile whose parametric-curve Type field equals exactly 5, so the switch(Type) at cmsgamma.c:344 selects the case 5: arm at line 542 instead of any of the other ~22 arms.",
+            "why_winner_satisfies": "cmplog/vpc winners drive the case 5: true side (DIVERGENT BRANCHES shows L 542 T=607000 in W vs T=0 in L), having substituted the exact integer 5 into the Type field via I2S; W coverage marks case 5: and its body lines 543-553 as winner-only [W].",
+            "why_loser_doesnt": "naive/value_profile losers never reach the true side of case 5: (L 542 T=0 F=204000), so they exercise some other Type arm (case 1/4/-4 are [B]) but never produce the discrete Type value 5 within the 10-trial budget.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the switch comparison operand (the constant 5) from the CmpLogObserver buffer and splices it into the input bytes that feed the Type field; the equality jump on a discrete switch constant is exactly the roadblock I2S solves and naive/value_profile (lacking I2S) cannot reliably hit through blind byte mutation. value_profile_cmplog shares the same I2SRandReplace stage, which is why it wins over plain value_profile."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the case 5: arm of a switch(Type) dispatcher in DefaultEvalParametricFn.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmsgamma.c:542:5",
+            "exact_quote": "Source line:     case 5:"
+          },
+          {
+            "claim": "The arm is selected by switch(Type), making the required input feature a specific discrete Type value.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L344",
+            "exact_quote": "switch (Type) {"
+          },
+          {
+            "claim": "Winners take the case 5: true side at high count while losers never do.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L542",
+            "exact_quote": "case 5:  <-- BLOCKER"
+          },
+          {
+            "claim": "The case 5: arm and its body are winner-only coverage.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L542-L553",
+            "exact_quote": "[W]   542  case 5: <-- BLOCKER"
+          },
+          {
+            "claim": "Both decisive pairs are I2S-technique deltas with the loser fully blocked.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 / Pair 2",
+            "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "cmplog augments naive with I2SRandReplace, which substitutes one CMP operand at matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive (a loser) has no I2S stage, so it cannot solve the switch-constant equality directly.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive mutators",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "value_profile_cmplog includes I2SRandReplace whereas plain value_profile does not.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic switch(Type) harness gated on the discrete constant 5 in which naive resolves the case 5: arm as fast as cmplog/vpc, showing I2S substitution is not the differentiator."
+        },
+        "weakest_evidence_point": "The exact input offset carrying the Type field is not isolated in the BYTE DIFF (all offsets are PARTIAL with mixed bytes), so the precise byte that I2S substitutes 5 into is inferred from source/lineage rather than directly seen.",
+        "confidence": "high"
+      }
+    }
+  ]
+}

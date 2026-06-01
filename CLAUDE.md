@@ -174,8 +174,9 @@ pipeline phase (see "Typical Workflow" further down for the phase ordering):
 - `db_query.py` — agent-facing pull queries (lineage, more-seeds).
 
 **Step 5a — cross-branch classification**
-- `mechanism_family.py` — deterministic `coarse_family(covers_pairs)` → per-technique `<T>_pro`/`<T>_anti` families (all 10 techniques) plus the I2S×VP `synergy`/`independent` composite; first-pass bucketing + self-test/scan.
-- `build_signature_cards.py` — build per-family distiller cards (family-tagged, with `analysis_path` back-pointers; analysis fields + candidates-CSV locators) for the `hypothesis-signature-distiller` agent. Pass B (the classifier) reads the signatures + cards directly — no group-by tool.
+- `mechanism_family.py` — deterministic per-technique `<T>_pro`/`<T>_anti` bucketing (all 10 techniques) via `coarse_family(covers_pairs)`, plus **branch-level `route_branch(hyps)`**: unions a branch's pairs and routes ALL its hyps to `synergy` when the union is the I2S×VP joint-necessity composite (synergy is AUTHORITATIVE → I2S_pro/VP_pro exclude it at the source; `independent` is not built; contradictions → `mixed`). Self-test/scan.
+- `build_signature_cards.py` — build per-family distiller cards (routed via `route_branch`, with `analysis_path` back-pointers; analysis fields + candidates-CSV locators) for the `hypothesis-signature-distiller` agent. Pass B (the classifier) reads the signatures + cards directly — no group-by tool.
+- `check_synergy_clusters.py` — deterministic validator for the synergy Pass-B output: coverage (every card in exactly one cluster) + the **co-cluster invariant** (a branch's `_h0`/`_h1` halves must share a cluster) + schema. Synergy Pass B uses the canonical `step5a/synergy/PASSB_PROMPT.md`; this tool is its backstop.
 
 **Step 5b — author + verify loop**
 - `build_template_briefs.py` — per-cluster authoring brief (cluster def + members' signatures + full analyses incl. the falsifiability harness-blueprint) → `step5b/briefs/<feature_id>.json` for the `template-author` agent.
@@ -484,11 +485,19 @@ clusters, in three stages so the feature taxonomy is found in the data rather
 than imposed:
 
 1. **Coarse family** — deterministic (`tools/mechanism_family.py`).
-   `coarse_family(covers_pairs)` maps each hypothesis to one of six mechanism
-   families (`I2S_pro`, `I2S_anti`, `VP_pro`, `VP_anti`, `synergy`,
-   `independent`; plus a `mixed` escape) from the technique + direction in
-   `covers_pairs` — robust to the ≥8/8 cutoff wobble that flips the fine
-   decisive-shape. Families are hard buckets; clustering never crosses them.
+   `coarse_family(covers_pairs)` maps each hypothesis to one `<technique>_pro` /
+   `<technique>_anti` family (for all 10 techniques) from the technique +
+   direction in `covers_pairs` — robust to the ≥8/8 cutoff wobble that flips the
+   fine decisive-shape. **Branch-level routing** (`route_branch(hyps)`) sits on
+   top: it unions a branch's `covers_pairs` and, if the union is the I2S×VP
+   joint-necessity composite (`synergy`, resolves ONLY under
+   `value_profile_cmplog`), routes **all** that branch's hypotheses to `synergy`
+   — making synergy a first-class, AUTHORITATIVE family so the single-technique
+   families (`I2S_pro`/`VP_pro`) exclude those branches at the source (no later
+   de-dup). Everything else routes per-hypothesis; the old `independent`
+   composite is **not built** (its arms each resolve alone, so they belong in
+   `I2S_pro`/`VP_pro`), and a contradictory edge-set falls to the `mixed` escape.
+   Families are hard buckets; clustering never crosses them.
 2. **Pass A — distill** (`hypothesis-signature-distiller` agent, per family).
    `build_signature_cards.py --family F` builds per-hypothesis cards (with
    `analysis_path` back-pointers); each card → one signature `{gate_structure,
@@ -503,6 +512,12 @@ than imposed:
    `mechanism_label` + `feature_id` + definition per cluster →
    `step5a/<family>/clusters.json`. Each cluster = one proposed feature/template
    for 5b; members carry `analysis_path` so 5b authors from the full analyses.
+   **Composite (`synergy`) caveat:** each synergy branch carries two signatures
+   (an I2S `_h0` + a VP `_h1`) of ONE joint mechanism, so its Pass B uses the
+   canonical prompt in `step5a/synergy/PASSB_PROMPT.md` (cluster by joint
+   mechanism, keep a branch's `_h0`/`_h1` together, no per-target lumping) and is
+   verified by `tools/check_synergy_clusters.py` (deterministic coverage +
+   co-cluster invariant). The classifier agent definition stays generic.
 
 **Why discovery, not a fixed mechanism vocabulary:** an earlier closed
 `technique_effect` taxonomy was *induced from the pilot then applied back to it*
@@ -515,11 +530,20 @@ could emit a closed mechanism label for reproducibility at scale.)
 
 ```bash
 python3 tools/mechanism_family.py                                   # family distribution + self-test
-for fam in I2S_pro I2S_anti VP_pro synergy independent; do
+# Families are whatever route_branch emits (single-technique <T>_pro/<T>_anti +
+# synergy). build_signature_cards --family synergy now builds synergy directly
+# (route_branch handles the I2S×VP union); there is no separate detect_synergy step.
+for fam in I2S_pro VP_pro I2S_anti synergy \
+           grimoire_structural_pro grimoire_structural_anti \
+           ctx_coverage_pro ctx_coverage_anti \
+           ngram_coverage_pro ngram_coverage_anti \
+           calibrated_energy_pro aflfast_rarity_anti; do
   python3 tools/build_signature_cards.py --family $fam --out step5a/$fam.cards.json
   # dispatch hypothesis-signature-distiller over $fam.cards.json -> step5a/$fam/signatures.json
   # dispatch signature-feature-classifier on signatures.json + cards -> step5a/$fam/clusters.json
 done
+# synergy Pass B: use step5a/synergy/PASSB_PROMPT.md, then:
+python3 tools/check_synergy_clusters.py                            # co-cluster invariant
 ```
 
 **Step 5b — author → preflight → verify → adjudicate loop**

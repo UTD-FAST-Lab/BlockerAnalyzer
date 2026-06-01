@@ -136,6 +136,35 @@ def coarse_family(covers_pairs):
     return "mixed"
 
 
+# ---- branch-level routing (synergy recovery) --------------------------------
+# coarse_family is per-edge-set; the analysis-only agents decompose a branch into
+# multi_feature (one hyp per technique), so a synergy branch's I2S hyp and VP hyp
+# each classify single-technique and the I2S×VP composite never appears per-hyp.
+# branch_family recovers it by unioning a branch's covers_pairs BEFORE classifying;
+# route_branch then makes synergy AUTHORITATIVE — a synergy branch routes ALL its
+# hypotheses to `synergy`, so the composite is distilled/clustered once and the
+# single-technique families (I2S_pro, VP_pro) exclude it at the source (no later
+# de-dup needed). Every other branch — including `independent` (each arm resolves
+# alone) and `mixed` — routes per-hypothesis exactly as coarse_family dictates.
+
+def branch_family(hyps):
+    """Branch-level composite family: classify the UNION of a branch's hypotheses'
+    covers_pairs. Same label space as coarse_family; None for an empty branch.
+    This is the only view in which `synergy` is visible (the per-hyp view can't
+    see both techniques at once)."""
+    union = [cp for h in hyps for cp in h.get("covers_pairs", [])]
+    return coarse_family(union) if union else None
+
+
+def route_branch(hyps):
+    """Family label per hypothesis (list aligned to `hyps`), applying the synergy
+    override: if the branch unions to `synergy`, every hypothesis routes to
+    `synergy`; otherwise each routes to its own per-hyp coarse_family."""
+    if branch_family(hyps) == "synergy":
+        return ["synergy"] * len(hyps)
+    return [coarse_family(h.get("covers_pairs", [])) for h in hyps]
+
+
 # ---- self-test --------------------------------------------------------------
 
 _EDGE_CASES = {
@@ -197,8 +226,22 @@ def self_test():
     for cps, want in _FAMILY_CASES.items():
         got = coarse_family(list(cps))
         assert got == want, f"family {cps}: got {got}, want {want}"
+    # branch-level routing: a multi_feature synergy branch (separate I2S + VP hyp)
+    # routes BOTH hyps to synergy; an independent branch routes per-hyp to the
+    # single-technique families; a single-technique branch is unaffected.
+    _syn = [{"covers_pairs": ["value_profile_cmplog>value_profile (I2S)"]},
+            {"covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"]}]
+    assert branch_family(_syn) == "synergy", branch_family(_syn)
+    assert route_branch(_syn) == ["synergy", "synergy"], route_branch(_syn)
+    _ind = [{"covers_pairs": ["cmplog>naive (I2S)"]},
+            {"covers_pairs": ["value_profile>naive (value_profile)"]}]
+    assert branch_family(_ind) == "independent", branch_family(_ind)
+    assert route_branch(_ind) == ["I2S_pro", "VP_pro"], route_branch(_ind)
+    _solo = [{"covers_pairs": ["cmplog>naive (I2S)"]}]
+    assert route_branch(_solo) == ["I2S_pro"], route_branch(_solo)
     print(f"self-test OK ({len(CANONICAL_FUZZERS)} fuzzers, "
-          f"{len(_EDGE_CASES)} edges, {len(_FAMILY_CASES)} families)")
+          f"{len(_EDGE_CASES)} edges, {len(_FAMILY_CASES)} families, "
+          f"+branch routing)")
 
 
 # ---- pilot scan -------------------------------------------------------------

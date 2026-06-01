@@ -28,7 +28,8 @@ table in `CLAUDE.md`.
 | **4a** prompt | `evidence_prompt.py` | Per-branch structured-prompt assembly; registers `evidence-per-branch` into study_units |
 | **4c** validate | `check_analysis.py` | Validate agent `.analysis.json` vs sibling prompt (exact_quote hallucination filter) |
 | **4** agent pull | `db_query.py` | Agent-facing pull queries (lineage, more-seeds) |
-| **5a** classify | `mechanism_family.py` | `coarse_family(covers_pairs)` → per-technique pro/anti families (10 techniques) + I2S×VP synergy/independent |
+| **5a** classify | `mechanism_family.py` | per-hyp `coarse_family` (10 techniques, pro/anti) + branch-level `route_branch` (synergy AUTHORITATIVE; independent not built; mixed escape) |
+| **5a** verify synergy | `check_synergy_clusters.py` | deterministic coverage + `_h0`/`_h1` co-cluster invariant on synergy Pass-B output |
 | **5a** classify | `build_signature_cards.py` | Per-family distiller cards for the signature-distiller agent |
 | **5b** author/verify | `build_template_briefs.py` | Per-cluster authoring brief → `step5b/briefs/<id>.json` |
 | **5b** author/verify | `check_template.py` | Preflight: schema/fuzzer sanity + scan_value compile + dead-knob detection |
@@ -580,8 +581,8 @@ else `T_anti`. The edge multiset reduces to one family:
 |---|---|
 | `I2S_pro` / `VP_pro` | only that technique's edges, technique helped |
 | `I2S_anti` / `VP_anti` | only that technique's edges, technique hurt |
-| `synergy` | both techniques help AND every winner is `value_profile_cmplog` (neither single technique suffices; the `-BBR` shape) |
-| `independent` | both techniques help, won by single-technique arms (the `BRR-` shape) |
+| `synergy` | both techniques help AND every winner is `value_profile_cmplog` (neither single technique suffices; the `-BBR` shape). Recovered at the BRANCH level by `route_branch` (the multi_feature per-hyp split hides it); **AUTHORITATIVE** — a synergy branch's hyps all route here, so `I2S_pro`/`VP_pro` exclude it. |
+| `independent` | both techniques help, won by single-technique arms (the `BRR-` shape). **Not built** — each arm resolves alone, so `route_branch` sends them per-hyp to `I2S_pro`/`VP_pro`. |
 | `mixed` | a technique both helped and hurt at one branch — escape hatch, route to a human |
 
 ```bash

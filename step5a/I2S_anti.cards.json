@@ -1,0 +1,146 @@
+[
+  {
+    "id": "bloaty_301",
+    "family": "I2S_anti",
+    "target": "bloaty",
+    "branch_id": 301,
+    "analysis_path": "prompts/bloaty_301.analysis.json",
+    "file": "/src/bloaty/third_party/abseil-cpp/absl/strings/numbers.cc",
+    "function": "numbers.cc:absl::(anonymous namespace)::safe_parse_sign_and_base(std::basic_string_view<char, std::char_traits<char> >*, int*, bool*)",
+    "line": "659",
+    "source_line": "    if (start >= end) {",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A byte region parsed as a number where, after leading/trailing whitespace is consumed and exactly one sign char (0x2b '+' or 0x2d '-') is consumed at start[0], start advances to meet end \u2014 i.e. a sign-only token with nothing after the sign.",
+    "why_winner_satisfies": "The winning value_profile seed contains a long contiguous run of 0x2b ('+') bytes (offsets 0x1d-0x2b) feeding the parser; once the sign is consumed start immediately equals end, so line 659 takes the true branch (W shows T=6 F=0 at 659 vs L T=0 F=12). value_profile reaches it via CMP_MAP gradient feedback on the start>=end / isspace comparisons plus havoc, with no I2S stage.",
+    "why_loser_doesnt": "The value_profile_cmplog loser seeds embed a sign (0x2d '-') but surrounded by digits and other content (e.g. 'elf -444444440'), so after consuming the sign there are still bytes before end; line 659 always falls through (L T=0 F=12) and the downstream base-parsing/safe_parse_positive_int path executes 24x while it never runs in W (0 hits).",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs that bring the start>=end and whitespace/sign comparisons closer to matching, preserving the sign-only-token corpus member; the input-to-state delta added in vpc does not help here because the gate is a pointer-arithmetic relation (start>=end) with no input-byte literal to substitute, so vpc's extra per-exec CMP-buffer cost yields no benefit and it loses, leaving CMP_MAP gradient as the technique that distinguishes the winner."
+  },
+  {
+    "id": "lcms_2137",
+    "family": "I2S_anti",
+    "target": "lcms",
+    "branch_id": 2137,
+    "analysis_path": "prompts/lcms_2137.analysis.json",
+    "file": "/src/Little-CMS/src/cmsio0.c",
+    "function": "cmsio0.c:_validatedVersion",
+    "line": "729",
+    "source_line": "    if (*pByte > 0x09) *pByte = (cmsUInt8Number) 0x09;",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "The first byte of the ICC Header.version field at file offset 0x08 must be greater than 0x09 (e.g. 0x0a or 0x29) rather than a small valid version major number like 0x03; the input is otherwise a short, structurally-loose buffer rather than a large well-formed multi-tag profile.",
+    "why_winner_satisfies": "Both value_profile winner seeds carry a byte > 0x09 at offset 0x08 (seed1 = 0x0a, seed2 = 0x29) so *pByte > 0x09 is true; the seeds are small (505 and 1832 bytes) loosely-structured buffers produced by plain havoc byte mutation, letting a high byte land in the version slot.",
+    "why_loser_doesnt": "All value_profile_cmplog blocking seeds hold the valid version byte 0x03 at offset 0x08 inside a complete 'lcms'-magic ICC header and are huge (25244 / 10346 bytes); I2S substitution drove them toward structurally-valid headers whose version major stays <= 0x09, so the branch condition is false.",
+    "mechanism_attribution": "havoc-only: the winner value_profile reaches the >0x09 side by ordinary havoc byte mutation dropping a high byte into the version field, with no comparison-introspection mutator available to it. The loser value_profile_cmplog's extra input-to-state substitution stage splices logged comparand bytes (magic 'lcms', valid version) back into the input, pulling its corpus toward valid headers that keep the version byte small and never trip the branch \u2014 so the input-to-state delta actively diverts the loser away from this side (I2S-hurts), and the winner's success rests on plain havoc, not on any comparison-solving technique."
+  },
+  {
+    "id": "libpng_3974_h0",
+    "family": "I2S_anti",
+    "target": "libpng",
+    "branch_id": 3974,
+    "analysis_path": "prompts/libpng_3974.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_handle_cHRM",
+    "line": "1280",
+    "source_line": "       xy.redy   == PNG_FIXED_ERROR ||",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A small (sub-1.4KB) PNG with a 32-byte cHRM chunk placed before any IDAT/PLTE, where the 4 bytes at cHRM-data offset 12 (buf+12) decode through png_get_fixed_point to PNG_FIXED_ERROR (0x7fffffff), driving the redy==PNG_FIXED_ERROR comparison true.",
+    "why_winner_satisfies": "naive's winning seeds are short (656-1314 bytes), invoke png_handle_cHRM 64 times vs 20, and actually take the L1280 true side 12 times (T=12) while never sinking budget into the IDAT/read-row decode machinery; pure havoc byte/word/dword arithmetic mutators repeatedly perturb the redy field until one execution lands the 0x7fffffff sentinel.",
+    "why_loser_doesnt": "cmplog's blocking seeds are large (738-8759 bytes, several 4902-8771) carrying full IDAT image streams; they pour execution budget into png_read_finish_row/png_combine_row/png_read_IDAT_data (hundreds of L hits, zero W hits), reach cHRM only 20 times, and never produce redy==PNG_FIXED_ERROR (T=0 at L1280).",
+    "mechanism_attribution": "naive wins by raw havoc throughput: with no CMP interception tax it runs more executions per second and its byte/Word/Dword arithmetic mutators stochastically hit the 4-byte 0x7fffffff sentinel in the redy slot, whereas cmplog's per-CMP callback + I2S buffer processing cost lowers throughput and its I2S substitution offers no help (PNG_FIXED_ERROR is an internal sentinel produced by overflow logic, not a value present as an input-byte pre-image to splice)."
+  },
+  {
+    "id": "libpng_3977",
+    "family": "I2S_anti",
+    "target": "libpng",
+    "branch_id": 3977,
+    "analysis_path": "prompts/libpng_3977.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_handle_cHRM",
+    "line": "1283",
+    "source_line": "       xy.bluex  == PNG_FIXED_ERROR ||",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A cHRM chunk of exactly length 32 (so png_handle_cHRM passes the length!=32 guard and reads all eight png_get_fixed_point values), with the bluex sub-field at chunk-data offset +24 carrying a 4-byte value that png_get_fixed_point rejects as PNG_FIXED_ERROR (an out-of-range/overflowing fixed-point integer).",
+    "why_winner_satisfies": "naive's undirected havoc (ByteRand/ByteInc/Word/DwordAdd, BytesSet) freely drives the 4 bluex bytes into the overflow range that decodes to PNG_FIXED_ERROR; the winner takes the true side (T=12) and resolves in all 10 trials with avg 17 hits on the branch.",
+    "why_loser_doesnt": "cmplog's input-to-state substitution copies operands logged from the png_get_fixed_point comparisons back into the input, biasing the bluex bytes toward valid (non-error) fixed-point magnitudes, so the loser never takes the true side (T=0 F=42) and stays blocked in 8/10 trials.",
+    "mechanism_attribution": "The WINNER is naive, whose enabling technique is havoc-only: raw undirected byte mutation (Byte/Word/Dword adds, BytesSet) stumbles the bluex field into the overflow range that decodes to the error sentinel, with no comparison introspection. cmplog's extra input-to-state substitution stage is the technique delta and acts as the hindrance \u2014 it pulls bluex toward in-range operands seen at the fixed-point comparison sites and away from the error branch (I2S-anti). The winning mechanism credited here is havoc-only."
+  },
+  {
+    "id": "libpng_4002",
+    "family": "I2S_anti",
+    "target": "libpng",
+    "branch_id": 4002,
+    "analysis_path": "prompts/libpng_4002.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_handle_bKGD",
+    "line": "2018",
+    "source_line": "         if (buf[0] != 0 || buf[2] != 0 || buf[4] != 0)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A truecolor (RGB) bKGD chunk reached with bit_depth<=8 and at least one of the high-order background bytes buf[0], buf[2] or buf[4] non-zero, so that the line-2018 disjunction takes its TRUE side ('invalid color').",
+    "why_winner_satisfies": "naive produces short inputs (375-793 bytes) that error out of image decoding early and re-enter the bKGD path repeatedly while havoc randomizes the chunk payload bytes; it reaches L2018 with T=13 F=1, i.e. it lucky-hits a non-zero buf[0]/buf[2]/buf[4] many times.",
+    "why_loser_doesnt": "cmplog produces large, structurally-valid inputs (8360-8771 bytes) that pass the length/CRC roadblocks and sink execution into IDAT row decoding; at L2018 it is stuck at T=0 F=19, always seeing all-zero background bytes and never flipping a high byte non-zero.",
+    "mechanism_attribution": "This is an I2S-anti branch where the I2S fuzzer LOSES. cmplog's comparison-solving substitution clears the structural integer-CMP roadblocks (length, CRC, magic) and drives the corpus toward big valid images deep in IDAT decoding, starving the bKGD color bytes of random mutation. naive's plain havoc byte/word mutation, having no CMP introspection to chase, keeps inputs small and blindly randomizes the chunk bytes, so it lucky-flips a high background byte non-zero. The winning technique is havoc-only mutation, not any CMP-solving."
+  },
+  {
+    "id": "libpng_4072_h1",
+    "family": "I2S_anti",
+    "target": "libpng",
+    "branch_id": 4072,
+    "analysis_path": "prompts/libpng_4072.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_read_IDAT_data",
+    "line": "4245",
+    "source_line": "         if (png_ptr->zstream.avail_in > 0 || png_ptr->idat_size > 0)",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "The same condition: a valid PNG whose IDAT stream leaves avail_in>0 or idat_size>0 after Z_STREAM_END, taking the True branch at L4245. The discriminating bytes are header/IDAT-size fields (offsets 0x11 and 0x17), not a magic-constant CMP that I2S could substitute.",
+    "why_winner_satisfies": "value_profile resolves 8/10 using naive's havoc stack (no I2SRandReplace). Three of its four winning seeds carry varied 0x11 (00/01/02) and 0x17 (45/46) bytes, exercising the extra-data path with ordinary mutation throughput rather than I2S substitution.",
+    "why_loser_doesnt": "value_profile_cmplog adds a per-execution CmpLog buffer plus the I2SRandReplace stage on top of value_profile. The blocker is not gated by an exact integer/string comparand that I2S can copy from input to state, so I2S provides no traction here; instead its per-execution CMP-record overhead lowers throughput and it resolves 0/10 (blocked 10/10, avg blocked 23.10h).",
+    "mechanism_attribution": "The winner value_profile is enabled by havoc-only byte mutation reaching the loop-deep extra-data state. The loser value_profile_cmplog is penalized by its I2S/CmpLog overhead, which yields no comparison-solving benefit on this non-CMP-gated branch while taxing throughput."
+  },
+  {
+    "id": "libxml2_6343",
+    "family": "I2S_anti",
+    "target": "libxml2",
+    "branch_id": 6343,
+    "analysis_path": "prompts/libxml2_6343.analysis.json",
+    "file": "/src/libxml2/encoding.c",
+    "function": "xmlDetectCharEncoding",
+    "line": "958",
+    "source_line": "\tif ((in[0] == 0x00) && (in[1] == 0x00) &&",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "The 4-byte window read by xmlDetectCharEncoding(start, 4) must hold exactly in[0]==0x00, in[1]==0x00, in[2]==0x3C, in[3]==0x00 (the UCS4_2143 magic) while NOT matching any earlier 4-byte encoding gate (e.g. 00 00 00 3C for UCS4BE) tested before line 958.",
+    "why_winner_satisfies": "value_profile resolves the true side in 9/10 trials; its CMP_MAP gradient rewards inputs whose CMP operands move bucket-by-bucket toward the 00 00 3C 00 constant, and winner-resolving seeds carry runs of 0x00 bytes (e.g. offsets 0x15-0x17 = 00 00 00) that the gradient feedback assembled into the magic prefix.",
+    "why_loser_doesnt": "value_profile_cmplog blocks the true side in 8/10 trials and spends 18.00h blocked; adding the I2SRandReplace stage diverts mutation energy into splicing logged operands, and the loser-blocking seeds instead resolve the sibling UTF16BE gate (line 980, tagged [L]) so they never present the 00 00 3C 00 window to line 958.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix-distance bucket feedback) lets it climb toward the 4-byte magic constant incrementally; value_profile_cmplog adds the input-to-state substitution stage which here diverts effort and the pair regresses, so this is an I2S-hurts case where the winning technique is the CMP_MAP gradient, not comparison-solving substitution."
+  },
+  {
+    "id": "libxml2_6837",
+    "family": "I2S_anti",
+    "target": "libxml2",
+    "branch_id": 6837,
+    "analysis_path": "prompts/libxml2_6837.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "parser.c:xmlParseTryOrFinish",
+    "line": "11754",
+    "source_line": "\t\t    (ctxt->input->cur[8] == '[')) {",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A '<'-led content byte stream whose bytes 1-8 do NOT spell '![CDATA[' (or a non-'<' content lead), so the 9-clause AND at L11747-11754 short-circuits to its false side and the parser keeps advancing through general START_TAG / CONTENT parsing instead of entering the CDATA-section state machine.",
+    "why_winner_satisfies": "value_profile resolves the branch in 9/10 trials; its winning seed reaches the false-side START_TAG path ([W] lines 11604-11620 and the goto-done at 11500/11639) and never enters the [L] CDATA-section block, meaning the 8-byte CDATA literal was not matched so the false side was taken.",
+    "why_loser_doesnt": "value_profile_cmplog blocks 8/10; its loser seed funnels into the [L] '<?xml' declaration and '<!DOCTYPE' / CDATA-section paths (L11555-11591, L11813-11903, L11950-11984), spending energy completing exact multi-byte literal matches and the CDATA term scan rather than diversifying content to take the false side.",
+    "mechanism_attribution": "value_profile (winner) uses CMP_MAP distance-bucket gradient feedback over edge coverage and lacks the input-to-state substitution mutator; it explores diverse content leads and rides the false side. value_profile_cmplog adds the input-to-state substitution mutator, which splices logged comparands (e.g. the '<![CDATA[', '<?xml', '<!DOCTYPE' literals it intercepts) back into the input, biasing its corpus toward completing those exact-literal gates and the CDATA state machine \u2014 diverting energy away from the false-side general-parse progress. The delta is I2S and the winner is the no-I2S variant, so the winner's progress is driven by CMP_MAP gradient feedback while I2S is a net liability here, not an asset."
+  }
+]

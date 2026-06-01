@@ -1,0 +1,1848 @@
+{
+  "feature_id": "format_magic_dispatch_literal",
+  "mechanism_family": "I2S_pro",
+  "mechanism_label": "format_magic_dispatch_literal",
+  "definition": "I2S intercepts a format-type header magic or chunk-type FOURCC comparison and splices the exact literal into the input, routing the parser into the correct format reader or handler.",
+  "n_members": 18,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "naive",
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "bloaty_13",
+      "target": "bloaty",
+      "branch_id": 13,
+      "analysis_path": "prompts/bloaty_13.analysis.json",
+      "file": "/src/bloaty/src/bloaty.cc",
+      "function": "bloaty::Bloaty::ScanAndRollupFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, bloaty::Rollup*, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >*) const",
+      "line": "1750",
+      "source_line": "  if (!build_id.empty()) {",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "ce fa ed fe",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2S splices the Mach-O magic bytes and section-name literals intercepted from format-dispatch CMPs directly into the input, enabling build_id extraction that loser WASM-magic inputs can never reach.",
+        "one_line": "I2S supplies Mach-O magic and section bytes to yield a non-empty build_id"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must be a Mach-O object file whose magic and section structure let bloaty parse a non-empty build_id.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "The leading bytes must form a Mach-O magic constant (ce fa ed fe / cf fa ed fe) followed by enough valid Mach-O load-command/section structure (including __ section-name bytes 5f 5f) that file->GetBuildId() returns a non-empty string, so the true side of if (!build_id.empty()) is taken.",
+            "why_winner_satisfies": "All winner-resolving seeds begin with the Mach-O magic ce fa ed fe (or cf fa ed fe) and carry embedded 5f 5f (__) section-name bytes and load-command sizing fields; these parse into a Mach-O whose build_id (UUID) is recovered, populating build_id and exercising lines 1751-1757 only in W.",
+            "why_loser_doesnt": "All loser-blocking seeds begin with 00 61 73 6d (WASM \\0asm) or similar non-Mach-O magic; bloaty parses them as a format that yields an empty build_id, so GetBuildId() returns empty and line 1750 always takes the false side (T=0 in L).",
+            "mechanism_attribution": "cmplog/vpc intercept the object-file format CMPs (magic and structural-field comparisons) and I2SRandReplace splices the exact required literals (Mach-O magic, section-name bytes) into the input at the offsets where the parser compares them; naive and value_profile lack I2SRandReplace and cannot reconstruct the multi-field magic/structure by blind havoc, so they never produce a parseable build_id."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked true side requires a non-empty build_id at the if guard.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L1750, blocked side=T",
+            "exact_quote": "if (!build_id.empty()) {"
+          },
+          {
+            "claim": "build_id is produced by parsing the object file via file->GetBuildId().",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1749",
+            "exact_quote": "std::string build_id = file->GetBuildId();"
+          },
+          {
+            "claim": "Only winner-resolving seeds exercise the true-side body lines 1751-1757.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L1750",
+            "exact_quote": "L1750  T=54 F=0  T=0 F=120  if (!build_id.empty()) {  <-- BLOCKER"
+          },
+          {
+            "claim": "Winner seeds begin with the Mach-O magic ce fa ed fe and carry embedded __ (5f 5f) section-name bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id dcb7ff92fe9d1ffa, offset 0x0000",
+            "exact_quote": "0000: ce fa ed fe 02 01 01 20 20 20 01 b0 48 13 5f 5f"
+          },
+          {
+            "claim": "Another winner seed uses the alternate Mach-O 64-bit magic cf fa ed fe.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 6ac11a9dca2495f8, offset 0x0000",
+            "exact_quote": "0000: cf fa ed fe 48 13 5f 5f 02 00 00 00 02 01 01 20"
+          },
+          {
+            "claim": "Loser-blocking seeds begin with non-Mach-O magic such as 00 61 73 6d (\\0asm).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 0002812e1528da92, offset 0x0000",
+            "exact_quote": "0000: 00 61 73 6d 7b 45 4c 46 01 01 46 01 01 17 04 00"
+          },
+          {
+            "claim": "At the leading magic offsets W and L bytes are sharply concentrated and disjoint (ce/fa/ed/fe vs 00/61/73/6d).",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0000-0x0003",
+            "exact_quote": "0x0000  ce(.)x7 cf(.)x2                     00(.)x19 21(!)x1                    DIFFER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at matching input offsets, unlike naive.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace; only its vpc counterpart adds it, matching the second decisive pair direction.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on a non-empty build_id behind a Mach-O magic/structure check in which naive (no I2S) resolves the branch at the same rate as cmplog within the budget, showing the magic/structure literals are reachable by blind havoc rather than requiring I2S substitution."
+        },
+        "weakest_evidence_point": "That bloaty's GetBuildId() returns non-empty specifically for Mach-O (vs other formats) is inferred from the seed magic bytes and source guard, not directly observed from a build_id value in the prompt.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "bloaty_133",
+      "target": "bloaty",
+      "branch_id": 133,
+      "analysis_path": "prompts/bloaty_133.analysis.json",
+      "file": "/src/bloaty/src/macho.cc",
+      "function": "bloaty::TryOpenMachOFile(std::unique_ptr<bloaty::InputFile, std::default_delete<bloaty::InputFile> >&)",
+      "line": "618",
+      "source_line": "  if (magic == MH_MAGIC || magic == MH_MAGIC_64 || magic == FAT_CIGAM) {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "cf fa ed fe",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2S reads the logged magic==MH_MAGIC CMP operand and splices the exact 4-byte Mach-O magic into input offset 0x00-0x03, directly satisfying the equality gate naive never blindly hits.",
+        "one_line": "I2S substitutes 4-byte Mach-O magic at offset 0 to pass the format gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must begin with the 4-byte Mach-O magic cf fa ed fe so magic equals MH_MAGIC/MH_MAGIC_64/FAT_CIGAM.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The first 4 bytes of the input must equal the Mach-O magic word cf fa ed fe at offset 0x00-0x03 so that the read magic compares equal to one of MH_MAGIC / MH_MAGIC_64 / FAT_CIGAM at macho.cc:618, taking the true branch into the MachOObjectFile constructor.",
+            "why_winner_satisfies": "Every cmplog winner-resolving seed begins with the exact bytes cf fa ed fe at offsets 0x00-0x03, which is the little-endian Mach-O magic; the per-offset byte sets show these four offsets are fully concentrated to that value across all 10 winner seeds.",
+            "why_loser_doesnt": "The naive loser-blocking seeds begin with 00 61 73 6d ('\\0asm', the WebAssembly magic), so magic never matches any Mach-O constant and execution falls through to the nullptr return at line 623, exercising the false branch.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the logged CMP operands from the magic==MH_MAGIC comparison and splices the constant magic value into the input at the matching offset; naive has no CMP introspection and cannot synthesize the exact 4-byte magic, so it never crosses the gate."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch at macho.cc:618 fires the true side only when magic equals one of three Mach-O magic constants.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "macho.cc:618",
+            "exact_quote": "if (magic == MH_MAGIC || magic == MH_MAGIC_64 || magic == FAT_CIGAM) {"
+          },
+          {
+            "claim": "All winner-resolving seeds carry the Mach-O magic cf fa ed fe in their first four bytes.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0000-0x0003",
+            "exact_quote": "0x0000  cf(.)x10                            00(.)x10                            DIFFER"
+          },
+          {
+            "claim": "The winning seed bytes literally start with cf fa ed fe.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 492ed499061ee540",
+            "exact_quote": "0000: cf fa ed fe 00 20 20 20 20 20 00 00 00 00 00 00"
+          },
+          {
+            "claim": "The loser-blocking seeds start with the WebAssembly magic \\0asm and not a Mach-O magic.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 00050eebd8570fd9",
+            "exact_quote": "0000: 00 61 73 6d fe 00 6d 00 01 01 01 01 01 01 01 01   .asm..m........."
+          },
+          {
+            "claim": "Loser inputs fall through TryOpenMachOFile to the nullptr return because magic does not match.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L618",
+            "exact_quote": "d=1   L 618  T=96 F=0  T=0 F=120  if (magic == MH_MAGIC || magic == MH_MAGIC_64 || magic ==...  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace, which scans the input for an operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S capability.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on a 4-byte exact-equality magic where naive resolves the gate as often as cmplog (no cmplog>naive divergence), showing the magic byte is reachable by plain havoc rather than requiring I2S substitution."
+        },
+        "weakest_evidence_point": "The dash-row I2S signal is a lower-bound floor at depth 3 of one seed's chain; it confirms some I2S contribution but does not prove the specific magic-byte splice was the I2S edit rather than a later havoc refinement.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "bloaty_141",
+      "target": "bloaty",
+      "branch_id": 141,
+      "analysis_path": "prompts/bloaty_141.analysis.json",
+      "file": "/src/bloaty/src/range_map.cc",
+      "function": "bloaty::RangeMap::FindContaining(unsigned long) const",
+      "line": "59",
+      "source_line": "  if (it == mappings_.begin() || (--it, !EntryContains(it, addr))) {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "ce fa ed fe",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2S intercepts the format-magic comparison, logs the Mach-O magic operand, and substitutes it at offset 0x00-0x03, routing the input into the Mach-O reader where the FindContaining true branch becomes reachable.",
+        "one_line": "I2S writes Mach-O magic at byte 0 to enter the parser that exposes the gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must carry the Mach-O magic ce-fa-ed-fe at offset 0 so the Mach-O parser populates range maps reached by FindContaining.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)",
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The first four bytes must equal the Mach-O magic number ce fa ed fe (little-endian 0xFEEDFACE). Bloaty's format dispatch matches this magic to enter the Mach-O object reader, which calls AddRange / FindContaining repeatedly; without the magic match the input is routed to a different (e.g. WASM) parser whose path drives FindContaining only on the false side.",
+            "why_winner_satisfies": "Every winner-resolving seed begins with ce fa ed fe at offsets 0x00-0x03; the BYTE DIFF shows W concentrated on ce/fa/ed/fe (and a few ASCII M/Z/L/E/P/F) at those offsets, and the winners reach FindContaining 562 times and its callers far more, with the blocker true side taken (T=101/160).",
+            "why_loser_doesnt": "Every loser-blocking seed begins with 00 61 73 6d (the WASM magic '.asm'), so the Mach-O reader is never entered; FindContaining is still invoked 1720 times on the L set but the blocker true side is taken 0 times (T=0 F=1720), i.e. the loser parser path never produces the empty-result condition the true branch encodes.",
+            "mechanism_attribution": "cmplog/vpc intercept the format-magic comparison and log both operands into the CmpLogObserver buffer; I2SRandReplace then scans the input for the seed's leading bytes and substitutes the expected magic operand (ce fa ed fe) directly at offset 0. naive and value_profile lack I2SRandReplace, so they must stumble onto the exact 4-byte magic by chance via havoc, which is why naive never resolves (0/10) and value_profile resolves only 1/10."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "Both decisive pairs differ by the I2S technique and both name I2S as the delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 headers",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "The cmplog>naive pair is also an I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 header",
+            "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "The blocked side is the true branch of FindContaining's empty-result test.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "range_map.cc:59",
+            "exact_quote": "if (it == mappings_.begin() || (--it, !EntryContains(it, addr))) {"
+          },
+          {
+            "claim": "All winner-resolving seeds start with the Mach-O magic ce fa ed fe at offset 0.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1 offset 0x0000",
+            "exact_quote": "0000: ce fa ed fe 7f 95 e8 00 20 10 18 24 24 20 20 20"
+          },
+          {
+            "claim": "The W byte set at offsets 0x00-0x03 is concentrated on ce/fa/ed/fe while the L byte set is the WASM magic 00 61 73 6d.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0000-0x0003",
+            "exact_quote": "0x0000  7f(.)x10 ce(.)x9 4d(M)x1            00(.)x68 7f(.)x2"
+          },
+          {
+            "claim": "Every loser-blocking seed starts with 00 61 73 6d (the WASM '.asm' magic).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 1 offset 0x0000",
+            "exact_quote": "0000: 00 61 73 6d 00 e8 e9 2d 00 25 20 00 fe ff ff ff   .asm...-.% ....."
+          },
+          {
+            "claim": "On the loser set FindContaining's blocker true side is taken 0 times despite 1720 invocations.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 line 59",
+            "exact_quote": "d=1   L  59  T=101 F=402  T=0 F=1720"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace, which scans the input for an operand and substitutes the other operand at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator, so its only route to the exact magic is chance havoc.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "naive never resolved the branch and value_profile resolved it only once across ten trials.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "naive and value_profile rows",
+            "exact_quote": "naive                            0       10          0  loser (I2S vs cmplog)"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness that gates FindContaining behind a 4-byte magic compare shows naive resolving the true branch as often and as fast as cmplog/vpc (no I2S advantage), meaning the magic match is not the controlling feature."
+        },
+        "weakest_evidence_point": "The claim that the Mach-O magic at offset 0 is the specific gate (rather than some other 4-byte constant elsewhere in the header) is inferred from the seed-prefix divergence, not from a directly cited source-level magic comparison.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "bloaty_34",
+      "target": "bloaty",
+      "branch_id": 34,
+      "analysis_path": "prompts/bloaty_34.analysis.json",
+      "file": "/src/bloaty/src/elf.cc",
+      "function": "elf.cc:bloaty::(anonymous namespace)::ElfFile::Initialize()",
+      "line": "475",
+      "source_line": "    default:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": null,
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2S surfaces the ELF magic to keep the memcmp guard passing, while also exposing that the byte at EI_DATA must avoid both case-label values; cmplog reaches the default arm by landing a non-{1,2} byte that naive keeps setting to a matching case value.",
+        "one_line": "I2S preserves ELF magic while placing a non-case byte at EI_DATA to hit default"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Valid ELF magic at bytes 0-3 plus byte 0x05 (EI_DATA) holding a value other than 1 (LSB) or 2 (MSB) to reach the default arm.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "Bytes 0x00-0x03 must equal the literal magic 7f 45 4c 46 (\\177ELF) so the memcmp guard at line 452 passes, AND byte 0x05 (ident[EI_DATA]) must hold a value other than ELFDATA2LSB(1) or ELFDATA2MSB(2) so the switch at line 468 falls through to the default arm at line 475.",
+            "why_winner_satisfies": "Winning cmplog seeds keep the magic 7f 45 4c 46 at offsets 0x00-0x03 and place a non-{1,2} value at offset 0x05 (e.g. seed 1 has 0x30, seed 2 has 0x00, seed 3 has 0xe7), so EI_DATA misses both case labels and hits default.",
+            "why_loser_doesnt": "Loser naive seeds also keep the magic but set offset 0x05 to either 0x01 or 0x02 in every sample, so EI_DATA always matches case ELFDATA2LSB or ELFDATA2MSB and the switch never reaches default.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLog buffer for the switch comparison on ident[EI_DATA] and substitutes the recorded compared operand at the input offset, but unlike a single magic-number gate the winning move is to make the byte NOT equal the case labels; I2S surfaces the magic prefix (7f 45 4c 46) keeping line 452 satisfied while the switch on a single byte is escaped via a non-matching value, a combination cmplog reaches and naive's blind havoc rarely lands while preserving the magic."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the default arm of the switch on ident[EI_DATA] at elf.cc:475.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "elf.cc:475:5",
+            "exact_quote": "Location: /src/bloaty/src/elf.cc:475:5"
+          },
+          {
+            "claim": "Reaching the default requires passing the magic memcmp guard and missing both EI_DATA case labels.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L452, L468-476",
+            "exact_quote": "if (memcmp(ident, \"\\177ELF\", 4) != 0) {"
+          },
+          {
+            "claim": "The switch dispatches on ident[EI_DATA] with cases ELFDATA2LSB and ELFDATA2MSB before default.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L468-476",
+            "exact_quote": "switch (ident[EI_DATA]) {"
+          },
+          {
+            "claim": "Winning cmplog seeds preserve the ELF magic 7f 45 4c 46 at offsets 0x00-0x03.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 1 W id=0989f57862fb3e41 offset 0x00",
+            "exact_quote": "0000: 7f 45 4c 46 02 30 01 00 00 00 20 20 20 20 20 00"
+          },
+          {
+            "claim": "A winning seed places a non-{1,2} value (0xe7) at offset 0x05 so EI_DATA misses both case labels.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 3 W id=51f1d6d54d767ae6 offset 0x05",
+            "exact_quote": "0000: 7f 45 4c 46 02 e7 00 00 00 00 20 20 20 20 20 00"
+          },
+          {
+            "claim": "Loser naive seeds set offset 0x05 to 0x01 or 0x02 (a valid EI_DATA case), so the switch matches a case and never reaches default.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 1 id=01a53df0ebbce533 offset 0x05",
+            "exact_quote": "0000: 7f 45 4c 46 01 01 01 00 f2 00 20 21 df 20 00 00"
+          },
+          {
+            "claim": "The byte-diff shows W offset 0x05 concentrated on non-{1,2} values while L offset 0x05 is dominated by 01/02.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0005",
+            "exact_quote": "0x0005  68(h)x5 00(.)x2 30(0)x1 e7(.)x1 +1u  01(.)x27 02(.)x5"
+          },
+          {
+            "claim": "The divergent-branches table shows the blocker default at line 475 taken only in W (T=60) and never in L (T=0).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 elf.cc:475",
+            "exact_quote": "d=1   L 475  T=60 F=0  T=0 F=2220  default:  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other CMP operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose switch dispatches on a single byte gated behind a preceding magic memcmp showing naive resolving the default arm as often as cmplog (no cmplog>naive divergence), which would mean I2S substitution of the magic prefix is not what enables the winner."
+        },
+        "weakest_evidence_point": "Whether I2S's advantage here is solving the magic memcmp prefix (a roadblock) versus the switch byte being escaped by chance, since reaching default requires a NON-matching byte that I2S does not directly synthesize.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "bloaty_57_h0",
+      "target": "bloaty",
+      "branch_id": 57,
+      "analysis_path": "prompts/bloaty_57.analysis.json",
+      "file": "/src/bloaty/src/elf.cc",
+      "function": "elf.cc:bloaty::(anonymous namespace)::ElfMachineToCapstone(unsigned short, cs_arch*, cs_mode*)",
+      "line": "787",
+      "source_line": "    case EM_X86_64:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "0x003e",
+        "operand_width_bytes": 2,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2S intercepts the switch CMP on e_machine, logs the EM_X86_64 constant 0x3e, and substitutes it at input offset 0x12-0x13; naive must blindly guess the 2-byte value and almost never does.",
+        "one_line": "I2S substitutes EM_X86_64 constant into e_machine field to hit the switch arm"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "ELF header e_machine field (2 bytes at offset 0x12) must equal EM_X86_64 (0x003e) to take the case EM_X86_64 switch arm",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The 2-byte little-endian e_machine field at input offset 0x12-0x13 must hold 0x003e (62 = EM_X86_64). The switch on e_machine at elf.cc:782 dispatches the true arm only for this exact 16-bit value.",
+            "why_winner_satisfies": "Winning cmplog seed 2a25258f656af261 carries 3e 00 at offset 0x12-0x13 (little-endian 0x003e = EM_X86_64), and seed 80ff9a7dac09a5e8 carries 3e 00 at offset 0x13-0x14; both supply the exact comparand the switch tests for.",
+            "why_loser_doesnt": "Naive loser seeds carry 00 at offset 0x12, never the 0x3e byte that the switch arm requires, so they fall through to the default arm and return false.",
+            "mechanism_attribution": "cmplog intercepts the switch comparison via __sanitizer_cov_trace_cmp callbacks, logs the constant 0x3e operand into the CmpLogObserver buffer, and I2SRandReplace substitutes that exact byte into the input at the e_machine offset; naive has no CMP introspection and must hit 0x003e by blind havoc mutation, which it almost never does."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked branch is the case EM_X86_64 arm of a switch on e_machine.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L51, L56",
+            "exact_quote": "switch (e_machine) {"
+          },
+          {
+            "claim": "The true side of line 787 (case EM_X86_64) is the globally blocked side.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6-L7",
+            "exact_quote": "case EM_X86_64:"
+          },
+          {
+            "claim": "Winning cmplog seed carries 3e 00 at the e_machine offset 0x12-0x13.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 2a25258f656af261, offset 0x10",
+            "exact_quote": "01 0a 3e 00 08 00 f5 ff 01 00 20 20 07 90 99 12"
+          },
+          {
+            "claim": "W bytes at offset 0x12 include 0x3e while L bytes there are dominated by 00.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0012",
+            "exact_quote": "0x0012  3e(>)x1 00(.)x1                     00(.)x8 03(.)x1 01(.)x1"
+          },
+          {
+            "claim": "Loser naive seed holds 00 at offset 0x12 and never the EM_X86_64 byte.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 43b1a3ff84794b7e, offset 0x10",
+            "exact_quote": "00 00 00 00 00 00 20 20 20 20 20 20 ff 3c ff ff"
+          },
+          {
+            "claim": "The loser takes the default arm and returns false at line 822/828.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L138, d=1 822",
+            "exact_quote": "d=1   L 822  T=0 F=6  T=26 F=3  default:"
+          },
+          {
+            "claim": "cmplog intercepts CMP operands and I2SRandReplace substitutes the logged operand into the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S and only blind havoc/token mutators.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "value_profile records a Hamming-distance CMP_MAP bucket and preserves inputs closer to matching as corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile resolved the branch in all 10 trials versus naive's 1.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile > naive  [delta: value_profile]"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on a 16-bit equality constant where cmplog does NOT resolve faster than naive, or where naive resolves the EM_X86_64 switch arm at the same 10/10 rate without any CMP-derived stepping-stone."
+        },
+        "weakest_evidence_point": "The value_profile gradient story rests on mechanism description only; no per-step CMP_MAP-bucket trace is shown for the value_profile winner, so the gradient-vs-lucky-havoc distinction for Pair 2 is inferred rather than directly observed.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "bloaty_59",
+      "target": "bloaty",
+      "branch_id": 59,
+      "analysis_path": "prompts/bloaty_59.analysis.json",
+      "file": "/src/bloaty/src/elf.cc",
+      "function": "elf.cc:bloaty::(anonymous namespace)::ElfMachineToCapstone(unsigned short, cs_arch*, cs_mode*)",
+      "line": "798",
+      "source_line": "    case EM_AARCH64:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "0x00B7",
+        "operand_width_bytes": 2,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2S logs the EM_AARCH64 constant 0xB7 from the switch CMP callbacks and substitutes it at input offset 0x12, solving the exact-equality roadblock in one step that naive never hits by blind mutation.",
+        "one_line": "I2S writes EM_AARCH64 byte into e_machine offset to dispatch the correct switch arm"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "ELF e_machine field must equal EM_AARCH64 (0x00B7 little-endian) at the 16-bit machine offset to take the switch arm",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The ELF header e_machine half-word must hold the exact 16-bit value EM_AARCH64 = 0x00B7 (low byte 0xB7, high byte 0x00) so that `switch (e_machine)` dispatches to `case EM_AARCH64:` at elf.cc:798. In the winner this lands at input bytes 0x12=0xB7, 0x13=0x00.",
+            "why_winner_satisfies": "The cmplog winner seed carries the bytes 01 d5 b7 00 at offsets 0x10-0x13, placing 0xB7 at offset 0x12; the per-role overlay marks line 798 case EM_AARCH64 as [W] (winner-only) and the divergent-branch table shows W takes the true side (T=3 F=0) while L never does (T=0 F=29).",
+            "why_loser_doesnt": "Every naive loser seed misses the EM_AARCH64 constant: the byte-diff shows offset 0x12 is 0xB7 only in W while L holds 00x8/03/01, so the switch falls through to `default:` (line 822, marked [L]) which returns false; the divergent-branch table shows L takes default true 26 times and EM_AARCH64 never.",
+            "mechanism_attribution": "cmplog's CMP-interception logs the `e_machine == EM_AARCH64` integer comparison operands into the CmpLogObserver buffer; I2SRandReplace then scans the input for the observed operand and substitutes the magic 0xB7 directly at the matching offset, solving the exact-equality roadblock in one step. naive has only havoc/token mutators with no CMP introspection, so it must blind-guess the 2-byte magic and never lands it across 10 trials."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the case EM_AARCH64 switch arm whose true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "elf.cc:798:5",
+            "exact_quote": "Source line:     case EM_AARCH64:"
+          },
+          {
+            "claim": "The arm is reached only by an exact-equality switch on e_machine.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L782, L798",
+            "exact_quote": "switch (e_machine) {"
+          },
+          {
+            "claim": "The winner seed places 0xB7 at offset 0x12 within the ELF header.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 86809c70eeb052ac offset 0x10-0x13",
+            "exact_quote": "01 d5 b7 00 08 00 f5 ff 01 00 20 20 07 90 99 12"
+          },
+          {
+            "claim": "Only the winner exercises the EM_AARCH64 arm; line 798 is winner-only in the per-role overlay.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L798",
+            "exact_quote": "[W]   798      case EM_AARCH64: <-- BLOCKER"
+          },
+          {
+            "claim": "Winner takes the EM_AARCH64 true side while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 elf.cc:798",
+            "exact_quote": "d=1   L 798  T=3 F=0  T=0 F=29  case EM_AARCH64:  <-- BLOCKER"
+          },
+          {
+            "claim": "At offset 0x12 the magic byte 0xB7 is present only in W; loser seeds hold other values.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0012",
+            "exact_quote": "0x0012  b7(.)x1                             00(.)x8 03(.)x1 01(.)x1             DIFFER"
+          },
+          {
+            "claim": "Loser seeds fall through to the default arm rather than EM_AARCH64.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 elf.cc:822",
+            "exact_quote": "d=1   L 822  T=0 F=3  T=26 F=3  default:"
+          },
+          {
+            "claim": "cmplog logs CMP operands and I2SRandReplace substitutes the matching operand into the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S capability \u2014 only havoc/token mutators.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on the EM_AARCH64 16-bit magic where naive resolves the branch as often as cmplog, or where cmplog fails to resolve it \u2014 showing the I2S CMP substitution is not what solves the exact-equality gate."
+        },
+        "weakest_evidence_point": "The decisive seed was stored by cmplog with a BytesCopyMutator leaf op, so the I2S substitution is inferred from dash-row ancestors rather than a labeled I2SRandReplace mutation directly on the magic byte.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_3820",
+      "target": "libpng",
+      "branch_id": 3820,
+      "analysis_path": "prompts/libpng_3820.analysis.json",
+      "file": "/src/libpng/png.c",
+      "function": "OSS_FUZZ_png_zstream_error",
+      "line": "1007",
+      "source_line": "      case Z_OK:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "iTXt",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace reads the CmpLogObserver buffer for the chunk-type CMP operand and substitutes the 4-byte tag (iTXt) that routes execution into a zlib-inflate path returning Z_OK, landing on the case Z_OK switch arm that naive never reaches.",
+        "one_line": "I2S substitutes chunk-type tag to route through Z_OK switch arm"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A 4-byte chunk-type tag at offset 0x35 must select a zlib-decompressing chunk whose inflate returns Z_OK in png_zstream_error.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A specific 4-byte PNG chunk-type FOURCC at file offset 0x35-0x38 (e.g. iTXt = 69 54 58 74 or kRGB-like variant) that routes the input into a zlib-inflate code path whose return code is Z_OK, so png_zstream_error(Z_OK) is reached and the true side of `case Z_OK:` (L1007) is taken.",
+            "why_winner_satisfies": "Winner cmplog seeds carry distinct chunk-type bytes at 0x35-0x38 (iTXt / kRGB) differing from the loser, and the per-role overlay marks line 1007 case Z_OK as [W] winner-only while the loser sits on [L] Z_STREAM_END / Z_BUF_ERROR arms \u2014 the winner exercises the exact ret==Z_OK switch arm 12 times (T=12 F=0) where the loser never does (T=0 F=225).",
+            "why_loser_doesnt": "Loser naive seeds hold the chunk type sRGB (73 52 47 42) at the same offset 0x35-0x38, which routes to chunk paths whose zlib calls return Z_STREAM_END or Z_BUF_ERROR instead of Z_OK, so they land on case Z_STREAM_END (L1011, T=216) and case Z_BUF_ERROR (L1041, T=9) and never on case Z_OK.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer where the chunk-type CMP operands were logged, finds the loser's chunk-type bytes in the input, and substitutes the operand that drives execution toward the Z_OK-returning chunk path; naive lacks I2S and must blunder onto the right 4-byte tag by havoc alone, which it fails to do in 8/10 trials."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is case Z_OK at png.c:1007, true side globally blocked, inside png_zstream_error.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "png.c:1007:7",
+            "exact_quote": "Source line:       case Z_OK:"
+          },
+          {
+            "claim": "cmplog resolves the branch 9/10 while naive resolves 0/10, with I2S as the technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "The winner-only overlay puts case Z_OK on the W (winner-resolving) path.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1007",
+            "exact_quote": "[W]  1007        case Z_OK: <-- BLOCKER"
+          },
+          {
+            "claim": "Winner takes the Z_OK arm (T=12 F=0) while loser never does (T=0 F=225) and instead takes Z_STREAM_END and Z_BUF_ERROR.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1007/L1011/L1041",
+            "exact_quote": "d=1   L1007  T=12 F=0  T=0 F=225  case Z_OK:  <-- BLOCKER"
+          },
+          {
+            "claim": "The loser routes to the Z_STREAM_END switch arm 216 times, where the winner never goes.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1011",
+            "exact_quote": "d=1   L1011  T=0 F=12  T=216 F=9  case Z_STREAM_END:"
+          },
+          {
+            "claim": "At offset 0x35-0x38 the winner carries iTXt/kRGB chunk-type bytes while the loser carries sRGB.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x35-0x38",
+            "exact_quote": "0x0035  69(i)x6 6b(k)x5 73(s)x1             73(s)x20"
+          },
+          {
+            "claim": "The 4-byte tag is a chunk type; winner seed bytes show iTXt at offset 0x35.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed c7492b31f4f7e961",
+            "exact_quote": "05 00 00 00 01 69 54 58 74 01 d9 c9 2c 7f 00 00   .....iTXt...,..."
+          },
+          {
+            "claim": "Loser naive seeds carry the sRGB chunk type at the same offset.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 20af14ddc952c142",
+            "exact_quote": "05 00 00 00 01 73 52 47 42 01 d9 c9 2c 7f 00 00   .....sRGB...,..."
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for one CMP operand and substitutes the other at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive has no I2S, only havoc and token mutators.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive mutators",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating only on a 4-byte chunk-type literal at a fixed offset where naive resolves it as fast as cmplog (no cmplog>naive separation), showing the divergence is not driven by I2S substitution of that 4-byte tag."
+        },
+        "weakest_evidence_point": "The causal link from the 0x35-0x38 chunk type to a zlib path returning specifically Z_OK is inferred from switch-arm hit counts and source, not directly traced through the inflate return value.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3887",
+      "target": "libpng",
+      "branch_id": 3887,
+      "analysis_path": "prompts/libpng_3887.analysis.json",
+      "file": "/src/libpng/pngread.c",
+      "function": "OSS_FUZZ_png_read_info",
+      "line": "159",
+      "source_line": "      else if (chunk_name == png_PLTE)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "png_PLTE",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace intercepts the 4-byte chunk_name==png_PLTE CMP via __sanitizer_cov_trace_cmp4, logs the PLTE FOURCC constant, and splices it into the chunk-type bytes; naive's havoc cannot brute-force the exact 4-byte tag.",
+        "one_line": "I2S splices 4-byte PLTE FOURCC into chunk-type field via CMP interception"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must contain a chunk whose 4-byte type field equals the PLTE FOURCC so chunk_name == png_PLTE holds true.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A PNG chunk whose 4-byte chunk-type field decodes to png_PLTE (ASCII 'PLTE' = 0x50 0x4c 0x54 0x45), making the equality test chunk_name == png_PLTE at pngread.c:159 evaluate true and dispatch png_handle_PLTE.",
+            "why_winner_satisfies": "cmplog resolves the branch in 10/10 trials and hits the true side 293 times on average; its I2SRandReplace mutator reads the failing 4-byte chunk_name comparison from the CmpLogObserver buffer and substitutes the png_PLTE constant directly into the chunk-type bytes, so a PLTE chunk appears in the input.",
+            "why_loser_doesnt": "naive blocks the branch in 10/10 trials with 0 hits on the true side; with only havoc/token mutators it never blindly lands the exact 4-byte PLTE tag at a valid chunk-type offset, so chunk_name == png_PLTE is never satisfied and execution falls through the else-if chain.",
+            "mechanism_attribution": "cmplog's I2SRandReplace intercepts the integer CMP of chunk_name against the png_PLTE constant via __sanitizer_cov_trace_cmp4, records both operands, and splices the constant operand into matching input bytes; naive has no CMP introspection and cannot target the exact magic tag."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the equality test chunk_name == png_PLTE at pngread.c:159, true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngread.c:159:16",
+            "exact_quote": "else if (chunk_name == png_PLTE)"
+          },
+          {
+            "claim": "Taking the true side dispatches png_handle_PLTE, which only the winner reaches.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L160",
+            "exact_quote": "[W]   160           png_handle_PLTE(png_ptr, info_ptr, length);"
+          },
+          {
+            "claim": "cmplog resolves the branch in all 10 trials and hits the true side 293 times on average while naive never does.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "subject 21",
+            "exact_quote": "avg hitcount on branch: winner=293  loser=0"
+          },
+          {
+            "claim": "naive blocks the branch in all 10 trials; cmplog resolves all 10.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "naive/cmplog rows",
+            "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "The winner reaches the true side of line 159 while the loser never does (T=10 vs T=0).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L159",
+            "exact_quote": "else if (chunk_name == png_PLTE)  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace scans the input for an operand and substitutes the other operand, which lands magic constants like a chunk tag.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive has only havoc/token mutators and no I2S, so it cannot introspect the chunk_name CMP.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on chunk_name == png_PLTE where naive resolves the branch as fast as cmplog, showing the 4-byte magic-tag equality is reachable by blind havoc without CMP introspection."
+        },
+        "weakest_evidence_point": "The byte diff does not pinpoint a fixed PLTE-tag offset (PLTE chunks sit at variable offsets after IHDR/gAMA/sRGB), so the literal 'PLTE' bytes are not directly visible in the shown seed prefix; the FOURCC inference rests on the source equality and lineage I2S signal rather than a byte-level diff.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_3890_h0",
+      "target": "libpng",
+      "branch_id": 3890,
+      "analysis_path": "prompts/libpng_3890.analysis.json",
+      "file": "/src/libpng/pngread.c",
+      "function": "OSS_FUZZ_png_read_info",
+      "line": "229",
+      "source_line": "      else if (chunk_name == png_sPLT)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "png_sPLT",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace intercepts the chunk_name==png_sPLT integer CMP, logs the sPLT FOURCC operand, and substitutes those 4 bytes at the chunk-name offset in the input, satisfying the exact magic equality that random havoc cannot brute-force.",
+        "one_line": "I2S substitutes 4-byte sPLT FOURCC at chunk-name offset via CMP log"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must place the 4-byte FOURCC magic 'sPLT' as a chunk-type field so chunk_name == png_sPLT holds",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A chunk-type field equal to the 4-byte ASCII FOURCC 'sPLT' (0x73 0x50 0x4c 0x54) at a chunk-name offset, so the equality test chunk_name == png_sPLT takes the true branch.",
+            "why_winner_satisfies": "cmplog winning seeds reach line 229 with the true side resolved (T=48) and dispatch png_handle_sPLT; the BYTE DIFF shows the winner producing the sPLT FOURCC bytes (0x73 's', 0x50 'P', 0x4c 'L', 0x54 'T') at offsets 0x35/0x1a/0x1b/0x1c that the loser never holds.",
+            "why_loser_doesnt": "naive seeds keep chunk-name bytes at unrelated values and resolve T=0 at line 229, never matching the exact 4-byte sPLT magic.",
+            "mechanism_attribution": "cmplog intercepts the chunk_name == png_sPLT integer compare, logs both operands, and I2SRandReplace substitutes the constant operand (png_sPLT FOURCC) into the input bytes that matched the other operand, instantly satisfying the exact 4-byte equality that random havoc cannot brute-force."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is an equality comparison of chunk_name against the sPLT chunk constant.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngread.c:229",
+            "exact_quote": "else if (chunk_name == png_sPLT)"
+          },
+          {
+            "claim": "The cmplog winner resolves the true side and dispatches the sPLT handler at line 230.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L230",
+            "exact_quote": "[W]   230           png_handle_sPLT(png_ptr, info_ptr, length);"
+          },
+          {
+            "claim": "The winner takes the true branch at line 229 while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L229",
+            "exact_quote": "T=48 F=138  T=0 F=23  else if (chunk_name == png_sPLT)"
+          },
+          {
+            "claim": "The winner emits sPLT FOURCC bytes (s/P/L/T) at chunk-name offsets that the loser lacks.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x1a-0x1c, 0x35",
+            "exact_quote": "0x001a  00(.)x24 50(P)x1                    00(.)x10"
+          },
+          {
+            "claim": "cmplog is the decisive winner over naive with the technique delta being I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes one logged CMP operand at offsets matching the other operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive seeds keep the chunk name at non-sPLT values and stay blocked.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 loser",
+            "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "value_profile is the decisive winner over naive with the technique delta being value_profile.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "--- Pair 2: value_profile > naive  [delta: value_profile] ---"
+          },
+          {
+            "claim": "value_profile resolves all 10 trials but takes longer than cmplog, consistent with gradient climbing.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 duration",
+            "exact_quote": "avg duration blocked: winner=5.50h  loser=24.00h"
+          },
+          {
+            "claim": "value_profile retains inputs whose CMP operands are closer to matching, giving a distance gradient.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the exact 4-byte sPLT equality gate where naive resolves the true branch as fast as cmplog/value_profile, showing the FOURCC equality is brute-forceable without CMP introspection."
+        },
+        "weakest_evidence_point": "The value_profile gradient claim is inferred from the duration gap and CMP_MAP mechanism description rather than from per-bucket distance evidence in the prompt.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_3891",
+      "target": "libpng",
+      "branch_id": 3891,
+      "analysis_path": "prompts/libpng_3891.analysis.json",
+      "file": "/src/libpng/pngread.c",
+      "function": "OSS_FUZZ_png_read_info",
+      "line": "244",
+      "source_line": "      else if (chunk_name == png_tRNS)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "png_tRNS",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace reads the CmpLogObserver entry for chunk_name==png_tRNS, finds the other operand's bytes in the input, substitutes the tRNS FOURCC (74 52 4E 53) at a chunk-name offset, directly manufacturing the exact 4-byte match naive's havoc cannot brute-force in a 32-bit equality.",
+        "one_line": "I2S plants tRNS FOURCC bytes at chunk-name offset from CMP buffer"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A PNG chunk whose 4-byte FOURCC name equals the literal 'tRNS' (74 52 4E 53) must appear so the linear chunk-name comparison chain reaches the tRNS arm.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The input must contain a PNG chunk whose 4-byte name field exactly equals the FOURCC literal 'tRNS' (bytes 74 52 4E 53) so the `chunk_name == png_tRNS` equality at pngread.c:244 evaluates true. chunk_name is built from a fixed-offset 4-byte field in a chunk header, and the dispatch is a linear `else if (chunk_name == png_X)` ladder that compares against each registered FOURCC constant.",
+            "why_winner_satisfies": "cmplog resolves the branch in 10/10 trials and hits the true side (avg hitcount 276). Its winning seeds carry the structured PNG chunk layout (PNG magic + IHDR + named chunks like tEXt/gAMA/sRGB at the 4-byte chunk-name offsets), and the I2S-floor dash-row ancestor confirms an input-to-state substitution event produced the exact-match FOURCC bytes the equality demands.",
+            "why_loser_doesnt": "naive blocks in 10/10 trials with 0 hits on the true side. At line 244 the loser shows T=0 F=24 \u2014 it walks the whole comparison ladder and never matches the tRNS constant; its mutated chunk-name bytes (e.g. 'tRGB' at 0x35-0x38, 'gAMA' at 0x25-0x28) never randomly land the exact 4-byte 74 52 4E 53 needle that the equality requires.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer recorded when `chunk_name == png_tRNS` executes, sees the constant operand (the tRNS FOURCC), scans the input for the other operand's byte sequence, and substitutes the constant at a chunk-name offset \u2014 directly synthesizing the 4-byte exact-match that naive's blind havoc cannot brute-force in a 32-bit equality."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the equality chunk_name == png_tRNS at pngread.c:244, true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngread.c:244",
+            "exact_quote": "Source line:       else if (chunk_name == png_tRNS)"
+          },
+          {
+            "claim": "chunk_name is read from a fixed 4-byte field of each chunk header inside a linear comparison ladder.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L108-L109",
+            "exact_quote": "png_uint_32 chunk_name = png_ptr->chunk_name;"
+          },
+          {
+            "claim": "cmplog resolves and hits the true side in all trials while naive never does.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+          },
+          {
+            "claim": "The loser never takes the tRNS true side; it walks the ladder with zero true hits.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L244",
+            "exact_quote": "d=1   L 244  T=12 F=14  T=0 F=24  else if (chunk_name == png_tRNS)  <-- BLOCKER"
+          },
+          {
+            "claim": "Winning cmplog seeds carry structured PNG chunk layout with named 4-byte chunk fields.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 016607d5919b9103 offset 0x25",
+            "exact_quote": "e4 00 00 00 04 67 41 4d 41 00 00 b1 8f 0b fc 00   .....gAMA......."
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "picks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S facility, only blind havoc/token mutation.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on a 4-byte exact-equality FOURCC where cmplog and naive resolve the branch at statistically indistinguishable rates (no I2S advantage), e.g. naive reaching the true side in >=8/10 trials within the same budget."
+        },
+        "weakest_evidence_point": "The byte diff does not show a winner offset where bytes 74 52 4E 53 ('tRNS') appear verbatim in the 5 displayed seeds, so the exact placement of the I2S-substituted tRNS FOURCC is inferred from the equality semantics rather than directly observed in a shown seed.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_3897",
+      "target": "libpng",
+      "branch_id": 3897,
+      "analysis_path": "prompts/libpng_3897.analysis.json",
+      "file": "/src/libpng/pngread.c",
+      "function": "OSS_FUZZ_png_read_end",
+      "line": "838",
+      "source_line": "      else if (chunk_name == png_PLTE)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "png_PLTE",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace reads the CmpLogObserver entry for chunk_name==png_PLTE, substitutes the PLTE FOURCC constant into the chunk-name bytes at the matching input offset; naive's havoc mutation cannot place the exact 4-byte PLTE tag by chance across 10 trials.",
+        "one_line": "I2S substitutes PLTE FOURCC into chunk-name bytes via CMP interception"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must contain a chunk whose 4-byte FOURCC name equals the PLTE tag so chunk_name==png_PLTE is true.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A PNG chunk header whose 4-byte type field equals the ASCII FOURCC 'PLTE'; png_read_chunk_header parses this into png_ptr->chunk_name, and the blocker at line 838 compares it against the png_PLTE 32-bit constant.",
+            "why_winner_satisfies": "cmplog resolves the branch in 9/10 trials and hits the true side 12 times (W T=12), meaning its inputs present a chunk-name word equal to the PLTE constant; the CMP interception logs the parsed chunk_name vs png_PLTE comparison and I2SRandReplace splices the constant into the input bytes, and the winning seed's lineage carries I2S-floor dash rows.",
+            "why_loser_doesnt": "naive blocks the branch in all 10 trials and never takes the true side (L T=0 at line 838); without I2S it cannot place the exact 4-byte PLTE FOURCC at the chunk-name offset by chance, so the equality compare against png_PLTE stays false.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver entry for the chunk_name==png_PLTE integer compare and substitutes the png_PLTE operand into the input at the offset matching the other operand, manufacturing the exact FOURCC that naive's havoc mutators cannot guess."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the equality test chunk_name == png_PLTE at pngread.c:838, true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngread.c:838:16",
+            "exact_quote": "else if (chunk_name == png_PLTE)"
+          },
+          {
+            "claim": "chunk_name is parsed from the chunk header read each loop iteration, establishing it as an input-derived value.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L794-795",
+            "exact_quote": "png_uint_32 chunk_name = png_ptr->chunk_name;"
+          },
+          {
+            "claim": "cmplog (winner) takes the PLTE true side while naive (loser) never does at the blocker line.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L838",
+            "exact_quote": "else if (chunk_name == png_PLTE)  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog resolves the branch in 9 of 10 trials while naive blocks in all 10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 winner/loser counts",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          },
+          {
+            "claim": "naive loser resolves zero of ten trials at this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 loser counts",
+            "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace scans the input for a matching operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "picks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator, so it cannot perform input-to-state substitution of the PLTE constant.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on an exact 4-byte FOURCC equality compare in which cmplog and naive resolve the branch at statistically indistinguishable rates would refute the I2S attribution."
+        },
+        "weakest_evidence_point": "The byte-diff offsets shown (0x13-0x2e) are in the IHDR region, not the PLTE chunk-name offset, so direct byte-level evidence that I2S placed the literal PLTE FOURCC is inferred rather than visible in the diff.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3900",
+      "target": "libpng",
+      "branch_id": 3900,
+      "analysis_path": "prompts/libpng_3900.analysis.json",
+      "file": "/src/libpng/pngread.c",
+      "function": "OSS_FUZZ_png_read_end",
+      "line": "897",
+      "source_line": "      else if (chunk_name == png_iCCP)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "png_iCCP",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace intercepts the 4-byte integer CMP at the chunk dispatch, records the iCCP FOURCC operand in CmpLogObserver, and substitutes it into the chunk-type bytes; naive cannot brute-force the exact 4-byte magic with havoc mutation in 10 trials.",
+        "one_line": "I2S substitutes iCCP FOURCC into chunk-type bytes via dispatch CMP interception"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must contain a PNG chunk whose 4-byte type field equals the iCCP FOURCC so chunk_name == png_iCCP holds.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A PNG chunk-header whose 32-bit type field byte-equals the ASCII FOURCC 'iCCP', so the dispatcher's else-if equality test chunk_name == png_iCCP resolves true and png_handle_iCCP runs.",
+            "why_winner_satisfies": "cmplog resolves the branch in 9/10 trials and is the only winner; the dispatch comparison chunk_name == png_iCCP is an exact 4-byte integer equality that I2SRandReplace can satisfy by substituting the logged png_iCCP operand into the chunk-type bytes of an existing valid PNG seed (header magic 89 50 4e 47 present in every winning seed).",
+            "why_loser_doesnt": "naive blocks the true side in all 10 trials (resolved=0/10), reaching only the false arm: in DIVERGENT BRANCHES line 897 shows L T=0 F=80, i.e. naive's havoc mutation never lands the exact iCCP type-word so the equality test stays false.",
+            "mechanism_attribution": "cmplog intercepts the integer CMP at the dispatch and records both operands into the CmpLogObserver buffer; I2SRandReplace then scans the input for the matched operand and substitutes the other (the iCCP literal) at the chunk-type offset, hitting the magic-number equality that naive's blind byte mutation cannot brute-force."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is an exact equality test against the iCCP chunk constant.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngread.c:897",
+            "exact_quote": "else if (chunk_name == png_iCCP)"
+          },
+          {
+            "claim": "cmplog is the decisive winner over naive on this branch via the I2S technique.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "cmplog resolves the branch in 9 of 10 trials while naive never does.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "cmplog / naive rows",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          },
+          {
+            "claim": "naive blocks the true side in every trial, never matching the iCCP type word.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "loser row",
+            "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "At line 897 the winner takes the true side 10 times while the loser takes it zero times.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L 897",
+            "exact_quote": "d=1   L 897  T=10 F=58  T=0 F=80  else if (chunk_name == png_iCCP)"
+          },
+          {
+            "claim": "Winning seeds carry the valid PNG header magic that anchors I2S substitution of the chunk-type bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 1 winner offset 0x00",
+            "exact_quote": "0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace substitutes a logged CMP operand at matching input offsets, the mechanism that lands the exact iCCP literal.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose dispatch compares chunk_name against the iCCP constant where naive resolves the true branch as often as cmplog within the same budget, showing the exact 4-byte equality is not an I2S-specific roadblock."
+        },
+        "weakest_evidence_point": "The byte-diff section shows W/L differences clustered in the IHDR width/height region (0x13-0x2e) rather than directly exposing the iCCP type-word offset, so the precise substituted-byte location is inferred from the dispatch equality rather than directly visible in BYTE DIFF.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_3901_h0",
+      "target": "libpng",
+      "branch_id": 3901,
+      "analysis_path": "prompts/libpng_3901.analysis.json",
+      "file": "/src/libpng/pngread.c",
+      "function": "OSS_FUZZ_png_read_end",
+      "line": "902",
+      "source_line": "      else if (chunk_name == png_sPLT)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "png_sPLT",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace intercepts the chunk_name==png_sPLT integer CMP, logs the 4-byte sPLT constant, and splices it into a chunk-name offset of the input; naive's havoc-only mutation stack never randomly produces the exact magic and remains blocked in all 10 trials.",
+        "one_line": "I2S splices sPLT FOURCC into chunk-name offset from CmpLogObserver log"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must contain a PNG chunk whose 4-byte chunk-name FOURCC equals 'sPLT' so chunk_name == png_sPLT is true.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A chunk header whose 4-byte chunk-name field is the literal FOURCC 'sPLT' (0x73 0x50 0x4C 0x54), so the 32-bit equality test chunk_name == png_sPLT resolves true at the else-if chain at pngread.c:902.",
+            "why_winner_satisfies": "cmplog intercepts the chunk_name == png_sPLT integer comparison, logs the constant png_sPLT operand into the CmpLogObserver buffer, and I2SRandReplace splices that 4-byte constant into a chunk-name offset of the input; the cmplog winner resolves the branch 9/10 with hitcount 21 vs the naive loser's 0, and its ancestor chain contains I2S-floor dash rows.",
+            "why_loser_doesnt": "naive has only havoc/token mutation and must blindly produce the exact 4-byte 'sPLT' magic by chance; it never resolves the branch (resolved=0/10, blocked=10/10) and its branch hitcount stays 0.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver entry for the chunk_name comparison and substitutes the logged png_sPLT constant directly into the input chunk-name bytes, which naive (havoc/token only, no CMP introspection) cannot do."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked branch is the equality test chunk_name == png_sPLT at pngread.c:902, true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngread.c:902",
+            "exact_quote": "Source line:       else if (chunk_name == png_sPLT)"
+          },
+          {
+            "claim": "Globally blocked side is the true branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L7",
+            "exact_quote": "Globally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "Taking the true side dispatches to png_handle_sPLT, the winner-only resolved line.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L903",
+            "exact_quote": "[W]   903           png_handle_sPLT(png_ptr, info_ptr, length);"
+          },
+          {
+            "claim": "cmplog wins over naive on this branch with the I2S technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "--- Pair 2: cmplog > naive  [delta: I2S] ---"
+          },
+          {
+            "claim": "The cmplog winner resolves 9/10 with branch hitcount 21 while the naive loser stays at 0.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "avg hitcount on branch: winner=21  loser=0"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace, which scans the input for an operand match and substitutes the other operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator and relies on havoc/token only.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "value_profile wins over naive on this branch with the value_profile technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+          },
+          {
+            "claim": "The value_profile winner resolves 10/10 with branch hitcount 3 while the naive loser stays at 0.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "avg hitcount on branch: winner=3  loser=0"
+          },
+          {
+            "claim": "value_profile retains inputs whose CMP operands are closer to matching as new CMP_MAP buckets, giving a distance gradient.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace, so its advantage comes from CMP_MAP feedback not substitution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "naive never resolves the branch across all 10 trials in both pairs.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "naive row",
+            "exact_quote": "naive                            0       10          0  loser (value_profile vs value_profile); loser (I2S vs cmplog)"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on chunk_name == png_sPLT in which cmplog shows no advantage over naive (equal resolve rate) would refute the I2S hypothesis; if value_profile also fails to resolve when only partial-prefix CMP_MAP gradient is available, the gradient hypothesis is refuted."
+        },
+        "weakest_evidence_point": "The byte-diff section concentrates on IHDR-region offsets (0x13-0x2e) not the sPLT chunk-name bytes themselves, so the seeds shown do not directly display the 'sPLT' FOURCC offset, leaving the exact substitution site inferred from source rather than observed in the dump.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3902",
+      "target": "libpng",
+      "branch_id": 3902,
+      "analysis_path": "prompts/libpng_3902.analysis.json",
+      "file": "/src/libpng/pngread.c",
+      "function": "OSS_FUZZ_png_read_end",
+      "line": "917",
+      "source_line": "      else if (chunk_name == png_tRNS)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "png_tRNS",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace intercepts the 4-byte chunk_name==png_tRNS CMP via __sanitizer_cov_trace_cmp4, logs both operands, and substitutes the tRNS FOURCC at the chunk-name offset; naive seeds show scattered chunk-header bytes and never land the exact 4-byte needle in 10 trials.",
+        "one_line": "I2S substitutes tRNS FOURCC at chunk-name offset via CMP4 interception"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must carry a chunk whose 4-byte FOURCC name field equals png_tRNS to take the true branch.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A 4-byte chunk-name field somewhere in the PNG chunk stream that exactly equals the tRNS FOURCC, so that the equality test 'chunk_name == png_tRNS' at pngread.c:917 evaluates true and png_handle_tRNS is reached.",
+            "why_winner_satisfies": "All five cmplog winner seeds converge on one concentrated chunk-header byte configuration (offsets 0x13-0x1e identical across all 8 winners), and the per-role overlay shows the winner reaches line 918 (png_handle_tRNS) which only fires when the 4-byte chunk_name matches the tRNS literal exactly. The cmplog CMP buffer logged the 'chunk_name == png_tRNS' comparison and I2SRandReplace spliced the matching operand into the chunk-name bytes.",
+            "why_loser_doesnt": "The ten naive loser seeds never resolve the branch (T=0 at line 917 in L) and instead exit through other chunk-name arms or the default; their chunk-header bytes are scattered (offsets 0x13-0x1e show many distinct values, e.g. 0x13 has 05/ab/5b/04 and 0x1d has 00/7f/52/ff), so they never place the exact tRNS FOURCC and fall through the if-else chain.",
+            "mechanism_attribution": "cmplog intercepts the 4-byte integer compare 'chunk_name == png_tRNS' via __sanitizer_cov_trace_cmp4, records both operands in the CmpLogObserver buffer, and I2SRandReplace then scans the input and substitutes the tRNS operand at the chunk-name offset. naive has no CMP introspection and must hit the exact 4-byte magic by chance, which it does not in 10 trials."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is an equality test of chunk_name against the tRNS FOURCC literal.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngread.c:917",
+            "exact_quote": "else if (chunk_name == png_tRNS)"
+          },
+          {
+            "claim": "Taking the true branch dispatches into png_handle_tRNS, reached only in the winner.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L918",
+            "exact_quote": "[W]   918           png_handle_tRNS(png_ptr, info_ptr, length);"
+          },
+          {
+            "claim": "cmplog resolved the branch in all 10 trials while naive resolved 0/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog>naive",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+          },
+          {
+            "claim": "The naive loser never takes the tRNS true side; the divergent-branch table shows L T=0 at line 917.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L 917",
+            "exact_quote": "T=14 F=7  T=0 F=54  else if (chunk_name == png_tRNS)  <-- BLOCKER"
+          },
+          {
+            "claim": "Winner chunk-header bytes are concentrated to a single configuration while loser bytes are scattered across many values.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x001d",
+            "exact_quote": "0x001d  52(R)x8                             00(.)x6 7f(.)x4 52(R)x3 ff(.)x1     PARTIAL"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace, which substitutes a logged CMP operand at matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator and must hit the magic by chance.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "If a synthetic harness with a 4-byte exact-equality FOURCC gate is resolved by naive as often as by cmplog within the same trial budget, the I2S magic-substitution attribution is refuted."
+        },
+        "weakest_evidence_point": "The byte-diff is reported at fixed early offsets (chunk-header region) rather than at the actual variable offset of the tRNS chunk-name in each seed, so the exact location of the matched FOURCC is inferred, not pinpointed.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_3811_h0",
+      "target": "libpng",
+      "branch_id": 3811,
+      "analysis_path": "prompts/libpng_3811.analysis.json",
+      "file": "/src/libpng/png.c",
+      "function": "OSS_FUZZ_png_free_data",
+      "line": "565",
+      "source_line": "   if (info_ptr->splt_palettes != NULL &&",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "sPLT",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace reads the CmpLogObserver buffer for the chunk-type comparison and splices the exact 4-byte 'sPLT' tag into the input at offset 0x35, causing png_handle_sPLT to allocate splt_palettes and making the NULL-pointer check true.",
+        "one_line": "I2S splices 'sPLT' chunk-type tag to trigger palette allocation"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must contain a well-formed sPLT chunk so png parses splt_palettes != NULL, enabling the true branch.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A chunk whose 4-byte type field equals the ASCII tag 'sPLT' (0x73 0x50 0x4c 0x54) at the chunk-type offset (e.g. 0x35-0x38), so png_handle_sPLT allocates info_ptr->splt_palettes and the blocker's `splt_palettes != NULL` test is true.",
+            "why_winner_satisfies": "Winner seed 3 (cmplog, id=4e93d4e85f61dcd4) carries the bytes 73 50 4c 54 ('sPLT') at offset 0x35; cmplog's CMP buffer logs the libpng chunk-type comparison constant and I2SRandReplace splices the exact 4-byte tag into the input, so splt_palettes becomes non-NULL.",
+            "why_loser_doesnt": "Every naive loser seed has the chunk-type bytes concentrated on 73 52 47 42 ('sRGB') with no 'sPLT' value at 0x35-0x38, so png never allocates splt_palettes and the branch's NULL pointer stays NULL (loser T=0 at line 565).",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer for the 4-byte chunk-type comparison and substitutes the matching 'sPLT' literal into the input bytes, manufacturing the exact magic tag that havoc-only naive cannot land by chance."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker tests info_ptr->splt_palettes != NULL, the sPLT-entry pointer.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "png.c:565",
+            "exact_quote": "if (info_ptr->splt_palettes != NULL &&"
+          },
+          {
+            "claim": "The cmplog winner seed contains the ASCII bytes for 'sPLT' at offset 0x35.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 4e93d4e85f61dcd4 offset 0x30",
+            "exact_quote": "05 00 00 00 1b 73 50 4c 54 01 d9 c9 2c 7f 00 00   .....sPLT...,..."
+          },
+          {
+            "claim": "The loser naive seeds carry 'sRGB' rather than 'sPLT' at the chunk-type offset.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 00140bdb0aa48f31 offset 0x30",
+            "exact_quote": "05 00 00 00 01 73 52 47 42 01 d9 c9 2c 7f 00 00   .....sRGB...,..."
+          },
+          {
+            "claim": "At the chunk-type bytes the winner set is diverse including S/P/L/T while losers concentrate on a single value.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0036",
+            "exact_quote": "0x0036  52(R)x15 50(P)x4 49(I)x3 43(C)x2    52(R)x9 45(E)x1"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace scans the input for an operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile rewards an input whose CMP-operand pair is closer to matching with a new CMP_MAP bucket.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "naive has only havoc/token mutators with no I2S and no CMP_MAP gradient.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Mutators",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "cmplog and value_profile resolve the branch 10/10 while naive is blocked 10/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating splt_palettes on a 4-byte 'sPLT' chunk-type literal in which naive resolves as fast as cmplog/value_profile (no I2S or CMP_MAP advantage), showing the magic tag is not the divergence driver."
+        },
+        "weakest_evidence_point": "The value_profile gradient claim is inferred from CMP_MAP semantics rather than direct distance-bucket lineage evidence, since value_profile winner seeds are not shown separately in BRANCH SEEDS.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_3949",
+      "target": "libpng",
+      "branch_id": 3949,
+      "analysis_path": "prompts/libpng_3949.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_IHDR",
+      "line": "847",
+      "source_line": "   if ((png_ptr->mode & PNG_HAVE_IHDR) != 0)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "IHDR",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace splices the logged 'IHDR' chunk-type comparand into a second chunk-type slot, manufacturing a duplicate IHDR chunk that re-enters png_handle_IHDR with PNG_HAVE_IHDR already set; value_profile lacks I2SRandReplace and cannot place this exact 4-byte literal.",
+        "one_line": "I2S places duplicate IHDR FOURCC to trigger already-have-IHDR true branch"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must present a SECOND IHDR chunk (chunk-type 'IHDR' after PNG_HAVE_IHDR is set) so png_handle_IHDR re-enters with mode already flagged.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A chunk whose 4-byte type field equals the magic literal 'IHDR' (0x49 0x48 0x44 0x52) appearing a SECOND time, so png_handle_IHDR is dispatched again after png_ptr->mode already has PNG_HAVE_IHDR set, forcing the (mode & PNG_HAVE_IHDR) != 0 true branch.",
+            "why_winner_satisfies": "value_profile_cmplog resolves the branch in 10/10 trials and accumulates avg hitcount 20 on the blocker; I2SRandReplace can splice the logged comparand 'IHDR' (the chunk-type literal compared in the chunk dispatcher) into a second chunk-type position, manufacturing a duplicate IHDR chunk so the chunk loop re-enters png_handle_IHDR. The winning lineage shows two I2S-floor dash rows at depth 3 and 4.",
+            "why_loser_doesnt": "value_profile blocks in 9/10 trials with avg hitcount 0 on the blocker; lacking I2SRandReplace it relies on CMP_MAP prefix-distance feedback and havoc, which cannot reliably reconstruct the exact 4-byte 'IHDR' literal in a second chunk-type slot, so png_handle_IHDR is only entered once and (mode & PNG_HAVE_IHDR) is still zero.",
+            "mechanism_attribution": "I2SRandReplace (vpc-only mutator) substitutes the logged chunk-type comparand 'IHDR' directly into a candidate chunk-type field, deterministically producing the duplicate-IHDR structure that drives the blocker's true (out-of-place) branch; value_profile has no I2SRandReplace and cannot place the exact literal."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true branch of the duplicate/out-of-place IHDR guard.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngrutil.c:847",
+            "exact_quote": "if ((png_ptr->mode & PNG_HAVE_IHDR) != 0)"
+          },
+          {
+            "claim": "Taking the true branch leads to the out-of-place chunk error, confirming the branch fires only on a second IHDR.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L848",
+            "exact_quote": "png_chunk_error(png_ptr, \"out of place\");"
+          },
+          {
+            "claim": "PNG_HAVE_IHDR is set inside png_handle_IHDR, so it is non-zero only on a re-entry from a second IHDR chunk.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L854",
+            "exact_quote": "png_ptr->mode |= PNG_HAVE_IHDR;"
+          },
+          {
+            "claim": "value_profile_cmplog wins decisively (10/10) over value_profile (1/10), the only technique delta being I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "The winner reaches the blocker repeatedly while the loser never does.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 avg hitcount",
+            "exact_quote": "avg hitcount on branch: winner=20  loser=0"
+          },
+          {
+            "claim": "Winning seeds carry the IHDR chunk-type literal in their bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 0bb540212fef4c2a offset 0x0c",
+            "exact_quote": "89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR"
+          },
+          {
+            "claim": "value_profile_cmplog has the I2SRandReplace mutator that value_profile lacks.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+          },
+          {
+            "claim": "value_profile explicitly has no I2SRandReplace.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose only roadblock is a duplicate-IHDR-style exact 4-byte magic-literal chunk type would be refuted if value_profile resolved the branch as often as value_profile_cmplog, showing CMP_MAP prefix-distance feedback alone can reconstruct the literal without I2S substitution."
+        },
+        "weakest_evidence_point": "The exact dataflow path by which a duplicate 'IHDR' chunk-type is produced is inferred from source structure and the IHDR literal in seeds; the byte-diff offsets do not pinpoint a second IHDR tag, so the duplicate-chunk construction is the most uncertain claim.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_4082",
+      "target": "libpng",
+      "branch_id": 4082,
+      "analysis_path": "prompts/libpng_4082.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_read_start_row",
+      "line": "4533",
+      "source_line": "          (png_ptr->num_trans != 0 &&",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "tRNS",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace substitutes the 'tRNS' FOURCC into the chunk-type field, causing png_handle_tRNS to execute and set num_trans non-zero; the compound condition at L4533-L4534 then evaluates true, which naive's blind havoc never achieves.",
+        "one_line": "I2S plants 'tRNS' FOURCC to set num_trans non-zero for compound check"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must carry a parseable tRNS chunk so png_ptr->num_trans is set non-zero, with PNG_EXPAND active.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A PNG whose chunk stream includes a valid tRNS chunk (FOURCC 0x74 0x52 0x4e 0x53 = 'tRNS') that png_handle_tRNS parses, setting png_ptr->num_trans != 0, combined with an expand transformation so (png_ptr->transformations & PNG_EXPAND) != 0 \u2014 making the compound condition at L4533/L4534 true.",
+            "why_winner_satisfies": "Winner cmplog seeds drive png_handle_tRNS 10 times (W hits) vs 0 in the loser, and the blocker L4533 evaluates true in all 10 winner trials (T=10 F=0); the upstream num_trans checks L4459 and L4477 also take their true sides only in the winner. The winner byte sets at the chunk-FOURCC offsets 0x25-0x28 carry non-default values (e.g. 69/54/58/74) showing chunk-type bytes were mutated toward real ancillary chunks.",
+            "why_loser_doesnt": "Loser naive seeds never invoke png_handle_tRNS (L hits = 0), so num_trans stays zero, and the blocker L4533 evaluates false in all 10 loser trials (T=0 F=10); at the FOURCC offsets 0x25-0x28 every loser seed keeps the default 67 41 4d 41 ('gAMA') bytes with no tRNS variant.",
+            "mechanism_attribution": "cmplog's I2SRandReplace intercepts the FOURCC comparison in png_read_chunk dispatch, reads the expected 'tRNS' literal from the CmpLog buffer, and substitutes it into input bytes at the chunk-type offset, manufacturing a parseable tRNS chunk that sets num_trans non-zero; naive must hit the exact 4-byte FOURCC by blind havoc and never does in 10 trials."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the num_trans!=0 condition at L4533, requiring num_trans non-zero (with PNG_EXPAND).",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L4533",
+            "exact_quote": "(png_ptr->num_trans != 0 &&"
+          },
+          {
+            "claim": "The full compound gate also requires PNG_EXPAND set on the next source line.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L4534",
+            "exact_quote": "(png_ptr->transformations & PNG_EXPAND) != 0) ||"
+          },
+          {
+            "claim": "The winner takes the blocker true side in all 10 trials while the loser takes false in all 10.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L4533",
+            "exact_quote": "d=1   L4533  T=10 F=0  T=0 F=10"
+          },
+          {
+            "claim": "png_handle_tRNS fires 10 times in the winner set and 0 times in the loser set, so num_trans is set only in the winner.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "OSS_FUZZ_png_handle_tRNS",
+            "exact_quote": "10         0  OSS_FUZZ_png_handle_tRNS"
+          },
+          {
+            "claim": "Upstream num_trans check L4477 takes its true side only in the winner.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L4477",
+            "exact_quote": "d=1   L4477  T=8 F=0  T=0 F=0  if (png_ptr->num_trans != 0)"
+          },
+          {
+            "claim": "Winner seeds carry mutated chunk-FOURCC bytes at offsets 0x25-0x28 while losers keep the default gAMA bytes.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "0x0025-0x0028",
+            "exact_quote": "0x0025  67(g)x8 69(i)x2                     67(g)x10"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace, which scans the input for one CMP operand and substitutes the other operand at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive has no I2S and relies on blind havoc/token byte mutation.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "If a naive-only campaign reaches the L4533 true side at the same rate as cmplog within the budget (showing blind havoc can place the 4-byte tRNS FOURCC unaided), the I2S attribution is wrong."
+        },
+        "weakest_evidence_point": "The byte-diff evidence ties winner seeds to mutated chunk-FOURCC bytes but does not directly prove the substituted literal is exactly 'tRNS' rather than another expand-triggering ancillary chunk.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_4020",
+      "target": "libpng",
+      "branch_id": 4020,
+      "analysis_path": "prompts/libpng_4020.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_pHYs",
+      "line": "2180",
+      "source_line": "   if (length != 9)",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "pHYs",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace splices the logged 'pHYs' chunk-type comparand directly into the input chunk-type bytes, manufacturing the FOURCC that routes into png_handle_pHYs; value_profile must blunder all four exact bytes by chance and consistently fails to do so.",
+        "one_line": "I2S writes pHYs FOURCC into chunk-type field to enable handler dispatch"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must contain a pHYs chunk (FOURCC 'pHYs' = 70 48 59 73) so png_handle_pHYs is dispatched and the length!=9 test is reached.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A chunk whose 4-byte type field equals the ASCII literal 'pHYs' (70 48 59 73). The PNG chunk-type dispatcher only calls png_handle_pHYs when the chunk type matches 'pHYs'; without that exact FOURCC the code at pngrutil.c:2180 (if (length != 9)) is never reached, let alone resolved.",
+            "why_winner_satisfies": "Winner-resolving seed 2 (vpc, trial 1) carries the literal bytes 70 48 59 73 ('pHYs') at offset 0x25-0x28, so the dispatcher invokes png_handle_pHYs and the branch is exercised 103 times; W reaches line 2180 with T=15/F=6.",
+            "why_loser_doesnt": "Every loser-blocking seed has 67 41 4d 41 ('gAMA') at offset 0x25-0x28 and no pHYs FOURCC, so png_handle_pHYs is never dispatched; L records T=0 F=13 at line 2180 (the branch is never reached) and the loser blocks 9/10 trials.",
+            "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile: the chunk-type comparison against the 'pHYs' constant is logged in the CmpLogObserver, and I2SRandReplace splices that logged 4-byte constant directly into the input where the (mutated) chunk-type bytes sit, manufacturing a valid 'pHYs' FOURCC in seconds. value_profile lacks I2SRandReplace and must blunder the exact 4-byte token by chance, which it fails to do."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the length test inside png_handle_pHYs and the globally-blocked side is the true branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngrutil.c:2180:8",
+            "exact_quote": "Source line:    if (length != 9)"
+          },
+          {
+            "claim": "A winner-resolving seed carries the literal 'pHYs' FOURCC at offset 0x25.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 0997284f41d33d90, offset 0x25-0x28",
+            "exact_quote": "e4 00 00 00 04 70 48 59 73 00 00 b1 8f 0b fc 61   .....pHYs......a"
+          },
+          {
+            "claim": "Loser-blocking seeds carry 'gAMA' rather than 'pHYs' at the same chunk-type offset.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 024188c1a0b8a2c2, offset 0x25-0x28",
+            "exact_quote": "e4 00 00 00 04 67 41 4d 41 00 00 b1 8f 3a 3a 3a   .....gAMA....:::"
+          },
+          {
+            "claim": "The winner reaches and exercises line 2180 while the loser never reaches it.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L2180",
+            "exact_quote": "d=1   L2180  T=15 F=6  T=0 F=13  if (length != 9)  <-- BLOCKER"
+          },
+          {
+            "claim": "The branch dispatch into png_handle_pHYs is gated on the chunk type and the byte-diff shows winners flipping the chunk-type bytes toward a different FOURCC.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x25-0x28",
+            "exact_quote": "0x0025  67(g)x14 70(p)x1                    67(g)x12 66(f)x1                    PARTIAL"
+          },
+          {
+            "claim": "value_profile_cmplog adds I2SRandReplace while value_profile does not, which is the single technique delta of the decisive pair.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "The decisive pair is value_profile_cmplog over value_profile with an I2S technique delta and large divergence.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where the pHYs chunk-type comparison is replaced by a runtime-derived (non-input-byte) dispatch key showing value_profile_cmplog losing its advantage over value_profile would refute the I2S-substitution mechanism; conversely, if value_profile resolves the branch at the same rate as vpc once an exact-FOURCC token gate is present, the I2S attribution is wrong."
+        },
+        "weakest_evidence_point": "Only one of five winner seeds shows the literal 'pHYs' FOURCC (the rest carry 'gAMA'), so the byte evidence that the FOURCC is the resolving feature rather than a co-occurring length/IHDR change rests on a single seed plus the dispatch-gating source logic.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

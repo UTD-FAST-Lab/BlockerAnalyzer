@@ -1,0 +1,992 @@
+{
+  "feature_id": "icc_profile_class_dispatch_joint_gate",
+  "mechanism_family": "synergy",
+  "mechanism_label": "icc_profile_class_dispatch_joint_gate",
+  "definition": "ICC header device-class, colorspace, and tag-type FOURCC fields gate entry to profile conversion/reading paths (AddConversion, output-direction Lut, non-Lut16 tag-type check); VP gradient accumulates near-valid multi-field header configurations while I2S plants the exact 4-byte FOURCC constants neither technique resolves alone.",
+  "n_members": 8,
+  "involved_fuzzers": [
+    "cmplog",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S",
+    "value_profile"
+  ],
+  "suggested_axis_partition": {},
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "lcms_2087_h0",
+      "target": "lcms",
+      "branch_id": 2087,
+      "analysis_path": "prompts/lcms_2087.analysis.json",
+      "file": "/src/Little-CMS/src/cmscnvrt.c",
+      "function": "cmscnvrt.c:AddConversion",
+      "line": "443",
+      "source_line": "            if (!cmsPipelineInsertStage(Result, cmsAT_END, _cmsStageAllocXYZ2Lab(Result ->ContextID)))",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "spac",
+        "operand_width_bytes": 4,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace reads the CmpLogObserver buffer for FOURCC class-tag comparisons and splices the exact 'spac'/'prtr' constants at input offset 0x0c, reaching the XYZ->Lab conversion arm that value_profile's Hamming gradient cannot assemble.",
+        "one_line": "I2S splices exact device-class FOURCC 'spac'/'prtr' to reach XYZ-to-Lab arm"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "ICC profile with XYZ-data PCS device-class (spac/prtr) input plus Lab output PCS, driving the XYZ->Lab conversion arm",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A 4-byte device-class / profile-class signature at offset 0x0c that the parser maps to XYZ-data PCS (winner seeds carry 'spac'=73 70 61 63 or 'prtr'=70 72 74 72), combined with the Lab output PCS selection, so InPCS==cmsSigXYZData and OutPCS==cmsSigLabData reach line 443.",
+            "why_winner_satisfies": "Winner-resolving seeds set offset 0x0c-0x0f to 'spac'/'prtr' (W bytes 70(p)/73(s) at 0x0c) and additionally flip the discriminator bytes at 0x2d (W=01) and 0x3d (W=50 'P'), which the loser never produces; these literal four-byte FOURCC class tags are exactly what I2SRandReplace can splice from a logged CMP operand.",
+            "why_loser_doesnt": "value_profile seeds are stuck at offset 0x0c='mntr' (6d 6e 74 72) for all 20 occurrences and keep 0x2d=00, 0x3d=00, so the parser routes to a PCS path that never enters the XYZ->Lab arm at line 443.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer where the parser compared the input class tag against the literal 'spac'/'prtr' FOURCC constants and substitutes that constant into the input bytes; value_profile has no I2SRandReplace and cannot place the exact multi-byte tag, so value_profile_cmplog beats value_profile on the I2S axis."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the XYZ->Lab conversion arm, requiring XYZ input PCS and Lab output PCS.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L429, L439, L443",
+            "exact_quote": "case cmsSigLabData:  // XYZ -> Lab"
+          },
+          {
+            "claim": "The blocked side is the true branch of the line-443 InsertStage check.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "line 443",
+            "exact_quote": "if (!cmsPipelineInsertStage(Result, cmsAT_END, _cmsStageAllocXYZ2Lab(Result ->ContextID)))"
+          },
+          {
+            "claim": "Winner seeds carry 'spac' or 'prtr' class tags at offset 0x0c while losers are stuck on 'mntr'.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x000c-0x000d",
+            "exact_quote": "0x000c  70(p)x7 73(s)x5                     6d(m)x20                            DIFFER"
+          },
+          {
+            "claim": "Winner seeds set discriminator byte 0x3d to 'P' while losers keep it zero.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x003d",
+            "exact_quote": "0x003d  50(P)x12                            00(.)x20                            DIFFER"
+          },
+          {
+            "claim": "Winner seeds set byte 0x2d to 01 while losers keep it 00.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x002d",
+            "exact_quote": "0x002d  01(.)x12                            00(.)x20                            DIFFER"
+          },
+          {
+            "claim": "value_profile_cmplog beats value_profile on the I2S axis with prob_div 0.90.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "I2SRandReplace scans the input for byte sequences matching one operand and substitutes the other operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile_cmplog beats cmplog on the value_profile axis with prob_div 0.70.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "cmplog resolves only 2/10 with avg hitcount 1 on this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 loser",
+            "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+          },
+          {
+            "claim": "value_profile's CMP_MAP preserves inputs whose operand pair is closer to matching than any previously-seen pair.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile_cmplog resolves 9/10 with avg hitcount 19 on the branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 winner",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating the XYZ->Lab arm on a 4-byte literal class tag at a fixed offset where cmplog/vpc fail to resolve at higher rate than value_profile, showing I2S substitution does not place the tag."
+        },
+        "weakest_evidence_point": "The exact semantic role of bytes 0x2d and 0x3d (W=01, W='P') is inferred as PCS/class discriminators from the byte diff but not confirmed against the lcms profile-header parse path.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2087_h1",
+      "target": "lcms",
+      "branch_id": 2087,
+      "analysis_path": "prompts/lcms_2087.analysis.json",
+      "file": "/src/Little-CMS/src/cmscnvrt.c",
+      "function": "cmscnvrt.c:AddConversion",
+      "line": "443",
+      "source_line": "            if (!cmsPipelineInsertStage(Result, cmsAT_END, _cmsStageAllocXYZ2Lab(Result ->ContextID)))",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "VP's CMP_MAP gradient gives distance credit for each colorspace/PCS sub-field comparison that approaches the XYZ-input/Lab-output discriminant, letting vpc_cmplog accumulate partial-match stepping-stones across multiple header fields that bare cmplog discards.",
+        "one_line": "VP gradient accumulates multi-field colorspace partial matches toward XYZ-Lab arm"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "ICC profile with XYZ-data PCS device-class (spac/prtr) input plus Lab output PCS, driving the XYZ->Lab conversion arm",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "Same XYZ-PCS-in / Lab-PCS-out structural requirement, but reached via incremental gradient progress on the multi-field colorspace comparison rather than a single substitution; the input must simultaneously satisfy the class tag and the colorspace fields (0x10-0x16) selecting Lab output.",
+            "why_winner_satisfies": "value_profile_cmplog resolves 9/10 with hitcount 19 on the branch, getting CMP_MAP gradient credit for each colorspace/PCS sub-field that moves closer to the XYZ->Lab discriminant, layered on top of I2S substitution.",
+            "why_loser_doesnt": "cmplog (no value profile) resolves only 2/10 with avg hitcount 1, so without the Hamming/prefix-distance feedback it rarely accumulates the multi-field colorspace state needed to enter the XYZ->Lab arm.",
+            "mechanism_attribution": "value_profile's CMP_MAP gradient preserves intermediate inputs that get closer on the colorspace/PCS comparisons, giving the fuzzer a smooth path to the XYZ->Lab discriminant; cmplog lacks this distance feedback, so value_profile_cmplog beats cmplog on the value_profile axis."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the XYZ->Lab conversion arm, requiring XYZ input PCS and Lab output PCS.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L429, L439, L443",
+            "exact_quote": "case cmsSigLabData:  // XYZ -> Lab"
+          },
+          {
+            "claim": "The blocked side is the true branch of the line-443 InsertStage check.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "line 443",
+            "exact_quote": "if (!cmsPipelineInsertStage(Result, cmsAT_END, _cmsStageAllocXYZ2Lab(Result ->ContextID)))"
+          },
+          {
+            "claim": "Winner seeds carry 'spac' or 'prtr' class tags at offset 0x0c while losers are stuck on 'mntr'.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x000c-0x000d",
+            "exact_quote": "0x000c  70(p)x7 73(s)x5                     6d(m)x20                            DIFFER"
+          },
+          {
+            "claim": "Winner seeds set discriminator byte 0x3d to 'P' while losers keep it zero.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x003d",
+            "exact_quote": "0x003d  50(P)x12                            00(.)x20                            DIFFER"
+          },
+          {
+            "claim": "Winner seeds set byte 0x2d to 01 while losers keep it 00.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x002d",
+            "exact_quote": "0x002d  01(.)x12                            00(.)x20                            DIFFER"
+          },
+          {
+            "claim": "value_profile_cmplog beats value_profile on the I2S axis with prob_div 0.90.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "I2SRandReplace scans the input for byte sequences matching one operand and substitutes the other operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile_cmplog beats cmplog on the value_profile axis with prob_div 0.70.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "cmplog resolves only 2/10 with avg hitcount 1 on this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 loser",
+            "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+          },
+          {
+            "claim": "value_profile's CMP_MAP preserves inputs whose operand pair is closer to matching than any previously-seen pair.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile_cmplog resolves 9/10 with avg hitcount 19 on the branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 winner",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating the XYZ->Lab arm on a 4-byte literal class tag at a fixed offset where cmplog/vpc fail to resolve at higher rate than value_profile, showing I2S substitution does not place the tag."
+        },
+        "weakest_evidence_point": "The exact semantic role of bytes 0x2d and 0x3d (W=01, W='P') is inferred as PCS/class discriminators from the byte diff but not confirmed against the lcms profile-header parse path.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2104_h0",
+      "target": "lcms",
+      "branch_id": 2104,
+      "analysis_path": "prompts/lcms_2104.analysis.json",
+      "file": "/src/Little-CMS/src/cmscnvrt.c",
+      "function": "cmscnvrt.c:DefaultICCintents",
+      "line": "592",
+      "source_line": "            if (!AddConversion(Result, CurrentColorSpace, ColorSpaceIn, &m, &off)) goto Error;",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "spac",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace logs the device-class FOURCC literals compared in the dispatch and substitutes 'spac'/'prtr' at offset 0x0c, routing the profile into the devicelink/abstract branch where AddConversion is called; value_profile's Hamming gradient cannot complete the exact 4-byte tag.",
+        "one_line": "I2S plants exact device-class FOURCC to reach AddConversion call site"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Reach AddConversion via the devicelink/named-color path by setting the profile device-class signature at 0x0c (spac/prtr, not mntr) plus colorspace bytes.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "The 4-byte device-class signature at offset 0x0c must equal a 4CC such as 'spac' or 'prtr' (and the colorspace fields at 0x10-0x16 must form a profile whose ColorSpaceIn is compatible with CurrentColorSpace) so the loop routes into the devicelink/abstract branch (line 576) and reaches the AddConversion call at line 592 with a non-NULL Lut.",
+            "why_winner_satisfies": "Winner-resolving seeds carry 'spac' (73 70 61 63) or 'prtr' (70 72 74 72) at offset 0x0c-0x0f and resolve the true branch with hitcount 19, taking the True side of line 592 (W T=12).",
+            "why_loser_doesnt": "Loser-blocking seeds all carry 'mntr' (6d 6e 74 72) at offset 0x0c-0x0f, never take the True side of line 592 (L T=0 F=38), and stay blocked with hitcount 0.",
+            "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace over value_profile: the CMP interception logs the literal 4CC operands compared against the input (device-class / colorspace tag matches) and substitutes them at the matching input offsets, planting the exact 'spac'/'prtr' magic that value_profile's Hamming-bucket gradient alone never completes; the winning seed's lineage shows an I2S-floor dash row confirming an I2S find in the ancestor chain."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the True side of the AddConversion call at cmscnvrt.c:592 inside DefaultICCintents.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmscnvrt.c:592:17",
+            "exact_quote": "if (!AddConversion(Result, CurrentColorSpace, ColorSpaceIn, &m, &off)) goto Error;"
+          },
+          {
+            "claim": "Line 592 is reached only via the devicelink/named-color branch gated at line 576.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L576",
+            "exact_quote": "if (lIsDeviceLink || ((ClassSig == cmsSigNamedColorClass) && (nProfiles == 1))) {"
+          },
+          {
+            "claim": "ColorSpaceIn must be compatible with CurrentColorSpace or the loop diverts to Error before line 592.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L568",
+            "exact_quote": "if (!ColorSpaceIsCompatible(ColorSpaceIn, CurrentColorSpace)) {"
+          },
+          {
+            "claim": "Winner-resolving seeds carry 'spac' / 'prtr' at offset 0x0c while loser seeds carry 'mntr'.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x000c-0x000f",
+            "exact_quote": "0x000c  70(p)x7 73(s)x5                     6d(m)x20                            DIFFER"
+          },
+          {
+            "claim": "A winner-resolving seed contains the 'spac' device-class signature in its bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 9e27a4d33b2ce2e2 offset 0x000c",
+            "exact_quote": "0000: 00 00 62 9c 6c 63 6d 73 03 40 00 00 73 70 61 63   ..b.lcms.@..spac"
+          },
+          {
+            "claim": "Loser-blocking seeds contain the 'mntr' device-class signature in their bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 0313315f3b972394 offset 0x000c",
+            "exact_quote": "0000: 00 00 62 9c 6c 63 6d 73 03 40 00 00 6d 6e 74 72   ..b.lcms.@..mntr"
+          },
+          {
+            "claim": "The winner takes the True side of the blocker while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L592",
+            "exact_quote": "d=1   L 592  T=12 F=12  T=0 F=38  if (!AddConversion(Result, CurrentColorSpace, ColorSpaceI...  <-- BLOCKER"
+          },
+          {
+            "claim": "value_profile_cmplog beats value_profile by the I2S technique delta at this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "value_profile_cmplog beats cmplog by the value_profile technique delta at this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "cmplog rarely reaches the branch, resolving only 2/10 with avg hitcount 1.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 loser",
+            "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+          },
+          {
+            "claim": "I2SRandReplace substitutes a logged CMP operand at the matching input offset, planting exact magic values.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile preserves inputs whose CMP-operand pair is closer to matching as a new CMP_MAP bucket, providing a gradient.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where setting the 4-byte device-class field to 'spac'/'prtr' (vs 'mntr') with a compatible colorspace shows no divergence \u2014 i.e. value_profile reaches the AddConversion branch as often as value_profile_cmplog without the I2S literal substitution."
+        },
+        "weakest_evidence_point": "The exact device-class 4CC value driving AddConversion is inferred from byte-diff concentration; whether 'spac'/'prtr' specifically (vs any non-'mntr' class that sets lIsDeviceLink/named-color) is the literal CMP operand I2S substitutes is not directly confirmed in source.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2104_h1",
+      "target": "lcms",
+      "branch_id": 2104,
+      "analysis_path": "prompts/lcms_2104.analysis.json",
+      "file": "/src/Little-CMS/src/cmscnvrt.c",
+      "function": "cmscnvrt.c:DefaultICCintents",
+      "line": "592",
+      "source_line": "            if (!AddConversion(Result, CurrentColorSpace, ColorSpaceIn, &m, &off)) goto Error;",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "VP's CMP_MAP gradient preserves inputs that get closer on the colorspace-compatibility comparisons as new corpus entries, compounding I2S substitution in vpc with a stepwise ratchet toward the compatible-colorspace configuration that bare cmplog's edge-bucket feedback cannot climb.",
+        "one_line": "VP gradient compounds I2S by retaining near-miss colorspace-compatibility inputs"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Reach AddConversion via the devicelink/named-color path by setting the profile device-class signature at 0x0c (spac/prtr, not mntr) plus colorspace bytes.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "The same device-class/colorspace byte configuration (device-class 4CC at 0x0c != 'mntr', compatible colorspace at 0x10-0x16) that routes into the devicelink branch and satisfies the ColorSpaceIsCompatible check at line 568, reaching AddConversion at line 592.",
+            "why_winner_satisfies": "value_profile_cmplog resolves 9/10 with hitcount 19; its seeds reach the True side of the blocker (line 592 W T=12) after passing the colorspace-compatibility chain.",
+            "why_loser_doesnt": "cmplog resolves only 2/10 and stays blocked 8/10 with avg hitcount 1, far below the winner, indicating its plain I2S substitution rarely assembles the full compatible-colorspace configuration the branch requires.",
+            "mechanism_attribution": "value_profile_cmplog adds the CMP_MAP Hamming/prefix-distance gradient over cmplog: each CMP-operand pair closer to matching adds a new CMP_MAP bucket and is preserved as corpus, giving a stepwise gradient toward the colorspace-compatibility comparisons that bare cmplog (edge-bucket feedback only) cannot climb, so vpc compounds I2S substitution with gradient retention to reach the branch reliably."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the True side of the AddConversion call at cmscnvrt.c:592 inside DefaultICCintents.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmscnvrt.c:592:17",
+            "exact_quote": "if (!AddConversion(Result, CurrentColorSpace, ColorSpaceIn, &m, &off)) goto Error;"
+          },
+          {
+            "claim": "Line 592 is reached only via the devicelink/named-color branch gated at line 576.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L576",
+            "exact_quote": "if (lIsDeviceLink || ((ClassSig == cmsSigNamedColorClass) && (nProfiles == 1))) {"
+          },
+          {
+            "claim": "ColorSpaceIn must be compatible with CurrentColorSpace or the loop diverts to Error before line 592.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L568",
+            "exact_quote": "if (!ColorSpaceIsCompatible(ColorSpaceIn, CurrentColorSpace)) {"
+          },
+          {
+            "claim": "Winner-resolving seeds carry 'spac' / 'prtr' at offset 0x0c while loser seeds carry 'mntr'.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x000c-0x000f",
+            "exact_quote": "0x000c  70(p)x7 73(s)x5                     6d(m)x20                            DIFFER"
+          },
+          {
+            "claim": "A winner-resolving seed contains the 'spac' device-class signature in its bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 9e27a4d33b2ce2e2 offset 0x000c",
+            "exact_quote": "0000: 00 00 62 9c 6c 63 6d 73 03 40 00 00 73 70 61 63   ..b.lcms.@..spac"
+          },
+          {
+            "claim": "Loser-blocking seeds contain the 'mntr' device-class signature in their bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 0313315f3b972394 offset 0x000c",
+            "exact_quote": "0000: 00 00 62 9c 6c 63 6d 73 03 40 00 00 6d 6e 74 72   ..b.lcms.@..mntr"
+          },
+          {
+            "claim": "The winner takes the True side of the blocker while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L592",
+            "exact_quote": "d=1   L 592  T=12 F=12  T=0 F=38  if (!AddConversion(Result, CurrentColorSpace, ColorSpaceI...  <-- BLOCKER"
+          },
+          {
+            "claim": "value_profile_cmplog beats value_profile by the I2S technique delta at this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "value_profile_cmplog beats cmplog by the value_profile technique delta at this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "cmplog rarely reaches the branch, resolving only 2/10 with avg hitcount 1.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 loser",
+            "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+          },
+          {
+            "claim": "I2SRandReplace substitutes a logged CMP operand at the matching input offset, planting exact magic values.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile preserves inputs whose CMP-operand pair is closer to matching as a new CMP_MAP bucket, providing a gradient.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where setting the 4-byte device-class field to 'spac'/'prtr' (vs 'mntr') with a compatible colorspace shows no divergence \u2014 i.e. value_profile reaches the AddConversion branch as often as value_profile_cmplog without the I2S literal substitution."
+        },
+        "weakest_evidence_point": "The exact device-class 4CC value driving AddConversion is inferred from byte-diff concentration; whether 'spac'/'prtr' specifically (vs any non-'mntr' class that sets lIsDeviceLink/named-color) is the literal CMP operand I2S substitutes is not directly confirmed in source.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2107_h0",
+      "target": "lcms",
+      "branch_id": 2107,
+      "analysis_path": "prompts/lcms_2107.analysis.json",
+      "file": "/src/Little-CMS/src/cmscnvrt.c",
+      "function": "cmscnvrt.c:DefaultICCintents",
+      "line": "646",
+      "source_line": "    if (Lut != NULL) cmsPipelineFree(Lut);",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": null,
+        "operand_width_bytes": 4,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace substitutes intercepted FOURCC/colorspace constants (device-class and colorspace tags at header offsets) into the input, constructing the output-direction profile combination that causes conversion failure with a non-NULL Lut; plain value_profile cannot assemble this multi-field header.",
+        "one_line": "I2S assembles rare output-direction device-class/colorspace header combination"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Profile bytes that force an output-direction PCS conversion whose ComputeConversion/AddConversion fails, reaching Error with Lut still allocated.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "Profile-header bytes (device class FOURCC at offset 0x0c and color-space signatures at 0x10/0x14) that select a non-input, non-devicelink profile so the output-direction branch (line 602) runs _cmsReadOutputLUT and a subsequent ComputeConversion/AddConversion failure jumps to Error while Lut is non-NULL.",
+            "why_winner_satisfies": "Winner seeds carry varied device-class FOURCCs (link/prtr/spac) and color spaces (MCHC/GRAY/RGB/MCH1/Lab) at the header offsets, and per-role coverage shows the winner exclusively hitting the output-direction block (lines 562-566, 602-612) and the abstract/conversion path (583-592).",
+            "why_loser_doesnt": "value_profile seeds are uniformly 'mntr'+'RGB ' headers that take the input direction (line 597 lIsInput true), so Lut is freed at line 619 before any goto and the Error path never sees a non-NULL Lut.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes intercepted CMP operands (the FOURCC/colorspace literals compared inside cmsGetDeviceClass/ColorSpaceIsCompatible) into the input bytes, letting vpc construct the rare device-class/colorspace combination that drives the output-direction conversion failure; plain value_profile lacks I2SRandReplace."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked true side is the Error-path free of a non-NULL Lut.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L646",
+            "exact_quote": "if (Lut != NULL) cmsPipelineFree(Lut);"
+          },
+          {
+            "claim": "The winner exclusively exercises the output-direction conversion block.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L602-L606",
+            "exact_quote": "[W]   605                  Lut = _cmsReadOutputLUT(hProfile, Intent);"
+          },
+          {
+            "claim": "Only the winner reaches the conversion/abstract path that can goto Error with Lut allocated.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L609",
+            "exact_quote": "if (!ComputeConversion(i, hProfiles, Intent, BPC[i], AdaptationStates[i], &m, &off)) goto Error;"
+          },
+          {
+            "claim": "Winner seeds carry varied device-class FOURCCs at the header offset (link/prtr/spac).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 0f8bbd51a2d5664d offset 0x0c",
+            "exact_quote": "6c 69 6e 6b   ..b.lcms.@..link"
+          },
+          {
+            "claim": "Loser value_profile seeds are uniformly mntr+RGB headers.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 154a2c890bbdb5cf offset 0x0c",
+            "exact_quote": "6d 6e 74 72   ..b.lcms.@..mntr"
+          },
+          {
+            "claim": "The device-class FOURCC offset differs between W and L byte sets.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x000c",
+            "exact_quote": "6c(l)x4 70(p)x4 73(s)x2             6d(m)x22 6c(l)x3 00(.)x1"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes intercepted CMP operands into the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile is the loser-distinguishing technique and lacks I2SRandReplace.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile preserves inputs whose CMP operands are closer to matching as new corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "vpc strongly outperforms cmplog at the branch in resolution and hitcount.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "avg hitcount on branch: winner=80  loser=8"
+          },
+          {
+            "claim": "vpc strongly outperforms value_profile at the branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "prob_div=0.90  dur_div=18.60h  hit_div=80"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where forcing the output-direction conversion failure requires no input-byte-derived comparand (e.g. a constant device class), yet vpc still resolves the Error-with-Lut branch far faster than value_profile, would refute the I2S-substitution attribution."
+        },
+        "weakest_evidence_point": "The Pair-2 value_profile attribution rests on the cmplog-vs-vpc hitcount/resolution gap plus mechanism reasoning, not on a direct lineage trace showing CMP_MAP stepping-stones for the cmplog loser.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2107_h1",
+      "target": "lcms",
+      "branch_id": 2107,
+      "analysis_path": "prompts/lcms_2107.analysis.json",
+      "file": "/src/Little-CMS/src/cmscnvrt.c",
+      "function": "cmscnvrt.c:DefaultICCintents",
+      "line": "646",
+      "source_line": "    if (Lut != NULL) cmsPipelineFree(Lut);",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "VP's Hamming/prefix-distance CMP_MAP buckets preserve inputs approaching the colorspace/device-class comparison matches as corpus, supplying stepping-stones to I2S substitution in vpc; cmplog alone discards near-misses and cannot ratchet toward the rare header combination.",
+        "one_line": "VP CMP_MAP retains near-miss colorspace header inputs as I2S stepping-stones"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Profile bytes that force an output-direction PCS conversion whose ComputeConversion/AddConversion fails, reaching Error with Lut still allocated.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "The same output-direction-failure profile, but here reached via gradient progress on the integer/string CMPs guarding the colorspace-compatibility and conversion checks rather than purely by substitution.",
+            "why_winner_satisfies": "value_profile_cmplog resolves 9/10 with avg hitcount 80 on the branch; its CMP_MAP gradient feedback preserves intermediate inputs that get progressively closer to matching the colorspace signature CMPs (lines 568, 583), so the output-direction conversion path is reached and fails into Error.",
+            "why_loser_doesnt": "plain cmplog resolves only 2/10 with avg hitcount 8; without CMP_MAP-bucket feedback it cannot retain near-miss inputs on the colorspace comparisons, so it rarely assembles the exact header combination that drives the output-direction failure.",
+            "mechanism_attribution": "value_profile's CMP_MAP gradient feedback (Hamming-distance / matching-prefix buckets) preserves inputs that approach matching the colorspace/device-class comparisons as new corpus entries, supplying cmplog's substitution stage in vpc with stepping-stones; cmplog alone has only edge-bucket feedback and cannot ratchet toward the rare combination."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked true side is the Error-path free of a non-NULL Lut.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L646",
+            "exact_quote": "if (Lut != NULL) cmsPipelineFree(Lut);"
+          },
+          {
+            "claim": "The winner exclusively exercises the output-direction conversion block.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L602-L606",
+            "exact_quote": "[W]   605                  Lut = _cmsReadOutputLUT(hProfile, Intent);"
+          },
+          {
+            "claim": "Only the winner reaches the conversion/abstract path that can goto Error with Lut allocated.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L609",
+            "exact_quote": "if (!ComputeConversion(i, hProfiles, Intent, BPC[i], AdaptationStates[i], &m, &off)) goto Error;"
+          },
+          {
+            "claim": "Winner seeds carry varied device-class FOURCCs at the header offset (link/prtr/spac).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 0f8bbd51a2d5664d offset 0x0c",
+            "exact_quote": "6c 69 6e 6b   ..b.lcms.@..link"
+          },
+          {
+            "claim": "Loser value_profile seeds are uniformly mntr+RGB headers.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 154a2c890bbdb5cf offset 0x0c",
+            "exact_quote": "6d 6e 74 72   ..b.lcms.@..mntr"
+          },
+          {
+            "claim": "The device-class FOURCC offset differs between W and L byte sets.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x000c",
+            "exact_quote": "6c(l)x4 70(p)x4 73(s)x2             6d(m)x22 6c(l)x3 00(.)x1"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes intercepted CMP operands into the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile is the loser-distinguishing technique and lacks I2SRandReplace.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile preserves inputs whose CMP operands are closer to matching as new corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "vpc strongly outperforms cmplog at the branch in resolution and hitcount.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "avg hitcount on branch: winner=80  loser=8"
+          },
+          {
+            "claim": "vpc strongly outperforms value_profile at the branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "prob_div=0.90  dur_div=18.60h  hit_div=80"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where forcing the output-direction conversion failure requires no input-byte-derived comparand (e.g. a constant device class), yet vpc still resolves the Error-with-Lut branch far faster than value_profile, would refute the I2S-substitution attribution."
+        },
+        "weakest_evidence_point": "The Pair-2 value_profile attribution rests on the cmplog-vs-vpc hitcount/resolution gap plus mechanism reasoning, not on a direct lineage trace showing CMP_MAP stepping-stones for the cmplog loser.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2184_h0",
+      "target": "lcms",
+      "branch_id": 2184,
+      "analysis_path": "prompts/lcms_2184.analysis.json",
+      "file": "/src/Little-CMS/src/cmsio1.c",
+      "function": "_cmsReadDevicelinkLUT",
+      "line": "782",
+      "source_line": "    if (OriginalType != cmsSigLut16Type) return Lut;",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "link",
+        "operand_width_bytes": 4,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace logs tag-type and device-class signature comparands and splices them into multiple header fields (device-class 'link' at 0x0c, colorspace bytes, flag 0x01 at 0x2d), making _cmsGetTagTrueType return a non-Lut16 type that crosses the OriginalType != cmsSigLut16Type guard.",
+        "one_line": "I2S plants non-Lut16 tag-type and device-class signatures to cross type equality guard"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A devicelink profile whose readable tag's on-disk true type is NOT cmsSigLut16Type ('mft2'), so OriginalType != Lut16 holds.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A profile that parses far enough to read a tag back (device class 'link'/'abst', valid acsp magic, a non-Lut16 LUT tag) so that _cmsGetTagTrueType returns a tag type signature OTHER than cmsSigLut16Type. This requires several 4-byte signature fields (device class at 0x0c, colorspace fields at 0x10-0x17, and the tag-true-type discriminator) to hold specific structural values rather than the still-blocked 'mntr'/Lut16 layout.",
+            "why_winner_satisfies": "value_profile_cmplog resolves 9/10 trials and reaches the true side (avg hitcount 14, blocked only 6.5h). Its winning seeds carry device-class bytes 'link' (offset 0x0c-0x0f) and varied colorspace signatures, and offset 0x2d flips to 01 vs the loser's 00 \u2014 distinct multi-byte signature substitutions consistent with I2SRandReplace splicing a logged tag-type/signature operand into the input at the offsets the parser compares.",
+            "why_loser_doesnt": "value_profile resolves 0/10, stays blocked all 24h with hitcount 0 on the branch. Its blocking seeds keep device class 'mntr' (offset 0x0c-0x0f) and offset 0x2d=00, so the tag read either fails or yields a Lut16 (mft2) true type, leaving OriginalType == cmsSigLut16Type and the true branch unreached.",
+            "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace over value_profile. I2SRandReplace reads the post-execution CmpLogObserver buffer, finds the input bytes matching one operand of an intercepted signature/type comparison, and substitutes the other operand, planting the exact 4-byte signature(s) the parser needs to make _cmsGetTagTrueType return a non-Lut16 type. value_profile's CMP_MAP gradient cannot place an exact multi-byte signature, so it never crosses."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker's true side is taken only when the read tag's true type is not Lut16, and that side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmsio1.c:782",
+            "exact_quote": "if (OriginalType != cmsSigLut16Type) return Lut;"
+          },
+          {
+            "claim": "OriginalType is the on-disk true type of the read tag, so the feature is a profile whose tag true type differs from Lut16.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L779",
+            "exact_quote": "OriginalType = _cmsGetTagTrueType(hProfile, tag16);"
+          },
+          {
+            "claim": "value_profile_cmplog beats value_profile decisively at this branch (the I2S delta pair).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "The winner resolves 9/10 with hitcount 14 while the value_profile loser stays blocked 10/10 with hitcount 0.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 counts",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "Winner seeds carry device class 'link' at the start of the profile while loser seeds carry 'mntr'.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0c-0x0f",
+            "exact_quote": "0x000c  6c(l)x12 61(a)x2                    6d(m)x20                            DIFFER"
+          },
+          {
+            "claim": "Offset 0x2d is concentrated at 01 in winners but 00 in all losers, a clean dataflow signal.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x2d",
+            "exact_quote": "0x002d  01(.)x14                            00(.)x20                            DIFFER"
+          },
+          {
+            "claim": "Winning seeds contain the ASCII 'link' device-class signature.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed d5bed00975df915d",
+            "exact_quote": "..b.lams.@..link"
+          },
+          {
+            "claim": "Loser-blocking seeds contain the 'mntr' device-class signature instead.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser seed 0313315f3b972394",
+            "exact_quote": "..b.lcms.@..mntr"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes one CMP operand at the input offsets matching the other operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace, so it cannot place an exact multi-byte signature.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile_cmplog beats cmplog decisively at this branch (the value_profile delta pair).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "cmplog resolves only 2/10 vs the winner's 9/10 at this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 counts",
+            "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+          },
+          {
+            "claim": "value_profile's CMP_MAP preserves any input whose operand pair is closer to matching than previously seen, giving incremental progress.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on `OriginalType != cmsSigLut16Type` where value_profile_cmplog and value_profile resolve at equal rates (no I2S advantage) AND cmplog matches value_profile_cmplog (no CMP_MAP advantage), showing the multi-byte signature gate is crossable by havoc alone."
+        },
+        "weakest_evidence_point": "The exact program-side role of offset 0x2d (01 vs 00) is inferred from the byte-diff concentration, not from a confirmed source field mapping to the tag-type discriminator.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2184_h1",
+      "target": "lcms",
+      "branch_id": 2184,
+      "analysis_path": "prompts/lcms_2184.analysis.json",
+      "file": "/src/Little-CMS/src/cmsio1.c",
+      "function": "_cmsReadDevicelinkLUT",
+      "line": "782",
+      "source_line": "    if (OriginalType != cmsSigLut16Type) return Lut;",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "cmsSigLut16Type",
+        "operand_width_bytes": 4,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "VP's CMP_MAP gradient buckets preserve inputs whose multi-byte signature fields (device class, colorspace, tag type) are progressively closer to a valid non-Lut16 layout, building the corpus scaffold that the I2S stage in vpc then completes; cmplog alone discards these near-miss seeds.",
+        "one_line": "VP gradient retains near-miss signature seeds that cmplog discards as corpus scaffold"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A devicelink profile whose readable tag's on-disk true type is NOT cmsSigLut16Type ('mft2'), so OriginalType != Lut16 holds.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "The same non-Lut16-true-type profile structure, but reached via incremental Hamming/prefix-distance progress on the chain of signature/equality comparisons (device class, colorspace, tag type) so that intermediate near-matches are retained as corpus and refined toward the exact non-Lut16 layout.",
+            "why_winner_satisfies": "value_profile_cmplog resolves 9/10 vs cmplog's 2/10 (prob_div 0.70, hit_div 8); its CMP_MAP feedback preserves seeds whose 4-byte signature fields (0x0c-0x12) are progressively closer to a valid non-Lut16 tag layout, building the corpus that the I2S stage then completes.",
+            "why_loser_doesnt": "cmplog resolves only 2/10 and stays blocked ~20h with branch hitcount 6 \u2014 it has I2S but lacks the CMP_MAP gradient, so near-miss signature seeds that don't change an edge bucket are discarded and the search loses the partial-progress scaffold value_profile_cmplog keeps.",
+            "mechanism_attribution": "value_profile_cmplog adds the value_profile CMP_MAP gradient over cmplog. Each signature/type CMP writes a (PC, distance-bucket) entry; an input whose operand pair is closer to matching than any seen adds a new bucket and is preserved as corpus. This retains the intermediate near-match profiles that cmplog throws away, giving the combined fuzzer a refinable foothold on the multi-field signature gate."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker's true side is taken only when the read tag's true type is not Lut16, and that side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmsio1.c:782",
+            "exact_quote": "if (OriginalType != cmsSigLut16Type) return Lut;"
+          },
+          {
+            "claim": "OriginalType is the on-disk true type of the read tag, so the feature is a profile whose tag true type differs from Lut16.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L779",
+            "exact_quote": "OriginalType = _cmsGetTagTrueType(hProfile, tag16);"
+          },
+          {
+            "claim": "value_profile_cmplog beats value_profile decisively at this branch (the I2S delta pair).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "The winner resolves 9/10 with hitcount 14 while the value_profile loser stays blocked 10/10 with hitcount 0.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 counts",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "Winner seeds carry device class 'link' at the start of the profile while loser seeds carry 'mntr'.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0c-0x0f",
+            "exact_quote": "0x000c  6c(l)x12 61(a)x2                    6d(m)x20                            DIFFER"
+          },
+          {
+            "claim": "Offset 0x2d is concentrated at 01 in winners but 00 in all losers, a clean dataflow signal.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x2d",
+            "exact_quote": "0x002d  01(.)x14                            00(.)x20                            DIFFER"
+          },
+          {
+            "claim": "Winning seeds contain the ASCII 'link' device-class signature.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed d5bed00975df915d",
+            "exact_quote": "..b.lams.@..link"
+          },
+          {
+            "claim": "Loser-blocking seeds contain the 'mntr' device-class signature instead.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser seed 0313315f3b972394",
+            "exact_quote": "..b.lcms.@..mntr"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes one CMP operand at the input offsets matching the other operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace, so it cannot place an exact multi-byte signature.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile_cmplog beats cmplog decisively at this branch (the value_profile delta pair).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "cmplog resolves only 2/10 vs the winner's 9/10 at this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 counts",
+            "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+          },
+          {
+            "claim": "value_profile's CMP_MAP preserves any input whose operand pair is closer to matching than previously seen, giving incremental progress.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on `OriginalType != cmsSigLut16Type` where value_profile_cmplog and value_profile resolve at equal rates (no I2S advantage) AND cmplog matches value_profile_cmplog (no CMP_MAP advantage), showing the multi-byte signature gate is crossable by havoc alone."
+        },
+        "weakest_evidence_point": "The exact program-side role of offset 0x2d (01 vs 00) is inferred from the byte-diff concentration, not from a confirmed source field mapping to the tag-type discriminator.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

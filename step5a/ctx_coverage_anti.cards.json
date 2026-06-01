@@ -1,0 +1,56 @@
+[
+  {
+    "id": "libpng_4072_h0",
+    "family": "ctx_coverage_anti",
+    "target": "libpng",
+    "branch_id": 4072,
+    "analysis_path": "prompts/libpng_4072.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_read_IDAT_data",
+    "line": "4245",
+    "source_line": "         if (png_ptr->zstream.avail_in > 0 || png_ptr->idat_size > 0)",
+    "covers_pairs": [
+      "naive>naive_ctx (ctx_coverage)"
+    ],
+    "what_input_feature": "A structurally valid PNG (IHDR/gAMA/sRGB header intact) whose IDAT stream contains residual compressed/leftover bytes so that after zlib returns Z_STREAM_END at L4237 the test png_ptr->zstream.avail_in > 0 || png_ptr->idat_size > 0 at L4245 is True. Reaching it requires driving the inflate do/while loop deep enough to hit Z_STREAM_END with leftover input.",
+    "why_winner_satisfies": "naive resolves 10/10 with ordinary havoc; its winning seed (id=7bc940e72a5dbe0c) keeps the PNG signature and IHDR intact and varies the IDAT-relevant header bytes (0x11=02/01/00, 0x17=45/46), and its lineage is pure havoc (BytesDeleteMutator/ByteRandMutator chain). naive spends its whole budget mutating bytes rather than expanding a context-indexed coverage map.",
+    "why_loser_doesnt": "naive_ctx folds a call-context hash into every edge-map slot, so the same edge counts as new coverage under each distinct caller chain. The deep IDAT loop (png_read_IDAT_data invoked 2750 times in L vs 136 in W) generates a flood of (call-context, edge) buckets that look novel, so naive_ctx hoards context-redundant corpus entries and starves the byte-level mutation that would manufacture the extra-data condition; it resolves only 1/10.",
+    "mechanism_attribution": "The winner naive is enabled by plain havoc byte mutation (havoc-only). The loser naive_ctx is penalized by its context-sensitive coverage feedback (CtxHook), which dilutes the map with (call-context, edge) pairs in the high-call-count inflate path and diverts energy away from solving the extra-compressed-data condition."
+  },
+  {
+    "id": "libxml2_6576",
+    "family": "ctx_coverage_anti",
+    "target": "libxml2",
+    "branch_id": 6576,
+    "analysis_path": "prompts/libxml2_6576.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "xmlParseCharData",
+    "line": "4610",
+    "source_line": "             (*in == 0x09) || (*in == 0x0a));",
+    "covers_pairs": [
+      "naive>naive_ctx (ctx_coverage)"
+    ],
+    "what_input_feature": "An XML element body containing a multi-character data run that keeps the do-while scan loop alive: printable ASCII / tab / newline content (0x20-0x7F, 0x09, 0x0A) plus at least one 0x0D carriage return followed by 0x0A so the in-loop CR handler executes `continue` and re-evaluates the loop condition at line 4609-4610 with `*in` still inside the accepted character class.",
+    "why_winner_satisfies": "Winner-resolving seeds carry long (1862/1898-byte) bodies with embedded CR/LF runs (e.g. Seed 2 bytes `0d 0d 0a` at offsets 0x07-0x09 and `0a 0a` pairs) and dense printable char data, so the loop reaches the 0xD handler and loops back to take the true side; the per-role overlay marks the 0xD/0xA continue block [W] only.",
+    "why_loser_doesnt": "naive_ctx loser-blocking seeds are short (247-527 bytes), front-loaded with binary/control noise and DTD/declaration tokens rather than long char-data bodies; they never reach the 0xD branch (loser takes it 0 times) so the loop falls through to xmlParseCharDataComplex and the true side stays blocked.",
+    "mechanism_attribution": "The winning technique is baseline naive's undiluted havoc/token budget. naive_ctx's CtxHook folds the call-context hash into the edge-map index, so the same scan-loop edges count as new coverage under many distinct call paths; this fragments the corpus and spreads mutation energy across context-duplicated edges, leaving naive_ctx unable to assemble the long CR/LF-bearing char-data run that naive builds with the same mutators. This is the context-sensitive-coverage feedback acting as a penalty on the loser."
+  },
+  {
+    "id": "libxml2_6605",
+    "family": "ctx_coverage_anti",
+    "target": "libxml2",
+    "branch_id": 6605,
+    "analysis_path": "prompts/libxml2_6605.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "xmlParsePITarget",
+    "line": "5129",
+    "source_line": "        ((name[1] == 'm') || (name[1] == 'M')) &&",
+    "covers_pairs": [
+      "naive>naive_ctx (ctx_coverage)"
+    ],
+    "what_input_feature": "An XML processing instruction whose target name parses to a 3+ char token beginning x/X then m/M then l/L, so that name[1] is 'm' or 'M'; the winner needs the literal byte run '<?xMl' (or '<?xml') where the second name char is m/M, not an arbitrary perturbation like '<?x_l'.",
+    "why_winner_satisfies": "The naive winner-resolving seed carries the literal bytes '<?xMl version=' at offsets 0x16-0x1d ('3c(<) 3f(?) 78(x) 4d(M) 6c(l) 20( )'), so xmlParsePITarget sees name[0]=='x',name[1]=='M',name[2]=='l' and the line 5129 true side is taken; W shows the blocker true side hit (T=3 F=0).",
+    "why_loser_doesnt": "naive_ctx loser seeds carry corrupted PI targets ('<?x_l' with byte 5f('_') at the name[1] position, plus xmltp/xsim variants), so name[1] is not m/M and line 5129 only ever takes the false side; the per-role overlay records the blocker exclusively as L false (T=0 F=12).",
+    "mechanism_attribution": "naive (the winner) uses a bare per-edge MaxMapFeedback, so once havoc/token mutation lands an 'x?l'->'xMl' byte that flips line 5128 to true the new edge at 5129 is immediately rewarded. naive_ctx (the loser) folds a call-context hash into the edge-map index (CtxHook), so the same parser edges are split across many (call-context, edge) slots; the feedback signal that should guide mutation toward the xMl name is diluted across contexts, the corpus fills with context-duplicate inputs that never carry a valid xml-prefixed PI target, and the branch stays blocked in all 10 trials."
+  }
+]

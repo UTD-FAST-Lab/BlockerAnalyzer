@@ -1,0 +1,943 @@
+{
+  "feature_id": "png_chunk_structural_state_repair",
+  "mechanism_family": "I2S_pro",
+  "mechanism_label": "png_chunk_structural_state_repair",
+  "definition": "I2S substitutes multiple PNG structural bytes (chunk-type tags, IHDR fields, CRC/length) so the parser advances deep enough to allocate state (num_trans, palette, hist, splt) or set bitflags (PNG_FREE_TRNS/PLTE/HIST), enabling downstream state-presence checks.",
+  "n_members": 9,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "naive",
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libpng_3810",
+      "target": "libpng",
+      "branch_id": 3810,
+      "analysis_path": "prompts/libpng_3810.analysis.json",
+      "file": "/src/libpng/png.c",
+      "function": "OSS_FUZZ_png_free_data",
+      "line": "507",
+      "source_line": "   if (((mask & PNG_FREE_TRNS) & info_ptr->free_me) != 0)",
+      "signature": {
+        "gate_structure": "other:bitflag_and",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "tRNS",
+        "operand_width_bytes": 4,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace substitutes logged chunk-type FOURCC and structural comparison operands into the matching input offsets, manufacturing a valid tRNS chunk that causes libpng to allocate tRNS state and set PNG_FREE_TRNS in free_me, enabling the bitflag test to pass.",
+        "one_line": "I2S plants valid tRNS chunk bytes so PNG_FREE_TRNS bit gets set"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must contain a well-formed tRNS chunk so libpng sets PNG_FREE_TRNS in free_me, satisfying the AND-mask gate.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A structurally valid PNG whose chunk stream includes a parseable tRNS chunk (correct 'tRNS' FOURCC type tag plus a self-consistent length/CRC and a prior valid IHDR establishing color type) so that libpng allocates a tRNS entry and OR's the PNG_FREE_TRNS bit into info_ptr->free_me; the TRUE side of line 507 then becomes reachable.",
+            "why_winner_satisfies": "Winner (cmplog) seeds share a stable, intact PNG header region (signature + IHDR + gAMA + sRGB) with concentrated byte values at the chunk-type/length offsets, indicating the parser advanced deep enough to recognize ancillary chunks and set free_me bits; the blocker TRUE side fires (W has T=11 at line 507 vs L T=0) and the W-only tRNS-free body (lines 508-513) executes.",
+            "why_loser_doesnt": "Loser (naive) seeds corrupt exactly the header dataflow bytes that gate chunk parsing (e.g. IHDR dimension/color-type bytes at 0x16-0x19 and chunk-type bytes at 0x25-0x28 diverge from the winner's consistent values), so libpng never recognizes/allocates a tRNS entry, PNG_FREE_TRNS is never set in free_me, and line 507 stays on the FALSE side (L T=0 F=23).",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer of intercepted integer/memory comparisons (chunk-type FOURCC checks, length/dimension comparisons libpng performs while parsing) and substitutes the expected operand directly into the matching input offsets, planting the exact magic/structural bytes needed for libpng to accept a tRNS chunk; naive must hit the same multi-byte constraints by blind havoc, which it never does in 10 trials."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked TRUE side gates on PNG_FREE_TRNS being set in info_ptr->free_me.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "png.c:507",
+            "exact_quote": "if (((mask & PNG_FREE_TRNS) & info_ptr->free_me) != 0)"
+          },
+          {
+            "claim": "The true branch is the globally blocked side, and only the winner runs the tRNS-free body.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "png.c:507-513",
+            "exact_quote": "[W]   508     {\n[W]   509        info_ptr->valid &= ~PNG_INFO_tRNS;"
+          },
+          {
+            "claim": "Winner takes the true side at line 507 while loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 png.c:507",
+            "exact_quote": "d=1   L 507  T=11 F=25  T=0 F=23"
+          },
+          {
+            "claim": "cmplog resolves all 10 trials while naive blocks all 10, isolating the I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog>naive",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "Winner header/chunk bytes are concentrated and stable across seeds, indicating intact chunk parsing.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1 offsets 0x10-0x1f",
+            "exact_quote": "00 00 00 5b 00 00 00 45 08 02 00 00 01 52 ed aa"
+          },
+          {
+            "claim": "Loser seeds diverge from the winner at the IHDR dimension/color-type and chunk-type dataflow offsets.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x16-0x19, 0x25-0x28",
+            "exact_quote": "0x0019  02(.)x9 03(.)x2                     00(.)x7 04(.)x2 06(.)x1             DIFFER"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace substitutes a logged CMP operand at matching input offsets, which naive lacks.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive has no I2S mutator, only havoc/token operators.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose tRNS-acceptance gate depends only on a single isolated byte comparison (not a multi-byte FOURCC/length structure) on which naive resolves the TRUE branch as fast as cmplog, showing I2S substitution is not what plants the required bytes."
+        },
+        "weakest_evidence_point": "The precise set of input offsets I2S must plant to make libpng allocate a tRNS entry is inferred from header-region byte stability, not from an explicit tRNS chunk visible in the shown 64-byte seed prefixes.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3816",
+      "target": "libpng",
+      "branch_id": 3816,
+      "analysis_path": "prompts/libpng_3816.analysis.json",
+      "file": "/src/libpng/png.c",
+      "function": "OSS_FUZZ_png_free_data",
+      "line": "640",
+      "source_line": "   if (((mask & PNG_FREE_HIST) & info_ptr->free_me) != 0)",
+      "signature": {
+        "gate_structure": "other:bitflag_and",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "hIST",
+        "operand_width_bytes": 4,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace substitutes the logged hIST chunk-type literal and bit-constant operands into the matching input bytes, causing libpng to allocate hist state and set PNG_FREE_HIST in free_me, which value_profile cannot do through Hamming-distance feedback alone.",
+        "one_line": "I2S plants hIST chunk-type bytes to set PNG_FREE_HIST bitflag"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must carry a valid hIST chunk so PNG_FREE_HIST is set in both mask and free_me, enabling the bitmask gate.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A structurally valid hIST chunk (correct 4-byte chunk type plus dependency chunks like PLTE) so png reading allocates info_ptr->hist and sets the PNG_FREE_HIST bit in info_ptr->free_me; this makes ((mask & PNG_FREE_HIST) & info_ptr->free_me) non-zero at png.c:640.",
+            "why_winner_satisfies": "Winner-resolving seeds are large (1013-1133 bytes) value_profile_cmplog inputs that drive deep into png_free_data, taking the hIST true branch (lines 641-645 marked [W]) and reaching PLTE/eXIf free paths the loser never hits; the branch row shows W T=6 F=23 versus L T=0 F=23 at line 640.",
+            "why_loser_doesnt": "Loser-blocking value_profile seeds, though they share the same PNG/IHDR/gAMA/sRGB header bytes, never construct the chunk state that sets PNG_FREE_HIST; they spend their executions in earlier free paths (sCAL/pCAL lines 519-547 marked [L]) and at line 640 record T=0 F=23 \u2014 the true side is never taken across all 10 trials.",
+            "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which value_profile lacks. I2SRandReplace substitutes logged comparison operands (the 4-byte hIST chunk-type literal and the bit constants compared while libpng dispatches chunk handlers) directly into the matching input bytes, letting the winner manufacture a valid hIST chunk that flips PNG_FREE_HIST. value_profile only nudges Hamming-distance feedback buckets and cannot place the exact chunk-type bytes, so it stalls."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is a bitmask AND gate over PNG_FREE_HIST and info_ptr->free_me whose true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "png.c:640:8",
+            "exact_quote": "if (((mask & PNG_FREE_HIST) & info_ptr->free_me) != 0)"
+          },
+          {
+            "claim": "The winner takes the hIST true branch and frees info_ptr->hist while the loser never does.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L641-645",
+            "exact_quote": "[W]   642        png_free(png_ptr, info_ptr->hist);"
+          },
+          {
+            "claim": "At the blocker line the winner takes the true side 6 times while the loser takes it zero times.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L640",
+            "exact_quote": "d=1   L 640  T=6 F=23  T=0 F=23  if (((mask & PNG_FREE_HIST) & info_ptr->free_me) != 0)  <-- BLOCKER"
+          },
+          {
+            "claim": "Winner-resolving seeds are large value_profile_cmplog inputs (1013-1133 bytes).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed f5d9e6546b2de5f3",
+            "exact_quote": "size=1111 bytes, fuzzer=value_profile_cmplog"
+          },
+          {
+            "claim": "Loser-blocking seeds come from value_profile and never resolve the branch across all 10 trials.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 loser",
+            "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "value_profile_cmplog adds I2SRandReplace whereas value_profile has no I2S mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+          },
+          {
+            "claim": "value_profile relies only on CMP_MAP distance buckets with no I2S substitution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on a hIST-style 4-byte chunk-type literal where value_profile resolves the gate as often as value_profile_cmplog, showing CMP_MAP gradient alone suffices and I2S substitution is not the decisive technique."
+        },
+        "weakest_evidence_point": "I infer the exact chunk-type/bit literal that I2S substitutes from source structure rather than from a concentrated byte-diff offset directly aligning to the hIST chunk type, since the BYTE DIFF only shows header-region offsets.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3817",
+      "target": "libpng",
+      "branch_id": 3817,
+      "analysis_path": "prompts/libpng_3817.analysis.json",
+      "file": "/src/libpng/png.c",
+      "function": "OSS_FUZZ_png_free_data",
+      "line": "649",
+      "source_line": "   if (((mask & PNG_FREE_PLTE) & info_ptr->free_me) != 0)",
+      "signature": {
+        "gate_structure": "other:bitflag_and",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace substitutes expected IHDR field values (dimensions, color-type, CRC) from the CmpLogObserver buffer into the matching input offsets, repairing the header so PNG parses far enough to allocate a palette and set PNG_FREE_PLTE in free_me.",
+        "one_line": "I2S repairs IHDR fields so PNG_FREE_PLTE bit gets set in free_me"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A structurally valid IHDR plus a parseable PLTE chunk so libpng internally allocates the palette and sets the PNG_FREE_PLTE free_me bit.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A well-formed PNG header whose IHDR fields (width 0x5b, height 0x45, bit_depth 0x08, color_type 0x06) and chunk length/CRC bytes survive validation so that downstream PLTE-chunk handling internally allocates info_ptr->palette and sets the PNG_FREE_PLTE bit in info_ptr->free_me; only then does (mask & PNG_FREE_PLTE) & free_me evaluate non-zero (the blocked true side at png.c:649).",
+            "why_winner_satisfies": "All 10 winner seeds carry an intact IHDR \u2014 offset 0x13 is 0x5b ([) in 10/10, 0x17 is 0x45 (E) in 10/10, 0x18 is 0x08 in 9/10, 0x1d is 0x52 (R) in 10/10, 0x1e is 0xed in 10/10 \u2014 yielding a consistent dimensions/color-type/CRC region that parses cleanly; the per-role overlay shows the true side at 649 is reached only in W (T=10 F=28 for W vs T=0 F=23 for L) and the palette-freeing body lines 650-654 are W-only.",
+            "why_loser_doesnt": "Loser seeds scatter those same header fields \u2014 offset 0x16 is a0/00/80/02, 0x17 is 86/00/45/03, 0x18 is 10/08/04/02, 0x1d is 7f/00/52/ff, 0x1e adds ff/00 \u2014 corrupting IHDR length/dimensions/CRC so the parse never reaches a valid PLTE allocation; at png.c:649 the loser only ever takes the false side (T=0 F=23), so info_ptr->palette is never internally allocated and PNG_FREE_PLTE stays clear in free_me.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer of operands from libpng's chunk-length/CRC/signature integer comparisons and substitutes the expected operand at the matching input offsets, repairing the IHDR/chunk fields so the PNG parses far enough to allocate the palette; naive has only havoc/token mutators and no CMP introspection, so it cannot reliably reconstruct the multi-field valid header and stays blocked in 10/10 trials."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is a bitmask test of mask & PNG_FREE_PLTE against info_ptr->free_me whose true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "png.c:649",
+            "exact_quote": "if (((mask & PNG_FREE_PLTE) & info_ptr->free_me) != 0)"
+          },
+          {
+            "claim": "The true (palette-freeing) side at 649 and its body are reached only by winner-resolving seeds.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "png.c:649-654",
+            "exact_quote": "[W]   651        png_free(png_ptr, info_ptr->palette);"
+          },
+          {
+            "claim": "At branch 649 the winner takes the true side ten times while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L 649",
+            "exact_quote": "d=1   L 649  T=10 F=28  T=0 F=23  if (((mask & PNG_FREE_PLTE) & info_ptr->free_me) != 0)  <-- BLOCKER"
+          },
+          {
+            "claim": "Winner seeds carry a consistent intact IHDR field region.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0013, 0x0017",
+            "exact_quote": "0x0013  5b([)x10                            5b([)x2 55(U)x1 0a(.)x1 05(.)x1 +5u  PARTIAL"
+          },
+          {
+            "claim": "Loser seeds scatter the IHDR dimension/length bytes that winners hold constant.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0016",
+            "exact_quote": "0x0016  00(.)x10                            a0(.)x4 00(.)x3 80(.)x2 02(.)x1     PARTIAL"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes one logged CMP operand at offsets where the other operand matches.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has only havoc and token mutators with no I2S capability.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Mutators",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A naive (no-I2S) trial reaching the true side at png.c:649 in a comparable fraction of trials, or a synthetic harness where corrupting only IHDR/chunk-length CMP-checked fields fails to gate cmplog's advantage over naive."
+        },
+        "weakest_evidence_point": "The mapping from input header bytes to the runtime info_ptr->free_me PNG_FREE_PLTE bit is inferred from source structure and per-role coverage, not directly traced, so I cannot prove the specific CMP whose operands I2S repaired.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3818_h0",
+      "target": "libpng",
+      "branch_id": 3818,
+      "analysis_path": "prompts/libpng_3818.analysis.json",
+      "file": "/src/libpng/png.c",
+      "function": "OSS_FUZZ_png_free_data",
+      "line": "674",
+      "source_line": "   if (num != -1)",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "-1",
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace substitutes logged chunk-type/CRC comparison operands into matching input offsets, enabling deep chunk parsing that populates info_ptr arrays; the resulting valid chunk state makes num != -1 true when png_free_data is reached.",
+        "one_line": "I2S fixes chunk literals so deep parsing populates info arrays for num!=-1"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Inputs must carry valid multi-entry chunk structures (text/sPLT/unknown) so png_free_data is invoked with a per-item num != -1.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A PNG with valid chunk-type and length/CRC fields whose comparisons against libpng's expected literals pass, so deeper chunk-parsing populates info_ptr arrays and png_free_data is later reached with num != -1.",
+            "why_winner_satisfies": "Winner cmplog seeds carry intact chunk headers (PNG/IHDR/gAMA/sRGB at fixed offsets) and the winner-only coverage reaches per-chunk free paths (tRNS 508, eXIf 621, hIST 641, PLTE 650) that the loser never enters, indicating more chunks parsed to valid state.",
+            "why_loser_doesnt": "Loser naive seeds corrupt the chunk-type / length / CRC region (e.g. offsets 0x1d-0x1e, 0x2c-0x3d differ with no concentration toward the valid literals), so those chunk comparisons fail and the per-item free branches stay un-hit (loser L=0 on the blocker true side).",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads intercepted integer/string CMP operands from the CmpLogObserver buffer and substitutes the expected chunk-type/CRC literal directly into the matching input offset, letting cmplog clear the chunk-validation comparisons that naive must hit by chance; verified by an I2S-floor dash-row ancestor in the winner lineage."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true branch of if (num != -1) at png.c:674 inside png_free_data, globally blocked on side T.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "png.c:674:8",
+            "exact_quote": "Source line:    if (num != -1)"
+          },
+          {
+            "claim": "cmplog wins over naive with full divergence at this branch via the I2S technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "value_profile wins over naive with full divergence at this branch via the value_profile technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile > naive  [delta: value_profile]"
+          },
+          {
+            "claim": "Winner-only coverage enters per-chunk free paths (tRNS/eXIf/hIST/PLTE) that the loser never reaches, evidencing deeper chunk parsing.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L508 / L650",
+            "exact_quote": "[W]   650     {"
+          },
+          {
+            "claim": "Winner seeds carry intact PNG/IHDR/gAMA/sRGB chunk headers.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "winner seed 074cbf90cbbef94f offset 0x00",
+            "exact_quote": "89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52"
+          },
+          {
+            "claim": "Loser-blocking seeds differ from winners at chunk-field offsets with no concentration toward the valid literals.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x001d",
+            "exact_quote": "0x001d  52(R)x20                            7f(.)x4 00(.)x3 52(R)x2 ff(.)x1     PARTIAL"
+          },
+          {
+            "claim": "The loser is blocked on the true side for the full campaign while the winner resolves it.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 durations",
+            "exact_quote": "avg duration blocked: winner=0.00h  loser=24.00h"
+          },
+          {
+            "claim": "value_profile accumulates a positive hitcount on the branch while the loser stays at zero.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 hitcount",
+            "exact_quote": "avg hitcount on branch: winner=77  loser=0"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for a CMP operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile feedback preserves inputs whose CMP operands are closer to matching than previously seen, creating a gradient.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness in which all chunk-validation comparisons are removed (chunks accepted unconditionally) but the num != -1 branch still resolved far more often under cmplog/value_profile than naive \u2014 showing the divergence is not driven by comparison-gated chunk parsing."
+        },
+        "weakest_evidence_point": "The exact offsets whose comparisons gate reaching num != -1 are inferred from the per-role coverage and PNG chunk layout, not pinned to a single concentrated I2S-substitutable byte run in the BYTE DIFF (all rows are PARTIAL).",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3909",
+      "target": "libpng",
+      "branch_id": 3909,
+      "analysis_path": "prompts/libpng_3909.analysis.json",
+      "file": "/src/libpng/pngrtran.c",
+      "function": "pngrtran.c:png_init_rgb_transformations",
+      "line": "1227",
+      "source_line": "      if (input_has_transparency == 0)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace intercepts chunk-type and header-field comparisons recorded when libpng validates the tRNS chunk, substitutes expected operands at matching header offsets, deterministically constructing the accepted tRNS-bearing image that makes input_has_transparency nonzero and the false branch reachable.",
+        "one_line": "I2S constructs valid tRNS chunk structure so transparency flag becomes nonzero"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must carry a parseable tRNS chunk so png_ptr->num_trans>0, making input_has_transparency nonzero and taking the false branch.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A valid transparency (tRNS) chunk that libpng's chunk dispatcher accepts so that png_ptr->num_trans > 0; this requires the chunk header bytes (length, the 4-byte 'tRNS' FOURCC and consistent CRC/structure) plus an IHDR whose color_type/bit_depth are accepted, so input_has_transparency = png_ptr->num_trans > 0 evaluates nonzero and line 1227 takes the false side.",
+            "why_winner_satisfies": "Winner-resolving cmplog seeds carry concentrated, structurally-consistent header bytes (e.g. IHDR color_type 0x18=08 and bit_depth-area 0x19=02 fixed across all 10 winners, and 0x1d=52 0x1e=ed fixed) that produce an accepted image with a tRNS chunk, so num_trans>0 and the branch falls through to line 1228 which the loser never reaches.",
+            "why_loser_doesnt": "Loser-blocking naive seeds scatter exactly those header offsets (0x18 spreads over 04/10/02/01, 0x19=00 in all 10, 0x1d over 00/7f) so the chunk/image is rejected before a tRNS is parsed; num_trans stays 0, input_has_transparency==0 is true, and the false branch is never taken in any of 10 trials.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver operands captured when libpng compares the parsed chunk-type / header fields against the literals it expects, then substitutes the expected operand into the input at the matching offset, deterministically constructing the accepted tRNS-bearing header that naive's blind havoc cannot stumble onto in 10 trials."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked false side of line 1227 is gated on input_has_transparency, which is png_ptr->num_trans > 0.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1213 and L1227",
+            "exact_quote": "int input_has_transparency = png_ptr->num_trans > 0;"
+          },
+          {
+            "claim": "The branch under analysis is if (input_has_transparency == 0) and its false side is the globally blocked side.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1227",
+            "exact_quote": "if (input_has_transparency == 0) <-- BLOCKER"
+          },
+          {
+            "claim": "Only winner seeds reach line 1228 (the false-branch body), the loser never does.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1228",
+            "exact_quote": "[L]  1228           png_ptr->transformations &= ~(PNG_COMPOSE | PNG_BACKGROUND_EXPAND);"
+          },
+          {
+            "claim": "Winner takes the false side in all 10 trials while loser takes the true side in all 10 trials.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L1227",
+            "exact_quote": "d=1   L1227  T=0 F=10  T=10 F=0  if (input_has_transparency == 0)  <-- BLOCKER"
+          },
+          {
+            "claim": "Winner header byte offset 0x18 is fixed at 08 across all 10 winners but scattered in losers.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0018",
+            "exact_quote": "0x0018  08(.)x10                            04(.)x5 10(.)x3 02(.)x1 01(.)x1     DIFFER"
+          },
+          {
+            "claim": "Winner byte at 0x19 is fixed at 02 while every loser has 00 there.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  02(.)x10                            00(.)x10                            DIFFER"
+          },
+          {
+            "claim": "Winner bytes at 0x1d/0x1e are concentrated (52/ed) while losers diverge there.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x001d",
+            "exact_quote": "0x001d  52(R)x10                            00(.)x6 7f(.)x4                     DIFFER"
+          },
+          {
+            "claim": "cmplog augments naive with I2SRandReplace, which scans the input for a matching operand and substitutes the other operand from intercepted CMPs.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator, only blind havoc/token mutations.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose only gate is an exact byte-literal chunk-type comparison (e.g. memcmp against 'tRNS') in which cmplog and naive resolve the false branch at statistically indistinguishable rates would refute I2S as the deciding mechanism."
+        },
+        "weakest_evidence_point": "I cannot directly confirm from the prompt bytes that a complete tRNS chunk is what sets num_trans>0; the concentrated winner bytes are in the IHDR region (0x18-0x1e) and the inferred tRNS-acceptance chain rests on libpng semantics rather than an explicit tRNS-offset byte diff.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3915",
+      "target": "libpng",
+      "branch_id": 3915,
+      "analysis_path": "prompts/libpng_3915.analysis.json",
+      "file": "/src/libpng/pngrtran.c",
+      "function": "OSS_FUZZ_png_read_transform_info",
+      "line": "1967",
+      "source_line": "         if (png_ptr->num_trans != 0)",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace substitutes chunk-type FOURCCs and structural field comparands logged during PNG chunk parsing, allowing cmplog to construct a valid tRNS chunk and RGB color_type that populates num_trans; naive cannot assemble this multi-constraint structure by random mutation.",
+        "one_line": "I2S builds valid tRNS chunk enabling num_trans!=0 nonzero presence check"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A valid non-palette PNG carrying a tRNS chunk (num_trans!=0) under the PNG_EXPAND transformation, requiring exact chunk-type/length bytes.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A structurally valid PNG that parses past IHDR into a non-palette (RGB, color_type=2) image and carries a tRNS chunk so that png_ptr->num_trans becomes non-zero, reaching the true side of line 1967 inside the else (non-palette) arm.",
+            "why_winner_satisfies": "Winner seeds are cmplog-discovered, well-formed PNGs (correct magic 89 50 4e 47 0d 0a 1a 0a, IHDR, gAMA, sRGB chunks) with IHDR color_type byte = 02 (RGB) held at offset 0x19 across all 10 winners, routing into the else branch; the blocker true side fired T=10 F=0 for W meaning num_trans was set non-zero by a successfully-parsed tRNS chunk.",
+            "why_loser_doesnt": "Loser (naive) seeds at offset 0x19 carry 00 (x8) and 04 (x2) instead of the winner's 02 RGB color_type, and corrupt the structural bytes (e.g. offset 0x1d shows R=52 in all winners but 7f/00/ff in losers), so parsing never establishes a non-palette image with a valid tRNS chunk; the blocker fired T=0 F=10 for L (num_trans stayed 0).",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer and substitutes the exact comparand operands (PNG chunk-type FOURCCs and length/CRC fields compared during chunk parsing) into the input at the matching byte offsets, letting cmplog construct a valid tRNS chunk and the RGB color_type that naive's blind havoc mutators cannot reliably reproduce."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the true side of `if (png_ptr->num_trans != 0)`, gating on a tRNS chunk having set num_trans.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngrtran.c:1967",
+            "exact_quote": "if (png_ptr->num_trans != 0)"
+          },
+          {
+            "claim": "The blocker sits in the else (non-palette) arm of the PNG_EXPAND handling.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1965-1967",
+            "exact_quote": "[B]  1967           if (png_ptr->num_trans != 0) <-- BLOCKER"
+          },
+          {
+            "claim": "All winner seeds hold IHDR color_type byte = 02 (RGB) at offset 0x19 while losers hold 00/04.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  02(.)x10                            00(.)x8 04(.)x2"
+          },
+          {
+            "claim": "Winner seeds are valid PNGs discovered by cmplog with correct magic and chunk structure.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 230924cbdaa2cc5c",
+            "exact_quote": "Seed 1 (id=230924cbdaa2cc5c, size=8774 bytes, fuzzer=cmplog, trial=1, discovered_at=18s"
+          },
+          {
+            "claim": "Loser seeds corrupt structural chunk bytes; offset 0x1d is R=52 in all winners but 7f/00/ff in losers.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x001d",
+            "exact_quote": "0x001d  52(R)x10                            7f(.)x5 00(.)x4 ff(.)x1"
+          },
+          {
+            "claim": "The blocker fired true 10/10 for winner seeds and false 10/10 for loser seeds.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1967",
+            "exact_quote": "d=1   L1967  T=10 F=0  T=0 F=10  if (png_ptr->num_trans != 0)  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for one CMP operand and substitutes the other at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S capability, only blind havoc/token mutators.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where the tRNS-presence gate depends only on a magic chunk-length/FOURCC comparison shows cmplog and naive resolving the branch at statistically indistinguishable rates, indicating I2S substitution gives no advantage for reaching num_trans!=0."
+        },
+        "weakest_evidence_point": "The byte-diff evidence ties the divergence to chunk-structure and color_type bytes, but it does not pin the specific tRNS chunk-type/length comparand that I2S substitutes, so the exact CMP operand driving the win is inferred rather than directly observed.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3933",
+      "target": "libpng",
+      "branch_id": 3933,
+      "analysis_path": "prompts/libpng_3933.analysis.json",
+      "file": "/src/libpng/pngrtran.c",
+      "function": "OSS_FUZZ_png_do_read_transformations",
+      "line": "4792",
+      "source_line": "         if (png_ptr->num_trans != 0 &&",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace reads CmpLogObserver and substitutes chunk-name and header comparands from libpng's chunk-parsing CMPs, repairing the structural layout needed for a valid tRNS chunk; naive's blind havoc never satisfies these multi-byte structural constraints, leaving num_trans==0.",
+        "one_line": "I2S repairs chunk structural bytes to satisfy tRNS parsing and PNG_EXPAND_tRNS flag"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input needs a valid tRNS chunk so num_trans!=0 and PNG_EXPAND_tRNS is set for a non-palette color type.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A well-formed PNG whose IHDR declares a non-palette color type (so the else branch at 4790 is taken) plus a structurally valid tRNS chunk that makes png_ptr->num_trans != 0 AND sets the PNG_EXPAND_tRNS transformation. This depends on chunk type bytes and length fields being correct enough for libpng to parse the chunk and accept the transparency, not just a single magic literal.",
+            "why_winner_satisfies": "cmplog winner seeds keep the chunk/header byte region intact and consistent (offsets 0x35-0x3d are uniformly 73 52 47 42 ... 'sRGB' across all 10 W seeds, and IHDR color-type byte 0x19 is uniformly 02 = RGB, a non-palette type), preserving a parseable chunk layout that lets the tRNS chunk register so num_trans!=0 and PNG_EXPAND_tRNS fires; W is the only role that ever takes the true side of the PNG_EXPAND_tRNS operand at L4793.",
+            "why_loser_doesnt": "naive loser seeds corrupt the IHDR/chunk bytes (offset 0x19 holds 00 in 8 of 10 L seeds rather than the uniform 02 of W, and the chunk-name region 0x35-0x3d carries stray non-'sRGB' bytes like 74/45/58 'tEXt'-style), so the tRNS condition never holds: every L seed takes the false branch at L4792 and L4793 is never reached as true.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes one CMP operand into the input wherever the other operand's bytes appear, repairing the chunk-name / header comparands that libpng tests while parsing chunks; naive can only stumble on these multi-byte structural constraints by chance havoc, which never lands in 10 trials."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the tRNS expansion guard requiring num_trans!=0 and PNG_EXPAND_tRNS in the non-palette else arm.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L4790-4793",
+            "exact_quote": "if (png_ptr->num_trans != 0 && <-- BLOCKER"
+          },
+          {
+            "claim": "The second operand of the gate is the PNG_EXPAND_tRNS transformation flag.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L4793",
+            "exact_quote": "(png_ptr->transformations & PNG_EXPAND_tRNS) != 0)"
+          },
+          {
+            "claim": "Only the winner role ever takes the true side of the PNG_EXPAND_tRNS operand at L4793; the loser never reaches it true.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L4793",
+            "exact_quote": "d=1   L4793  T=181 F=0  T=0 F=0  (png_ptr->transformations & PNG_EXPAND_tRNS) != 0)"
+          },
+          {
+            "claim": "Winner seeds hold a uniform intact chunk-name region (sRGB) at offsets 0x35-0x3d while loser seeds carry stray non-sRGB bytes there.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0035-0x003d",
+            "exact_quote": "0x0035  73(s)x10                            73(s)x9 74(t)x1"
+          },
+          {
+            "claim": "Winner seeds have a uniform non-palette color-type byte 02 at offset 0x19 while loser seeds mostly hold 00 there.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  02(.)x10                            00(.)x8 04(.)x2"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for one CMP operand and substitutes the other at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator and relies solely on havoc/token byte mutation.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating only on a single fixed multi-byte tRNS magic literal where naive resolves the branch about as often as cmplog within the same budget, showing the structural chunk constraint is not what I2S substitution is solving."
+        },
+        "weakest_evidence_point": "The byte diff shows multi-byte structural divergence (color-type and chunk-name regions) rather than one clean concentrated comparand, so the exact CMP operand I2S substitutes to satisfy num_trans!=0/PNG_EXPAND_tRNS is inferred from chunk-parsing semantics, not pinned to a specific offset.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_4055_h0",
+      "target": "libpng",
+      "branch_id": 4055,
+      "analysis_path": "prompts/libpng_4055.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_iTXt",
+      "line": "2796",
+      "source_line": "      for (; prefix_length < length && buffer[prefix_length] != 0;",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": null,
+        "operand_width_bytes": 1,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace substitutes the compression-info equality comparand (compression-flag and compression-type bytes) so the iTXt chunk passes the L2777-2779 gate, enabling the third NUL-scan loop at L2796 to execute and exit normally.",
+        "one_line": "I2S satisfies compression-info gate bytes to reach inner loop"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A well-formed iTXt chunk whose translated-keyword field starts with a non-zero byte before length-end, so the L2796 NUL-scan loop runs and exits false.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "An iTXt chunk that survives the compression-info gate at buffer[prefix_length+1] (==0 or (==1 && buffer[prefix_length+2]==PNG_COMPRESSION_TYPE_BASE)) so control reaches the third loop at L2796; the translated-keyword region must contain at least one non-zero byte within `length` so the loop body executes and the false (loop-exit) side is taken at L2796.",
+            "why_winner_satisfies": "cmplog reaches the L2796 loop and exits it (avg hitcount on branch winner=23, resolved 10/10); I2SRandReplace can substitute the byte values the compression-info comparison expects (buffer[prefix_length+2]==PNG_COMPRESSION_TYPE_BASE) so the chunk passes the L2777-2779 gate, letting the third NUL-scan loop run to completion.",
+            "why_loser_doesnt": "naive resolves only 1/10 with avg hitcount on branch loser=0 and stays blocked 9/10; its random havoc rarely hits the exact compression-info byte the gate compares against, so control diverts to the L2853 'bad compression info' else and never reaches L2796.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer for the equality CMP guarding the iTXt compression-info gate and splices the logged comparand into the input at the matching offset, manufacturing a gate-passing chunk that naive's blind havoc cannot reliably produce."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the false (loop-exit) side of the third NUL-scan loop over the translated-keyword field at pngrutil.c:2796.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L2796",
+            "exact_quote": "for (; prefix_length < length && buffer[prefix_length] != 0;"
+          },
+          {
+            "claim": "Reaching L2796 requires passing the compression-info gate that compares buffer[prefix_length+2] against PNG_COMPRESSION_TYPE_BASE.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2777-2779",
+            "exact_quote": "buffer[prefix_length+2] == PNG_COMPRESSION_TYPE_BASE))"
+          },
+          {
+            "claim": "Inputs that fail the compression-info gate divert to the bad-compression-info else and never reach L2796.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2853",
+            "exact_quote": "errmsg = \"bad compression info\";"
+          },
+          {
+            "claim": "cmplog wins over naive at this branch with prob_div 0.90 and a large hitcount divergence on the branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog>naive",
+            "exact_quote": "avg hitcount on branch: winner=23  loser=0"
+          },
+          {
+            "claim": "naive resolves only 1/10 and stays blocked 9/10 at this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 loser line",
+            "exact_quote": "loser:  resolved=1/10  blocked=9  unreached=0"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace reads the CMP buffer and substitutes one operand at input offsets matching the other operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive_ctx wins over naive at this branch via the ctx_coverage technique with prob_div 0.80.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 naive_ctx>naive",
+            "exact_quote": "Pair 2: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "naive_ctx folds the call context into the edge-map index so a new (call-context, edge) pair counts as new coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Feedback",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+          },
+          {
+            "claim": "naive_ctx resolves 9/10 at this branch with positive on-branch hitcount.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 winner line",
+            "exact_quote": "avg hitcount on branch: winner=6  loser=0"
+          },
+          {
+            "claim": "naive's feedback is a bare per-edge hit-count bucket with no context indexing and no I2S.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Feedback/Mutators",
+            "exact_quote": "Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic iTXt-handler harness where the compression-info gate byte is fixed/constant (no input-derived equality CMP) shows cmplog NOT outperforming naive at reaching the L2796 loop-exit, indicating I2S substitution was not the enabling factor."
+        },
+        "weakest_evidence_point": "The claim that the L2777-2779 compression-info equality is the specific CMP that I2SRandReplace solves is inferred from source structure; the lineage dash row confirms an I2S find in the chain but does not prove it targeted that exact comparand.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_4061_h0",
+      "target": "libpng",
+      "branch_id": 4061,
+      "analysis_path": "prompts/libpng_4061.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_iTXt",
+      "line": "2810",
+      "source_line": "      else if (compressed != 0 && prefix_length < length)",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": null,
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace satisfies the compression-flag/type equality CMPs at L2777-2779 so the iTXt chunk enters the inner block, then lands on the false (compressed==0 or truncated) side of L2810 that naive's havoc almost never produces.",
+        "one_line": "I2S satisfies compression-flag gate, letting false side of L2810 fire"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A well-formed iTXt chunk whose compression-flag/type bytes pass the dispatch but whose compressed/prefix_length combo fails the compressed-branch test.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "An iTXt chunk where the compression-flag byte at buffer[prefix_length+1] is 0 (or 1 with a compression-type byte equal to PNG_COMPRESSION_TYPE_BASE), so the chunk enters the inner block at L2779, but is NOT (compressed != 0 AND prefix_length < length) \u2014 i.e. it takes the false side of L2810 via the L2807 compressed==0 path or the trailing else 'truncated'.",
+            "why_winner_satisfies": "cmplog resolves 10/10; its winning seeds carry concrete iTXt-chunk bytes (PNG magic + IHDR + gAMA + sRGB) and the byte-diff shows the compression-flag region at offset 0x2e holds fc (the chunk passes the L2779 dispatch but lands on the compressed==0 / truncated false side of the blocker at L2810).",
+            "why_loser_doesnt": "naive resolves only 1/10 and is blocked 9/10 averaging 20.30h; the divergent-branch view shows naive (L) takes the TRUE side of L2810 (T=10 F=0) \u2014 its inputs satisfy compressed!=0 && prefix_length<length and never produce the false-side compression-flag/length combination.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer, finds the byte sequence matching one operand of the equality CMPs at L2777-2779 (compression-flag == 0/1, compression-type == PNG_COMPRESSION_TYPE_BASE) and substitutes the satisfying operand directly into the input, letting it pass the dispatch gate and reach the false side of the blocker that naive's blind havoc almost never hits."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the false side of an else-if testing compressed!=0 && prefix_length<length in the iTXt handler.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngrutil.c:2810",
+            "exact_quote": "else if (compressed != 0 && prefix_length < length)"
+          },
+          {
+            "claim": "The globally blocked side is the false branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Globally blocked side",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "Reaching the blocker requires passing the compression-flag/type dispatch at L2777-2779.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2777-2779",
+            "exact_quote": "else if (buffer[prefix_length+1] == 0 ||\n[B]  2778        (buffer[prefix_length+1] == 1 &&\n[B]  2779        buffer[prefix_length+2] == PNG_COMPRESSION_TYPE_BASE))"
+          },
+          {
+            "claim": "The false side of the blocker is taken via the compressed==0 path at L2807 or the trailing else 'truncated'.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2807",
+            "exact_quote": "if (compressed == 0 && prefix_length <= length)"
+          },
+          {
+            "claim": "cmplog resolves the branch in all 10 trials while naive is blocked in 9.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog>naive",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0"
+          },
+          {
+            "claim": "The loser (naive) takes the TRUE side of the blocker and never the false side that resolves it.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L2810",
+            "exact_quote": "d=1   L2810  T=0 F=27  T=10 F=0  else if (compressed != 0 && prefix_length < length)  <-- BLOCKER"
+          },
+          {
+            "claim": "The compression-flag region byte differs between winner and loser at offset 0x2e.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "0x002e",
+            "exact_quote": "0x002e  fc(.)x18                            05(.)x4                             DIFFER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans for one CMP operand in the input and substitutes the other.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "The winner-resolving seeds are stored by naive_ctx and carry the PNG/iTXt chunk byte layout.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner-resolving seeds",
+            "exact_quote": "Seed 1 (id=0f8ce28016e111ca, size=415 bytes, fuzzer=naive_ctx, trial=1):"
+          },
+          {
+            "claim": "naive_ctx resolves 9/10 vs naive 1/10 with much shorter blocked time.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 naive_ctx>naive",
+            "exact_quote": "avg duration blocked: winner=7.60h  loser=20.30h"
+          },
+          {
+            "claim": "naive_ctx folds call context into the edge-map index so the same edge is a new coverage bucket per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx instrumentation",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "naive uses a bare per-edge hit-count bucket with no I2S.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive mutators",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic iTXt-style harness whose only roadblock is the equality dispatch on the compression-flag/type bytes shows cmplog NOT beating naive at reaching the post-dispatch false side, indicating the divergence is not driven by I2S solving those equality CMPs."
+        },
+        "weakest_evidence_point": "The byte-diff at offset 0x2e (fc vs 05) is attributed to the compression-flag/type region by structural inference; the exact mapping of file offset 0x2e to buffer[prefix_length+1] inside the iTXt chunk is not directly proven by the prompt.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

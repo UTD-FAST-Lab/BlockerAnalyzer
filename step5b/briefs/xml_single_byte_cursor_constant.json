@@ -1,0 +1,1076 @@
+{
+  "feature_id": "xml_single_byte_cursor_constant",
+  "mechanism_family": "I2S_pro",
+  "mechanism_label": "xml_single_byte_cursor_constant",
+  "definition": "I2S intercepts a single-byte equality CMP at the XML parse cursor or a structurally-constrained position and substitutes the exact byte (NUL, tab, control character, punctuation) directly there, satisfying a gate that blind havoc rarely hits in the parse context.",
+  "n_members": 10,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "naive",
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libxml2_6597_h1",
+      "target": "libxml2",
+      "branch_id": 6597,
+      "analysis_path": "prompts/libxml2_6597.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "xmlParseComment",
+      "line": "4985",
+      "source_line": "\t       (*in == 0x09)) {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x09",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts the logged 0x09 tab comparand from the CMP buffer and splices it at the matching input offset inside the comment body, directly satisfying the single-byte equality that blind havoc cannot reliably hit.",
+        "one_line": "I2S splices logged 0x09 tab byte into comment body to clear equality gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A well-formed XML comment opener <!-- whose body contains a literal 0x09 tab byte, so the loop's third disjunct fires.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The same gate: a <!-- comment opener (the '-' = 0x2D comparand) plus a literal 0x09 tab byte in the comment body satisfying *in == 0x09.",
+            "why_winner_satisfies": "cmplog adds I2SRandReplace, which reads the post-execution CmpLogObserver buffer and substitutes intercepted CMP operands (the 0x2D '-' opener bytes and the 0x09 loop comparand) at matching input offsets, letting it place the exact tab byte that opens the True side.",
+            "why_loser_doesnt": "naive has no CMP interception and no I2SRandReplace, so it must stumble onto the exact 0x09 byte inside a valid comment by blind havoc; its blocking seeds never form a comment body carrying a tab and stay on the False side (cmplog resolved 8/10, naive only 2/10).",
+            "mechanism_attribution": "input-to-state substitution: I2SRandReplace splices the logged comparand byte (0x09 / 0x2D) into the matching input offset, supplying the byte-exact tab the comment-content loop tests for."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the third disjunct *in == 0x09 of the comment-content while loop, whose globally blocked side is True.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L4985",
+            "exact_quote": "(*in == 0x09)) { <-- BLOCKER"
+          },
+          {
+            "claim": "0x09 is below the 0x20 lower bound of the second disjunct, so the byte must be exactly a tab to reach the True side.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L4983-4985",
+            "exact_quote": "((*in >= 0x20) && (*in < '-')) ||"
+          },
+          {
+            "claim": "naive_ctx is the winner and naive the loser in the ctx_coverage pair, with naive_ctx resolving 10/10 and naive only 2/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "Winner-resolving seeds are all naive_ctx and carry 0x09 tab bytes alongside comment-opener bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1",
+            "exact_quote": "8<!--------...!"
+          },
+          {
+            "claim": "Loser-blocking naive seeds contain '--' runs but the dumped bytes show no tab inside a comment body.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 5",
+            "exact_quote": "-Gex>.<!t\">b --A"
+          },
+          {
+            "claim": "naive_ctx's CtxHook folds the call context into the edge-map index so the same edge is recorded at different slots per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "cmplog beats naive on the I2S delta, resolving 8/10 vs naive's 2/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3",
+            "exact_quote": "Pair 3: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "naive has no I2S and only havoc+token mutators.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "grimoire loses to cmplog despite both running the I2S stage; grimoire adds GeneralizationStage and Grimoire mutators.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: cmplog > grimoire  [delta: grimoire_structural]"
+          },
+          {
+            "claim": "grimoire's GeneralizationStage replaces concrete byte runs with <GAP> placeholders by repeated re-execution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire",
+            "exact_quote": "replaces concrete byte runs in a corpus entry with `<GAP>` placeholders"
+          },
+          {
+            "claim": "grimoire incurs extra executions during generalization, each gap validated by a re-run.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire",
+            "exact_quote": "plus extra executions\nduring generalization (each candidate gap is validated by a re-run)."
+          },
+          {
+            "claim": "The loser-blocking grimoire seeds were produced by Grimoire structural mutators.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 2",
+            "exact_quote": "mutation_op=GrimoireExtensionMutator"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic comment-content gate testing a byte-exact 0x09 tab where cmplog does NOT outpace naive, and grimoire matches or beats cmplog, and naive_ctx shows no advantage over naive \u2014 i.e. all three deltas vanish, showing the divergence is not technique-driven."
+        },
+        "weakest_evidence_point": "The cmplog>naive I2S attribution is unverified in lineage because only naive_ctx winner seeds are stored, so I2S's role rests on mechanism reasoning rather than a confirmed dash-row ancestor.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6643",
+      "target": "libxml2",
+      "branch_id": 6643,
+      "analysis_path": "prompts/libxml2_6643.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "parser.c:xmlParseElementChildrenContentDeclPriv",
+      "line": "6358",
+      "source_line": "\tif (RAW == '?') {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "'?'",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace logs the '?' operand from RAW=='?' and splices it directly at the parse cursor position in the input, deterministically satisfying the single-byte equality that value_profile's distance-bucket feedback alone cannot flip.",
+        "one_line": "I2S places '?' at parse cursor to satisfy DTD content-decl equality gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A '?' (0x3f) occurrence indicator byte must follow an element Name inside a DTD children content declaration.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "Inside a well-formed DTD <!ELEMENT ...> children content declaration, after the parser consumes an element Name (the 'else' branch at line 6347), the very next input byte at the parse cursor (RAW) must be '?' (0x3f) so the equality test `if (RAW == '?')` at parser.c:6358 takes its true branch.",
+            "why_winner_satisfies": "value_profile_cmplog reaches the blocker true side 6/10 trials and resolves 9/10; the winning seed embeds the full DTD prolog (<?xml ...?>, <!DOCTYPE a SYSTEM \"dtds/1...\") needed to drive the parser into xmlParseElementChildrenContentDeclPriv, and I2SRandReplace can splice the literal '?' operand from the RAW=='?' comparison into the cursor position.",
+            "why_loser_doesnt": "value_profile resolves only 2/10 and never takes the blocker true side (W T=6 vs L T=0 at L6358); its inputs reach the surrounding parse machinery but the byte at the cursor after the element Name is not '?', so the equality comparison only ever yields false, draining time into the *,+,else arms (L6361 T=21, L6367) instead.",
+            "mechanism_attribution": "The only technique distinguishing winner (value_profile_cmplog) from loser (value_profile) is I2SRandReplace: both carry value-profile distance feedback, but only vpc has the cmplog CMP buffer + I2SRandReplace mutator that logs the '?' operand of `RAW == '?'` and substitutes it directly into the input cursor, deterministically satisfying the single-byte equality gate that distance-bucket feedback alone does not flip."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is a single-byte equality test against '?' whose true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "parser.c:6358",
+            "exact_quote": "Source line: \tif (RAW == '?') {"
+          },
+          {
+            "claim": "The '?' test is reached only in the else branch after an element Name is parsed via xmlParseName.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L6347-6358",
+            "exact_quote": "elem = xmlParseName(ctxt);"
+          },
+          {
+            "claim": "value_profile_cmplog is the winner resolving 9/10 and value_profile is the loser blocked 8/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          },
+          {
+            "claim": "The winner takes the blocker true side while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L6358",
+            "exact_quote": "L6358  T=6 F=3  T=0 F=32  if (RAW == '?') {  <-- BLOCKER"
+          },
+          {
+            "claim": "The winning seed contains the DTD prolog structure required to reach the children content declaration parser.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 518db8383db21f1c",
+            "exact_quote": "3e 0a 3c 21 44 4f 43 54 59 50 45"
+          },
+          {
+            "claim": "value_profile_cmplog's only distinguishing mutator over value_profile is I2SRandReplace.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace, leaving only CMP_MAP gradient feedback.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the `RAW == '?'` single-byte equality gate where value_profile resolves the true side as often as value_profile_cmplog (no significant I2S advantage), showing CMP_MAP gradient alone flips the byte."
+        },
+        "weakest_evidence_point": "The byte-diff section shows only PARTIAL concentration and no offset isolates a clean '?'(0x3f)-present vs -absent contrast at the cursor, so the direct byte-level pre-image of the substituted operand is inferred from source + lineage rather than shown explicitly.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6674_h0",
+      "target": "libxml2",
+      "branch_id": 6674,
+      "analysis_path": "prompts/libxml2_6674.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "xmlParseMarkupDecl",
+      "line": "6969",
+      "source_line": "\t        case '-':",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "'-'",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace reads the switch comparison on NXT(2) against '-' from the CMP buffer and substitutes 0x2d at the NXT(2) offset in the input, flipping existing markup tokens into comment openers that naive havoc cannot reliably produce.",
+        "one_line": "I2S substitutes '-' at NXT(2) to select comment case in markup switch"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must place '-' as the third byte after '<!' (i.e. '<!--') so xmlParseMarkupDecl's switch dispatches the comment arm.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A '<!' followed by a '-' byte at the NXT(2) position, so the switch on NXT(2) selects case '-' and calls xmlParseComment. The single discriminating byte is the '-' (0x2d) immediately after '<!'.",
+            "why_winner_satisfies": "cmplog intercepts the switch comparison on NXT(2) against the constant '-' as a CMP callback; I2SRandReplace can read that operand and substitute the literal '-' at the matching input offset after '<!', flipping an existing '<!E'/'<!A' markup decl into '<!--'.",
+            "why_loser_doesnt": "naive has only havoc/token mutators and no CMP introspection; its corpus seeds carry '<!DOCTYPE'/SYSTEM markup (case 'E'/'A'/'N' arms) and it never lands the exact '-' byte at NXT(2) within budget, so case '-' stays at T=0 for all 10 trials.",
+            "mechanism_attribution": "cmplog's I2SRandReplace substitutes the logged switch operand '-' at the NXT(2) byte offset, which plain naive havoc cannot reliably hit; this is the input-to-state comparison-solving technique distinguishing cmplog from naive."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked branch is the case '-' arm of xmlParseMarkupDecl, whose true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "parser.c:6969",
+            "exact_quote": "case '-':"
+          },
+          {
+            "claim": "case '-' calls xmlParseComment, the comment-parsing path the winner reaches.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L6970",
+            "exact_quote": "xmlParseComment(ctxt);"
+          },
+          {
+            "claim": "The switch dispatch on NXT(2) selects the markup-declaration arm, so NXT(2)=='-' is the discriminating byte condition.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L6954",
+            "exact_quote": "switch (NXT(2)) {"
+          },
+          {
+            "claim": "cmplog resolves the case '-' arm where naive does not (winner of the I2S pair).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 cmplog>naive",
+            "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace scans the input for a matching operand and substitutes the other CMP operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive has no I2S substitution mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "any of the above. No I2S."
+          },
+          {
+            "claim": "naive_ctx resolves the branch in all 10 trials while naive is blocked in all 10 (winner of the ctx_coverage pair).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 naive_ctx>naive",
+            "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "naive_ctx folds the call-context hash into the edge-map index so the same edge registers at different slots per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Instrumentation",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it"
+          },
+          {
+            "claim": "Under naive_ctx a new coverage bucket is a new (call-context, edge) pair rather than a bare edge.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Feedback",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge"
+          },
+          {
+            "claim": "xmlParseMarkupDecl is reached from multiple call contexts (internal subset, conditional sections, external subset), making context-sensitivity informative.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "Call chain hop 2",
+            "exact_quote": "hop 2  parser.c:xmlParseConditionalSections  (/src/libxml2/parser.c:6804-6923, calls xmlParseMarkupDecl at line 6907)"
+          },
+          {
+            "claim": "naive_ctx uses only havoc/token mutators with no I2S or CMP_MAP, so its win is feedback-driven not comparison-solving.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the '<!' + NXT(2) switch on '-' (comment arm) in which cmplog shows NO advantage over naive at reaching case '-', indicating the single '-' byte is reachable by havoc alone and I2S substitution is not the driver."
+        },
+        "weakest_evidence_point": "The I2S mechanism for the cmplog>naive pair is unverified in lineage because the DB holds only naive_ctx winner seeds, so the I2S attribution rests on source/mechanism inference rather than an observed dash-row ancestor chain.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6785_h0",
+      "target": "libxml2",
+      "branch_id": 6785,
+      "analysis_path": "prompts/libxml2_6785.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "xmlParseDocument",
+      "line": "10852",
+      "source_line": "    if (CUR == 0) {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x00",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace reads the intercepted CUR==0 operand from the CMP buffer and substitutes 0x00 at the matching cursor offset in the input, directly synthesizing the NUL byte that naive's blind havoc must stumble onto by chance.",
+        "one_line": "I2S places NUL at parse cursor to satisfy CUR==0 document-empty gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Parse cursor must reach a NUL (0x00) byte so the CUR==0 empty-document check fires before any XMLDecl prolog content.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "An input where the byte at the parse cursor (after optional 4-byte encoding detection) is 0x00, satisfying the integer comparison CUR == 0 at parser.c:10852.",
+            "why_winner_satisfies": "Winner-resolving seeds carry NUL bytes early in the buffer (e.g. seed 1 has 5c 0a 00 00 00 around offset 0x04-0x07 and seed 2 has 0a 00 80 at offset 0x05-0x07); the cmplog winner resolved the branch in 8/10 trials, taking the W-marked true-branch at lines 10853-10855.",
+            "why_loser_doesnt": "naive loser seeds begin with printable prolog/URL content (e.g. 127772.xml, <?xml vdrsion, http://www.w3) with no 0x00 at the cursor, so CUR is nonzero and they always take the false branch (T=0 F=10 at L10852); naive blocked 10/10.",
+            "mechanism_attribution": "CUR == 0 compiles to an integer CMP against the literal 0; cmplog's CMP interception logs the (current_byte, 0) operand pair and I2SRandReplace scans the input for the current byte and substitutes the other operand (0x00) at that offset, directly synthesizing the NUL at the cursor that naive's blind havoc must stumble onto."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is an equality comparison of the current parse byte against literal 0, whose true branch is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "parser.c:10852",
+            "exact_quote": "Source line:     if (CUR == 0) {"
+          },
+          {
+            "claim": "Taking the true branch leads to the empty-document fatal-error path that only winners reach.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L10852-10855",
+            "exact_quote": "[B] 10852      if (CUR == 0) { <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog is the winner over naive on the I2S pair, resolving 8/10 while naive blocks 10/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "--- Pair 2: cmplog > naive  [delta: I2S] ---"
+          },
+          {
+            "claim": "value_profile is the winner over naive on the value_profile pair, resolving 9/10 while naive blocks 10/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+          },
+          {
+            "claim": "Winner-resolving seeds contain NUL bytes early in the buffer near the parse cursor.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1 offset 0x04-0x07",
+            "exact_quote": "3e 0a 0a 5c 0a 00 00 00 31 32 37 37 37 32 2e 78"
+          },
+          {
+            "claim": "A second winner seed also carries a NUL byte before content.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 2 offset 0x05-0x07",
+            "exact_quote": "45 44 3e 0a 0a 5c 0a 00 80 59 50 45 20 61 20 ad"
+          },
+          {
+            "claim": "Loser-blocking seeds begin with printable prolog content (a filename then XMLDecl), no NUL at the cursor.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser seed 1 offset 0x04",
+            "exact_quote": "06 00 00 00 31 32 37 37 37 32 2e 78 6d 6c 5c 0a"
+          },
+          {
+            "claim": "At the blocker line winners take the true side and losers always take the false side.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L10852",
+            "exact_quote": "d=1   L10852  T=3 F=0  T=0 F=10  if (CUR == 0) {  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog intercepts integer CMPs and I2SRandReplace substitutes the other operand at offsets matching one operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile records an operand-distance bucket so an input closer to matching adds a new CMP_MAP bucket and is preserved.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "naive has no I2S and no CMP_MAP distance feedback, only edge buckets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Mutators",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the CUR==0 gate where forcing a NUL at the cursor offset does NOT let cmplog/value_profile resolve faster than naive, or where the winning seeds resolve the branch with no 0x00 byte reaching the parse cursor."
+        },
+        "weakest_evidence_point": "I2S attribution for the cmplog pair is unverified in lineage because no cmplog winner seed was captured, so the cmplog win could in principle ride on lucky havoc rather than I2SRandReplace substitution of 0x00.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6809",
+      "target": "libxml2",
+      "branch_id": 6809,
+      "analysis_path": "prompts/libxml2_6809.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "parser.c:xmlCheckCdataPush",
+      "line": "11351",
+      "source_line": "\t    else if ((c == 0xA) || (c == 0xD) || (c == 0x9))",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x0A",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace logs the exact control-codepoint comparands (0x0A/0x0D/0x09) from CDATA equality CMPs and splices one into the input byte feeding c, deterministically hitting the single-byte equality that value_profile's distance buckets cannot land on.",
+        "one_line": "I2S splices control codepoint (0x0A/0x0D/0x09) into CDATA scan byte to clear equality"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A 1-byte ASCII control char (0x0A/0x0D/0x09) inside CDATA content so xmlCheckCdataPush takes the whitespace true branch instead of returning error.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "CDATA-scanned content bytes that include one of the three exact control codepoints 0x0A, 0x0D, or 0x09 at a position where xmlCheckCdataPush evaluates a sub-0x20 1-byte char; the byte must equal one of those three values, otherwise the else arm at L11353 returns -ix and the blocker true side at L11351 is never taken.",
+            "why_winner_satisfies": "value_profile_cmplog's winning seed carries a 0x0A (newline) byte at offset 0x0f embedded in xml-prefixed content, and the per-role overlay shows the winner reaching the call site (L11861-11870 marked [W]) while the true-branch line L11351 was hit, so the control-char equality is satisfied on the winner's path.",
+            "why_loser_doesnt": "value_profile cannot reliably plant the exact 0x0A/0x0D/0x09 comparand on the scanned path; its blocking seeds stall on the false side (L11351 shows T=2 F=2 / T=3 F=15 for the loser i.e. the false arm dominates) and fall through to the else at L11353/L11354 which is marked [L] (loser-only) and returns -ix.",
+            "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator on top of value_profile: the cmplog CMP buffer records the literal comparands 0x0A/0x0D/0x09 from the equality CMPs at L11351, and I2SRandReplace splices one of those logged bytes directly into the input at the offset feeding c, deterministically satisfying the equality that value_profile's distance-bucket feedback plus havoc cannot land on a single exact byte."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is an equality test of a single byte c against the three control codepoints 0xA, 0xD, 0x9 in xmlCheckCdataPush.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "parser.c:11351",
+            "exact_quote": "else if ((c == 0xA) || (c == 0xD) || (c == 0x9))"
+          },
+          {
+            "claim": "When the control-char equality fails the code falls through to the loser-only else returning -ix.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L11353-11354",
+            "exact_quote": "[L] 11353  \telse\n[L] 11354  \t        return(-ix);"
+          },
+          {
+            "claim": "The winner-resolving seed contains a 0x0A byte in its content.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 008ff29e17e42a70 offset 0x0f",
+            "exact_quote": "6e 78 6d 6c 5c 0a"
+          },
+          {
+            "claim": "The winner reaches the xmlCheckCdataPush call site while it is loser-unreached.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L11865",
+            "exact_quote": "[W] 11865  \t\t    tmp = xmlCheckCdataPush(ctxt->input->cur, base, 1); <-- CALL"
+          },
+          {
+            "claim": "At the blocker line the loser's false arm dominates over the true arm.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L11351",
+            "exact_quote": "d=1   L11351  T=2 F=2  T=3 F=15  else if ((c == 0xA) || (c == 0xD) || (c == 0x9))  <-- BLOCKER"
+          },
+          {
+            "claim": "value_profile_cmplog has I2SRandReplace while value_profile does not.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+          },
+          {
+            "claim": "value_profile's mutators lack I2SRandReplace.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "The decisive pair is value_profile_cmplog over value_profile with an I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating a 1-byte equality against 0x0A/0x0D/0x09 reached only after a multi-byte CDATA prefix where value_profile resolves the branch as often as value_profile_cmplog (no I2S advantage)."
+        },
+        "weakest_evidence_point": "The single winner seed shows 0x0A but I cannot directly confirm that exact byte landed at the offset feeding c via I2S substitution rather than incidental havoc, since the byte-diff offsets do not isolate the scanned-content position.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6818",
+      "target": "libxml2",
+      "branch_id": 6818,
+      "analysis_path": "prompts/libxml2_6818.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "parser.c:xmlParseTryOrFinish",
+      "line": "11539",
+      "source_line": "\t\tif (cur == 0) {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x00",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts the cur==0 CMP operand and substitutes 0x00 at the exact cursor-feeding offset in the input, driving the true (document-empty) branch that naive cannot reach because it lacks CMP introspection to place NUL precisely at the cursor.",
+        "one_line": "I2S places NUL at try-or-finish cursor position to satisfy cur==0 gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A NUL byte (0x00) positioned as the first content byte after 4-byte encoding detection, satisfying cur == 0 in XML_PARSER_START.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The byte at the parser cursor when it reaches XML_PARSER_START with avail>=2 (i.e. the first content byte after the 4-byte encoding-detection prefix is consumed) must be 0x00, so that the comparison `cur == 0` at parser.c:11539 evaluates true and takes the document-empty/halt path.",
+            "why_winner_satisfies": "cmplog winner seeds carry embedded NUL bytes near the cursor region (e.g. Seed 3 has 00 at offset 0x2b, Seed 4 has 00 at offset 0x28), and on the branch the winner takes the true side (W L11539 T=8 F=0) reaching lines 11540-11551 marked [W]. cmplog's I2SRandReplace can read the intercepted `cur == 0` operand and splice a 0x00 byte at the matching input offset.",
+            "why_loser_doesnt": "naive never resolves (0/10, blocked=10/10); at the branch it takes only the false side (L L11539 T=0 F=73), so its cursor byte is non-zero at the moment the START case is evaluated. naive seeds contain NUL bytes only at non-cursor offsets (e.g. Seed 1 at 0x02-0x03, Seed 3 at 0x00-0x02) that get consumed or shifted out of the decisive cursor position; naive has no CMP introspection to deliberately place 0x00 there.",
+            "mechanism_attribution": "cmplog intercepts the single-byte comparison `cur == 0` via __sanitizer_cov_trace_cmp and records operand 0 in the CmpLogObserver buffer; I2SRandReplace then substitutes 0x00 into the input at the offset feeding the cursor, deterministically driving the true branch. naive can only reach 0x00 by blind havoc, which is improbable at the exact cursor position."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the comparison `cur == 0` at parser.c:11539, with the globally-blocked side being the true branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "parser.c:11539",
+            "exact_quote": "Source line: \t\tif (cur == 0) {"
+          },
+          {
+            "claim": "cur is the first content byte read from the parse cursor in the XML_PARSER_START state after encoding detection.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L11537-11539",
+            "exact_quote": "cur = ctxt->input->cur[0];"
+          },
+          {
+            "claim": "The decisive pair is cmplog>naive with a one-technique I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "The cmplog winner takes the true side of the blocker (T=8) while naive loser takes only the false side (F=73).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L11539",
+            "exact_quote": "L11539  T=8 F=0  T=0 F=73  if (cur == 0) {  <-- BLOCKER"
+          },
+          {
+            "claim": "Winner cmplog seed contains an embedded NUL byte near the cursor region.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 4 offset 0x28",
+            "exact_quote": "3c 2f 3a 3e 0a 0a 5c 0a 00 74 64 73 2b 31 32 37"
+          },
+          {
+            "claim": "naive loser seeds carry no I2S capability and resolve in 0 of 10 trials, blocked in all 10.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "naive row",
+            "exact_quote": "naive                            0       10          0  loser (I2S vs cmplog)"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other operand at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has only havoc + token mutators and no I2S capability.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on a single-byte `cur == 0` comparison where cmplog shows no advantage over naive at reaching the true branch (i.e. naive resolves the 0x00-at-cursor gate at the same rate), which would mean I2S substitution is not what places the NUL byte."
+        },
+        "weakest_evidence_point": "The byte-diff section does not pinpoint a single fixed cursor offset where W carries 0x00 and L does not, since the cursor position depends on consumed prefix length, so the exact decisive offset is inferred rather than directly isolated.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6909",
+      "target": "libxml2",
+      "branch_id": 6909,
+      "analysis_path": "prompts/libxml2_6909.analysis.json",
+      "file": "/src/libxml2/tree.c",
+      "function": "xmlSplitQName2",
+      "line": "283",
+      "source_line": "    if (name[0] == ':')",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "':'",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace reads the CmpLogObserver entry for name[0]==':' (constant 0x3a) and substitutes 0x3a at the matching input offset feeding the QName first byte, deterministically synthesizing a colon-leading name that pure havoc mutation only hits by chance.",
+        "one_line": "I2S places ':' at QName start to satisfy single-byte colon equality gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A QName passed to xmlSplitQName2 whose first byte is a literal ':' (0x3a), reached deep in DTD-element validation.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "Input bytes that, after DTD parsing, hand xmlSplitQName2 a name whose first character is the colon ':' (0x3a) so the equality test name[0] == ':' takes the true branch; the colon must land at the start of an element/attribute QName, not anywhere arbitrary.",
+            "why_winner_satisfies": "Winner inputs drive the DTD-validation path far deeper (xmlGetDtdElementDesc 80 W hits vs 12 L) so xmlSplitQName2 is invoked on real DTD names, and at least one such call presents a ':'-leading name (W hits the true side T=33 at line 283); seed 4 even shows a literal 'DOCTYPE:' with ':' injected at offset 0x27 (3a), evidencing I2S placing 0x3a where the compare expects it.",
+            "why_loser_doesnt": "Loser (naive) inputs never produce a ':'-leading name at the comparison point (T=0 at line 283) and stay shallow in DTD validation (xmlGetDtdElementDesc only 12 L hits, and xmlGetDtdQElementDesc / xmlIsMixedElement etc. show 0 L hits), so the colon test is always false.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver entry for the name[0] == ':' comparison (constant operand 0x3a), scans the input for the byte sequence matching the other operand, and substitutes the colon at that offset, deterministically synthesizing the ':'-leading name that pure havoc byte mutation in naive only hits by chance."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the equality test name[0] == ':' whose true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "tree.c:283",
+            "exact_quote": "Source line:     if (name[0] == ':')"
+          },
+          {
+            "claim": "cmplog resolves the branch in all 10 trials while naive blocks it in all 10, a perfect I2S divergence.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+          },
+          {
+            "claim": "The winner takes the true side of the colon test (T=33) while the loser never does (T=0).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L283",
+            "exact_quote": "d=1   L 283  T=33 F=64  T=0 F=67  if (name[0] == ':')"
+          },
+          {
+            "claim": "name reaching the comparison is the QName argument of xmlSplitQName2, called from DTD-element lookup.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "valid.c:3260",
+            "exact_quote": "uqname = xmlSplitQName2(name, &prefix); <-- CALL"
+          },
+          {
+            "claim": "Winner drives the DTD-element-desc path far deeper than the loser (80 vs 12 invocations).",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "xmlGetDtdElementDesc",
+            "exact_quote": "80        12  xmlGetDtdElementDesc  (/src/libxml2/valid.c:3250-3267)"
+          },
+          {
+            "claim": "A winner seed contains a literal colon injected right after DOCTYPE ('DOCTYPE:').",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed b96369824ac69302 offset 0x20-0x2f",
+            "exact_quote": "2e 30 22 3f 3e 0a 3c 21 44 4f 43 54 59 50 45 3a   .0\"?>.<!DOCTYPE:"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace, which scans the input for a CMP operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive has no I2S mechanism, only havoc/token mutation.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose gated comparison is name[0] == ':' on a runtime-derived name with no input-byte pre-image of the colon: if cmplog still resolves it as fast as on the byte-anchored version, the win is not from I2S substituting the 0x3a operand into the input."
+        },
+        "weakest_evidence_point": "The colon must land at the START of the QName specifically; the byte diff shows no single concentrated offset where W reliably places 0x3a, so the exact input-byte location I2S targets is inferred rather than pinpointed.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6910",
+      "target": "libxml2",
+      "branch_id": 6910,
+      "analysis_path": "prompts/libxml2_6910.analysis.json",
+      "file": "/src/libxml2/tree.c",
+      "function": "xmlSplitQName3",
+      "line": "334",
+      "source_line": "    if (name[0] == ':')",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "':'",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace logs the constant ':' = 0x3a from the name[0]==':' comparison and splices it into the input position feeding the QName first byte, manufacturing a colon-leading QName that CMP_MAP Hamming-distance feedback alone cannot synthesize.",
+        "one_line": "I2S splices 0x3a into QName first byte to satisfy colon-leading equality gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A DTD-declared QName reaching xmlSplitQName3 whose first byte is a literal ':' colon, so name[0]==':' is true.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "An XML input whose DTD markup declarations (e.g. <!ATTLIST>/element-content name) drive a QName into xmlSplitQName3 whose very first byte equals ':' (0x3a), so name[0] == ':' holds and the true branch returns NULL.",
+            "why_winner_satisfies": "The winning vpc seeds carry the full DTD scaffold (<?xml version=\"1.0\"?> then <!DOCTYPE a SYSTEM \"dtds/1...) that reaches DTD markup-decl parsing and the xmlSplitQName3 call, and vpc resolves the colon-first comparison: the blocker line L334 shows W=T:6 vs L=T:0, i.e. only the winner ever takes the true (':' leading) side.",
+            "why_loser_doesnt": "The value_profile seeds carry the same DTD scaffold and reach the same call (L334 L=F:32, blocked side only), but never place a literal ':' as the first byte of the parsed name, so name[0]==':' stays false and the branch is never resolved across 8/10 blocked trials.",
+            "mechanism_attribution": "value_profile_cmplog's I2SRandReplace logs the byte compared at name[0]==':' (the constant ':' = 0x3a) and splices that literal byte into the matching input position, manufacturing a colon-leading QName that pure CMP_MAP Hamming-distance feedback in value_profile cannot synthesize for a single-byte equality against a constant."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the equality test name[0] == ':' in xmlSplitQName3 and the globally blocked side is the true branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "tree.c:334:9",
+            "exact_quote": "Source line:     if (name[0] == ':')\nGlobally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "Only the winner takes the colon-leading true side at the blocker line; the loser is confined to the false side.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L334",
+            "exact_quote": "d=1   L 334  T=6 F=15  T=0 F=32  if (name[0] == ':')  <-- BLOCKER"
+          },
+          {
+            "claim": "The winning seeds contain a complete DTD scaffold that reaches the xmlSplitQName3 call site via markup-declaration parsing.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 518db8383db21f1c offsets 0x10-0x3f",
+            "exact_quote": "3c 3f 78 6d 6c 20 76 65 72 73 69 6f 6e 3d 22 31   <?xml version=\"1"
+          },
+          {
+            "claim": "The loser seeds carry the same DTD scaffold yet still block the branch, so the missing element is the colon byte, not the surrounding structure.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 00ec62cd667738b2",
+            "exact_quote": "2e 30 22 3f 3e 0a 3c 21 44 4f 43 54 59 50 45 20   .0\"?>.<!DOCTYPE "
+          },
+          {
+            "claim": "value_profile_cmplog adds I2SRandReplace on top of value_profile's havoc/token mutators, enabling input-to-state byte substitution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace and relies only on CMP_MAP distance buckets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on name[0]==':' where value_profile resolves the colon-leading side as fast as value_profile_cmplog, showing CMP_MAP distance feedback alone solves the single-byte equality without I2S substitution."
+        },
+        "weakest_evidence_point": "The byte-diff section is all PARTIAL with no offset showing a concentrated ':' (0x3a) in the W set, so the exact input position where the colon is spliced is inferred from source dataflow rather than directly visible in the seed bytes.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6967_h0",
+      "target": "libxml2",
+      "branch_id": 6967,
+      "analysis_path": "prompts/libxml2_6967.analysis.json",
+      "file": "/src/libxml2/uri.c",
+      "function": "uri.c:xmlParse3986Host",
+      "line": "454",
+      "source_line": "    if (*cur == '[') {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "'['",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace reads the intercepted *cur=='[' compare from CmpLogObserver and substitutes the bracket byte at the host-token offset, planting the exact byte blind havoc rarely produces.",
+        "one_line": "I2S plants single bracket byte '[' at URI host-token position"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A literal '[' byte must appear at the host position of the URI authority (after http://) to take the IPv6-bracket branch.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A single literal '[' (0x5b) byte positioned at the start of the host token, i.e. immediately after the 'http://' scheme-and-slashes prefix that xmlParse3986Authority reaches when *cur is dereferenced at uri.c:454.",
+            "why_winner_satisfies": "cmplog winner seeds carry the exact prefix 'http://[' so that *cur=='[' is true; e.g. seed 20b2621140bcb91b has '5b([)' at offset 0x09 right after 'tp://', and the BYTE DIFF shows W concentrates 5b([)x8 at offset 0x08 while L never does.",
+            "why_loser_doesnt": "naive loser seeds reach the same host position but hold a non-'[' byte there (digit/letter/'/'), so *cur=='[' is false and they fall through to the IPv4/hostname path; the loser-blocking seeds show 'http://www', 'http://f2', 'http://fak' with no bracket at offset 0x08.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the intercepted compare *cur=='[' from the CmpLogObserver buffer, then substitutes the constant operand '[' into the input at the matching host offset, planting the required bracket byte that blind havoc rarely produces; this is the I2S input-to-state substitution technique that naive lacks."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is *cur=='[' at uri.c:454, true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "uri.c:454:9",
+            "exact_quote": "Source line:     if (*cur == '[') {"
+          },
+          {
+            "claim": "cmplog wins over naive at this branch with an I2S technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "value_profile wins over naive at this branch with a value_profile technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile > naive  [delta: value_profile]"
+          },
+          {
+            "claim": "A cmplog winner seed contains 'http://[' so *cur=='[' is satisfied at the host position.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 20b2621140bcb91b offset 0x00",
+            "exact_quote": "3d 22 6a 22 74 70 3a 2f 2f 5b 61 6b 65 75 72 2a   =\"j\"tp://[akeur*"
+          },
+          {
+            "claim": "A value_profile winner seed contains 'http://[' so *cur=='[' is satisfied.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 2ec8851de49ee930 offset 0x00",
+            "exact_quote": "27 68 74 74 70 3a 2f 2f 5b 77 77 2e 77 33 2e 6f   'http://[ww.w3.o"
+          },
+          {
+            "claim": "Winner inputs concentrate the '[' byte at offset 0x08 while loser inputs never do, an informative dataflow signal at the host position.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0008",
+            "exact_quote": "0x0008  5b([)x8 2f(/)x6 3a(:)x3             2f(/)x24 3a(:)x7 74(t)x5 66(f)x3 +9u  PARTIAL"
+          },
+          {
+            "claim": "A naive loser seed reaches the same authority position but holds 'www' (no bracket) at the host, so the false branch is taken.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 0028492ac168fa2b offset 0x00",
+            "exact_quote": "44 20 27 68 74 74 70 3a 2f 2f 77 77 77 2e 77 33   D 'http://www.w3"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other operand at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile retains an input when its CMP-operand pair is closer to matching than any seen before, ratcheting toward the target byte.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "naive has only edge counters and no CMP introspection, so it cannot sense closeness to '['.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Feedback",
+            "exact_quote": "per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on *cur=='[' where cmplog and value_profile reach the bracket branch no faster than naive (equal time-to-resolve across all three), showing the literal bracket byte is not what the comparison-solving techniques supply."
+        },
+        "weakest_evidence_point": "The value_profile hypothesis assumes CMP_MAP closeness on a single-character '[' compare gives a meaningful gradient, but a 1-byte equality has very coarse Hamming buckets, so its advantage over naive may instead come from retaining the shared 'http://' prefix rather than ratcheting the host byte itself.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_7038",
+      "target": "libxml2",
+      "branch_id": 7038,
+      "analysis_path": "prompts/libxml2_7038.analysis.json",
+      "file": "/src/libxml2/uri.c",
+      "function": "xmlBuildURI",
+      "line": "2064",
+      "source_line": "    if ((ref->path != NULL) && (ref->path[0] == '/')) {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "'/'",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2S intercepts the single-byte ref->path[0]=='/' comparison, logs operand 0x2f, then substitutes '/' at the path-start offset, synthesizing the absolute-path prefix that naive rarely produces.",
+        "one_line": "I2S substitutes slash byte at URI path-start to satisfy absolute-path check"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "The reference URI's path component must begin with a literal '/' so ref->path[0]=='/' takes the absolute-path branch.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A parsed reference-URI path whose first character is a slash: the systemId/URI string must contain a path token beginning with '/' (e.g. SYSTEM \"/tds/1\"), so that after URI parsing ref->path != NULL and ref->path[0] == '/' (0x2f).",
+            "why_winner_satisfies": "Every cmplog winner seed carries a SYSTEM-id path that starts with '/': seed 1 has SYSTEM \"/tds/1, seed 2 has SYSTEM \"/////=, seed 3 has SYSTEM \"/t@.'', seed 5 has SYSTEM \"/tds//. The slash at the path start makes ref->path[0]=='/' true, taking the blocked T side (W-only lines 2065-2067 are hit).",
+            "why_loser_doesnt": "The naive loser seeds put a non-slash first character in the path: seeds 1 and 2 have SYSTEM \"dtds/1 (path begins with 'd'), so ref->path[0] != '/'. The branch evaluates false and execution falls into the relative-path merge block (L-only lines 2078-2133).",
+            "mechanism_attribution": "cmplog intercepts the single-byte comparison ref->path[0]=='/' via __sanitizer_cov_trace_cmp1 and logs operand 0x2f ('/'); I2SRandReplace then scans the input and substitutes '/' at the path-start offset, directly synthesizing the absolute-path prefix. naive has no CMP introspection and must hit the exact slash by blind havoc, which it largely fails to do (1/10 resolved)."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked branch is the true side of ref->path[0]=='/', the absolute-path test.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "uri.c:2064:32",
+            "exact_quote": "if ((ref->path != NULL) && (ref->path[0] == '/')) {"
+          },
+          {
+            "claim": "Taking the true side jumps to step_7 (the W-only path-copy), confirming this branch gates the absolute-path resolution.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2065-2067",
+            "exact_quote": "[W]  2065  \tres->path = xmlMemStrdup(ref->path);"
+          },
+          {
+            "claim": "Winner cmplog seeds contain a SYSTEM-id whose path begins with '/'.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "winner seed 1 id=6c78d3f922fb9894 offset 0x30",
+            "exact_quote": "61 20 53 59 53 54 45 4d 20 22 2f 74 64 73 2f 31   a SYSTEM \"/tds/1"
+          },
+          {
+            "claim": "Another winner seed has a run of slashes at the path start.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "winner seed 2 id=0a8ffe5adb5dead8 offset 0x30",
+            "exact_quote": "61 20 53 59 53 54 45 4d 20 22 2f 2f 2f 2f 2f 3d   a SYSTEM \"/////="
+          },
+          {
+            "claim": "Loser naive seeds put 'd' (not '/') as the first path character.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "loser seed 1 id=022872fb8319f510 offset 0x30",
+            "exact_quote": "61 20 53 59 53 54 45 4d 20 22 64 74 64 73 2f 31   a SYSTEM \"dtds/1"
+          },
+          {
+            "claim": "The loser falls into the relative-path merge block instead of the absolute-path copy.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2078",
+            "exact_quote": "[L]  2078      len = 2; /* extra / and 0 */"
+          },
+          {
+            "claim": "At the blocker line the winner takes T while the loser never does (W T=10 F=0, L T=0 F=13).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L2064",
+            "exact_quote": "L2064  T=10 F=0  T=0 F=13  if ((ref->path != NULL) && (ref->path[0] == '/')) {  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog intercepts integer CMP operands and I2SRandReplace substitutes the matched operand into the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator and so cannot solve the CMP except by blind havoc.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "cmplog resolves the branch in all 10 trials while naive resolves only 1.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog>naive",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on ref->path[0]=='/' where naive resolves the branch as fast as cmplog (no cmplog advantage), or where forcing a non-slash first path byte still takes the true side \u2014 either would refute the single-byte '/' I2S substitution as the divergence cause."
+        },
+        "weakest_evidence_point": "The single-byte comparison ref->path[0]=='/' is a 1-byte CMP, which is also reachable by blind havoc; the attribution rests on cmplog's 10/10 vs naive's 1/10 plus the dash-row lineage floor rather than a direct I2SRandReplace name in metadata.",
+        "confidence": "high"
+      }
+    }
+  ]
+}

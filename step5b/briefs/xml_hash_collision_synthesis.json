@@ -1,0 +1,115 @@
+{
+  "feature_id": "xml_hash_collision_synthesis",
+  "mechanism_family": "I2S_pro",
+  "mechanism_label": "xml_hash_collision_synthesis",
+  "definition": "I2S reuses name-equality comparands observed during a hash-chain walk to generate multiple related names that collide into the same bucket, growing the hash chain so the loop guard fires.",
+  "n_members": 1,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog"
+    ],
+    "lacks_axis": [
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libxml2_6402",
+      "target": "libxml2",
+      "branch_id": 6402,
+      "analysis_path": "prompts/libxml2_6402.analysis.json",
+      "file": "/src/libxml2/hash.c",
+      "function": "xmlHashAddEntry3",
+      "line": "572",
+      "source_line": "\t    for (insert = &(table->table[key]); insert->next != NULL;",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace substitutes logged name-equality comparands from the hash-chain walk back into input bytes, generating multiple related names that collide into the same bucket and grow the ->next chain so the for-loop's true guard fires; naive's havoc produces no collisions.",
+        "one_line": "I2S manufactures colliding hash entries by reusing chain-walk comparands"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must register multiple distinct hash names colliding into one bucket so the chain-walk sees insert->next != NULL.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "An XML document that registers at least two distinct named entries (name/name2/name3 triples) in xmlHashAddEntry3 whose computed key collides into the same bucket, so the bucket already holds a linked chain (table->table[key] has a non-NULL ->next) when a later entry is added.",
+            "why_winner_satisfies": "cmplog resolves the branch in 8/10 trials with avg hitcount 1 on the branch; its I2SRandReplace mutator substitutes logged comparison operands from the chain-walk equality checks (insert->name == name) back into input bytes, producing several distinct-yet-related names that accumulate in one bucket and grow the ->next chain so the for-loop guard's true side is taken.",
+            "why_loser_doesnt": "naive resolves only 1/10 trials with avg hitcount 0; its havoc/token mutators flip bytes blindly and tend to produce a single distinct name or no collision, so the bucket stays empty (insert == NULL via valid == 0) or holds exactly one entry with ->next == NULL, leaving the true branch untaken.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer recorded at the name-equality comparisons in the chain-walk and splices a matched operand into the input at the offset where it appeared, generating extra hash entries that share a bucket; this comparison-introspection capability is exactly what naive lacks, explaining the cmplog>naive divergence."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked true side is the loop guard insert->next != NULL inside xmlHashAddEntry3, requiring an existing chain in the bucket.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6 / hash.c:572",
+            "exact_quote": "for (insert = &(table->table[key]); insert->next != NULL;"
+          },
+          {
+            "claim": "Entering the chain-walk loop requires the bucket to be already valid (non-empty), so a prior collision must have populated it.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "hash.c:564-568",
+            "exact_quote": "if (table->table[key].valid == 0) {\n\tinsert = NULL;\n    } else {"
+          },
+          {
+            "claim": "The chain-walk compares insert->name/name2/name3 against the new name triple, the comparisons whose operands cmplog logs.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "hash.c:570-573",
+            "exact_quote": "if ((insert->name == name) &&\n\t\t    (insert->name2 == name2) &&\n\t\t    (insert->name3 == name3))"
+          },
+          {
+            "claim": "cmplog wins the branch 8/10 while naive blocks 9/10, with cmplog showing avg hitcount 1 vs naive 0.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "avg hitcount on branch: winner=1  loser=0"
+          },
+          {
+            "claim": "naive's mutators are blind byte/havoc/token operations with no comparison introspection.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive section",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "cmplog's I2SRandReplace substitutes a logged comparison operand into the input at matching offsets, the mechanism enabling distinct colliding names.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness requiring only a single distinct hash entry (no second colliding key) where cmplog still resolves the insert->next != NULL true side at the same rate as naive would refute the collision-chain requirement."
+        },
+        "weakest_evidence_point": "No winner-resolving seed or lineage is available, so the claim that I2SRandReplace specifically (rather than lucky havoc) generates the colliding names is inferred from source + counts, not directly observed.",
+        "confidence": "low"
+      }
+    }
+  ]
+}

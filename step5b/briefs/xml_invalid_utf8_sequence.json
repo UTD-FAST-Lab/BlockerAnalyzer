@@ -1,0 +1,127 @@
+{
+  "feature_id": "xml_invalid_utf8_sequence",
+  "mechanism_family": "I2S_pro",
+  "mechanism_label": "xml_invalid_utf8_sequence",
+  "definition": "I2S places high-bit UTF-8 lead bytes (0xf5/0xff) at the parse cursor to construct an out-of-range codepoint that fails IS_CHAR validation, reaching the character-error branch.",
+  "n_members": 1,
+  "involved_fuzzers": [
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libxml2_8138",
+      "target": "libxml2",
+      "branch_id": 8138,
+      "analysis_path": "prompts/libxml2_8138.analysis.json",
+      "file": "/src/libxml2/parserInternals.c",
+      "function": "xmlStringCurrentChar",
+      "line": "764",
+      "source_line": "            if (!IS_CHAR(val)) {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "other:bitflag_test",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace splices logged comparand bytes (high-bit multibyte lead bytes 0xf5/0xff) into the parse cursor offset, constructing an out-of-range UTF-8 sequence whose decoded val fails IS_CHAR, reaching the error branch.",
+        "one_line": "I2S plants high-bit lead byte producing out-of-range UTF-8 codepoint"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input needs a high-bit multibyte UTF-8 lead byte that decodes to a codepoint outside the allowed XML char range.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A byte at the parse cursor with the high bit set (c & 0x80) forming a multibyte UTF-8 sequence whose decoded value val fails IS_CHAR(val), e.g. a 0xf5/0xff lead-byte run that produces an out-of-allowed-range codepoint.",
+            "why_winner_satisfies": "The winner-resolving seed begins with f5 ff ff ff ff ff ff ff: 0xf5 and 0xff have the high bit set, so c & 0x80 is true and the bytes are decoded as a multibyte sequence whose resulting val lands out of the IS_CHAR range, taking the blocked TRUE side and reaching the xmlErrEncodingInt call at lines 765-767.",
+            "why_loser_doesnt": "The loser-blocking seed reaches line 764 but only on the False side (T=0 F=3): its decoded multibyte values stay inside the allowed XML char range, so IS_CHAR(val) is true and the TRUE branch is never taken.",
+            "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator that value_profile lacks; I2SRandReplace splices logged comparand bytes into the input at the cursor offset, constructing the exact high-bit multibyte lead sequence that decodes to an out-of-range val, which value_profile's distance-feedback-only search fails to assemble within budget."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the IS_CHAR(val) test whose TRUE side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "parserInternals.c:764",
+            "exact_quote": "if (!IS_CHAR(val)) {"
+          },
+          {
+            "claim": "Reaching line 764 requires a high-bit byte (c & 0x80) triggering the multibyte decode path.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L735",
+            "exact_quote": "if (c & 0x80) {"
+          },
+          {
+            "claim": "The winner-resolving seed begins with a high-bit lead-byte run f5 ff ff ff ...",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id e77944c783da000c offset 0x0000",
+            "exact_quote": "f5 ff ff ff ff ff ff ff"
+          },
+          {
+            "claim": "The winner seed was discovered by value_profile_cmplog.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id e77944c783da000c",
+            "exact_quote": "fuzzer=value_profile_cmplog"
+          },
+          {
+            "claim": "At the blocker line the loser only takes the False side (T=0) while the winner takes True.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L764",
+            "exact_quote": "d=1   L 764  T=3 F=0  T=0 F=3  if (!IS_CHAR(val)) {  <-- BLOCKER"
+          },
+          {
+            "claim": "The winner-resolving overlay shows the error-reporting block at 765-767 hit only by the winner.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L765-767",
+            "exact_quote": "[W]   765  \t        xmlErrEncodingInt(ctxt, XML_ERR_INVALID_CHAR,"
+          },
+          {
+            "claim": "value_profile_cmplog adds I2SRandReplace that value_profile lacks.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator, relying on CMP_MAP gradient only.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where value_profile resolves the IS_CHAR(val) TRUE branch as often and as fast as value_profile_cmplog, showing the out-of-range multibyte codepoint is reachable by CMP_MAP gradient alone without I2S substitution."
+        },
+        "weakest_evidence_point": "The exact decoded val that fails IS_CHAR is inferred from the high-bit lead bytes rather than observed directly; the precise out-of-range codepoint and which multibyte length path produced it is not pinned down in the prompt.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}
