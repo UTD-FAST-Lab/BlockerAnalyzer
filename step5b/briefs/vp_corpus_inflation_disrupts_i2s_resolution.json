@@ -1,0 +1,272 @@
+{
+  "feature_id": "vp_corpus_inflation_disrupts_i2s_resolution",
+  "mechanism_family": "VP_anti",
+  "mechanism_label": "vp_gradient_stage_sabotages_i2s_substitution",
+  "definition": "VP's CMP_MAP gradient stage in value_profile_cmplog inflates the interesting-bucket corpus and/or interferes with I2S's direct operand substitution, causing the combined fuzzer to perform worse than cmplog alone at literal-codepoint gates that I2S resolves cleanly.",
+  "n_members": 2,
+  "involved_fuzzers": [
+    "cmplog",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "value_profile"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "value_profile",
+    "has_axis": [
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "cmplog"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "harfbuzz_5624_h1",
+      "target": "harfbuzz",
+      "branch_id": 5624,
+      "analysis_path": "prompts_b/harfbuzz_5624.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shape-fallback.cc",
+      "function": "hb-ot-shape-fallback.cc:recategorize_combining_class(unsigned int, unsigned int)",
+      "line": "52",
+      "source_line": "\tcase 0x0E37u:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "0x0E37",
+        "operand_width_bytes": 2,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "The VP CMP_MAP gradient stage added on top of cmplog in vpc interferes with I2S's direct substitution of the 0x0E37 codepoint operand, preventing reliable placement and causing vpc to lose to cmplog alone.",
+        "one_line": "VP gradient stage interferes with I2S codepoint substitution, degrading vpc vs cmplog"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "value_profile_cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must carry codepoint 0x0E37 (Thai U+0E37, little-endian bytes 37 0e) at a buffer-glyph offset so switch(u) takes case 0x0E37u.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>value_profile_cmplog (value_profile)"
+            ],
+            "what_input_feature": "The same exact-equality target: a glyph codepoint of 0x0E37 (little-endian 37 0e) substituted into the input so switch(u) takes case 0x0E37u.",
+            "why_winner_satisfies": "cmplog winner seed d484b55bd133cd62 ends in '37 0e' (offset 0x18) and its ancestor chain contains an I2S-floor dash row at depth 5; I2SRandReplace reads the intercepted codepoint==0x0E37 CMP and copies the constant 0x0E37 directly into the input, letting cmplog resolve 8/10.",
+            "why_loser_doesnt": "value_profile_cmplog blocks 9/10 (loser in this pair too); adding the CMP_MAP gradient delta on top of cmplog does not help and the combined fuzzer fails to place 0x0E37 reliably, with loser hitcount 5 vs winner-resolving runs.",
+            "mechanism_attribution": "cmplog's I2SRandReplace performs direct input-to-state substitution of the 0x0E37 operand at matching byte offsets; the lone delta to the loser value_profile_cmplog is the value_profile CMP_MAP stage, which interferes, so the I2S-only fuzzer wins."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the switch case for the literal codepoint 0x0E37.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6 / source line",
+            "exact_quote": "Source line: \tcase 0x0E37u:"
+          },
+          {
+            "claim": "The branch is reached only when the codepoint u flows through switch(u) inside the Thai/Lao block.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L59-L65",
+            "exact_quote": "switch (u)"
+          },
+          {
+            "claim": "value_profile is the winner over value_profile_cmplog and the delta technique is I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "value_profile resolves 10/10 while value_profile_cmplog blocks 9/10, with winner branch hitcount 166 vs loser 5.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 stats",
+            "exact_quote": "avg hitcount on branch: winner=166  loser=5"
+          },
+          {
+            "claim": "A value_profile winner seed carries the little-endian 0x0E37 byte run 37 0e.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 025be01a9b9fc036 offset 0x2c",
+            "exact_quote": "68 7a 6f 2d 68 61 6e 74 2d 6d 6f 00 37 0e 00 00"
+          },
+          {
+            "claim": "Another value_profile winner seed also carries 37 0e near offset 0x10.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 087d01cc6daaeb6f offset 0x10",
+            "exact_quote": "37 0e 00 00 47 0e 00 00 37 0e 00 00 00 00 0e 00"
+          },
+          {
+            "claim": "value_profile uses CMP_MAP distance-bucket feedback that rewards operands creeping toward a match, with no I2SRandReplace.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "cmplog is the winner over value_profile_cmplog and the delta technique is value_profile.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: cmplog > value_profile_cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "The cmplog winner seed ends in the 37 0e little-endian 0x0E37 literal.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed d484b55bd133cd62 offset 0x18",
+            "exact_quote": "20 00 1a 4d 6b 64 00 f8 37 0e"
+          },
+          {
+            "claim": "I2SRandReplace substitutes an intercepted CMP operand into the input at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile_cmplog loses both pairs, blocking 9/10 at this branch.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "value_profile_cmplog row",
+            "exact_quote": "value_profile_cmplog             1        9          0  loser (I2S vs value_profile); loser (value_profile vs cmplog)"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on codepoint==0x0E37 where value_profile_cmplog resolves as fast as or faster than both value_profile and cmplog (no interference), with winner/loser branch hitcounts within noise."
+        },
+        "weakest_evidence_point": "Why combining BOTH techniques (value_profile_cmplog) underperforms each single technique is an interference inference; the prompt shows the divergence but no direct mechanism trace of why the union regresses.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5660_h0",
+      "target": "harfbuzz",
+      "branch_id": 5660,
+      "analysis_path": "prompts_b/harfbuzz_5660.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shape-fallback.cc",
+      "function": "hb-ot-shape-fallback.cc:recategorize_combining_class(unsigned int, unsigned int)",
+      "line": "145",
+      "source_line": "    case HB_MODIFIED_COMBINING_CLASS_CCC118: /* sign u / sign uu */",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "HB_MODIFIED_COMBINING_CLASS_CCC118",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "VP's CMP_MAP gradient stage in vpc inflates the interesting-bucket corpus with extra entries, polluting the corpus and starving the I2S-substituted U+0EB9 path that cmplog cleanly resolved; the added VP technique is the loss axis.",
+        "one_line": "VP corpus inflation in vpc starves I2S-planted codepoint path that cmplog alone resolves"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "value_profile_cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A glyph whose codepoint is a Lao CCC118 sign-u character (U+0EB8/0EB9, bytes b9 0e 00 00) must reach the modified-combining-class switch.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>value_profile_cmplog (value_profile)"
+            ],
+            "what_input_feature": "A 4-byte little-endian codepoint slot holding a Lao 'sign u/uu' character (e.g. b9 0e 00 00 = U+0EB9) classified as a non-spacing mark, so recategorize_combining_class sees klass == HB_MODIFIED_COMBINING_CLASS_CCC118 and the line-145 case is taken.",
+            "why_winner_satisfies": "cmplog winning seeds are saturated with the b9 0e 00 00 codepoint run (Seed 2/3/4 begin with b9 ... b9 0e 00 00 patterns); the cmplog winner's lineage carries I2S-floor dash rows, so I2SRandReplace substituted the intercepted U+0EB9 codepoint operand into the input, planting the exact byte sequence that drives klass to CCC118.",
+            "why_loser_doesnt": "value_profile_cmplog blocks 8/10 with hitcount 0 on the branch and never plants the b9 0e codepoint run; the loser-blocking seeds carry ASCII filler (e.g. 'ttcf', 'nor', '5! ') and no b9 0e codepoint pattern.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver entry for the CCC118 codepoint comparison and substitutes U+0EB9 (b9 0e 00 00) into the input; vpc adds the value_profile CMP_MAP gradient on top, whose extra interesting-bucket corpus inflation distracts the schedule and pollutes the corpus so the I2S-found path is starved \u2014 the added value_profile technique is the loss axis."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the CCC118 (Lao sign u/uu) case in recategorize_combining_class, taken when klass equals CCC118.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "hb-ot-shape-fallback.cc:145",
+            "exact_quote": "case HB_MODIFIED_COMBINING_CLASS_CCC118: /* sign u / sign uu */"
+          },
+          {
+            "claim": "Reaching this code requires a glyph classified as a non-spacing mark whose modified combining class is read and recategorized.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 180-182",
+            "exact_quote": "combining_class = recategorize_combining_class (info[i].codepoint, combining_class);"
+          },
+          {
+            "claim": "cmplog is the winner over value_profile_cmplog with the delta being value_profile.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: cmplog > value_profile_cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "A cmplog winning seed contains the b9 0e 00 00 codepoint run.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 3 id=8f2a9151726c6119",
+            "exact_quote": "0e 00 00 00 00 00 00 00 00 39 00 00 e9 4b 00 00"
+          },
+          {
+            "claim": "The cmplog winning seed begins with a b9 run feeding the codepoint slot.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 2 id=6639a9032f7ffe2a",
+            "exact_quote": "b9 0e 00 00 00 fe 01 01 00 03 00 00 00 fe 02 00"
+          },
+          {
+            "claim": "The loser blocks 8/10 with zero hitcount on the branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 loser",
+            "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+          },
+          {
+            "claim": "Loser-blocking seeds carry ASCII filler with no Lao codepoint run.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 3 id=06458dae620cb2e6",
+            "exact_quote": "20 74 74 63 66 20 20 20 20 20 20 20 20 20 20 20"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace substitutes one intercepted CMP operand for the other into the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile resolves all 10 trials and is the winner over value_profile_cmplog with delta I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "The value_profile winner sustains the branch with hitcount 267 while the loser has hitcount 0.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 avg hitcount",
+            "exact_quote": "avg hitcount on branch: winner=267  loser=0"
+          },
+          {
+            "claim": "A value_profile winning seed contains 0e-suffixed codepoint slots including b9 0e.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 1 id=04dbb8139e6820e9 (value_profile)",
+            "exact_quote": "00 00 1a 00 b9 0e 00 00 4c ff 7f ff ff 1b 00 f0"
+          },
+          {
+            "claim": "value_profile's CMP_MAP rewards inputs whose CMP operands are closer to matching, preserving them as corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "Adding I2S to value_profile produces the loser that stays blocked 19.90h on average.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 avg duration blocked",
+            "exact_quote": "avg duration blocked: winner=0.50h  loser=19.90h"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating only on a literal Lao CCC118 codepoint with NO value_profile-favoring distance gradient shows value_profile_cmplog resolving at least as fast as cmplog and value_profile, contradicting the both-techniques-is-worse corpus-pollution claim."
+        },
+        "weakest_evidence_point": "The corpus-pollution loss mechanism (vpc worse than each single technique) is inferred from the inverted win direction and blocked durations, not directly observed as off-path seed flooding in the prompt.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

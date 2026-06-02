@@ -1,0 +1,1541 @@
+{
+  "feature_id": "i2s_pro_structural_count_enables_loop",
+  "mechanism_family": "I2S_pro",
+  "mechanism_label": "count_field_loop_guard",
+  "definition": "I2S synthesizes a structural count or length field (ELF section count, font record count, loop-entry integer) so the loop guard evaluates true and the loop body executes, reaching branches gated behind a positive-count check.",
+  "n_members": 14,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "naive",
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "bloaty_63",
+      "target": "bloaty",
+      "branch_id": 63,
+      "analysis_path": "prompts_a/bloaty_63.analysis.json",
+      "file": "/src/bloaty/src/elf.cc",
+      "function": "elf.cc:bloaty::(anonymous namespace)::ReadELFSymbols(bloaty::InputFile const&, bloaty::RangeSink*, std::map<std::basic_string_view<char, std::char_traits<char> >, std::pair<unsigned long, unsigned long>, std::less<std::basic_string_view<char, std::char_traits<char> > >, std::allocator<std::pair<std::basic_string_view<char, std::char_traits<char> > const, std::pair<unsigned long, unsigned long> > > >*, bool)::$_0::operator()(bloaty::(anonymous namespace)::ElfFile const&, std::basic_string_view<char, std::char_traits<char> >, unsigned long) const",
+      "line": "856",
+      "source_line": "        for (Elf64_Xword i = 1; i < elf.section_count(); i++) {",
+      "signature": {
+        "gate_structure": "length_or_count_check",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2S substitutes ELF magic and class/section-count header operands from the CmpLog buffer into matching input offsets, raising the decoded section_count above 1 so the loop guard becomes true and ReadSection executes.",
+        "one_line": "I2S plants header bytes to raise section_count above 1, enabling the loop body"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A valid ELF header whose e_shnum (section_count) decodes to >=2, so the section-iteration loop body executes",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The input must parse as an ELF whose header fields (magic 7f 45 4c 46, class/endianness/version bytes at 0x04-0x07, and the section-header-count field) decode to a section_count() value of 2 or more, so the loop guard i < elf.section_count() is true on the first iteration (i=1).",
+            "why_winner_satisfies": "The cmplog winner seeds carry well-formed ELF identification bytes (e.g. 7f 45 4c 46 02 02 03 00 ... and 7f 45 4c 46 02 01 ...) plus header fields that make section_count() large: in the W role section_count() is invoked 286000 times and the loop guard at line 856 takes the true side (T=57200), whereas the loser does not, so the loop body and ReadSection run only for the winner.",
+            "why_loser_doesnt": "The naive loser seeds keep section_count() effectively at <=1 so the line-856 guard never takes the true branch (L role at line 856 shows T=0 F=29); section_count() fires only 222 times in L vs 286000 in W, and ReadSection (line 536) fires 0 times in L, meaning the loop body is never entered.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the per-execution CmpLogObserver buffer and substitutes one CMP operand into input offsets matching the other operand, letting it plant the exact header byte values (magic/class/section-count) that the ELF parser compares against, so the decoded section_count() crosses the loop bound. Naive has only blind havoc with no CMP introspection and cannot reliably hit the multi-byte header constraints."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the section-iteration loop guard whose true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "elf.cc:856",
+            "exact_quote": "for (Elf64_Xword i = 1; i < elf.section_count(); i++) {"
+          },
+          {
+            "claim": "The true (loop-entering) side is the globally blocked side.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L7",
+            "exact_quote": "Globally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "cmplog resolves the branch in all 10 trials while naive is blocked in all 10, a single I2S-delta decisive pair.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "In the winner role the line-856 guard takes the true side while in the loser role it never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 elf.cc:856",
+            "exact_quote": "d=1   L 856  T=57200 F=18  T=0 F=29  for (Elf64_Xword i = 1; i < elf.section_count(); i++) {"
+          },
+          {
+            "claim": "section_count() is invoked ~286000 times for the winner versus 222 for the loser, indicating the header decodes to a much larger count for W.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "elf.cc:80 section_count",
+            "exact_quote": "286000       222  elf.cc:bloaty::(anonymous namespace)::ElfFile::section_count() const"
+          },
+          {
+            "claim": "ReadSection (the loop body) executes only in the winner role, confirming the loser never enters the loop.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "elf.cc:536 ReadSection",
+            "exact_quote": "287000         0  elf.cc:bloaty::(anonymous namespace)::ElfFile::ReadSection(unsigned int, bloaty::(anonymous namespace)::ElfFile::Section*) const"
+          },
+          {
+            "claim": "Winner seeds carry well-formed ELF magic and identification bytes that the parser compares against.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "winner seed 8aaeeb3b8eacf665 offset 0x00",
+            "exact_quote": "7f 45 4c 46 02 02 03 00 7f 00 00 00 00 00 00 03"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand into matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator and relies on blind havoc/token mutation.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic ELF-parsing harness whose loop bound is set by a section-count header field where naive resolves the loop-entry branch as fast as cmplog (no significant cmplog>naive divergence), showing the multi-byte header constraint is not what gates the loop."
+        },
+        "weakest_evidence_point": "The exact header field whose value cmplog substitutes to raise section_count() is inferred from hit-count divergence and seed magic bytes, not pinned to a specific offset in the BYTE DIFF, since the differing offsets are PARTIAL and not concentrated to one section-count field.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "bloaty_77",
+      "target": "bloaty",
+      "branch_id": 77,
+      "analysis_path": "prompts_a/bloaty_77.analysis.json",
+      "file": "/src/bloaty/src/elf.cc",
+      "function": "elf.cc:bloaty::(anonymous namespace)::ReadELFTables(bloaty::InputFile const&, bloaty::RangeSink*)::$_0::operator()(bloaty::(anonymous namespace)::ElfFile const&, std::basic_string_view<char, std::char_traits<char> >, unsigned int) const",
+      "line": "991",
+      "source_line": "               for (Elf64_Xword i = 1; i < elf.section_count(); i++) {",
+      "signature": {
+        "gate_structure": "length_or_count_check",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2S reads section-count and magic-field CMP operands from the post-execution buffer and plants them back into ELF header offsets, synthesizing a section_count exceeding 1 that naive's blind havoc never constructs.",
+        "one_line": "I2S manufactures a valid section-count header so the loop guard evaluates true"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "ELF header bytes that parse to a section-header table with section_count() >= 2, so the loop body is entered.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A valid ELF header at offset 0x00 (magic 7f 45 4c 46 plus class/data/version fields) whose section-table fields (e_shnum / e_shoff and related header words at offsets ~0x04-0x2f) parse such that elf.section_count() returns a value >= 2, making the loop condition i < section_count() true for i starting at 1.",
+            "why_winner_satisfies": "Winner-resolving seeds carry the ELF magic and structured header bytes with non-0x20 values in the class/data/version and section-count region (e.g. 02 02 03 at offsets 0x04-0x06, concentrated low integer values at 0x07-0x2f), so the parsed header yields section_count() of 286000 entry hits in W and ReadSection fires; the true side of branch 991 is taken (W resolves 10/10).",
+            "why_loser_doesnt": "Loser-blocking seeds fill the section-table header region with 0x20 (space) padding runs (offsets 0x0a-0x1c are dominated by 20 20 20 ... in L), so the parsed header gives section_count()==0/1; section_count() entry-line is hit only 222 times in L vs 286000 in W and the loop body (ReadSection, line 993) is never entered, so the false side is taken (L blocks 10/10).",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads CMP operands from the post-execution CmpLogObserver buffer (here the integer comparison i < section_count() and the magic/header field compares inside the ELF struct reader) and substitutes the recorded comparand back into the matching input offsets, manufacturing a header whose parsed section_count exceeds 1; naive lacks I2S and must hit the multi-byte header layout by blind havoc, which it never does in 10 trials."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked branch is the loop guard whose true side enters the per-section loop body, requiring section_count() greater than the start index 1.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "elf.cc:991:40",
+            "exact_quote": "for (Elf64_Xword i = 1; i < elf.section_count(); i++) {"
+          },
+          {
+            "claim": "cmplog resolves the branch 10/10 while naive blocks 10/10, a single I2S-delta decisive pair.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "section_count() and ReadSection fire heavily in the winner and almost never in the loser, showing the loop body is entered only in W.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "elf.cc:80 section_count / elf.cc:536 ReadSection",
+            "exact_quote": "286000       222  elf.cc:bloaty::(anonymous namespace)::ElfFile::section_count() const"
+          },
+          {
+            "claim": "Winner seeds carry a structured ELF header (magic plus class/data/version 02 02 03) rather than padding.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 8aaeeb3b8eacf665",
+            "exact_quote": "7f 45 4c 46 02 02 03 00 7f 00 00 00 00 00 00 03"
+          },
+          {
+            "claim": "Loser seeds fill the section-table header region with 0x20 space padding runs.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 5d61a88c26233d9d",
+            "exact_quote": "7f 45 4c 46 02 01 01 00 00 00 20 20 20 20 20 00"
+          },
+          {
+            "claim": "Byte-diff shows winner header bytes are low concentrated integers while loser bytes are 0x20 space runs at the section-count region offsets.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x000a-0x000e",
+            "exact_quote": "0x000b  00(.)x5 20( )x1                     20( )x6 21(!)x2 7f(.)x1 01(.)x1"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace, which scans the input for a recorded CMP operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S; it relies on havoc plus token mutation only.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic ELF-parsing harness gating on section_count()>1 where cmplog and naive resolve the loop-body branch at statistically indistinguishable rates, showing I2S substitution gives no advantage in reaching section_count>=2."
+        },
+        "weakest_evidence_point": "The exact header field (e_shnum vs e_shoff or a derived count) that section_count() reads is inferred from source/byte-diff, not directly confirmed, so the precise input offset that must be substituted is uncertain.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "bloaty_81",
+      "target": "bloaty",
+      "branch_id": 81,
+      "analysis_path": "prompts_a/bloaty_81.analysis.json",
+      "file": "/src/bloaty/src/elf.cc",
+      "function": "elf.cc:bloaty::(anonymous namespace)::DoReadELFSections(bloaty::RangeSink*, bloaty::(anonymous namespace)::ReportSectionsBy)::$_0::operator()(bloaty::(anonymous namespace)::ElfFile const&, std::basic_string_view<char, std::char_traits<char> >, unsigned int) const",
+      "line": "1033",
+      "source_line": "        for (Elf64_Xword i = 1; i < elf.section_count(); i++) {",
+      "signature": {
+        "gate_structure": "length_or_count_check",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2S reads section-table header field CMP operands and substitutes them at matching offsets, producing a self-consistent section_count above 1 and making the loop condition true; lineage dash-row confirms I2S ancestry.",
+        "one_line": "I2S synthesizes consistent section-table bytes so section_count exceeds 1 for the loop"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "ELF header section-table fields (e_shoff/e_shnum/e_shentsize region) must encode a valid section_count() greater than 1 to enter the loop body.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The ELF header section-table descriptor bytes (section-header offset / count / entry-size, derived from header fields in the 0x05-0x3f region after the 7f454c46 magic) must form a structurally consistent table so elf.section_count() returns a value greater than 1, making the loop condition i < elf.section_count() true at least once.",
+            "why_winner_satisfies": "Winner cmplog seeds carry structured header fields (e.g. class/data bytes 02 02 03 at 0x04-0x06 and structured table descriptors around 0x17-0x1f such as 21(!)/98/38/10) and DO take the true side: the blocker branch shows T=40 F=24 in W versus T=0 in L, and ReadSection/Section::header() fire 287000 times in W vs 0 in L, proving section_count()>1 and the loop body executing.",
+            "why_loser_doesnt": "Loser naive seeds leave the section-table region filler/uniform (offsets 0x17-0x1f are 20( ) padding or ff/00 runs, e.g. 0x18 is 20( )x10 and 0x1d-0x1f are ff/00 in L), so section_count() collapses to <=1; the loop condition is always false (L1033 T=0 F=57) and section_count() is entered only 222 times vs 286000 in W.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the per-execution CmpLogObserver buffer for the integer comparisons that validate the section-table header fields, locates the matching operand byte sequence in the input, and substitutes the expected operand at those header offsets, synthesizing a self-consistent section count that naive's blind havoc cannot land on; lineage shows I2S-floor dash rows in the winner's ancestor chain."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is a loop guard whose true side requires elf.section_count() to exceed 1.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L1033",
+            "exact_quote": "for (Elf64_Xword i = 1; i < elf.section_count(); i++) {"
+          },
+          {
+            "claim": "The globally blocked side is the true (loop-entering) branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L1033 blocked side",
+            "exact_quote": "Globally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "Winner takes the loop's true side while loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1033",
+            "exact_quote": "L1033  T=40 F=24  T=0 F=57"
+          },
+          {
+            "claim": "The loop body fires ReadSection and Section::header() hundreds of thousands of times in W and never in L, confirming section_count()>1 only for the winner.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "elf.cc:536-555 ReadSection / elf.cc:100 Section::header()",
+            "exact_quote": "287000         0  elf.cc:bloaty::(anonymous namespace)::ElfFile::ReadSection(unsigned int, bloaty::(anonymous namespace)::ElfFile::Section*) const  (/src/bloaty/src/elf.cc:536-555)"
+          },
+          {
+            "claim": "section_count() is evaluated 286000 times in W but only 222 times in L, indicating the loop iterates for the winner and short-circuits for the loser.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "elf.cc:80 section_count()",
+            "exact_quote": "286000       222  elf.cc:bloaty::(anonymous namespace)::ElfFile::section_count() const  (/src/bloaty/src/elf.cc:80-80)"
+          },
+          {
+            "claim": "Winner seeds carry structured header/section-table descriptor bytes in the post-magic region.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id e4860a9307c6e75f offsets 0x04-0x1f",
+            "exact_quote": "7f 45 4c 46 02 02 03 00 7f 00 00 00 00 00 00 03   .ELF............"
+          },
+          {
+            "claim": "Loser seeds leave the section-table region as uniform space/0xff filler, so no valid section count is encoded.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x18",
+            "exact_quote": "0x0018  20( )x5 00(.)x2 24($)x1 61(a)x1     20( )x10                            PARTIAL"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes the expected CMP operand at the matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator, only blind havoc/token mutations.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A naive trial resolving the branch (taking L1033 true) by landing a valid multi-section header through blind havoc at the same rate as cmplog, showing I2S substitution is not the necessary mechanism."
+        },
+        "weakest_evidence_point": "The byte diff is PARTIAL across the section-table offsets rather than a clean single-offset DIFFER, so the exact header field whose CMP I2S solves is inferred from structure rather than pinned to one operand width.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "bloaty_87",
+      "target": "bloaty",
+      "branch_id": 87,
+      "analysis_path": "prompts_a/bloaty_87.analysis.json",
+      "file": "/src/bloaty/src/elf.cc",
+      "function": "elf.cc:bloaty::(anonymous namespace)::ReadDWARFSections(bloaty::InputFile const&, bloaty::dwarf::File*, bloaty::RangeSink*)",
+      "line": "1193",
+      "source_line": "  for (Elf64_Xword i = 1; i < elf.section_count(); i++) {",
+      "signature": {
+        "gate_structure": "length_or_count_check",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2S substitutes logged CMP operands for ELF section-header offset and count fields into the input, yielding a section_count above 1 so the DWARF-section loop guard passes and the loop body executes.",
+        "one_line": "I2S fills ELF section-header fields to produce section_count greater than 1"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must be a 64-bit ELF whose header e_shnum/e_shoff fields yield section_count() > 1 so the loop guard's true side fires",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A valid 64-bit ELF header (magic 7f 45 4c 46, ELFCLASS64 = 0x02 at offset 0x04) whose section-header-table fields (e_shoff at 0x28 and e_shnum near 0x3c) parse to a section_count() strictly greater than 1, so the loop guard i < elf.section_count() takes its true side and the body at lines 1194-1239 executes.",
+            "why_winner_satisfies": "Winner cmplog seeds set offset 0x04 to 0x02 (ELFCLASS64) and carry non-trivial header offset/count fields, so ElfFile::section_count() returns ~286000 hits in W vs ~230 in L and the blocker line reports T=16 in W versus T=0 in L; the loop body lines 1194-1239 are W-only.",
+            "why_loser_doesnt": "Loser naive seeds use offset 0x04 = 0x01 (ELFCLASS32) with mostly-zeroed or 0x20-padded section-table fields, so section_count() resolves to 0/1, the guard is always false (L1193 shows T=0 F=20), the loop body never runs, and ElfFile::section_count() is hit only ~230 times in L.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes one logged CMP operand at input offsets matching the other, letting it splice the precise section-count/offset comparand values into the header so the loop guard comparison passes; naive has only blind havoc and never solves the multi-field header constraint."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is a loop guard comparing the index against the ELF section count, with the true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L1193, elf.cc:1193:27",
+            "exact_quote": "for (Elf64_Xword i = 1; i < elf.section_count(); i++) {"
+          },
+          {
+            "claim": "Winner seeds set offset 0x04 to 0x02 (ELFCLASS64) while loser seeds use 0x01 (ELFCLASS32).",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0005",
+            "exact_quote": "0x0005  02(.)x4 01(.)x2                     01(.)x10"
+          },
+          {
+            "claim": "The loop body executes only in the winner role; the body lines 1194-1239 are marked [W].",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1194-L1195",
+            "exact_quote": "[W]  1195      elf.ReadSection(i, &section);"
+          },
+          {
+            "claim": "section_count() is invoked ~286000 times in the winner versus ~230 in the loser, showing the count is non-zero only for winners.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "elf.cc:80 ElfFile::section_count()",
+            "exact_quote": "286000       230  elf.cc:bloaty::(anonymous namespace)::ElfFile::section_count() const"
+          },
+          {
+            "claim": "The blocker line takes its true side in the winner (T=16) but never in the loser (T=0).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L1193",
+            "exact_quote": "d=1   L1193  T=16 F=12  T=0 F=20  for (Elf64_Xword i = 1; i < elf.section_count(); i++) {  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace, which scans the input for one CMP operand and substitutes the other at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive has no I2S capability, only the havoc/token mutator stack.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic ELF-header harness where cmplog fails to resolve the section_count loop guard no faster than naive (no significant cmplog>naive divergence), indicating I2S substitution does not help solve the multi-field section-table comparison."
+        },
+        "weakest_evidence_point": "The exact offsets that feed section_count() (e_shoff/e_shnum) are inferred from ELF layout plus diffuse PARTIAL byte-diff signal rather than a single concentrated I2S-substituted offset, so the precise comparand splice point is uncertain.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "bloaty_90",
+      "target": "bloaty",
+      "branch_id": 90,
+      "analysis_path": "prompts_a/bloaty_90.analysis.json",
+      "file": "/src/bloaty/src/elf.cc",
+      "function": "elf.cc:bloaty::(anonymous namespace)::ElfObjectFile::GetBuildId[abi:cxx11]() const",
+      "line": "1279",
+      "source_line": "    for (Elf64_Xword i = 1; i < elf.section_count(); i++) {",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace intercepts integer CMPs on ELF header fields (e_shoff/e_shnum/e_shentsize) and substitutes correlated section-table values into input bytes, raising section_count() above 1 to open the loop.",
+        "one_line": "I2S splices ELF header integers to make section_count exceed 1"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "ELF header whose section-header-table fields yield section_count()>1 so the GetBuildId section loop iterates instead of terminating immediately",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A valid ELF header (7f 45 4c 46 magic) whose e_shoff / e_shnum / e_shentsize section-header-table fields parse to a section count greater than 1, so the loop condition i < elf.section_count() is true on the first iteration and the loop body at lines 1280-1291 executes.",
+            "why_winner_satisfies": "The cmplog winner seeds carry the ELF magic and structured header bytes that drive section_count() to fire 286000 times in W vs 230 in L, and the blocker true side is taken (T=228000) only in W; ReadSection and Section::header() run 287000 times in W and 0 in L, showing the loop body actually iterates over real sections.",
+            "why_loser_doesnt": "The naive loser seeds keep header fields that make section_count() evaluate to <=1, so the loop condition i<section_count() is immediately false: the blocker shows T=0 F=120 in L (loop never enters), Section::header()/ReadSection have 0 L hits, and instead the segment path (Segment::header() 2130000 L hits, GetSegmentName 427000 L hits) is exercised.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the per-execution CmpLogObserver buffer and substitutes the comparand operands of the integer CMPs that the StructReader/section-count parsing performs on the header bytes, splicing the matching section-table field values into the input so section_count() crosses 1; naive has only havoc/token mutators and no CMP introspection, so it cannot reliably synthesize the correlated header fields."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the section-iteration loop condition in GetBuildId and its globally-blocked side is the true branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "elf.cc:1279, L1279",
+            "exact_quote": "for (Elf64_Xword i = 1; i < elf.section_count(); i++) { <-- BLOCKER"
+          },
+          {
+            "claim": "Taking the true side requires section_count() to exceed 1 so the loop body executes; the body (ReadSection / SHT_NOTE check) is W-only.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1281-L1282",
+            "exact_quote": "[W]  1281        elf.ReadSection(i, &section);"
+          },
+          {
+            "claim": "The winner drives section_count() and ReadSection to fire hundreds of thousands of times while the loser invokes them zero times.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "elf.cc:536-555 ReadSection",
+            "exact_quote": "  287000         0  elf.cc:bloaty::(anonymous namespace)::ElfFile::ReadSection(unsigned int, bloaty::(anonymous namespace)::ElfFile::Section*) const  (/src/bloaty/src/elf.cc:536-555)"
+          },
+          {
+            "claim": "section_count() returns >1 in W (286000 hits) but is effectively dead in L (230 hits).",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "elf.cc:80 section_count",
+            "exact_quote": "  286000       230  elf.cc:bloaty::(anonymous namespace)::ElfFile::section_count() const  (/src/bloaty/src/elf.cc:80-80)"
+          },
+          {
+            "claim": "In the loser the loop never enters: the blocker branch is T=0 F=120 in L versus T=228000 in W.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1279 d=1",
+            "exact_quote": "T=228000 F=90  T=0 F=120  for (Elf64_Xword i = 1; i < elf.section_count(); i++) {  <-- BLOCKER"
+          },
+          {
+            "claim": "Winner seeds carry the ELF magic plus structured header bytes (offsets 0x05-0x0f) that differ from loser seeds in the parsed header region.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0006",
+            "exact_quote": "   0x0006  00(.)x5 03(.)x3                     01(.)x10                            DIFFER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace, which substitutes one logged CMP operand at input offsets matching the other operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator, only havoc/token operators.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic ELF harness where naive resolves the section-iteration loop as fast as cmplog when the section-count fields are NOT gated behind correlated integer CMPs on header bytes (e.g. section_count derived from input length alone), showing I2S substitution is not what enables the winner."
+        },
+        "weakest_evidence_point": "The exact header offsets that I2S substitutes to lift section_count() above 1 are inferred from the broad byte-diff region (0x05-0x1f) rather than pinned to a single section-table field, since StructReader parsing spans the Ehdr.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "harfbuzz_5292",
+      "target": "harfbuzz",
+      "branch_id": 5292,
+      "analysis_path": "prompts_b/harfbuzz_5292.analysis.json",
+      "file": "/src/harfbuzz/src/hb-array.hh",
+      "function": "_ZNK10hb_array_tIKcE2asIN2OT16OpenTypeFontFileELj1ETnPN12hb_enable_ifIXeqT0_Li1EEvE4typeELPv0EEEPKT_v",
+      "line": "252",
+      "source_line": "  { return length < hb_min_size (T) ? &Null (T) : reinterpret_cast<const T *> (arrayZ); }",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "GSUB",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace reads the CmpLogObserver buffer from sfnt-magic and FOURCC table-tag comparisons and substitutes the expected operands (sfnt version 00 01 00 00 and tag literals like GSUB/GPOS/MATH) at the matching input offsets, making array length >= hb_min_size so the false branch is taken.",
+        "one_line": "I2S plants sfnt magic and FOURCC tags to pass array length >= hb_min_size"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must be a well-formed OpenType font file: a valid sfnt header plus recognized 4-byte table tags so the array length reaches hb_min_size(OpenTypeFontFile).",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "An OpenType sfnt blob whose leading bytes match the expected sfnt-version magic and whose table-directory entries carry recognized 4-byte FOURCC tags (GSUB/GPOS/MATH/...), so the parsed array length is >= hb_min_size(OpenTypeFontFile) and the gate at hb-array.hh:252 takes its false branch (returning a real reinterpret_cast<const T*> rather than &Null(T)).",
+            "why_winner_satisfies": "Every winning seed begins with the sfnt version 00 01 00 00 and embeds literal OpenType table tags at offset 0x0c (GSUB, GPOS, MATH, GPO), giving the array enough length to clear hb_min_size and resolve the false branch; the branch is hit 12529 (cmplog) / 5642 (vpc) times.",
+            "why_loser_doesnt": "Loser-blocking seeds are short and lack the sfnt magic and table-tag structure (e.g. a 6-byte seed 87 0e 0d 0e 22 0e), so length stays below hb_min_size and only the true (Null) side is ever taken; loser hitcount on the branch is 0.",
+            "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes the program's expected operands (the sfnt magic and FOURCC tag literals) directly into the input at the matching offsets, manufacturing the exact byte sequences the length/tag gate requires; naive and value_profile lack I2SRandReplace and must hit those multi-byte literals by chance, which they never do in 10 trials."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is a length-vs-min-size gate that returns either a Null pointer or a real cast pointer.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "hb-array.hh:252:12",
+            "exact_quote": "{ return length < hb_min_size (T) ? &Null (T) : reinterpret_cast<const T *> (arrayZ); }"
+          },
+          {
+            "claim": "The globally blocked side is the false branch, i.e. the side reached only when length is large enough.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Globally blocked side",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "Winning seeds begin with the OpenType sfnt version magic 00 01 00 00.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "W Seed 2 offset 0x0000",
+            "exact_quote": "0000: 00 01 00 00 00 01 ee ff 00 30 00 20 47 53 55 42   .........0. GSUB"
+          },
+          {
+            "claim": "Winning seeds embed literal OpenType table tags such as GPOS at offset 0x0c.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "W Seed 5 offset 0x0000",
+            "exact_quote": "0000: 00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+          },
+          {
+            "claim": "Offset 0x0c is concentrated on tag-letter bytes in W (G dominant) but not in L.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "0x000c",
+            "exact_quote": "0x000c  47(G)x19 4d(M)x1                    00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+          },
+          {
+            "claim": "The winner resolves the branch in all 10 trials with high hitcount while the loser stays blocked at hitcount 0.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog>naive",
+            "exact_quote": "avg hitcount on branch: winner=12529  loser=0"
+          },
+          {
+            "claim": "The value_profile_cmplog pair shows the same all-resolved-vs-all-blocked split with the I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 value_profile_cmplog>value_profile",
+            "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+          },
+          {
+            "claim": "A loser-blocking seed is a tiny 6-byte blob lacking any sfnt header or tag structure.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "L Seed 1",
+            "exact_quote": "0000: 87 0e 0d 0e 22 0e                                 ....\"."
+          },
+          {
+            "claim": "I2SRandReplace substitutes the other CMP operand into the input at offsets matching one operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive and value_profile lack I2SRandReplace, so the dash signal's absence marks naive/value_profile finds.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on length < hb_min_size where naive or value_profile resolves the false branch as often as cmplog/vpc despite the required bytes being a multi-byte magic+tag literal \u2014 i.e. no I2S advantage at the length/tag gate."
+        },
+        "weakest_evidence_point": "The branch is a pure length comparison (length < hb_min_size), so attribution of the I2S win to FOURCC tag substitution rests on the seed-byte structure (sfnt magic + tags) rather than on a directly observed CMP on those literals at this line.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "harfbuzz_5293",
+      "target": "harfbuzz",
+      "branch_id": 5293,
+      "analysis_path": "prompts_b/harfbuzz_5293.analysis.json",
+      "file": "/src/harfbuzz/src/hb-bit-set.hh",
+      "function": "hb_bit_set_t::resize(unsigned int, bool, bool)",
+      "line": "92",
+      "source_line": "    if (pages.length == 0 && count == 1)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "length_or_count",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace copies sfnt magic (00 01 00 00) and 4-byte table-tag FOURCCs ('cmap','GSUN') from intercepted CMP operands directly into input, building the multi-page bit-set structure value_profile cannot assemble.",
+        "one_line": "I2S plants sfnt magic and table-tag FourCCs enabling multi-page bit-set"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A multi-table sfnt font (>=2 page-map entries so pages.length!=0) must drive resize past the small-set fast path to reach the false branch.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A structurally valid sfnt/font header whose parsed table directory yields a multi-page bit-set: pages.length must be non-zero (or count!=1) so that the small-set guard at line 92 fails and the false branch is taken. This requires byte-exact sfnt magic (00 01 00 00), a plausible numTables/offset record, and recognizable table tags (cmap, GSUN/GSUB-like) at fixed offsets that survive harfbuzz's structural sanity checks deep enough to build a second bit-set page.",
+            "why_winner_satisfies": "All five winner-resolving seeds begin with the canonical TrueType header 00 01 00 00 followed by a table-directory region containing ASCII tags 'cmap', 'GSUN' and dense non-zero structural bytes at fixed offsets (e.g. 0x06 ff, 0x07 80, 0x17 21, 0x1b-0x1e 'GSUN'). These pinned multi-byte literals let parsing proceed far enough that the bit-set acquires more than one page, so resize is called with pages.length!=0 and the false branch (resolved 17134 hits) is taken.",
+            "why_loser_doesnt": "The value_profile loser seeds are short (13-57 bytes) and lack the byte-exact header/tag structure: offset 0x00 holds e0/fe/92 rather than 00, and offsets 0x05-0x20 hold scattered 00/garbage instead of the concentrated 'cmap'/'GSUN' tag bytes. These inputs never build a second page, so resize sees pages.length==0 && count==1, takes the true branch, and the false side stays blocked (loser hitcount 0).",
+            "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which copies the operands of intercepted comparisons (the sfnt magic compare, the 4-byte table-tag fourcc compares) directly into the input at the offset the operand was loaded from, byte-exactly placing 00 01 00 00 / 'cmap' / 'GSUN'. value_profile has only the CMP_MAP Hamming-distance gradient and havoc/token mutators (no I2SRandReplace), so it cannot place the exact multi-byte tags and stalls before a second page is built."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the false side of a small-set fast-path guard combining pages.length and count.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6 / L92",
+            "exact_quote": "if (pages.length == 0 && count == 1)"
+          },
+          {
+            "claim": "The globally blocked side is the false branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L7",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "The only decisive pair is value_profile_cmplog beating value_profile with an I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "The winner resolves the false branch with high hitcount while the loser never hits it.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "avg hitcount on branch",
+            "exact_quote": "avg hitcount on branch: winner=17134  loser=0"
+          },
+          {
+            "claim": "Winner seeds carry the canonical sfnt header and recognizable table tags including cmap and GSUN.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1, offset 0x00",
+            "exact_quote": "00 01 00 00 00 07 ff 80 20 3f 21 20 63 6d 61 70   ........ ?! cmap"
+          },
+          {
+            "claim": "Winner seeds contain a GSUN table tag in the directory region.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1, offset 0x10",
+            "exact_quote": "20 00 00 01 00 00 00 21 11 fb 20 47 53 55 4e 20    ......!.. GSUN "
+          },
+          {
+            "claim": "Loser-blocking seeds are short and lack the structured header bytes, starting with garbage like fe ff.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser seed 1, size 57, offset 0x00",
+            "exact_quote": "fe ff ff ff f4 01 e0 e0 20 00 00 00 01 20 e0 6a   ........ .... .j"
+          },
+          {
+            "claim": "At least one loser-blocking seed is only 13 bytes long, far too short to build a multi-page table directory.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser seed 3",
+            "exact_quote": "size=13 bytes"
+          },
+          {
+            "claim": "At the fixed sfnt magic/tag offsets the winner bytes are tightly concentrated while loser bytes are scattered, a dataflow signal of pinned literals.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x06-0x07",
+            "exact_quote": "0x0006  ff(.)x10                            00(.)x11 e0(.)x1 68(h)x1 73(s)x1 +6u  DIFFER"
+          },
+          {
+            "claim": "Winner pins the GSUN tag bytes at offsets 0x1b-0x1e while the loser does not.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x1b",
+            "exact_quote": "0x001b  47(G)x10                            00(.)x8 20( )x2 3d(=)x1 74(t)x1 +5u  DIFFER"
+          },
+          {
+            "claim": "value_profile_cmplog adds the I2SRandReplace mutator on top of havoc/token.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace entirely.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where value_profile reaches the false branch as often as value_profile_cmplog when the small-set guard is gated only by a Hamming-near table tag (i.e. CMP_MAP gradient alone solves it without needing byte-exact I2S substitution)."
+        },
+        "weakest_evidence_point": "The causal link from byte-exact tag placement to pages.length becoming non-zero is inferred from source plus seed structure; the prompt does not directly show the parse step that creates the second bit-set page.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "harfbuzz_5295",
+      "target": "harfbuzz",
+      "branch_id": 5295,
+      "analysis_path": "prompts_b/harfbuzz_5295.analysis.json",
+      "file": "/src/harfbuzz/src/hb-bit-set.hh",
+      "function": "hb_bit_set_t::page_for(unsigned int, bool)",
+      "line": "912",
+      "source_line": "    if (!page_map.bfind (map, &i, HB_NOT_FOUND_STORE_CLOSEST))",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "00 01 00 00",
+        "operand_width_bytes": 4,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace substitutes intercepted sfnt version word and 4-byte table-tag literals ('cmap','GSUN') into input, populating multi-major page_map that value_profile cannot build without exact tag bytes.",
+        "one_line": "I2S plants sfnt version and table tags to populate bfind-searched page_map"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input needs a valid sfnt font header with multiple distinct major-codepoint table tags so bfind probes a populated page_map.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A well-formed OpenType/sfnt container: 4-byte sfnt version 00 01 00 00 at offset 0, a non-trivial numTables, and recognizable 4-byte table tags (e.g. 'cmap', 'GSU.', tag bytes at 0x1b-0x1e = 53 55 4e = 'SUN') that drive glyph-set population across several distinct majors, so that page_map is non-empty and bfind (the binary-search lookup at line 912) returns false (no match yet) on a fresh major, forcing the insert/store-closest path.",
+            "why_winner_satisfies": "Every winner-resolving seed carries the constant prefix 00 01 00 00 00 07 ff 80 ... 63 6d 61 70 ('cmap') and 47 53 55 4e ('GSUN') tags; these are font tables that get parsed and add glyph ranges across many majors, so page_for is invoked 3520 times (W) and page_map_t::cmp runs 18400 times (W) \u2014 a populated, repeatedly-searched page_map.",
+            "why_loser_doesnt": "Loser-blocking seeds are short (13-57 bytes) and lack the sfnt prefix and table-tag structure; page_for fires only 20 times (L) and page_map_t::cmp 0 times (L), so the bit-set is essentially empty/never bfind-searched and the false (store-closest) side at line 912 is never taken.",
+            "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which copies intercepted comparison operands (sfnt version word, the 4-byte table tags compared during table-directory parsing) directly into the input at the offsets being compared. This lets vpc reconstruct the exact magic/tag bytes that build a multi-major page_map; plain value_profile has only the CMP_MAP Hamming-distance gradient and no operand-substitution mutator, so it cannot place the exact tag bytes and stays blocked."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the false side of a binary-search lookup with store-closest into page_map.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6-L7, line 912",
+            "exact_quote": "if (!page_map.bfind (map, &i, HB_NOT_FOUND_STORE_CLOSEST))"
+          },
+          {
+            "claim": "The decisive pair is value_profile_cmplog > value_profile with delta I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "Winner resolves 9/10 while loser blocks 10/10, with the branch hit 2860 times by the winner and 0 by the loser.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 stats",
+            "exact_quote": "avg hitcount on branch: winner=2860  loser=0"
+          },
+          {
+            "claim": "Winner-resolving seeds carry a constant sfnt/font-table prefix including the 'cmap' tag.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1, offset 0x00",
+            "exact_quote": "00 01 00 00 00 07 ff 80 20 3f 21 20 63 6d 61 70   ........ ?! cmap"
+          },
+          {
+            "claim": "Winner seeds also contain a 'GSUN' table tag region.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1, offset 0x10",
+            "exact_quote": "20 00 00 01 00 00 00 21 11 fb 20 47 53 55 4e 20    ......!.. GSUN "
+          },
+          {
+            "claim": "Loser-blocking seeds are short and unstructured, e.g. 13 bytes with no font header.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 3, size=13",
+            "exact_quote": "e0 17 00 00 1a 20 00 00 29 2b 29 29 2c            ..... ..)+)),"
+          },
+          {
+            "claim": "page_for and page_map_t::cmp run thousands of times for the winner but never (cmp) or only 20 times (page_for) for the loser.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "cmp and page_for rows",
+            "exact_quote": "18400         0  hb_bit_set_t::page_map_t::cmp(hb_bit_set_t::page_map_t const&) const"
+          },
+          {
+            "claim": "The bfind branch at line 912 is exercised on both sides for the winner but L only reaches the true side, never the false (store-closest) side.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 line 912",
+            "exact_quote": "d=1   L 912  T=3070 F=375  T=20 F=0  if (!page_map.bfind (map, &i, HB_NOT_FOUND_STORE_CLOSEST))  <-- BLOCKER"
+          },
+          {
+            "claim": "value_profile_cmplog has I2SRandReplace in its mutator stack.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace, relying only on the CMP_MAP distance bucket feedback.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A value_profile (no-I2S) trial that resolves the false side of line 912 at comparable rate to vpc, or vpc resolving it on inputs that contain no recognizable sfnt version word / table tags (i.e. with the tag-substitution mutator disabled)."
+        },
+        "weakest_evidence_point": "The exact comparison whose operands I2S substitutes (sfnt version word vs each 4-byte table tag) is inferred from seed structure, not directly traced to a specific CMP callsite in the prompt's source window.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "harfbuzz_5397",
+      "target": "harfbuzz",
+      "branch_id": 5397,
+      "analysis_path": "prompts_b/harfbuzz_5397.analysis.json",
+      "file": "/src/harfbuzz/src/hb-open-type.hh",
+      "function": "bool OT::UnsizedArrayOf<AAT::FeatureName>::sanitize<AAT::feat const*>(hb_sanitize_context_t*, unsigned int, AAT::feat const*&&) const",
+      "line": "541",
+      "source_line": "    for (unsigned int i = 0; i < count; i++)",
+      "signature": {
+        "gate_structure": "length_or_count_check",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "00 01 00 00",
+        "operand_width_bytes": 4,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace buffers tag/count CMP operands per execution and substitutes the AAT table-tag literal and count value into the input, building a valid sanitize-passing table with count>0 that value_profile's Hamming gradient cannot reliably land.",
+        "one_line": "I2S plants sfnt magic and AAT table tag so count>0 loop-entry branch fires"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input needs a valid sfnt header with a non-zero table count and a recognized 4-byte table tag so the array sanitize loop has elements to iterate.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A well-formed OpenType header: magic 00 01 00 00 at offset 0, a non-zero numTables/count field (offsets 0x04-0x05), and one of the literal 4-byte sfnt/AAT table tags (e.g. 'feat', 'trak', 'name', 'VORG') at offsets 0x0c-0x0f, so sanitize_shallow's check_array succeeds and count>0 makes the for-loop enter its body (true side).",
+            "why_winner_satisfies": "Winner-resolving seeds carry the 00 01 00 00 sfnt magic, a non-zero count byte at offset 0x05, and ASCII table tags at 0x0c-0x0f ('feat','trak','name'), the exact bytes whose CMP against harfbuzz's known-tag constants the I2S stage can satisfy by substitution.",
+            "why_loser_doesnt": "Loser-blocking seeds carry 00 in offsets 0x05-0x10 (count and tag region all zero), so the tag never matches a recognized table and count stays 0, taking the false side and never entering the loop body.",
+            "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace: cmplog buffers the failing tag/count CMP operands per execution and substitutes the harfbuzz-side comparison constant (the table tag, the count check) directly into the input, planting the literal bytes that plain value_profile's Hamming-distance feedback cannot reliably assemble at these multi-byte tag offsets."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked branch is the loop-entry test of an array sanitize over font table records; the true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6-L7",
+            "exact_quote": "Source line:     for (unsigned int i = 0; i < count; i++)\nGlobally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "Entering the loop body requires sanitize_shallow to succeed via len.sanitize and check_array; the body is only hit by the winner.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L42-L48, L55",
+            "exact_quote": "[W]   542        if (unlikely (!c->dispatch (arrayZ[i], std::forward<Ts> (ds)...)))"
+          },
+          {
+            "claim": "The 1-hop caller gates the loop on check_array(arrayZ, len), reached only by the winner.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L55",
+            "exact_quote": "return_trace (len.sanitize (c) && c->check_array (arrayZ, len)); <-- CALL"
+          },
+          {
+            "claim": "Winner seeds carry the 00 01 00 00 sfnt magic and an ASCII table tag ('feat') at offsets 0x0c onward.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id c62e53eef0209e96 offsets 0x00-0x0f",
+            "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 66 65 61 74   ......      feat"
+          },
+          {
+            "claim": "Another winner seed carries the 'trak' table tag at offsets 0x0c-0x0f.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 9c804af094eab4e9 offsets 0x00-0x0f",
+            "exact_quote": "0000: 00 01 00 00 00 10 20 20 20 20 20 20 74 72 61 6b   ......      trak"
+          },
+          {
+            "claim": "Loser-blocking seeds are all-zero across the count and tag region (offsets 0x05-0x10), so no recognized tag and count=0.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 6a9f1dbd630938ea offsets 0x00-0x0f",
+            "exact_quote": "0000: 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00   ................"
+          },
+          {
+            "claim": "The byte diff shows winner carries printable tag bytes at 0x0c-0x0f while loser carries 00 there.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0c-0x0f",
+            "exact_quote": "0x000c  74(t)x4 43(C)x4 66(f)x1 6e(n)x1     00(.)x5 20( )x2                     DIFFER"
+          },
+          {
+            "claim": "At offset 0x05 the winner carries a non-zero count byte (mostly 01) while the loser carries 00.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0005",
+            "exact_quote": "0x0005  01(.)x8 10(.)x1 02(.)x1             00(.)x7                             DIFFER"
+          },
+          {
+            "claim": "value_profile_cmplog's mutator set adds I2SRandReplace on top of havoc/token, which value_profile lacks.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "L212, L233",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "L212",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "If value_profile resolves the branch at the same rate as value_profile_cmplog when the harness front-matter (sfnt magic + non-zero count + a recognized 4-byte table tag) is supplied pre-formed in the seed, showing the divergence is not driven by I2S supplying the multi-byte tag/count operands."
+        },
+        "weakest_evidence_point": "The byte diff is multi-tag and noisy (different winner seeds use feat/trak/name/VORG), so I cannot pin the divergence to a single fixed tag literal versus the more general 'any recognized tag + non-zero count' structural requirement.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5486",
+      "target": "harfbuzz",
+      "branch_id": 5486,
+      "analysis_path": "prompts_b/harfbuzz_5486.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-layout-common.hh",
+      "function": "OT::FeatureVariations::find_index(int const*, unsigned int, unsigned int*) const",
+      "line": "3281",
+      "source_line": "    for (unsigned int i = 0; i < count; i++)",
+      "signature": {
+        "gate_structure": "length_or_count_check",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "00 01 00 00",
+        "operand_width_bytes": 4,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace intercepts version and GPOS/GSUB tag integer comparisons and substitutes the captured operands at fixed input offsets, planting the exact magic/tag bytes that make varRecords.len > 0 so the FeatureVariations loop body is entered.",
+        "one_line": "I2S plants sfnt magic and GPOS/GSUB tag so FeatureVariations loop body fires"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Resolving the find_index loop requires a structurally-valid OpenType table header (00 01 00 00, GPOS/GSUB tag, valid offsets) so a varRecord exists to iterate.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A well-formed OpenType GSUB/GPOS layout table: the 4-byte version magic 00 01 00 00 at offset 0x00, a script/feature tag (GPOS/GSUB) at 0x0c-0x0f, and consistent table/offset fields (ff 1e 21, 00 18, etc.) so that sanitize passes and varRecords.len > 0, making the loop at L3281 enter its body (true branch).",
+            "why_winner_satisfies": "Winner-resolving seeds carry the literal magic 00 01 00 00 at 0x00-0x03, the ASCII tags GPOS/GSUB at 0x0c-0x0f, and a stable structured tail (ff 1e 21 ... 00 18) at 0x10-0x17 across all 10 winner samples; the cov overlay shows the loop body L3283-L3289 hit only by W and ConditionSet::evaluate runs 315 times for W versus 0 for L.",
+            "why_loser_doesnt": "Loser-blocking seeds are unstructured byte soup (e0 17 00 00..., fe ff ff ff..., repeated 3d/= runs) with no magic/tag at the fixed offsets, so sanitize rejects the table and varRecords.len stays 0; the loop never enters (T=0) and the false branch is taken.",
+            "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, the only mutator value_profile lacks: cmplog intercepts the integer/tag comparisons (version equality, tag cmp) and substitutes the captured operand directly into the input at the comparison's byte offset, planting the exact magic/tag bytes that value_profile's Hamming-bucket feedback alone cannot land because the equality is all-or-nothing."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the loop-condition true branch of find_index iterating varRecords.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L3281, blocked side T",
+            "exact_quote": "for (unsigned int i = 0; i < count; i++)"
+          },
+          {
+            "claim": "The only decisive pair is value_profile_cmplog beating value_profile on the I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "Winner seeds carry the OpenType version magic and GPOS/GSUB tags at fixed offsets.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1, offset 0x00-0x0f",
+            "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 47 50 4f 53   ......      GPOS"
+          },
+          {
+            "claim": "A winner seed shows the GSUB tag instead of GPOS, confirming the tag bytes are the discriminating structure.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 4, offset 0x00-0x0f",
+            "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 47 53 55 42   ......      GSUB"
+          },
+          {
+            "claim": "The byte diff shows W is concentrated on the magic/tag bytes (00 01 00 00 at 0x00-0x03, GPOS/GSUB at 0x0c-0x0f) while L is dispersed.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0c-0x0f",
+            "exact_quote": "0x000c  47(G)x10"
+          },
+          {
+            "claim": "Loser-blocking seeds are unstructured and lack the fixed-offset header.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 1, offset 0x00",
+            "exact_quote": "fe ff ff ff f4 01 e0 e0 20 00 00 00 01 20 e0 6a   ........ .... .j"
+          },
+          {
+            "claim": "ConditionSet::evaluate runs 315 times for the winner and 0 for the loser, showing only W enters the loop body and reaches the conditions.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "ConditionSet::evaluate row",
+            "exact_quote": "315         0  OT::ConditionSet::evaluate(int const*, unsigned int) const"
+          },
+          {
+            "claim": "The loop true branch is taken only by W (T=315) and never by L (T=0).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L3281",
+            "exact_quote": "d=1   L3281  T=315 F=270  T=0 F=416"
+          },
+          {
+            "claim": "value_profile_cmplog adds I2SRandReplace to the mutator stack that value_profile lacks.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator, only havoc plus the CMP_MAP Hamming-distance gradient feedback.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where value_profile resolves the loop as often as value_profile_cmplog when the gate is an exact 4-byte equality on the OpenType magic/tag \u2014 showing CMP_MAP gradient alone suffices and I2S substitution is not the deciding factor."
+        },
+        "weakest_evidence_point": "The byte diff confirms W concentrates on the magic/tag offsets but does not directly prove cmplog substituted those exact bytes via I2S rather than havoc/token mutations landing them by luck; the single dash-row floor signal is a lower bound, not a precise count.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "harfbuzz_5558",
+      "target": "harfbuzz",
+      "branch_id": 5558,
+      "analysis_path": "prompts_b/harfbuzz_5558.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-layout-gsubgpos.hh",
+      "function": "OT::GSUBGPOS::accelerator_t<OT::Layout::GPOS>::accelerator_t(hb_face_t*)",
+      "line": "4456",
+      "source_line": "      for (unsigned int i = 0; i < this->lookup_count; i++)",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "GPOS / GSUB",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace reads the CmpLogObserver buffer for the FOURCC tag and sfnt-header integer comparisons and substitutes the expected operand bytes, bridging the multi-byte exact-match gate so that lookup_count becomes positive and the loop guard is true.",
+        "one_line": "I2S plants GPOS/GSUB FOURCC to make lookup_count positive for loop guard"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must be a valid sfnt font carrying a parseable GPOS/GSUB table whose lookup_count is non-zero to enter the per-lookup loop.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A well-formed sfnt header (00 01 00 00 version, table directory) with a table record bearing the literal FOURCC tag 'GPOS' (or 'GSUB') at the tag offset, so that get_lookup_count() returns a value > 0 and the loop guard i < this->lookup_count is taken true.",
+            "why_winner_satisfies": "Every winner-resolving seed carries the exact ASCII FOURCC 'GPOS'/'GSUB' at offsets 0x0c-0x0f and the canonical sfnt version prefix 00 01 00 00 at offsets 0x00-0x03, plus structured table-record bytes; the loop runs heavily (avg hitcount 77280 / 55420) and the per-lookup init at line 4457 is hit only in W.",
+            "why_loser_doesnt": "Loser-blocking seeds are short or garbage (6, 13, 27, 35, 57 bytes) lacking the GPOS/GSUB FOURCC at 0x0c-0x0f; they never produce a parseable table directory, so lookup_count stays 0 and the loop guard is always false (blocked=10/10, hitcount 0).",
+            "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the CmpLogObserver buffer where the FOURCC tag comparison and sfnt-header integer comparisons are logged, then substitutes the expected operand (the 'GPOS'/'GSUB' tag and header magic) into the input at the matching offsets \u2014 bridging the multi-byte exact-match gate that the plain havoc/token stack in naive/value_profile cannot brute-force."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the loop guard whose true side requires lookup_count > 0.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6, L68",
+            "exact_quote": "for (unsigned int i = 0; i < this->lookup_count; i++)"
+          },
+          {
+            "claim": "lookup_count is set from the parsed table just before the loop.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L58",
+            "exact_quote": "this->lookup_count = table->get_lookup_count ();"
+          },
+          {
+            "claim": "Winner seeds contain the literal FOURCC 'GPOS'/'GSUB' tag at offsets 0x0c-0x0f while loser seeds do not.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0c-0x0f",
+            "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+          },
+          {
+            "claim": "Winner seed bytes carry the sfnt version prefix and the GPOS FOURCC.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 002c9ad92acce91b offset 0x00",
+            "exact_quote": "00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+          },
+          {
+            "claim": "Loser-blocking seeds are tiny and unstructured, lacking any table directory.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 003817559785f774 (6 bytes)",
+            "exact_quote": "Seed 1 (id=003817559785f774, size=6 bytes, fuzzer=naive, trial=1, discovered_at=0s, mutation_op=ByteDecMutator,WordAddMutator):"
+          },
+          {
+            "claim": "The winner runs the loop with very high hit count while the loser never enters it.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 hitcount",
+            "exact_quote": "avg hitcount on branch: winner=77280  loser=0"
+          },
+          {
+            "claim": "The per-lookup init at line 4457 is exercised only in the winner role.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L69",
+            "exact_quote": "[W]  4457  \tthis->accels[i].init (table->get_lookup (i));"
+          },
+          {
+            "claim": "cmplog/vpc add I2SRandReplace which substitutes the matching CMP operand at the offsets where it occurs in the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "Both decisive pairs differ from their loser by exactly the I2S technique.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 delta",
+            "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A naive or value_profile trial reaching the true branch (resolved>0) on an input lacking the GPOS/GSUB FOURCC, or a synthetic harness where removing the exact FOURCC tag-match gate leaves the cmplog>naive divergence intact."
+        },
+        "weakest_evidence_point": "The byte-diff shows the FOURCC tag offset is data-dependent (a table directory can place the GPOS record at varying offsets), so the fixed 0x0c-0x0f location is seed-specific rather than a guaranteed structural offset.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "harfbuzz_5559",
+      "target": "harfbuzz",
+      "branch_id": 5559,
+      "analysis_path": "prompts_b/harfbuzz_5559.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-layout-gsubgpos.hh",
+      "function": "OT::GSUBGPOS::accelerator_t<OT::Layout::GPOS>::~accelerator_t()",
+      "line": "4461",
+      "source_line": "      for (unsigned int i = 0; i < this->lookup_count; i++)",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "GPOS",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace intercepts the 4-byte GPOS tag comparison via __sanitizer_cov_trace_cmp, logs the operand, and substitutes the literal into the input at the matching offset so lookup_count is non-zero and the destructor loop iterates.",
+        "one_line": "I2S substitutes GPOS tag so destructor loop count exceeds zero"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must carry a well-formed GPOS table (FOURCC 'GPOS' at offset 0x0c plus a valid header) so lookup_count > 0 drives the destructor loop true side.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "The 4-byte table tag 'GPOS' (47 50 4f 53) must appear at offset 0x0c so the sfnt table directory routes to GPOS parsing, and the GPOS header must parse with at least one lookup so accelerator_t::lookup_count is non-zero, making the destructor loop 'i < this->lookup_count' iterate (true branch).",
+            "why_winner_satisfies": "Every winning-resolving seed places the literal FOURCC tag at offset 0x0c-0x0f: seeds 1/3/5 show 'GPOS' (47 50 4f 53) and seed 2 shows 'GSUB' (47 53 55 42); the BYTE DIFF confirms W is fully concentrated to 47('G') at 0x0c and 50('P')/53('S') at 0x0d-0x0f, indicating the tag is the dataflow-relevant operand the winner reproduces.",
+            "why_loser_doesnt": "Loser-blocking seeds carry no table tag at offset 0x0c (bytes there are 00/01/20/2c), so the sfnt directory never resolves a GPOS table, lookup_count stays 0, and the loop guard is false; their hitcount on the branch is 0 across all 10 trials.",
+            "mechanism_attribution": "cmplog/vpc intercept the 4-byte tag comparison via __sanitizer_cov_trace_cmp, log the expected operand 'GPOS' into the CmpLogObserver buffer, and I2SRandReplace substitutes that literal into the input at the matching offset; naive and value_profile have no I2SRandReplace mutator and cannot synthesize the exact FOURCC magic, so they stall."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the destructor loop guarded by this->lookup_count, true side blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6-L7",
+            "exact_quote": "for (unsigned int i = 0; i < this->lookup_count; i++)"
+          },
+          {
+            "claim": "The true (loop-entering) side is the globally blocked side.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L7",
+            "exact_quote": "Globally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "Winning seeds contain the literal 'GPOS' FOURCC tag at offset 0x0c.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 002c9ad92acce91b offset 0x0c-0x0f",
+            "exact_quote": "00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+          },
+          {
+            "claim": "Another winning seed carries the related 'GSUB' table tag at offset 0x0c.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 001eeb5a047b00d0 offset 0x0c-0x0f",
+            "exact_quote": "00 01 00 00 00 04 00 ff 00 30 00 20 47 53 55 42   .........0. GSUB"
+          },
+          {
+            "claim": "At offset 0x0c the winner bytes are fully concentrated on 47('G') while the loser bytes diverge to 00/01/20/2c.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x000c",
+            "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+          },
+          {
+            "claim": "At offset 0x0d the winner is concentrated on 50('P')/53('S'), the tag's second byte.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x000d",
+            "exact_quote": "0x000d  50(P)x16 53(S)x4                    20( )x4 00(.)x4 18(.)x1 17(.)x1  +8u  DIFFER"
+          },
+          {
+            "claim": "The winner resolves the branch in all 10 trials while the loser is blocked in all 10 with zero hitcount.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog>naive",
+            "exact_quote": "avg hitcount on branch: winner=77280  loser=0"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at matching offsets in the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator, so it cannot perform the operand substitution that the vpc winner uses.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating only on a 4-byte magic-tag equality where cmplog/vpc fail to resolve the true side while naive/value_profile resolve it, showing I2S substitution is not what drives the divergence."
+        },
+        "weakest_evidence_point": "The two dash rows sit at depths 29-30, far back in a 31-level chain dominated by havoc ops, so the I2S contribution to this specific leaf is an inference rather than a directly-tagged step.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "harfbuzz_5565",
+      "target": "harfbuzz",
+      "branch_id": 5565,
+      "analysis_path": "prompts_b/harfbuzz_5565.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-layout.cc",
+      "function": "hb_ot_layout_language_find_feature",
+      "line": "1001",
+      "source_line": "  for (unsigned int i = 0; i < num_features; i++) {",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "GSUB / GPOS",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace intercepts the 4-byte tag comparison inside get_feature_tag and substitutes the GSUB/GPOS magic FOURCC directly into the input, making get_feature_count positive so the for-loop true branch fires.",
+        "one_line": "I2S plants GSUB/GPOS tag to make feature count positive for loop entry"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must carry a 4-byte FOURCC table tag (e.g. GSUB/GPOS) so the LangSys feature list is non-empty and the loop iterates.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A well-formed OpenType sfnt header whose table directory contains a 4-byte FOURCC tag matching a layout table the harness looks up (GSUB / GPOS), so get_gsubgpos_table resolves a real table, get_lang_sys yields a LangSys with num_features > 0, and the for-loop at line 1001 takes its true branch.",
+            "why_winner_satisfies": "Every winner-resolving seed embeds an exact ASCII FOURCC table tag at the table-directory offset: seeds 1-2 and 5 contain 'GSUB', seeds 3-4 contain 'GPOS', sitting at offset 0x0c onward where the W byte set is concentrated on 47(G)/50(P)/53(S)/4f(O)/55(U)/42(B). These literal 4-byte tags drive get_feature_count() positive and the loop iterates 76930 (cmplog) / 11528 (vpc) times.",
+            "why_loser_doesnt": "Loser-blocking seeds carry no GSUB/GPOS FOURCC at those offsets \u2014 at 0x0c-0x0f the L byte sets are scattered (00, 20, 18, 6a, 6f, fa, etc.) with no concentrated tag literal, so get_gsubgpos_table returns the empty default, num_features is 0, the loop body never runs (hitcount 0), and line 1001 stays on its false side.",
+            "mechanism_attribution": "cmplog/vpc intercept the 4-byte tag comparison inside get_feature_tag / table-tag lookup and record (input-operand, expected-tag) into the CmpLogObserver buffer; I2SRandReplace then substitutes the magic FOURCC ('GSUB'/'GPOS') directly into the input at the matched offset, synthesizing the exact-literal tag that random havoc byte mutation in naive/value_profile is astronomically unlikely to land on a 4-byte literal. Both decisive pairs differ from their loser by exactly the I2SRandReplace stage."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "Both decisive pairs differ by the I2S technique and both winners fully resolve while losers fully block.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 headers",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "The second decisive pair isolates the same I2S technique delta (vpc over vp).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 header",
+            "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "The blocker is the feature-iteration loop, and its body is reached only on the winner role, gated by a feature_tag equality compare.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "hb-ot-layout.cc:1001-1004",
+            "exact_quote": "if (feature_tag == g.get_feature_tag (f_index)) {"
+          },
+          {
+            "claim": "The loop body / feature-index read is hit only by winner-resolving seeds.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1002 marker [W]",
+            "exact_quote": "[W]  1002      unsigned int f_index = l.get_feature_index (i);"
+          },
+          {
+            "claim": "Winner seeds embed the literal ASCII table tag GSUB at the table-directory offset.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1 id=3209219fbc11cc7c offset 0x0c",
+            "exact_quote": "0000: 00 01 00 00 00 01 2f 1d 21 20 20 20 47 53 55 42   ....../.!   GSUB"
+          },
+          {
+            "claim": "Other winner seeds carry GPOS instead of GSUB, both valid layout-table FOURCC tags.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 3 id=32f381bd655a37b8 offset 0x0c",
+            "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 47 50 4f 53   ......      GPOS"
+          },
+          {
+            "claim": "At the tag offsets the winner byte set concentrates on the FOURCC letters while the loser set is scattered with no tag literal.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0f",
+            "exact_quote": "0x000f  53(S)x3 42(B)x2 7f(.)x1                     00(.)x5 6a(j)x1 6f(o)x1 fa(.)x1 +10u  DIFFER"
+          },
+          {
+            "claim": "On the loser role the blocker loop never enters its body (true side count zero), confirming an empty feature list.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L1001 BLOCKER row",
+            "exact_quote": "d=1   L1001  T=7300 F=674  T=0 F=2180  for (unsigned int i = 0; i < num_features; i++) {  <-- BLOCKER"
+          },
+          {
+            "claim": "The winner spends far more time in the loop body (high hitcount) than the loser which never hits it.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 hitcount line",
+            "exact_quote": "avg hitcount on branch: winner=76930  loser=0"
+          },
+          {
+            "claim": "I2SRandReplace reads the CmpLogObserver buffer and substitutes the other CMP operand at matching offsets, the technique exclusive to cmplog/vpc.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators paragraph",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile lacks the I2S substitution mutator, isolating the technique delta against vpc.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators paragraph",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where cmplog still fails to resolve (no faster than naive) when the gating compare is the 4-byte table-tag/feature-tag equality, OR naive resolving as fast as cmplog despite needing the exact FOURCC literal."
+        },
+        "weakest_evidence_point": "The byte diff aligns the FOURCC at offset 0x0c but does not prove the exact compare I2S solves is the table-tag lookup versus the inner feature_tag==get_feature_tag compare; either way the operand is a 4-byte tag literal.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "harfbuzz_5567",
+      "target": "harfbuzz",
+      "branch_id": 5567,
+      "analysis_path": "prompts_b/harfbuzz_5567.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-layout.cc",
+      "function": "hb_ot_layout_get_size_params",
+      "line": "1680",
+      "source_line": "  for (unsigned int i = 0; i < num_features; i++)",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "GPOS",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace reads the intercepted HB_TAG sfnt-table-tag comparison from the CmpLogObserver buffer and substitutes the GPOS operand into the input at the matching offset, making get_feature_count return positive and the loop guard true.",
+        "one_line": "I2S substitutes GPOS tag so feature-loop guard evaluates to true"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must contain a structurally valid GPOS table (literal 'GPOS' FOURCC tag) so num_features>0 and the feature loop is entered.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "The input must carry the 4-byte ASCII table tag 'GPOS' (0x47 0x50 0x4f 0x53) at the sfnt table-directory entry so the GPOS table is located and gpos.get_feature_count() returns num_features>0; the loop at L1680 then takes its true side.",
+            "why_winner_satisfies": "Every winner-resolving seed places the literal bytes 'GPOS' at offsets 0x0c-0x0f, giving a valid GPOS table directory entry; the branch true-side fires (W shows T=129) and the body at L1681/L1682 is reached only in W.",
+            "why_loser_doesnt": "Loser-blocking seeds have no 'GPOS' tag at 0x0c-0x0f (they hold values like 47/01/00/2c, 50/20/00, etc.), so no GPOS table is located, num_features stays 0, and the loop true side is never taken (L shows T=0 F=20).",
+            "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the intercepted tag comparison (the HB_TAG sfnt-table-tag compare) from the CmpLogObserver buffer and substitutes the 'GPOS' operand into the input at the matching offset, planting the exact 4-byte tag that naive/value_profile must find by blind havoc."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the feature loop gated on num_features, derived from gpos.get_feature_count().",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1679-L1680",
+            "exact_quote": "unsigned int num_features = gpos.get_feature_count ();"
+          },
+          {
+            "claim": "A HB_TAG sfnt table tag drives table lookup in this function.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1676-L1677",
+            "exact_quote": "const hb_tag_t tag = HB_TAG ('s','i','z','e');"
+          },
+          {
+            "claim": "Winner seeds carry the literal ASCII 'GPOS' tag at offsets 0x0c-0x0f.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0c-0x0f",
+            "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+          },
+          {
+            "claim": "At 0x0f winner is uniformly 'S' (0x53) while loser is not.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0f",
+            "exact_quote": "0x000f  53(S)x20                            00(.)x5 6a(j)x1 6f(o)x1 fa(.)x1  +10u  DIFFER"
+          },
+          {
+            "claim": "Winner-resolving seed bytes show 'GPOS' at offset 0x0c.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 0119dc42c7db21ec offset 0x0000",
+            "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 47 50 4f 53   ......      GPOS"
+          },
+          {
+            "claim": "The blocker loop true side fires only in winner seeds (T=129 in W, T=0 in L).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1680",
+            "exact_quote": "d=1   L1680  T=129 F=20  T=0 F=20  for (unsigned int i = 0; i < num_features; i++)  <-- BLOCKER"
+          },
+          {
+            "claim": "Loser-blocking seeds lack a GPOS tag and are short/unstructured.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "loser seed_id 003817559785f774",
+            "exact_quote": "0000: 87 0e 0d 0e 22 0e                                 ....\"."
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes a recorded CMP operand into matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "picks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace, so the I2S delta separates the vp pair.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose GPOS-table-tag compare is removed (table located by index, not by an intercepted 4-byte tag CMP) showing cmplog/vpc NOT outpacing naive/value_profile at entering the feature loop."
+        },
+        "weakest_evidence_point": "The byte-diff shows 'GPOS' at a fixed offset 0x0c-0x0f in all sampled winners, but I infer (rather than directly observe) that the sfnt table-directory tag CMP is the specific comparison I2SRandReplace solves.",
+        "confidence": "high"
+      }
+    }
+  ]
+}

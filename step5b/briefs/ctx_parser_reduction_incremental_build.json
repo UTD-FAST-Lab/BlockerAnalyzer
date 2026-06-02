@@ -1,0 +1,357 @@
+{
+  "feature_id": "ctx_parser_reduction_incremental_build",
+  "mechanism_family": "ctx_coverage_pro",
+  "mechanism_label": "parser_reduction_incremental_build",
+  "definition": "SQL parser grammar-reduction edges (yy_reduce, yy_destructor) are reached via deep call chains; context-sensitive coverage treats each distinct parse-reduction call path as new coverage, incrementally building deeper parse trees and complex SQL structures that bare-edge naive saturates on from shallower paths.",
+  "n_members": 3,
+  "involved_fuzzers": [
+    "naive",
+    "naive_ctx"
+  ],
+  "techniques_seen": [
+    "ctx_coverage"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "ctx_coverage",
+    "has_axis": [
+      "naive_ctx"
+    ],
+    "lacks_axis": [
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "sqlite3_14745_h1",
+      "target": "sqlite3",
+      "branch_id": 14745,
+      "analysis_path": "prompts_b/sqlite3_14745.analysis.json",
+      "file": "/src/sqlite3/bld/sqlite3.c",
+      "function": "sqlite3.c:yy_reduce",
+      "line": "157646",
+      "source_line": "",
+      "signature": {
+        "gate_structure": "other:parser_reduce_action",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "CtxHook folds the SELECT-parse call chain (sqlite3RunParser -> sqlite3Parser -> yy_reduce) into the edge-map index, making the reducer edge fresh coverage that keeps SELECT-prefixed inputs in the corpus and lets naive_ctx extend the parse incrementally.",
+        "one_line": "context-indexed yy_reduce edge retains SELECT-prefixed inputs for deeper parse"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A syntactically valid SELECT statement with a dotted column-expression list that drives the yy_reduce reduction at 157646's true side.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "An input that reaches the yy_reduce reducer at 157646 via the deep SELECT-parse call context (sqlite3RunParser -> sqlite3Parser -> yy_reduce), so the edge is newly interesting under context-indexed coverage.",
+            "why_winner_satisfies": "naive_ctx winner seeds begin with 'SELECT' (53 45 4c 45 43 54) and drive yy_reduce to hit the blocker true side 11 times with avg hitcount 140 on the branch, far above the loser's 3.",
+            "why_loser_doesnt": "naive loser seeds resolve the branch in only 2/10 trials with avg hitcount 3, never sustaining the deep parse call path that would make the reducer edge a fresh (call-context, edge) coverage event.",
+            "mechanism_attribution": "naive_ctx installs a CtxHook that folds the running caller-chain hash into the edge-map index, so the yy_reduce reducer edge reached through the SELECT-expression call chain registers as a new (call-context, edge) bucket; this keeps intermediate SELECT-shaped inputs in the corpus and lets naive_ctx incrementally extend the parse where bare-edge naive coverage sees nothing new."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The two decisive pairs differ by distinct techniques: value_profile and ctx_coverage.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 headers",
+            "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+          },
+          {
+            "claim": "The second decisive pair is the ctx_coverage delta (naive_ctx beats naive).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 header",
+            "exact_quote": "--- Pair 2: naive_ctx > naive  [delta: ctx_coverage] ---"
+          },
+          {
+            "claim": "The blocked side is the true branch inside the yy_reduce parser reducer.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L4-L7",
+            "exact_quote": "Enclosing function: sqlite3.c:yy_reduce"
+          },
+          {
+            "claim": "value_profile winner seeds begin with the literal bytes for 'SELECT '.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "W Seed 1 id=bf9a426c1bd27d40",
+            "exact_quote": "53 45 4c 45 43 54 20 4c 4c 4c 4c 2d 20 ff 65 65   SELECT LLLL- .ee"
+          },
+          {
+            "claim": "naive_ctx winner seeds also begin with the SELECT keyword.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "W Seed 3 id=97d84b49082ea1f1",
+            "exact_quote": "53 45 4c 45 43 54 2b d4 2b 2b 2b d4 2b 50 ac 45   SELECT+.+++.+P.E"
+          },
+          {
+            "claim": "Winner inputs all carry SELECT at offsets 0x00-0x05 while loser inputs carry non-SELECT bytes there.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0000",
+            "exact_quote": "0x0000  53(S)x4                             3b(;)x2 20( )x2 54(T)x1 60(`)x1 +4u  DIFFER"
+          },
+          {
+            "claim": "Loser-blocking seeds do not begin with SELECT (e.g. start with 'T ').",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "L Seed 1 id=00415129895a1bd5",
+            "exact_quote": "54 20 31 3b 20 63 20 42 49 4e 41 52 59 00 21 21   T 1; c BINARY.!!"
+          },
+          {
+            "claim": "Winner inputs drive expression resolution (resolveExprStep) that loser inputs never reach.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "resolveExprStep row",
+            "exact_quote": "15         0  sqlite3.c:resolveExprStep"
+          },
+          {
+            "claim": "At the blocker line the winner takes the true side 11 times while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L157646",
+            "exact_quote": "L157646  T=11 F=898  T=0 F=61    <-- BLOCKER"
+          },
+          {
+            "claim": "The ctx_coverage winner shows a far larger branch hitcount than the loser.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 hit_div",
+            "exact_quote": "avg hitcount on branch: winner=140  loser=3"
+          },
+          {
+            "claim": "value_profile rewards inputs whose CMP operands move closer to matching via the CMP_MAP distance bucket.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "naive_ctx folds the call-context hash into the edge index so the same edge counts as new coverage on a new call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Instrumentation",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where the blocker reduction can be reached by a non-SELECT input (no keyword/expression prefix dataflow) yet value_profile still resolves it significantly faster than naive \u2014 showing the win is not driven by CMP_MAP ratcheting toward the SELECT-expression prefix."
+        },
+        "weakest_evidence_point": "Whether the divergence is driven by tokenizer/keyword CMP feedback specifically (CMP_MAP gradient) versus generic deep-parse difficulty is inferred from the SELECT-prefix byte pattern, not from a named CMP comparison in the source, since the blocker source text was not available.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "sqlite3_14762",
+      "target": "sqlite3",
+      "branch_id": 14762,
+      "analysis_path": "prompts_b/sqlite3_14762.analysis.json",
+      "file": "/src/sqlite3/bld/sqlite3.c",
+      "function": "sqlite3.c:yy_reduce",
+      "line": "157866",
+      "source_line": "",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "CtxHook registers the LP-select-RP reduce action edge as a new (call-context, edge) bucket along the deep parser call chain, rewarding parenthesized nested-SELECT inputs that bare-edge naive saturates on from shallower paths and never retains.",
+        "one_line": "context bucket along deep parse chain rewards nested-SELECT LP-select-RP reduction"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must contain a parenthesized subquery used as an expression (LP select RP) so the parser fires yy_reduce case 209.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "SQL text that parses to the grammar rule expr ::= LP select RP, i.e. a '(' opening a nested SELECT statement closed by ')' in an expression position, so yy_reduce dispatches the case-209 reduce action at line 157866.",
+            "why_winner_satisfies": "All five winner-resolving seeds begin 'SELECT' and contain a '(' followed by a second nested 'SELE'/'SELECT' token (e.g. '(+++S...((((((SELECT'), giving the parser a parenthesized inner SELECT that reduces via LP select RP; the true side is taken 10 times under W.",
+            "why_loser_doesnt": "Loser-blocking seeds are short fragments (15-79 bytes) with no parenthesized inner SELECT and never reach yy_reduce case 209 at all (the whole yy_reduce body shows T=0 throughout L), so the true side is taken 0 times.",
+            "mechanism_attribution": "naive_ctx's CtxHook folds the call-context hash into the edge-map index, so reaching the deep parser reduce path along the renameParseSql/sqlite3RunParser/sqlite3Parser/yy_reduce call chain registers as new (call-context, edge) coverage; this rewards the intermediate parser states that build a nested-SELECT expression, whereas bare-edge naive coverage saturates on the same edges seen via shallower paths and never retains the inputs that drive toward the LP select RP reduction."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked true side is the case-209 reduce action 'expr ::= LP select RP' inside yy_reduce.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "sqlite3.c:157866:7, yy_reduce",
+            "exact_quote": "Enclosing function: sqlite3.c:yy_reduce"
+          },
+          {
+            "claim": "Only the naive_ctx winner takes the true branch; naive loser blocks it across all trials.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 naive_ctx > naive",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          },
+          {
+            "claim": "At the blocker line the winner takes true 10 times while the loser never enters that side of the function.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L157866",
+            "exact_quote": "d=1   L157866  T=10 F=2720  T=0 F=61    <-- BLOCKER"
+          },
+          {
+            "claim": "Winner-resolving seeds contain a SELECT prefix with a '(' opening a nested SELECT token, satisfying the LP select RP structure.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 1 winner id=72d7f78e04cdc9d1 offset 0x20-0x2f",
+            "exact_quote": "++++((((((SELEC"
+          },
+          {
+            "claim": "Loser-blocking seeds are short fragments lacking any parenthesized inner SELECT.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 2 id=0011eb1355e148b3 size=15",
+            "exact_quote": "Seed 2 (id=0011eb1355e148b3, size=15 bytes, fuzzer=naive"
+          },
+          {
+            "claim": "The blocker is reached through a deep parser call chain ending at yy_reduce, the path that context coverage distinguishes.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "call chain hops 2-3",
+            "exact_quote": "hop 2  sqlite3.c:sqlite3Parser  (/src/sqlite3/bld/sqlite3.c:158501-158664, calls sqlite3.c:yy_reduce at line 158536)"
+          },
+          {
+            "claim": "naive_ctx's distinguishing technique is folding the call-context hash into the edge-map index so the same edge counts as new coverage on a new call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "naive_ctx uses only havoc/token mutators with no I2S or CMP_MAP comparison-solving.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating only on the LP-select-RP reduce path where baseline naive resolves the branch as fast as naive_ctx, showing the call-context-indexed coverage gives no advantage at reaching the nested-subquery reduce action."
+        },
+        "weakest_evidence_point": "The byte evidence shows a nested-SELECT/'(' pattern in winner seeds but does not directly prove the parser reduces exactly via rule 209 rather than some other parenthesized-expression rule reaching the same line.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "sqlite3_15434",
+      "target": "sqlite3",
+      "branch_id": 15434,
+      "analysis_path": "prompts_b/sqlite3_15434.analysis.json",
+      "file": "/src/sqlite3/bld/sqlite3.c",
+      "function": "sqlite3.c:yy_destructor",
+      "line": "155710",
+      "source_line": "",
+      "signature": {
+        "gate_structure": "other:parser_destructor_dispatch",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "CtxHook records yy_destructor edges at distinct (call-context, edge) slots per parse-reduction call path, so SELECT-driven deep reduction paths earn new coverage that bare-edge naive collapses to already-seen slots and never prioritizes.",
+        "one_line": "context buckets per parse-reduction path enable yy_destructor true branch via SELECT input"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Reaching yy_destructor's true side needs deep SQL parser reductions (SELECT-prefixed grammar) that exercise the destructor under a specific call context.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "A syntactically rich SQL input (leading SELECT keyword followed by nested parser productions) that drives the Lemon parser through deep yy_reduce reductions, so yy_destructor is invoked from a destructor-bearing grammar symbol and takes the true branch at line 155710.",
+            "why_winner_satisfies": "All five winner-resolving seeds begin with the literal bytes 'SELECT' (53 45 4c 45 43 54) and contain repeated '(' and '$' structure that drives many parser reductions; the blocker true side fires (L155710 T=8 in W) and yy_reduce executes 2680 false / hundreds of true reductions only in W, reaching the destructor.",
+            "why_loser_doesnt": "The loser-blocking seeds are short, malformed fragments (15-79 bytes) that do not begin with SELECT and never drive the parser into the deep reduction paths; the blocker true side is never taken (L155710 T=0 in L) and yy_reduce sees only 61 reductions.",
+            "mechanism_attribution": "naive_ctx installs a CtxHook that folds the caller chain into the edge-map index, so the same yy_destructor edge recorded under a new (call-context, edge) pair counts as new coverage; this rewards inputs that reach yy_destructor via novel parse-reduction call paths, which plain naive collapses into one already-seen edge and so never prioritizes. Both fuzzers share identical havoc/token mutators with no I2S or CMP_MAP, so the only enabling difference is coverage granularity."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The decisive pair is naive_ctx winning over naive with delta ctx_coverage.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "naive_ctx resolves the branch in 9/10 trials while naive blocks in all 10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 counts",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          },
+          {
+            "claim": "The blocker is in the Lemon parser destructor function yy_destructor.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "line 155710",
+            "exact_quote": "Enclosing function: sqlite3.c:yy_destructor"
+          },
+          {
+            "claim": "All winner-resolving seeds begin with the literal SELECT keyword bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "winner seed 1 offset 0x0000",
+            "exact_quote": "53 45 4c 45 43 54 2b d4 2b 2b 2b d4 2b 50 53 45   SELECT+.+++.+PSE"
+          },
+          {
+            "claim": "Winner bytes at offsets 0x00-0x05 are concentrated on SELECT while loser bytes are scattered fragments.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0000",
+            "exact_quote": "0x0000  53(S)x8                             3b(;)x2 20( )x2 54(T)x1 60(`)x1 +4u  DIFFER"
+          },
+          {
+            "claim": "The loser-blocking seeds are short malformed fragments that do not start with SELECT.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "loser seed 2 size 15",
+            "exact_quote": "60 60 67 96 96 3b ff 00 00 00 00 00 79 ff ff      ``g..;......y.."
+          },
+          {
+            "claim": "The blocker true side is taken in W but not in L.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L155710",
+            "exact_quote": "d=1   L155710  T=8 F=154  T=0 F=39    <-- BLOCKER"
+          },
+          {
+            "claim": "Deep parser reduction (yy_reduce) executes vastly more in W than L, evidencing deeper parse paths only in the winner.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=7 L156897",
+            "exact_quote": "d=7   L156897  T=0 F=2680  T=0 F=61"
+          },
+          {
+            "claim": "naive_ctx's CtxHook folds call context into the edge-map index so a new (call-context, edge) pair is new coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Feedback",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge"
+          },
+          {
+            "claim": "Both involved fuzzers use the same havoc/token mutators with no I2S or CMP_MAP.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness in which the destructor-bearing branch is reachable via only one fixed call context shows naive resolving it as fast as naive_ctx, indicating context granularity (not parse depth) was not the enabling factor."
+        },
+        "weakest_evidence_point": "The link from 'SELECT-prefixed grammar drives deep reductions' to the specific yymajor token that makes yy_destructor take its true side is inferred from call-chain counts, not from a confirmed grammar-symbol-to-branch mapping.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

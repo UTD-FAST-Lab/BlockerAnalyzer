@@ -1,0 +1,622 @@
+{
+  "feature_id": "vp_gradient_dominant_i2s_overhead_regresses",
+  "mechanism_family": "mixed",
+  "mechanism_label": "vp_cmp_gradient_wins_i2s_adds_overhead",
+  "definition": "VP's CMP_MAP Hamming/prefix-distance gradient is the sole enabling technique: it preserves inputs whose intercepted comparison operands move incrementally closer to the gate target, outperforming both naive (no gradient at all) and value_profile_cmplog (gradient plus I2S, where the added I2S stage regresses performance by diluting the corpus or consuming per-execution budget). Gate structures range from simple equality to switch-case dispatch to bitmask presence; the common thread is that the CMP_MAP bucket signal is both necessary and sufficient while I2S is actively counterproductive. These are MIXED-edge cases (vp>naive AND vp>vpc) requiring manual review to confirm whether the anti-I2S edge is a consistent VP_pro-with-I2S-overhead phenomenon rather than noise.",
+  "n_members": 5,
+  "involved_fuzzers": [
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S",
+    "value_profile"
+  ],
+  "suggested_axis_partition": {},
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "harfbuzz_5237_h0",
+      "target": "harfbuzz",
+      "branch_id": 5237,
+      "analysis_path": "prompts_b/harfbuzz_5237.analysis.json",
+      "file": "/src/harfbuzz/src/OT/Layout/GPOS/GPOS.hh",
+      "function": "OT::Layout::GPOS::position_finish_offsets(hb_font_t*, hb_buffer_t*)",
+      "line": "151",
+      "source_line": "  if (buffer->scratch_flags & HB_BUFFER_SCRATCH_FLAG_HAS_GPOS_ATTACHMENT)",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "HB_BUFFER_SCRATCH_FLAG_HAS_GPOS_ATTACHMENT",
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "VP's CMP_MAP gradient preserves inputs scoring incremental Hamming-distance progress toward GPOS comparison values, ratcheting toward the structural flag state that naive cannot sense and that vpc's added I2S layer does not improve.",
+        "one_line": "VP CMP gradient climbs deep GPOS attachment flag state unreachable by naive"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        },
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must be a font whose GPOS table sets HB_BUFFER_SCRATCH_FLAG_HAS_GPOS_ATTACHMENT, i.e. drives shaping deep enough to produce a glyph attachment.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>naive (value_profile)",
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "A font input that passes enough CMP-distance milestones during GPOS table parsing/shaping to set the GPOS-attachment scratch flag; the true branch is reached only after the buffer accumulates a GPOS attachment, a deep semantic state behind many integer/tag comparisons.",
+            "why_winner_satisfies": "value_profile resolves 9/10 and hits the branch 105 times on average; its CMP_MAP distance-bucket feedback keeps near-match font inputs whose operands approach the gate values, ratcheting toward the kern/GPOS structure that triggers the attachment flag.",
+            "why_loser_doesnt": "naive blocks 8/10 (15 hits) because it has only edge feedback and no gradient toward the comparison milestones; value_profile_cmplog blocks 8/10 (6 hits) because adding the per-execution CMP buffer and I2S stage diverts energy without helping reach this structural flag, so it underperforms plain value_profile.",
+            "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix-distance buckets) preserves inputs that get progressively closer to the comparison values guarding GPOS parsing, a feedback advantage naive lacks and which the extra I2S/CMP-buffer machinery in value_profile_cmplog does not improve."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked true branch is a GPOS-attachment scratch-flag test, a deep semantic state rather than a single CMP magic value.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "GPOS.hh:151",
+            "exact_quote": "if (buffer->scratch_flags & HB_BUFFER_SCRATCH_FLAG_HAS_GPOS_ATTACHMENT)"
+          },
+          {
+            "claim": "Taking the true branch leads into the attachment-offset propagation loop that the winners execute and losers do not.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "GPOS.hh:152-153",
+            "exact_quote": "propagate_attachment_offsets (pos, len, i, direction);"
+          },
+          {
+            "claim": "value_profile beats naive on this branch with much higher hitcount.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile > naive  [delta: value_profile]"
+          },
+          {
+            "claim": "value_profile resolves 9/10 while naive blocks 8/10 and hits the branch only 15 times on average.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 hitcounts",
+            "exact_quote": "avg hitcount on branch: winner=105  loser=15"
+          },
+          {
+            "claim": "value_profile also beats value_profile_cmplog, so adding I2S to value_profile does not help reach this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile > value_profile_cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "value_profile_cmplog is the loser of pair 2, hitting the branch only 6 times.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 hitcounts",
+            "exact_quote": "avg hitcount on branch: winner=105  loser=6"
+          },
+          {
+            "claim": "value_profile's mechanism is a CMP_MAP distance-bucket gradient that preserves near-match inputs.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "minimizer beats naive via a calibration-derived energy advantage.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3",
+            "exact_quote": "Pair 3: minimizer > naive  [delta: calibrated_energy]"
+          },
+          {
+            "claim": "minimizer reaches the branch fastest with the highest hitcount and shortest blocked duration.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3 metrics",
+            "exact_quote": "avg duration blocked: winner=7.30h  loser=21.80h"
+          },
+          {
+            "claim": "minimizer derives per-seed mutation energy from calibration, favoring faster/smaller/more-stable seeds.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "minimizer power stage",
+            "exact_quote": "faster, smaller,\nmore-stable seeds earn more mutations"
+          },
+          {
+            "claim": "naive_ctx beats naive via context-sensitive coverage.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 4",
+            "exact_quote": "Pair 4: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "naive_ctx folds the call-context hash into the edge-map index so the same edge counts at different slots per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx CtxHook",
+            "exact_quote": "the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it"
+          },
+          {
+            "claim": "The branch sits at the bottom of a deep multi-hop shaping call chain, so new call-contexts along it are plentiful.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "Call chain hops 2-6",
+            "exact_quote": "hop 6  _hb_ot_shape"
+          },
+          {
+            "claim": "naive has only edge feedback and no I2S or comparison introspection.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive mutators",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "Winning seeds are well-formed font inputs containing the kern table tag, evidencing real font structure reaching shaping.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1 bytes",
+            "exact_quote": "6b 65 72 6e   ......F  .(.kern"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating only on a single fixed-width integer CMP (no deep parse state) where value_profile shows no advantage over naive AND value_profile_cmplog matches or beats value_profile, contradicting the observed vp>vpc and vp>naive ordering."
+        },
+        "weakest_evidence_point": "The exact comparison operands that value_profile's CMP_MAP gradient ratchets toward are not directly observed; the BYTE DIFF shows differing tag bytes (0x0c-0x0f) but the link from those bytes to the attachment-flag-setting GPOS parse is inferred from the call chain rather than a single decisive CMP.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "sqlite3_14163",
+      "target": "sqlite3",
+      "branch_id": 14163,
+      "analysis_path": "prompts_b/sqlite3_14163.analysis.json",
+      "file": "/src/sqlite3/bld/sqlite3.c",
+      "function": "sqlite3.c:sqlite3Dequote",
+      "line": "31402",
+      "source_line": "  if( quote=='[' ) quote = ']';",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "'['",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "VP's CMP_MAP gradient rewards incremental byte moves toward a syntactically valid bracketed-SQL token containing '['; naive lacks this signal; vpc also has CMP_MAP but I2S adds overhead that regresses it, so the gradient alone enables the win.",
+        "one_line": "VP CMP gradient builds valid SQL bracket token; I2S overhead hurts vpc"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        },
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must contain a SQL token quoted with '[' so the dequoted first char equals '[' at sqlite3Dequote.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>naive (value_profile)",
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "A SQL string containing a bracket-quoted identifier whose opening quote char is the literal '[' (0x5b), so that after sqlite3Isquote accepts the quote, the byte tested at line 31402 equals '['. The winner must drive an executable input that reaches Dequote with z[0]=='['.",
+            "why_winner_satisfies": "The value_profile winner-resolving seed is a valid SELECT statement carrying a bracketed token '[13-3]' \u2014 byte 0x5b('[') sits at offset 0x1c and the closing 0x5d(']') at offset 0x21 \u2014 so when this token is dequoted, quote=='[' and the true branch is taken (winner hitcount=2 on the branch).",
+            "why_loser_doesnt": "The loser-blocking seeds are short, malformed fragments (e.g. ';d T 1S', 'T 1; c BINARY') with no '[' opening a quoted token; at the blocker line the losers never satisfy quote=='[' (L side L31402 shows T=0 F=20) and never even parse a valid bracketed identifier, so the equality byte is never produced.",
+            "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs whose CMP operands move closer to matching: as havoc mutates bytes toward the syntactically-valid bracketed-SELECT shape, the per-CMP Hamming/prefix-distance buckets register incremental progress and preserve the partial inputs, letting value_profile climb to a parseable '[...]' token. naive lacks CMP_MAP feedback so it gets no gradient signal; in pair 2 value_profile_cmplog additionally has I2S yet still loses, showing the enabling technique is the CMP_MAP gradient (shared by both winner-pairs), not I2S."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "Taking the blocked true side requires the dequote quote char to be '['.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "sqlite3.c:31402",
+            "exact_quote": "if( quote=='[' ) quote = ']';"
+          },
+          {
+            "claim": "value_profile is the winner over both naive and value_profile_cmplog at this branch.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "value_profile role",
+            "exact_quote": "winner (value_profile vs naive); winner (I2S vs value_profile_cmplog)"
+          },
+          {
+            "claim": "The winner-resolving seed is a SELECT statement containing a bracketed token, and it was found by value_profile.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id e77023f4c8c4c04a offsets 0x10-0x21",
+            "exact_quote": "33 3d 31 33 2d 33 2e 33 33 3d 31 33 5b 31 33 2d   3=13-3.33=13[13-"
+          },
+          {
+            "claim": "The winning seed carries the closing bracket ']' completing the bracketed token.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id e77023f4c8c4c04a offset 0x20",
+            "exact_quote": "33 5d 30 33 2d 33 2d 30 31 2d 30 00 00 7f ff 13   3]03-3-01-0....."
+          },
+          {
+            "claim": "The byte diff shows the winner uniquely carries '[' at offset 0x1c and ']' at 0x21 where the losers do not.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x001c and 0x0021",
+            "exact_quote": "0x001c  5b([)x1"
+          },
+          {
+            "claim": "At the blocker line the loser inputs never satisfy quote=='[' (true side never taken on L).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L31402",
+            "exact_quote": "d=1   L31402  T=1 F=1  T=0 F=20  if( quote=='[' ) quote = ']';  <-- BLOCKER"
+          },
+          {
+            "claim": "value_profile has CMP_MAP gradient feedback that preserves inputs whose CMP operands approach matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace, so its advantage is not input-to-state substitution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on quote=='[' where value_profile and naive resolve the branch at statistically indistinguishable rates (no CMP_MAP gradient advantage), which would show the bracket gate is not what value_profile's distance-bucket feedback is solving."
+        },
+        "weakest_evidence_point": "Only one value_profile winner-resolving seed is shown, so the inference that the '[' bracketed token is the necessary feature (rather than incidental to a larger valid-SQL requirement) rests on a single positive example.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "sqlite3_14452",
+      "target": "sqlite3",
+      "branch_id": 14452,
+      "analysis_path": "prompts_b/sqlite3_14452.analysis.json",
+      "file": "/src/sqlite3/bld/sqlite3.c",
+      "function": "sqlite3.c:sqlite3VdbeExec",
+      "line": "87188",
+      "source_line": "case OP_Le:               /* same as TK_LE, jump, in1, in3 */",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "OP_Le",
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "VP's CMP_MAP Hamming/prefix-distance feedback over intercepted VDBE integer/string CMPs incrementally builds a valid relational SQL expression; naive has only edge counters; vpc has CMP_MAP too but its added I2S corpus dilution regresses it, isolating CMP_MAP gradient as the decisive factor.",
+        "one_line": "VP CMP gradient assembles relational SQL opcode; I2S dilution stalls vpc"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        },
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A valid SQL query containing a '<=' (or sibling) comparison whose numeric operands actually compare, reaching the OP_Le VDBE case jump.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>naive (value_profile)",
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "An ASCII SQL statement that parses into a VDBE program containing an OP_Le/OP_Lt/OP_Ge comparison opcode whose two non-NULL operands are evaluated by the integer/MemCompare path, so the comparison case executes its true (jump) side. The winning seed 'SELECT 11-013>=1...' contains explicit relational operators including a '<=' (bytes 3c 3d) and arithmetic that yields comparable integer operands.",
+            "why_winner_satisfies": "value_profile resolves the branch 8/10. Its corpus contains the structurally valid SQL seed 'SELECT 11-013>=1 3=13-3-323=13=13-3-32=1<=13-3-32=...' which carries the '<=' relational operator (W byte 3c('<') at offset 0x27) plus integer operands; the CMP_MAP gradient feedback over the VDBE integer/string comparisons rewards mutants that drive comparison operands closer, building the valid relational expression incrementally.",
+            "why_loser_doesnt": "naive (loser in pair 1) never resolves (0/10): with only edge-counter feedback it must assemble a valid relational SQL expression by blind havoc/token mutation, its blocking seeds are short garbage like ';d T 1S' and 'T 1; c BINARY' that never parse into an OP_Le comparison opcode. value_profile_cmplog (loser in pair 2) also stalls (1/10) despite having the CMP_MAP gradient, because adding the I2S CmpLog stage and per-execution CMP buffering dilutes its corpus and per-exec budget here rather than helping reach this comparison opcode.",
+            "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix-distance buckets over intercepted CMPs) provides progress feedback toward forming a comparable relational expression that naive's plain edge counters cannot sense; the I2S CmpLog technique that distinguishes vpc from vp does not help and the vp-only arm wins, so the enabling technique is the CMP_MAP gradient, not I2S."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked branch is the OP_Le comparison-opcode case in the VDBE interpreter, true (jump) side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6-7",
+            "exact_quote": "Source line: case OP_Le:               /* same as TK_LE, jump, in1, in3 */\nGlobally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "Reaching the comparison body requires neither operand to be NULL and runs a real integer or MemCompare comparison.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1462-1504",
+            "exact_quote": "/* Neither operand is NULL.  Do a comparison. */"
+          },
+          {
+            "claim": "value_profile is the decisive winner in both pairs, resolving 8/10 while naive resolves 0/10 and value_profile_cmplog resolves 1/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L26-41",
+            "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+          },
+          {
+            "claim": "Pair 2 is an I2S delta where value_profile beats value_profile_cmplog, so removing I2S helps.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L34",
+            "exact_quote": "--- Pair 2: value_profile > value_profile_cmplog  [delta: I2S] ---"
+          },
+          {
+            "claim": "The winner-resolving seed is a valid SQL SELECT statement carrying relational comparison operators.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 0fadca0bde089a74 offset 0x0000",
+            "exact_quote": "53 45 4c 45 43 54 20 31 31 2d 30 31 33 3e 3d 31   SELECT 11-013>=1"
+          },
+          {
+            "claim": "The winning seed contains a '<=' relational operator (bytes 3c 3d).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 0fadca0bde089a74 offset 0x0020",
+            "exact_quote": "2d 33 2d 33 32 3d 31 3c 3d 31 33 2d 33 2d 33 32   -3-32=1<=13-3-32"
+          },
+          {
+            "claim": "At offset 0x27 the winner byte is '<' while the losers carry unrelated bytes, marking the relational operator as a discriminating feature.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0027",
+            "exact_quote": "0x0027  3c(<)x1"
+          },
+          {
+            "claim": "The loser-blocking seeds are short non-parseable fragments that do not form a relational comparison.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 003532fb9610ed1e",
+            "exact_quote": "0000: 3b 64 20 54 20 31 53                              ;d T 1S"
+          },
+          {
+            "claim": "value_profile feedback rewards an input whose CMP-operand pair is closer to matching than any previously seen, the CMP_MAP gradient mechanism.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "naive has only per-edge hit-count feedback and no CMP introspection.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Feedback",
+            "exact_quote": "**Feedback**: per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+          },
+          {
+            "claim": "value_profile_cmplog adds the I2S CmpLog stage and per-execution CMP buffering on top of the CMP_MAP gradient.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Instrumentation",
+            "exact_quote": "**Instrumentation**: union of cmplog and value_profile \u2014 edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness that gates the OP_Le-equivalent comparison only behind a valid relational SQL expression and finds naive resolving it as fast as value_profile (no CMP_MAP-gradient advantage), or value_profile_cmplog resolving it strictly faster than value_profile."
+        },
+        "weakest_evidence_point": "Whether the CMP_MAP gradient (vs. mere corpus-quality / valid-SQL bias) is the actual driver is inferential \u2014 the prompt shows value_profile wins but does not directly trace a gradient walk on the comparison operands.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "sqlite3_14518",
+      "target": "sqlite3",
+      "branch_id": 14518,
+      "analysis_path": "prompts_b/sqlite3_14518.analysis.json",
+      "file": "/src/sqlite3/bld/sqlite3.c",
+      "function": "sqlite3.c:resolveExprStep",
+      "line": "98662",
+      "source_line": "    case TK_LE:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "TK_LE",
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "VP's CMP_MAP gradient credits partial progress toward valid comparison-operator bytes across the SQL parse path, steering the corpus toward the TK_LE switch arm; naive lacks CMP_MAP; vpc's I2S stage regresses performance, confirming CMP_MAP gradient (not I2S) is responsible.",
+        "one_line": "VP CMP gradient steers parser to TK_LE arm; vpc I2S stage regresses"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        },
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must be a SQL relational-comparison expression (e.g. '<=', '>=') so resolveExprStep reaches the TK_LE comparison-operator switch arm.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>naive (value_profile)",
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "Bytes must parse into a SQL expression containing a relational comparison operator (TK_LE/TK_LT/TK_GE/TK_GT family, e.g. ASCII '<=' or '>=' between numeric operands), so the parsed Expr->op lands on the TK_LE case of the switch in resolveExprStep rather than on TK_ID/TK_VARIABLE/junk arms.",
+            "why_winner_satisfies": "The winning value_profile seed is 'SELECT 11-013>=13...' packed with '>=', '<=', and '=' comparison operators over numeric operands, forming valid comparison expressions whose Expr->op reaches the TK_LE/TK_GE switch arm (T=1 hits on the blocker line under W).",
+            "why_loser_doesnt": "Loser-blocking seeds are degenerate 'SELECT +:SELECT...' / 'SELECT +LLLLLT...' fragments with no well-formed relational comparison; their expressions resolve down the TK_ID / TK_VARIABLE arms (L hits L98354 TK_ID T=5, L98632 TK_VARIABLE T=9) and never the TK_LE arm (L T=0 at L98662).",
+            "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs whose intercepted integer/string CMP operands move closer to matching the parser's keyword/operator-token comparisons, giving partial-progress credit that lets it assemble a valid comparison expression. Both decisive pairs have value_profile as winner: it beats naive (which lacks CMP_MAP) and beats value_profile_cmplog (where adding the I2S CmpLog stage regresses, so the win is attributable to the CMP_MAP gradient, not I2S)."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the TK_LE arm of a relational-comparison operator switch in resolveExprStep, globally blocked on the true side.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L98662 / blocked side T",
+            "exact_quote": "Source line:     case TK_LE:"
+          },
+          {
+            "claim": "The TK_LE blocker sits among the relational comparison cases TK_EQ/TK_NE/TK_LT/TK_GT/TK_GE.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L98659-98664",
+            "exact_quote": "98662  case TK_LE: <-- BLOCKER"
+          },
+          {
+            "claim": "The winning value_profile seed is a SQL SELECT containing relational comparison operators over numeric operands.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 0fadca0bde089a74 / offset 0x00",
+            "exact_quote": "53 45 4c 45 43 54 20 31 31 2d 30 31 33 3e 3d 31   SELECT 11-013>=1"
+          },
+          {
+            "claim": "The winning seed contains a '<=' relational comparison.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 0fadca0bde089a74 / offset 0x20",
+            "exact_quote": "2d 33 2d 33 32 3d 31 3c 3d 31 33 2d 33 2d 33 32   -3-32=1<=13-3-32"
+          },
+          {
+            "claim": "The loser-blocking seeds are degenerate SELECT fragments without well-formed relational comparison expressions.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 0327e21cff4ff230 / offset 0x00",
+            "exact_quote": "53 45 4c 45 43 54 20 2b 3a 53 45 4c 45 43 54 20   SELECT +:SELECT "
+          },
+          {
+            "claim": "Under the loser-blocking seed set, the parser resolves expressions down the TK_ID and TK_VARIABLE arms but never the TK_LE arm.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L98354 / L98632 / L98662",
+            "exact_quote": "case TK_LE:  <-- BLOCKER"
+          },
+          {
+            "claim": "Loser-blocking inputs take the TK_VARIABLE arm 9 times while the blocker TK_LE true side is never taken under L.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L98632",
+            "exact_quote": "case TK_VARIABLE: {"
+          },
+          {
+            "claim": "value_profile wins over naive (delta value_profile) and over value_profile_cmplog (delta I2S), so value_profile is the winner in both decisive pairs.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 headers",
+            "exact_quote": "--- Pair 2: value_profile > value_profile_cmplog  [delta: I2S] ---"
+          },
+          {
+            "claim": "value_profile's distinguishing technique is CMP_MAP gradient feedback rewarding operand pairs closer to matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator, so its win cannot be attributed to I2S substitution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose only gate is reaching the TK_LE comparison arm shows naive resolving it as fast as value_profile (no CMP_MAP advantage), or value_profile_cmplog matching value_profile \u2014 which would refute that CMP_MAP gradient is the decisive feature."
+        },
+        "weakest_evidence_point": "Only one winning seed is available, so the claim that the CMP_MAP gradient (rather than incidental havoc luck on numeric-comparison bytes) is what assembles the comparison expression rests on the technique-delta inference more than on direct seed-lineage evidence.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "sqlite3_14577",
+      "target": "sqlite3",
+      "branch_id": 14577,
+      "analysis_path": "prompts_b/sqlite3_14577.analysis.json",
+      "file": "/src/sqlite3/bld/sqlite3.c",
+      "function": "sqlite3.c:sqlite3ExprCodeTarget",
+      "line": "103533",
+      "source_line": "",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "VP's CMP_MAP writes a (PC, operand-distance bucket) entry per intercepted integer CMP, preserving seeds whose operand pair approaches the threshold; naive has no such feedback; vpc's substitution stage is counterproductive, so dispersed operator-byte diversity driven by CMP_MAP gradient alone crosses the rare true branch.",
+        "one_line": "VP CMP bucket feedback walks dispersed operator bytes to rare true branch"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "naive",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        },
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A SELECT expression with diverse comparison/arithmetic operators that drives an integer-CMP operand pair toward equality, reachable via CMP_MAP gradient feedback.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>naive (value_profile)",
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "A SELECT query whose expression body uses a varied mix of relational/arithmetic operators (=, >=, <=, -, /) at offsets 0x06-0x2d, so that an integer comparison inside sqlite3ExprCodeTarget produces a near-matching operand pair (the rare true branch at line 103533, T=1/F=62 in W).",
+            "why_winner_satisfies": "The value_profile winner seed is 'SELECT 11-013>=1 3=13-3-323=13=13 ...' with distinct single-byte operators per offset (3e(>),3d(=),2d(-),2f(/),3c(<)), exactly the operand-distance gradient that CMP_MAP rewards; W resolves 9/10 and is the only side that takes the blocker true branch (W T=1 F=62 vs L T=0 F=743).",
+            "why_loser_doesnt": "Both losers (naive, value_profile_cmplog) stay blocked: their inputs are degenerate digit/operator runs ('SELECT 222&22222...', '2222222222222222') concentrated on '2'(0x32), '&'(0x26) and '1'(0x31) across offsets 0x07-0x2d, never assembling the operator diversity that nudges the CMP operand pair across the threshold; naive has no CMP feedback at all and value_profile_cmplog's added substitution stage diverts mutation effort away from the gradient.",
+            "mechanism_attribution": "value_profile's CMP_MAP gradient: each intercepted integer CMP writes a (PC, operand-distance bucket) entry, so an input producing operands closer to matching adds a new bucket and is preserved, walking the corpus toward the rare true branch. naive lacks this feedback entirely; value_profile_cmplog adds a substitution stage that here is counterproductive (it loses to plain value_profile), so the enabling technique is the CMP_MAP gradient."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "Both decisive pairs have value_profile as winner; pair 1 delta is value_profile and pair 2 delta is I2S, and value_profile beats the I2S-equipped variant.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 headers",
+            "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+          },
+          {
+            "claim": "value_profile wins over value_profile_cmplog on the I2S axis, so adding I2S is counterproductive at this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 header",
+            "exact_quote": "--- Pair 2: value_profile > value_profile_cmplog  [delta: I2S] ---"
+          },
+          {
+            "claim": "The winner-resolving seed is a SELECT with diverse comparison and arithmetic operators.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "winner seed id=0fadca0bde089a74 offsets 0x00-0x0f",
+            "exact_quote": "53 45 4c 45 43 54 20 31 31 2d 30 31 33 3e 3d 31   SELECT 11-013>=1"
+          },
+          {
+            "claim": "Loser-blocking seeds are degenerate digit/operator runs concentrated on '2' and '&'.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "loser seed id=17028fa8ee4f5d17 offsets 0x00-0x1f",
+            "exact_quote": "53 45 4c 45 43 54 20 32 32 32 26 32 32 32 32 32   SELECT 222&22222"
+          },
+          {
+            "claim": "The byte diff shows W carries distinct operator bytes per offset while L bytes are concentrated on digits, '2', '&', and '+'.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x000d",
+            "exact_quote": "0x000d  3e(>)x1                             31(1)x9 32(2)x4 45(E)x2 34(4)x2 +3u  DIFFER"
+          },
+          {
+            "claim": "At the blocker line the winner takes the rare true side once while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L103533 BLOCKER row",
+            "exact_quote": "d=1   L103533  T=1 F=62  T=0 F=743    <-- BLOCKER"
+          },
+          {
+            "claim": "value_profile's feedback rewards an input whose CMP-operand pair is closer to matching by adding a new CMP_MAP bucket.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback paragraph",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "naive has no CMP interception, only edge-counter feedback, so it cannot follow an operand-distance gradient.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Feedback paragraph",
+            "exact_quote": "**Feedback**: per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+          },
+          {
+            "claim": "value_profile uses only havoc/token mutators with no I2SRandReplace, distinguishing its winning mechanism from input-to-state substitution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators line",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the same integer-CMP gate showing value_profile_cmplog reaching the true branch at least as fast as plain value_profile, which would imply I2S substitution (not the CMP_MAP gradient) is the enabling technique."
+        },
+        "weakest_evidence_point": "Only one winner-resolving seed is shown, so the claim that operator diversity (rather than incidental query length or a specific literal) is what drives the CMP operand pair toward equality is inferred rather than directly measured.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

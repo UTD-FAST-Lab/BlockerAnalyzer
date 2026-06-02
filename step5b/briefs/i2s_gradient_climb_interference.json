@@ -1,0 +1,1489 @@
+{
+  "feature_id": "i2s_gradient_climb_interference",
+  "mechanism_family": "I2S_anti",
+  "mechanism_label": "i2s_gradient_climb_interference",
+  "definition": "The winner is value_profile, which uses the CMP_MAP Hamming-distance gradient to incrementally ratchet input bytes toward an exact comparison constant; adding the I2S stage (value_profile_cmplog) disrupts this gradient climb by introducing corpus pollution, throughput overhead on deep call chains, or whole-operand substitutions that divert the corpus to a competing/neighboring literal rather than the true target.",
+  "n_members": 13,
+  "involved_fuzzers": [
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "harfbuzz_5350",
+      "target": "harfbuzz",
+      "branch_id": 5350,
+      "analysis_path": "prompts_b/harfbuzz_5350.analysis.json",
+      "file": "/src/harfbuzz/src/hb-common.cc",
+      "function": "hb_script_get_horizontal_direction",
+      "line": "652",
+      "source_line": "    case HB_SCRIPT_OLD_UYGHUR:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "HB_SCRIPT_OLD_UYGHUR",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "Adding I2S to value_profile adds per-execution CmpLog overhead on a deep call chain without delivering the script tag; the CMP_MAP gradient alone in value_profile incrementally approaches the OLD_UYGHUR constant, but the extra I2S cost kills throughput enough to block it.",
+        "one_line": "I2S overhead on deep call chain overwhelms CMP_MAP gradient"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A 4-byte script tag matching HB_SCRIPT_OLD_UYGHUR ('Ougr') must reach the switch so the OLD_UYGHUR case arm fires.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "An input whose script-tag field is driven to the exact 4-byte FOURCC for HB_SCRIPT_OLD_UYGHUR so the switch ((hb_tag_t) script) at hb-common.cc:586 dispatches to the case HB_SCRIPT_OLD_UYGHUR arm at line 652 (true side), returning HB_DIRECTION_RTL.",
+            "why_winner_satisfies": "value_profile resolves the branch in all 10 trials (avg 52 hits) within 0.70h; its CMP_MAP distance-bucket feedback rewards inputs whose script-tag operand grows closer (matching-prefix length) to the OLD_UYGHUR constant, so havoc bytes that incrementally approach the FOURCC are retained as corpus and the tag is solved without the per-execution cost of the I2S/CmpLog stage.",
+            "why_loser_doesnt": "value_profile_cmplog blocks the branch in 9/10 trials (avg 0 hits, 22.10h blocked); it adds the per-execution CmpLog buffer + I2SRandReplace stage on top of value_profile, but that extra per-execution cost slows throughput on this deep call chain without delivering the tag, so it never drives the script field to the OLD_UYGHUR constant within budget.",
+            "mechanism_attribution": "The winner is value_profile, which has no input-to-state substitution mutator; its enabling technique is the CMP_MAP gradient (matching-prefix / Hamming-distance bucket feedback) that incrementally rewards script-tag bytes approaching the OLD_UYGHUR constant. Adding the I2S+CmpLog stage (the value_profile_cmplog loser) only adds per-execution overhead here, so the divergence is attributable to value_profile's CMP_MAP gradient working unencumbered, not to comparison substitution."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the case HB_SCRIPT_OLD_UYGHUR arm of a switch on the script tag, whose true side returns HB_DIRECTION_RTL.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "hb-common.cc:586 and :652-654",
+            "exact_quote": "case HB_SCRIPT_OLD_UYGHUR: <-- BLOCKER"
+          },
+          {
+            "claim": "Dispatch is a switch over the script tag cast to hb_tag_t (a 4-byte FOURCC compare).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "hb-common.cc:586",
+            "exact_quote": "switch ((hb_tag_t) script)"
+          },
+          {
+            "claim": "value_profile resolves the branch in all 10 trials while value_profile_cmplog blocks it in 9/10, with the winner hitting the branch and the loser never reaching it.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1, winner/loser counts and hits",
+            "exact_quote": "avg hitcount on branch: winner=52  loser=0"
+          },
+          {
+            "claim": "The winner resolves quickly while the loser stays blocked for the full budget.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 duration",
+            "exact_quote": "avg duration blocked: winner=0.70h  loser=22.10h"
+          },
+          {
+            "claim": "value_profile's CMP_MAP gradient rewards inputs whose CMP operands grow closer to matching, preserving them as corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback paragraph",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "The CMP_MAP distance bucket encodes matching-prefix length for string/memory CMPs, which is the relevant signal for a multi-byte tag compare.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Instrumentation paragraph",
+            "exact_quote": "matching-prefix\nlength for string/memory CMPs"
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator, so the winner does not rely on I2S substitution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators paragraph",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile_cmplog (the loser) adds the I2SRandReplace mutator and a per-execution CMP buffer on top of value_profile.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators/cost paragraphs",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "The loser pays extra per-execution cost from the CMP buffer record on top of value_profile's CMP_MAP update.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Per-execution cost",
+            "exact_quote": "edge increment + CMP-buffer record + CMP_MAP\nupdate per intercepted CMP per execution"
+          },
+          {
+            "claim": "The winning seeds carry only havoc/value_profile mutation_ops, consistent with value_profile (no I2S) finding them.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1, fuzzer=value_profile",
+            "exact_quote": "fuzzer=value_profile, trial=1, discovered_at=28s, mutation_op=ByteAddMutator,BytesDeleteMutator,ByteNegMutator"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with a single 4-byte switch/compare against a fixed FOURCC where value_profile_cmplog resolves it as fast as or faster than value_profile (no I2S-overhead penalty), showing the CMP_MAP gradient is not the decisive winner mechanism."
+        },
+        "weakest_evidence_point": "The attribution that I2S+CmpLog per-execution overhead (rather than some other value_profile_cmplog-specific exploration difference) is what blocks the loser is inferred from the cost paragraphs, not directly measured at this branch.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5623",
+      "target": "harfbuzz",
+      "branch_id": 5623,
+      "analysis_path": "prompts_b/harfbuzz_5623.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shape-fallback.cc",
+      "function": "hb-ot-shape-fallback.cc:recategorize_combining_class(unsigned int, unsigned int)",
+      "line": "51",
+      "source_line": "\tcase 0x0E36u:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x0E36",
+        "operand_width_bytes": 2,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "value_profile's CMP_MAP gradient ratchets codepoint bytes toward 0x0E36 via distance-bucket feedback; adding I2S (vpc) diverts mutation/corpus budget away from this gradient climb, so the gradient-only fuzzer reaches the exact constant while vpc cannot.",
+        "one_line": "I2S disrupts CMP_MAP gradient climb toward exact codepoint 0x0E36"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must place the 32-bit codepoint 0x0E36 (bytes 36 0e 00 00) at a parsed codepoint field so the switch case is taken.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "A 4-byte little-endian codepoint field holding exactly 0x0E36 (bytes 36 0e 00 00), so that recategorize_combining_class is called with u==0x0E36 and the switch dispatches to case 0x0E36u at line 51, taking the true side.",
+            "why_winner_satisfies": "value_profile resolves all 10 trials and the winner-resolving seeds embed the literal codepoint 36 0e at the parsed field (Seed 1 has 36 0e 00 00 at offset 0x0c; Seed 5 has 36 0e at offset 0x20); the byte-diff at offset 0x36 shows the value 36 concentrated on the W side. value_profile's CMP_MAP gradient rewards inputs whose comparison operand grows closer (Hamming/prefix bucket) to the constant 0x0E36, climbing the integer-equality gate without needing I2S substitution.",
+            "why_loser_doesnt": "value_profile_cmplog blocks all 10 trials with hitcount 0 on the branch; the loser-blocking seeds carry other codepoints (e.g. 37 0e, 31 0e, 32 0e, 35 0f) at the codepoint field and never place 0x0E36. Adding the extra input-to-state substitution mutator to value_profile diverts mutation effort/corpus budget away from the CMP_MAP gradient climb that value_profile uses to find 0x0E36, so vpc fails to match the exact constant.",
+            "mechanism_attribution": "The winner value_profile is enabled by its CMP_MAP gradient: each integer-CMP callback writes a (PC, operand-distance bucket) entry, so inputs that bring the codepoint operand closer to 0x0E36 register new buckets and are preserved, ratcheting toward the exact match. The loser vpc differs only by also carrying the extra input-to-state substitution stage; that extra technique does not help and the divergence is attributable to value_profile's CMP_MAP gradient-driven match."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the switch case 0x0E36u, an integer-equality gate on a Unicode codepoint, whose true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "hb-ot-shape-fallback.cc:51:2",
+            "exact_quote": "Source line: \tcase 0x0E36u:"
+          },
+          {
+            "claim": "The switch is keyed on the codepoint variable u inside recategorize_combining_class.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L46-L51",
+            "exact_quote": "switch (u)"
+          },
+          {
+            "claim": "value_profile resolves the branch in all 10 trials while value_profile_cmplog blocks it in all 10, with winner hitcount 75 vs loser 0.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "avg hitcount on branch: winner=75  loser=0"
+          },
+          {
+            "claim": "A winner-resolving seed embeds the literal codepoint 0x0E36 as bytes 36 0e at the parsed codepoint field.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1, offset 0x0c",
+            "exact_quote": "55 15 00 00 36 0e 00 00"
+          },
+          {
+            "claim": "A second winner seed also carries the 0x0E36 codepoint bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 5, offset 0x20",
+            "exact_quote": "36 0e"
+          },
+          {
+            "claim": "At offset 0x36 the byte value 36 is concentrated on the winner side and absent from the loser side.",
+            "cited_section": "BYTE DIFF (W vs L at common offsets)",
+            "cited_locator": "offset 0x0036",
+            "exact_quote": "00(.)x3 4c(L)x1 4f(O)x1 36(6)x1"
+          },
+          {
+            "claim": "Loser-blocking seeds carry other (non-0x0E36) codepoints at the field, e.g. 37 0e.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 5, offset 0x04",
+            "exact_quote": "ff 00 00 00 37 0e 00 00"
+          },
+          {
+            "claim": "value_profile's CMP_MAP gradient preserves inputs whose CMP operand pair is closer to matching than any previously seen pair.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile carries no I2SRandReplace mutator, so the winner's success cannot be attributed to I2S substitution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile_cmplog differs from value_profile by adding the I2SRandReplace mutator, isolating the I2S technique as the delta.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on u==0x0E36 where value_profile_cmplog resolves at least as fast/often as value_profile, showing that adding I2S does not impede the CMP_MAP gradient climb toward the constant."
+        },
+        "weakest_evidence_point": "The mechanism for WHY adding I2S (vpc) hurts rather than helps is inferential \u2014 the prompt shows the divergence but does not directly demonstrate I2S diverting budget away from the CMP_MAP gradient.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5624_h0",
+      "target": "harfbuzz",
+      "branch_id": 5624,
+      "analysis_path": "prompts_b/harfbuzz_5624.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shape-fallback.cc",
+      "function": "hb-ot-shape-fallback.cc:recategorize_combining_class(unsigned int, unsigned int)",
+      "line": "52",
+      "source_line": "\tcase 0x0E37u:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x0E37",
+        "operand_width_bytes": 2,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "value_profile's CMP_MAP Hamming-distance bucket feedback continuously rewards codepoint bytes that approach 0x0E37; the I2S stage added in vpc interferes with this gradient climb, preventing it from stably producing 37 0e at the decisive offset.",
+        "one_line": "I2S interferes with CMP_MAP gradient toward codepoint 0x0E37"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must carry codepoint 0x0E37 (Thai U+0E37, little-endian bytes 37 0e) at a buffer-glyph offset so switch(u) takes case 0x0E37u.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "A glyph codepoint equal to 0x0E37 reaching recategorize_combining_class so that switch(u) selects case 0x0E37u; in the serialized input this appears as the 2-byte little-endian literal 37 0e.",
+            "why_winner_satisfies": "value_profile winner seeds repeatedly contain the 37 0e byte run (e.g. seed 025be01a9b9fc036 has '37 0e 00 00' at 0x2c and seed 087d01cc6daaeb6f has '37 0e 00 00' near 0x10); the CMP_MAP Hamming-distance feedback rewards inputs whose CMP operand creeps toward the 0x0E37 constant, and value_profile resolves 10/10.",
+            "why_loser_doesnt": "value_profile_cmplog blocks 9/10 with avg hitcount 5 on the branch versus the winner's 166, so it rarely drives the compared codepoint to exactly 0x0E37; loser-blocking seeds carry different trailing bytes (e.g. 47 0e / 31 0e / 1f e2) rather than a stable 37 0e at the decisive offset.",
+            "mechanism_attribution": "value_profile's CMP_MAP gradient bucket on the codepoint==0x0E37 comparison gives a continuous distance signal that ratchets the operand to the exact constant; adding the cmplog I2S stage (the only delta to value_profile_cmplog) interferes here, so the gradient-only fuzzer wins."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the switch case for the literal codepoint 0x0E37.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6 / source line",
+            "exact_quote": "Source line: \tcase 0x0E37u:"
+          },
+          {
+            "claim": "The branch is reached only when the codepoint u flows through switch(u) inside the Thai/Lao block.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L59-L65",
+            "exact_quote": "switch (u)"
+          },
+          {
+            "claim": "value_profile is the winner over value_profile_cmplog and the delta technique is I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "value_profile resolves 10/10 while value_profile_cmplog blocks 9/10, with winner branch hitcount 166 vs loser 5.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 stats",
+            "exact_quote": "avg hitcount on branch: winner=166  loser=5"
+          },
+          {
+            "claim": "A value_profile winner seed carries the little-endian 0x0E37 byte run 37 0e.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 025be01a9b9fc036 offset 0x2c",
+            "exact_quote": "68 7a 6f 2d 68 61 6e 74 2d 6d 6f 00 37 0e 00 00"
+          },
+          {
+            "claim": "Another value_profile winner seed also carries 37 0e near offset 0x10.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 087d01cc6daaeb6f offset 0x10",
+            "exact_quote": "37 0e 00 00 47 0e 00 00 37 0e 00 00 00 00 0e 00"
+          },
+          {
+            "claim": "value_profile uses CMP_MAP distance-bucket feedback that rewards operands creeping toward a match, with no I2SRandReplace.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "cmplog is the winner over value_profile_cmplog and the delta technique is value_profile.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: cmplog > value_profile_cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "The cmplog winner seed ends in the 37 0e little-endian 0x0E37 literal.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed d484b55bd133cd62 offset 0x18",
+            "exact_quote": "20 00 1a 4d 6b 64 00 f8 37 0e"
+          },
+          {
+            "claim": "I2SRandReplace substitutes an intercepted CMP operand into the input at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile_cmplog loses both pairs, blocking 9/10 at this branch.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "value_profile_cmplog row",
+            "exact_quote": "value_profile_cmplog             1        9          0  loser (I2S vs value_profile); loser (value_profile vs cmplog)"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on codepoint==0x0E37 where value_profile_cmplog resolves as fast as or faster than both value_profile and cmplog (no interference), with winner/loser branch hitcounts within noise."
+        },
+        "weakest_evidence_point": "Why combining BOTH techniques (value_profile_cmplog) underperforms each single technique is an interference inference; the prompt shows the divergence but no direct mechanism trace of why the union regresses.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5660_h1",
+      "target": "harfbuzz",
+      "branch_id": 5660,
+      "analysis_path": "prompts_b/harfbuzz_5660.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shape-fallback.cc",
+      "function": "hb-ot-shape-fallback.cc:recategorize_combining_class(unsigned int, unsigned int)",
+      "line": "145",
+      "source_line": "    case HB_MODIFIED_COMBINING_CLASS_CCC118: /* sign u / sign uu */",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "value_profile's CMP_MAP gradient steers 0x0E-block codepoint bytes toward the Lao CCC118 value; I2S added in vpc floods the corpus with off-path CMP-substituted seeds, crowding out the gradient-steered path so vpc never sustains the required codepoint.",
+        "one_line": "I2S corpus pollution crowds out CMP_MAP gradient toward CCC118"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A glyph whose codepoint is a Lao CCC118 sign-u character (U+0EB8/0EB9, bytes b9 0e 00 00) must reach the modified-combining-class switch.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "The same Lao CCC118 codepoint slot (bytes in the 0x0E00 block, low byte b9/0xEB9 etc.) must be present so klass == CCC118 at the line-145 case; value_profile reaches it via CMP_MAP-bucket-guided byte steering rather than I2S substitution.",
+            "why_winner_satisfies": "value_profile resolves 10/10 (winner: resolved=10/10) with hitcount 267 on the branch; its winning seed contains 0e-suffixed codepoint slots (47 0e, 4b 0e, b9 0e, 4c 0e), found by CMP_MAP Hamming-distance feedback that preserves inputs whose codepoint bytes edge closer to a 0x0E00-block Lao value.",
+            "why_loser_doesnt": "Adding I2S to value_profile (-> value_profile_cmplog) flips it to loser (loser: resolved=2/10 blocked=8) with avg duration blocked 19.90h and hitcount 0; the I2S substitution stage floods the corpus with off-path CMP-substituted seeds that crowd out the CMP_MAP-steered path, so vpc never sustains the codepoint.",
+            "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix-distance buckets) rewards inputs whose codepoint bytes approach a 0x0E00-block Lao value, steering byte mutation toward CCC118; the I2S technique that vpc adds is the loss axis (corpus pollution), so the winner is enabled by CMP_MAP gradient, not I2S."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the CCC118 (Lao sign u/uu) case in recategorize_combining_class, taken when klass equals CCC118.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "hb-ot-shape-fallback.cc:145",
+            "exact_quote": "case HB_MODIFIED_COMBINING_CLASS_CCC118: /* sign u / sign uu */"
+          },
+          {
+            "claim": "Reaching this code requires a glyph classified as a non-spacing mark whose modified combining class is read and recategorized.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 180-182",
+            "exact_quote": "combining_class = recategorize_combining_class (info[i].codepoint, combining_class);"
+          },
+          {
+            "claim": "cmplog is the winner over value_profile_cmplog with the delta being value_profile.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: cmplog > value_profile_cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "A cmplog winning seed contains the b9 0e 00 00 codepoint run.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 3 id=8f2a9151726c6119",
+            "exact_quote": "0e 00 00 00 00 00 00 00 00 39 00 00 e9 4b 00 00"
+          },
+          {
+            "claim": "The cmplog winning seed begins with a b9 run feeding the codepoint slot.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 2 id=6639a9032f7ffe2a",
+            "exact_quote": "b9 0e 00 00 00 fe 01 01 00 03 00 00 00 fe 02 00"
+          },
+          {
+            "claim": "The loser blocks 8/10 with zero hitcount on the branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 loser",
+            "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+          },
+          {
+            "claim": "Loser-blocking seeds carry ASCII filler with no Lao codepoint run.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 3 id=06458dae620cb2e6",
+            "exact_quote": "20 74 74 63 66 20 20 20 20 20 20 20 20 20 20 20"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace substitutes one intercepted CMP operand for the other into the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile resolves all 10 trials and is the winner over value_profile_cmplog with delta I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "The value_profile winner sustains the branch with hitcount 267 while the loser has hitcount 0.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 avg hitcount",
+            "exact_quote": "avg hitcount on branch: winner=267  loser=0"
+          },
+          {
+            "claim": "A value_profile winning seed contains 0e-suffixed codepoint slots including b9 0e.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 1 id=04dbb8139e6820e9 (value_profile)",
+            "exact_quote": "00 00 1a 00 b9 0e 00 00 4c ff 7f ff ff 1b 00 f0"
+          },
+          {
+            "claim": "value_profile's CMP_MAP rewards inputs whose CMP operands are closer to matching, preserving them as corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "Adding I2S to value_profile produces the loser that stays blocked 19.90h on average.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 avg duration blocked",
+            "exact_quote": "avg duration blocked: winner=0.50h  loser=19.90h"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating only on a literal Lao CCC118 codepoint with NO value_profile-favoring distance gradient shows value_profile_cmplog resolving at least as fast as cmplog and value_profile, contradicting the both-techniques-is-worse corpus-pollution claim."
+        },
+        "weakest_evidence_point": "The corpus-pollution loss mechanism (vpc worse than each single technique) is inferred from the inverted win direction and blocked durations, not directly observed as off-path seed flooding in the prompt.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5683",
+      "target": "harfbuzz",
+      "branch_id": 5683,
+      "analysis_path": "prompts_b/harfbuzz_5683.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shape-normalize.cc",
+      "function": "hb-ot-shape-normalize.cc:decompose_current_character(hb_ot_shape_normalize_context_t const*, bool)",
+      "line": "195",
+      "source_line": "    if (space_type != hb_unicode_funcs_t::NOT_SPACE &&",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "I2S copies space codepoint and unicode-space-class constants (like 0x0020) into the vpc corpus, biasing inputs toward space-classified codepoints that take the != NOT_SPACE true branch; value_profile's CMP_MAP gradient instead steers toward valid non-space table-structure inputs reaching the false side.",
+        "one_line": "I2S substitutes space constants, biasing corpus away from false branch"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Reaching the unicode-space guard with a non-space codepoint there, so space_type==NOT_SPACE takes the false branch; CMP_MAP gradient finds it, I2S substitution diverts vpc into the space-fallback path.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "A font/buffer input whose current codepoint passes the _hb_glyph_info_is_unicode_space guard at line 191 yet has space_fallback_type == NOT_SPACE at line 194, so the line-195 comparison `space_type != NOT_SPACE` evaluates false. This requires bytes that drive a real glyph-decomposition path (kern/GPOS/GSUB table structure) rather than degenerate ASCII-space runs that resolve to a true space type.",
+            "why_winner_satisfies": "value_profile winner-resolving seeds carry structured table tags (kern at offset 0x0c, the 0x00 0x01 0x00 0x00 sfnt-version header) and diverse non-space codepoints; the per-role overlay shows the winner set taking the line-195 false side (W F=16) and the line-196 short-circuit chain, exercising the branch 38 times on average.",
+            "why_loser_doesnt": "value_profile_cmplog blocking seeds are dominated by 0x20 (ASCII space) and 0x18 byte runs that resolve to an actual space type, so at line 195 space_type != NOT_SPACE is true (L T=12 F=0) and control diverts into the space-fallback block at 196-202; the loser never lands on the false side, blocking 10/10 trials for 23.9h.",
+            "mechanism_attribution": "The winner is value_profile, whose CMP_MAP gradient (Hamming/prefix distance buckets) rewards inputs that incrementally approach valid table-structure CMPs, steering the corpus toward well-formed non-space glyph inputs that reach line 195 with a non-space codepoint. The loser value_profile_cmplog adds input-to-state substitution, which copies intercepted comparison operands (e.g. the 0x0020 space codepoint compared at line 196 and unicode-space class constants) directly into the input, biasing vpc's corpus toward space-classified codepoints that satisfy line 195's != NOT_SPACE TRUE side and thus block the false branch. So the divergence is attributable to the I2S delta but the technique that *helps* is CMP_MAP gradient on the value_profile arm."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The globally blocked side is the false branch of the line-195 comparison space_type != NOT_SPACE.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6-L7, line 195",
+            "exact_quote": "if (space_type != hb_unicode_funcs_t::NOT_SPACE &&"
+          },
+          {
+            "claim": "The false branch is the globally blocked side.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L7",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "Reaching line 195 requires passing the unicode-space guard at line 191, and the space type is computed at line 194.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 191-194",
+            "exact_quote": "if (_hb_glyph_info_is_unicode_space (&buffer->cur()))"
+          },
+          {
+            "claim": "The space type fed into line 195 is space_fallback_type of the current codepoint.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "line 194",
+            "exact_quote": "hb_unicode_funcs_t::space_t space_type = buffer->unicode->space_fallback_type (u);"
+          },
+          {
+            "claim": "The winner value_profile takes the line-195 false side while the loser value_profile_cmplog takes only the true side.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 line 195 BLOCKER row",
+            "exact_quote": "T=1 F=16  T=12 F=0  if (space_type != hb_unicode_funcs_t::NOT_SPACE &&"
+          },
+          {
+            "claim": "value_profile resolves 10/10 with average hitcount 38 on the branch; value_profile_cmplog blocks 10/10 for 23.9h.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "avg hitcount on branch: winner=38  loser=0"
+          },
+          {
+            "claim": "The decisive pair is value_profile beating value_profile_cmplog with delta I2S, prob_div=1.00.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 header",
+            "exact_quote": "--- Pair 1: value_profile > value_profile_cmplog  [delta: I2S] ---"
+          },
+          {
+            "claim": "Winner-resolving value_profile seeds carry structured sfnt-version header and kern table tag bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1 id=631d87a766522a94",
+            "exact_quote": "0000: 00 01 00 00 00 01 20 21 20 20 17 17 6b 65 72 6e   ...... !  ..kern"
+          },
+          {
+            "claim": "Loser-blocking value_profile_cmplog seeds are dominated by 0x20 ASCII-space byte runs.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser seed 1 id=044f6bc4804646ac",
+            "exact_quote": "0010: 20 00 01 20 20 20 20 20 20 20 20 20 6b e8 20 20    ..         k.  "
+          },
+          {
+            "claim": "value_profile uses CMP_MAP gradient feedback that preserves inputs producing operand pairs closer to matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator; value_profile_cmplog adds I2SRandReplace.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "The line-196 short-circuit compares the codepoint against the literal 0x0020 space.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "line 196",
+            "exact_quote": "(c->font->get_nominal_glyph (0x0020, &space_glyph) || (space_glyph = buffer->invisible)))"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose only gate is space_type != NOT_SPACE on a parsed codepoint where value_profile_cmplog resolves the false branch as fast as or faster than value_profile across trials would refute the claim that I2S operand substitution diverts vpc into the space-fallback path."
+        },
+        "weakest_evidence_point": "The causal link that I2SRandReplace copies the 0x0020/space-class constants into vpc inputs (rather than vpc merely lagging by chance) is inferred from the loser seeds' 0x20 dominance plus the mutator delta, not directly observed in lineage.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5761",
+      "target": "harfbuzz",
+      "branch_id": 5761,
+      "analysis_path": "prompts_b/harfbuzz_5761.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shaper-arabic-joining-list.hh",
+      "function": "hb-ot-shaper-use.cc:has_arabic_joining(hb_script_t)",
+      "line": "32",
+      "source_line": "    case HB_SCRIPT_OLD_UYGHUR:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "derived_integer",
+        "operand_literal": "HB_SCRIPT_OLD_UYGHUR",
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "The script enum is computed indirectly from font tables; I2S substitution cannot reach it directly and dilutes/pollutes the corpus and energy budget, starving the CMP_MAP gradient that value_profile uses unencumbered to walk toward the OLD_UYGHUR script value.",
+        "one_line": "I2S corpus dilution starves CMP_MAP gradient toward indirect script enum"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Reach a font/script setup whose computed script enum equals HB_SCRIPT_OLD_UYGHUR's switch case, found by CMP_MAP gradient without I2S corpus dilution.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "An input that drives plan->props.script through the use-shaper data path so the script enum lands on the HB_SCRIPT_OLD_UYGHUR switch-case at line 32 (true side, return true), rather than the MONGOLIAN/NKO/default arms the loser reaches; the controlling value is the script enum derived from parsed font/table bytes, not a literal that can be substituted directly into a CMP.",
+            "why_winner_satisfies": "value_profile reaches the true side in all 10 trials with hitcount 26 on the branch; its CMP_MAP gradient feedback rewards inputs whose CMP operands move closer to a matching script tag, walking the corpus toward OLD_UYGHUR without an I2S stage diverting energy.",
+            "why_loser_doesnt": "value_profile_cmplog resolves only 1/10 and is blocked 9/10 at avg 22h, hitting MONGOLIAN/NKO/default instead; its added I2SRandReplace mutator spends mutation energy on direct operand substitution that cannot reach a script enum computed indirectly from font tables, diluting the corpus and starving the CMP_MAP gradient that actually works.",
+            "mechanism_attribution": "The winner is enabled by the CMP_MAP gradient (Hamming/prefix-distance bucket feedback) shared by both fuzzers; the loser's only extra technique is the I2S substitution mutator, and since this delta is the sole difference, adding it hurts here \u2014 it pollutes/dilutes the corpus and energy budget rather than helping reach an indirectly-computed switch value, so the operative winning technique is the CMP_MAP gradient running undiluted in value_profile."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is a switch-case arm on a script enum (HB_SCRIPT_OLD_UYGHUR), reached only when the computed script equals that case.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "line 6, hb-ot-shaper-arabic-joining-list.hh:32",
+            "exact_quote": "Source line:     case HB_SCRIPT_OLD_UYGHUR:"
+          },
+          {
+            "claim": "The switched value is plan->props.script, computed upstream and passed into has_arabic_joining, not a raw input literal.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L74, line 164",
+            "exact_quote": "if (has_arabic_joining (plan->props.script)) <-- CALL"
+          },
+          {
+            "claim": "The decisive pair is value_profile beating value_profile_cmplog with the I2S technique as the single delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L26",
+            "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "The winner value_profile resolves all trials and hits the branch (hitcount 26); the loser is blocked 9/10 for ~22h.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L30-31",
+            "exact_quote": "avg duration blocked: winner=0.70h  loser=22.00h\n  avg hitcount on branch: winner=26  loser=0"
+          },
+          {
+            "claim": "The loser reaches the sister switch arms (MONGOLIAN) and the default instead of OLD_UYGHUR.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L101-104",
+            "exact_quote": "d=1   L  32  T=10 F=0  T=0 F=10  case HB_SCRIPT_OLD_UYGHUR:  <-- BLOCKER"
+          },
+          {
+            "claim": "value_profile's enabling technique is the CMP_MAP distance-bucket gradient feedback that preserves inputs whose CMP operands get closer to matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "L208-210",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "The winner value_profile has no I2SRandReplace mutator; the loser value_profile_cmplog adds it as its sole extra technique.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "L212, L233",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile_cmplog's only added mutator over value_profile is I2SRandReplace, isolating the delta.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "L233",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with this indirectly-computed switch-on-script-enum gate in which value_profile_cmplog reaches the OLD_UYGHUR true side at least as fast as value_profile across trials, showing I2S does not dilute and the CMP_MAP gradient alone is not the decisive advantage."
+        },
+        "weakest_evidence_point": "The corpus-dilution/energy-starvation explanation for why adding I2S hurts is inferred from the technique delta and blocked-time gap, not directly observed in seed lineage at this branch.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5865",
+      "target": "harfbuzz",
+      "branch_id": 5865,
+      "analysis_path": "prompts_b/harfbuzz_5865.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+      "function": "hb-ot-shaper-indic.cc:initial_reordering_consonant_syllable(hb_ot_shape_plan_t const*, hb_face_t*, hb_buffer_t*, unsigned int, unsigned int)",
+      "line": "937",
+      "source_line": "      } while (j > start && !is_consonant (info[j]));",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "value_profile's CMP_MAP gradient incrementally builds structured Indic consonant-joiner syllables; adding I2S (vpc) displaces the gradient's incremental corpus growth by inserting whole-operand literal substitutions, disrupting the steady syllable assembly and causing vpc to block.",
+        "one_line": "I2S literal substitution disrupts CMP_MAP gradient's syllable assembly"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A multi-glyph Indic consonant syllable with a joiner (ZWJ/ZWNJ) preceded by a consonant, so the ZWJ-effect do-while loop walks back and exits false.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "An input decoding to an Indic consonant-syllable cluster of multiple glyphs containing a joiner (ZWJ/ZWNJ) at position i>start with a consonant somewhere before it, so the line-937 do-while (decrementing j from the joiner) exits via its false condition because is_consonant(info[j]) becomes true. The seeds are little-endian glyph-index records; the recurring 0c 20 00 00 / 09 00 00 dwords plus 0xa4 bytes encode the Indic glyph stream that set_indic_properties classifies into consonants + joiners.",
+            "why_winner_satisfies": "value_profile resolved 10/10 with avg 32 hits on the branch; its CMP_MAP Hamming/prefix-distance gradient incrementally rewards inputs whose CMP operands approach the glyph-classification thresholds, building well-formed multi-glyph consonant syllables. Winner seeds carry repeated 0c 20 00 00 and 09 00 00 structural dwords and 0xa4 runs that produce the consonant+joiner stream the loop needs; the loop at 937 is reached and exits false (T=7 F=12 on one count line).",
+            "why_loser_doesnt": "value_profile_cmplog blocked 8/10 (resolved 0/10) despite sharing the same CMP_MAP gradient; its extra I2SRandReplace stage substitutes whole CMP operands, displacing the gradient's incremental corpus growth so it rarely assembles the multi-consonant joiner syllable. Loser seeds are shorter, joiner-poor records (e.g. dense 0c 20 00 00 / 47 0c 00 00 dwords) that take the line-937 true side (T=4 F=3) and never satisfy the consonant-before-joiner exit; the enclosing function fires only 2 times for L vs 27 for W.",
+            "mechanism_attribution": "The winner value_profile is enabled by the CMP_MAP gradient (Hamming/prefix-distance bucket feedback) without input-to-state substitution. The divergence is anti-I2S: the only technique value_profile_cmplog adds over value_profile is the per-execution CmpLog buffer plus input-to-state operand substitution, and that addition HURTS \u2014 the literal operand replacement disrupts the steady gradient-driven assembly of the structured Indic syllable. So the technique enabling the winner is CMP_MAP gradient."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the false side of a do-while loop that decrements j until it hits a consonant or start, inside the joiner-effect pass.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "line 937",
+            "exact_quote": "} while (j > start && !is_consonant (info[j]));"
+          },
+          {
+            "claim": "The blocked side is the false branch, globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L7",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "The decisive pair is value_profile beating value_profile_cmplog with an I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "value_profile resolved all 10 trials while value_profile_cmplog blocked 8 of 10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "winner/loser counts",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+          },
+          {
+            "claim": "The loser value_profile_cmplog resolved zero trials and blocked eight.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "loser counts",
+            "exact_quote": "loser:  resolved=0/10  blocked=8  unreached=2"
+          },
+          {
+            "claim": "The winner averages 32 hits on the branch versus 0 for the loser.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "avg hitcount",
+            "exact_quote": "avg hitcount on branch: winner=32  loser=0"
+          },
+          {
+            "claim": "The branch sits inside the ZWJ/ZWNJ joiner-effect loop that walks back from a joiner.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 921-937",
+            "exact_quote": "if (is_joiner (info[i])) {"
+          },
+          {
+            "claim": "The enclosing consonant-syllable reordering function was invoked 27 times for the winner seed-set but only 2 for the loser.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "initial_reordering_consonant_syllable",
+            "exact_quote": "27         2  hb-ot-shaper-indic.cc:initial_reordering_consonant_syllable"
+          },
+          {
+            "claim": "is_consonant is exercised far more under the winner (129) than the loser (18).",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "is_consonant",
+            "exact_quote": "129        18  hb-ot-shaper-indic.cc:is_consonant"
+          },
+          {
+            "claim": "At the blocker line one count tuple shows the winner taking the false side far more than the loser (T=7 F=12 vs T=4 F=0).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L937",
+            "exact_quote": "d=1   L 937  T=7 F=12  T=4 F=0  } while (j > start && !is_consonant (info[j]));  <-- BLOCKER"
+          },
+          {
+            "claim": "Winner-resolving seeds are value_profile records carrying repeated 0c 20 00 00 and 09 00 00 structural dwords and 0xa4 runs.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1",
+            "exact_quote": "0c 20 00 00 ab ab 54 01 a4 a4 ad a4 00"
+          },
+          {
+            "claim": "Loser-blocking seeds are value_profile_cmplog records dense in 0c 20 00 00 / 47 0c 00 00 glyph dwords.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser seed 2",
+            "exact_quote": "47 0c 00 00 41 0c 00 00 47 0d 00 00 0c 20 00 00"
+          },
+          {
+            "claim": "The only comparison-solving technique value_profile_cmplog adds over value_profile is I2SRandReplace plus the per-execution CMP buffer.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+          },
+          {
+            "claim": "value_profile's comparison feedback is the CMP_MAP distance-bucket gradient with no I2SRandReplace.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile preserves an input whenever its CMP operand pair is closer to matching than any previously seen, driving incremental corpus growth.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "adds a new CMP_MAP bucket and is preserved as corpus"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic sweep in which value_profile_cmplog resolves the branch as fast as or faster than value_profile across trials, showing the added I2SRandReplace stage does not impede assembling the multi-glyph consonant-plus-joiner syllable."
+        },
+        "weakest_evidence_point": "The claim that I2SRandReplace operand substitution actively disrupts gradient-driven syllable assembly (rather than the loser sample simply being underpowered with only 2 enclosing-function invocations) is inferential, not directly observed in lineage.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_6010",
+      "target": "harfbuzz",
+      "branch_id": 6010,
+      "analysis_path": "prompts_b/harfbuzz_6010.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+      "function": "_hb_preprocess_text_vowel_constraints(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+      "line": "68",
+      "source_line": "\t      case 0x0946u: case 0x0949u: case 0x094Au: case 0x094Bu:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "0x0946, 0x0949, 0x094A, 0x094B",
+        "operand_width_bytes": 2,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "value_profile's CMP_MAP gradient incrementally preserves inputs whose codepoint CMP operands approach the Devanagari case constants without I2S interference; adding the I2SRandReplace stage adds per-execution overhead and corpus churn that dilutes the gradient-driven progress toward the 0x094X codepoints.",
+        "one_line": "CMP_MAP gradient inches codepoint toward Devanagari constant; I2S overhead dilutes progress"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Buffer must shape as a Devanagari 0x0905 base followed by a second codepoint in the 0x0946-0x094B vowel set so the inner switch case matches.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "A glyph buffer routed to HB_SCRIPT_DEVANAGARI whose current codepoint is 0x0905 and whose next codepoint (buffer->cur(1)) equals one of 0x0946/0x0949/0x094A/0x094B, so the inner switch on cur(1).codepoint takes the true arm at line 68.",
+            "why_winner_satisfies": "value_profile wins 8/10 and reaches the branch true side (avg hitcount 9 vs 0); its CMP_MAP gradient steadily preserves inputs whose CMP operands inch toward the required Devanagari codepoint constants, and the resolving seed carries 09 09 05 09 byte runs consistent with the 0x0905/0x094X 16-bit codepoints driving the switch.",
+            "why_loser_doesnt": "value_profile_cmplog resolves only 2/10 (avg hitcount 0); it pays I2SRandReplace per-execution cost and corpus churn on top of the same CMP_MAP gradient, and its blocking seeds stay on the false arm (line 68 L counts T=0/T=1 F=17/F=18) without assembling the 0x0905-then-0x094X pair.",
+            "mechanism_attribution": "Both involved fuzzers share the CMP_MAP gradient (Hamming/prefix distance feedback) that incrementally rewards inputs whose codepoint CMP operands approach the case constants; value_profile beats value_profile_cmplog because the winner relies on that gradient unburdened, whereas adding the I2S input-to-state substitution mutator (the single technique delta) does not help solve this nested 16-bit-codepoint switch and its overhead/corpus churn dilutes the loser's progress."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The only decisive pair is value_profile > value_profile_cmplog with technique delta I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "The blocker is the inner switch case on the second Devanagari codepoint, line 68, true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "line 68",
+            "exact_quote": "case 0x0946u: case 0x0949u: case 0x094Au: case 0x094Bu:"
+          },
+          {
+            "claim": "Matching in this shaper depends on buffer->cur(1).codepoint, the second glyph's codepoint, being a specific Devanagari constant.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "line 84",
+            "exact_quote": "matched = 0x0941u == buffer->cur (1).codepoint;"
+          },
+          {
+            "claim": "value_profile resolves the branch 8/10 with average hitcount 9 while value_profile_cmplog resolves 2/10 with average hitcount 0.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 aggregates",
+            "exact_quote": "avg hitcount on branch: winner=9  loser=0"
+          },
+          {
+            "claim": "The winner-resolving value_profile seed carries 0x0905/0x094X-consistent codepoint byte runs (09 09 05 09).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed b66b6d7aad45d988",
+            "exact_quote": "13 10 10 10 10 10 09 09 05 09 00 00 4a 09 00 00"
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace and is driven by the CMP_MAP gradient that preserves inputs whose CMP operands approach a match.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile mutators/feedback",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile_cmplog adds I2SRandReplace on top of the same edge plus CMP_MAP machinery the winner already has.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "The CMP_MAP gradient preserves an input whose CMP-operand pair is closer to matching than any seen before.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "Loser-blocking seeds stay on the false arm at the blocker line (true counts 0/1 vs large false counts).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L 68",
+            "exact_quote": "L  68  T=0 F=1  T=1 F=17  case 0x0946u: case 0x0949u: case 0x094Au: case 0x094Bu:  <-- BLOCKER"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the same nested 16-bit-codepoint Devanagari switch in which value_profile_cmplog resolves the case as fast as or faster than value_profile across trials, showing that adding I2SRandReplace does not hurt and the CMP_MAP gradient is not the decisive advantage."
+        },
+        "weakest_evidence_point": "The byte-level link from the winner seed's 09 09 05 09 run to the specific 0x0905/0x094X codepoints is inferred from glyph-codepoint plausibility, not from a confirmed input-to-codepoint decode path in this harness.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_6162",
+      "target": "harfbuzz",
+      "branch_id": 6162,
+      "analysis_path": "prompts_b/harfbuzz_6162.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shaper.hh",
+      "function": "hb-ot-shape-normalize.cc:hb_ot_shaper_categorize(hb_ot_shape_planner_t const*)",
+      "line": "300",
+      "source_line": "    case HB_SCRIPT_PHAGS_PA:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "HB_SCRIPT_PHAGS_PA",
+        "operand_width_bytes": 4,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "value_profile's CMP_MAP gradient walks script-tag/table-magic CMP operands incrementally toward a USE-routed script tag, hitting the line-300 block; value_profile_cmplog's I2S additionally swaps in exact GSUB/GPOS/DFLT/latn literal operands, over-committing the corpus to earlier high-frequency case arms and starving the USE block.",
+        "one_line": "CMP_MAP gradient walks toward USE-routed script; I2S over-commits corpus to earlier literal cases"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Font input whose resolved script tag falls in the USE-shaper case-block (HB_SCRIPT_PHAGS_PA and the Unicode-5.0+ additions) reaches the blocked case arm.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "A font whose parsed script property (planner->props.script) resolves to one of the Unicode-5.0+ scripts handled by the shared USE case block at line 300 (HB_SCRIPT_PHAGS_PA). This requires valid OpenType table magic (e.g. GSUB/GPOS) plus script/script-tag bytes that decode to a USE-routed script rather than DFLT/latn, so the categorize switch lands on the line-300 arm.",
+            "why_winner_satisfies": "value_profile winning seeds carry structured table-ish byte runs (e.g. ascii 'darf', repeated 0x06/0x64/0x6e fields and embedded tags like 'h-hans', 'h-min') that drive the script property into the USE case block; the W-only overlay marks line 300 and the entire downstream USE block (lines 303-398) as hit, and the branch averages 34 hits for the winner.",
+            "why_loser_doesnt": "value_profile_cmplog blocking seeds are dominated by literal magic-table tokens 'GSUB'/'GPOS' at offset 0x0c with long 0x20/0x5a/0x47 filler runs; they resolve to scripts handled by earlier arms (the L-only overlay hits the Indic/Telugu block at 231-244 and the Myanmar block at 249-262, never line 300), so the loser blocks on this branch in 9/10 trials with 0 hits.",
+            "mechanism_attribution": "The winner value_profile uses the CMP_MAP gradient: each script-tag / table-magic CMP writes a Hamming/prefix-distance bucket, and an input that is one bucket closer to a USE-routed script tag is preserved, letting the corpus incrementally walk the operand toward the line-300 USE block. The loser value_profile_cmplog additionally carries the input-to-state comparison-substitution mutator (the only technique delta), which swaps whole CMP operands toward the nearest matching literal (the GSUB/GPOS magic and the DFLT/latn anchor arms), over-committing the corpus to the earlier high-frequency literal case arms and starving exploration of the line-300 USE case; thus the gradient-only fuzzer wins. The winner-enabling technique is the CMP_MAP gradient, not the comparison-substitution mutator."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked branch is the case arm for HB_SCRIPT_PHAGS_PA inside the script-dispatch switch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6, hb-ot-shaper.hh:300",
+            "exact_quote": "case HB_SCRIPT_PHAGS_PA:"
+          },
+          {
+            "claim": "The enclosing function switches on the parsed script property of the font.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L179",
+            "exact_quote": "switch ((hb_tag_t) planner->props.script)"
+          },
+          {
+            "claim": "The winner-resolving overlay marks line 300 and the downstream USE block as hit by W only.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 300, 397-398",
+            "exact_quote": "[W]   300      case HB_SCRIPT_PHAGS_PA: <-- BLOCKER"
+          },
+          {
+            "claim": "The winning USE-routing tail returns the USE shaper and is hit only by W.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "line 398",
+            "exact_quote": "[W]   398  \treturn &_hb_ot_shaper_use;"
+          },
+          {
+            "claim": "Loser-blocking seeds only reach earlier case arms (Telugu/Indic block) and not line 300.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "line 231",
+            "exact_quote": "[L]   231      case HB_SCRIPT_TELUGU:"
+          },
+          {
+            "claim": "The winner resolved this branch 10/10 with avg 34 hits while the loser blocked 9/10 with 0 hits.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L30-32",
+            "exact_quote": "avg hitcount on branch: winner=34  loser=0"
+          },
+          {
+            "claim": "Winner seeds contain structured table-like byte runs and embedded tag-like ascii ('darf', 'h-hans').",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "W seed 1 offset 0x10 / W seed 3 offset 0x30",
+            "exact_quote": "darf.nnnnnnnnnn"
+          },
+          {
+            "claim": "Loser seeds are dominated by the literal table-magic tokens GSUB/GPOS.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "L seed 2 offset 0x0c / L seed 4 offset 0x0c",
+            "exact_quote": "GSUB"
+          },
+          {
+            "claim": "At offset 0x0c the loser is uniformly the byte 0x47 ('G', start of GSUB/GPOS) while the winner is not.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x000c",
+            "exact_quote": "47(G)x10"
+          },
+          {
+            "claim": "value_profile uses the CMP_MAP distance-bucket gradient as its comparison-solving feedback.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback paragraph",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "The winner value_profile has no I2SRandReplace mutator; the loser value_profile_cmplog adds it, so I2S is the single technique delta.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators paragraph",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose script-dispatch switch routes a USE-block script via a CMP that value_profile_cmplog (with I2S) resolves as fast or faster than value_profile, showing I2S does not regress reaching the line-300 arm."
+        },
+        "weakest_evidence_point": "The claim that I2S over-commits the loser to the GSUB/GPOS and DFLT/latn literal arms is inferred from byte concentration and overlay, not from a loser lineage trace confirming I2S substitutions toward those literals.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_6210",
+      "target": "harfbuzz",
+      "branch_id": 6210,
+      "analysis_path": "prompts_b/harfbuzz_6210.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shaper.hh",
+      "function": "hb-ot-shape-normalize.cc:hb_ot_shaper_categorize(hb_ot_shape_planner_t const*)",
+      "line": "380",
+      "source_line": "    case HB_SCRIPT_OLD_UYGHUR:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "HB_SCRIPT_OLD_UYGHUR",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "value_profile's CMP_MAP distance-bucket feedback incrementally ratchets short header bytes toward the Old Uyghur script-tag case constant; value_profile_cmplog adds I2S substitution that solves the GSUB/GPOS table-tag comparisons instead, pulling the corpus toward large sfnt-structured inputs that land on earlier/default script arms.",
+        "one_line": "CMP_MAP gradient ratchets script-tag bytes to Old Uyghur case; I2S diverts to GSUB/GPOS literals"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Script tag must equal a Unicode-14/15 USE-shaper value (Old Uyghur/Tangsa/Toto/Vithkuqi/Kawi/Nag Mundari) to take the switch case at line 380.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "The 4-byte script tag dispatched by the switch on (hb_tag_t) planner->props.script must hold one of the Unicode-14.0/15.0 values whose case-arm falls through to line 380 (HB_SCRIPT_OLD_UYGHUR and siblings). The winner inputs supply a short header whose leading bytes (e.g. 75 0f 01 / 88 0f 01 / 80 0f 01 at offsets 0x00-0x02) drive props.script into that USE-shaper case group rather than the default/DFLT/latn arms.",
+            "why_winner_satisfies": "value_profile winner seeds carry a concentrated low-byte head pattern at offsets 0x00-0x02 (75/88/80 then 0f then 01) and are short (10-73 bytes); the CMP_MAP distance-bucket feedback rewards each input whose script-tag CMP operand gets closer to a target case constant, ratcheting props.script into the Old Uyghur case so the true branch is hit 26 times.",
+            "why_loser_doesnt": "value_profile_cmplog loser seeds are large (56-323 bytes) well-formed-looking sfnt tables beginning 00 01 00 00 with GSUB/GPOS directory tags; they resolve a chosen_script of DFLT/latn or an earlier (lower-Unicode) script case, never reaching the line-380 case group, and stay blocked for 22.10h.",
+            "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix distance-bucket feedback on the switch-dispatch CMP) incrementally rewards inputs whose script-tag operand approaches a line-380 case constant. The loser adds an input-to-state substitution stage on top, but that extra substitution diverts the mutation budget toward solving the GSUB/GPOS table-tag comparisons (the only literals it can lift from the corpus), pulling it away from the script-tag dispatch; the winning technique here is the CMP_MAP gradient, not the substitution stage."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is a switch-case dispatch on the script tag, with the blocked true side at the Old Uyghur Unicode-14.0 case group.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L43, L242-244",
+            "exact_quote": "switch ((hb_tag_t) planner->props.script)"
+          },
+          {
+            "claim": "Line 380 case HB_SCRIPT_OLD_UYGHUR is the winner-only blocking branch side.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L244",
+            "exact_quote": "case HB_SCRIPT_OLD_UYGHUR: <-- BLOCKER"
+          },
+          {
+            "claim": "The line-380 case group is the Unicode-14.0/15.0 script set routed to the USE shaper, hit only by winner seeds.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L242-245,250-251,262",
+            "exact_quote": "[W]   381      case HB_SCRIPT_TANGSA:"
+          },
+          {
+            "claim": "Winner seeds carry a concentrated low-byte head pattern at offsets 0x00-0x02.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0001-0x0002",
+            "exact_quote": "0x0001  0f(.)x7 e6(.)x1 e0(.)x1 0c(.)x1     01(.)x9 00(.)x1                     DIFFER"
+          },
+          {
+            "claim": "A winner seed begins 75 0f 01 and is short (19 bytes), found by value_profile.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1 id=1390ee63592e3e2f",
+            "exact_quote": "0000: 75 0f 01 00 00 00 00 01 20 20 e0 ed 5a 1a 20 39"
+          },
+          {
+            "claim": "Loser seeds are large well-formed-looking sfnt fonts beginning 00 01 00 00 with GSUB table tags.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 2 id=00347ed302ef3460",
+            "exact_quote": "0000: 00 01 00 00 00 01 ee ff 00 30 00 20 47 53 55 42   .........0. GSUB"
+          },
+          {
+            "claim": "At offset 0x0c winners hold low bytes while losers concentrate on 0x47 (the 'G' of GSUB/GPOS table tags).",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x000c",
+            "exact_quote": "0x000c  00(.)x5 76(v)x2 5a(Z)x1 11(.)x1     47(G)x10                            DIFFER"
+          },
+          {
+            "claim": "The winner resolves the true branch 26 times while the loser hitcount is 0 and stays blocked 22.10h.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 avg hitcount / avg duration blocked",
+            "exact_quote": "avg duration blocked: winner=0.70h  loser=22.10h"
+          },
+          {
+            "claim": "value_profile uses a CMP_MAP keyed by operand-distance bucket and rewards inputs whose CMP operands move closer to matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Instrumentation/Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile_cmplog is the only involved fuzzer that adds I2SRandReplace on top of the CMP_MAP gradient.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "The decisive pair delta is I2S, value_profile winning over value_profile_cmplog.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 header",
+            "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the same switch-on-tag dispatch where value_profile_cmplog resolves the line-380 case as fast as or faster than value_profile across trials, showing the added I2S substitution does not impede (or actively accelerates) reaching the script-tag case group."
+        },
+        "weakest_evidence_point": "The claim that I2S substitution actively diverts value_profile_cmplog's budget toward GSUB/GPOS tag comparisons is inferred from seed structure, not directly observed in lineage; the slowdown could instead be ordinary run-to-run variance amplified by the larger loser inputs.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_6263",
+      "target": "harfbuzz",
+      "branch_id": 6263,
+      "analysis_path": "prompts_b/harfbuzz_6263.analysis.json",
+      "file": "/src/harfbuzz/src/hb-unicode.hh",
+      "function": "hb_unicode_funcs_t::space_fallback_type(unsigned int)",
+      "line": "224",
+      "source_line": "      default:\t    return NOT_SPACE;\t/* U+1680 OGHAM SPACE MARK */",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "default",
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "value_profile's CMP_MAP gradient accumulates diverse unicode-space codepoints without forcing exact equality; value_profile_cmplog's I2S substitution rewrites the switch comparand u with the exact case-literal operands (0x0020/0x00A0/0x2006), collapsing every space input onto enumerated cases and starving the default arm.",
+        "one_line": "CMP_MAP gradient preserves diverse space codepoints reaching default; I2S collapses them onto enumerated cases"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A unicode-space codepoint u that is NOT any enumerated case literal (0x0020/0x00A0/0x2006...) so the switch falls to default.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "An input whose decoded codepoint u reaches space_fallback_type but does NOT equal any enumerated switch case literal (0x0020, 0x00A0, 0x2000, 0x2006, 0x3000, ...), so the switch on u takes the `default:` arm at line 224 instead of a `case` arm.",
+            "why_winner_satisfies": "value_profile resolves the default arm in 10/10 trials with hitcount 38 and W reaches line 224 ([W] 224, d=1 L 224 W=T:16/F:1); its CMP_MAP gradient feedback rewards producing unicode-space codepoints that route into space_fallback_type, but lacking I2SRandReplace it is not snapped onto the exact case literals, so non-enumerated space codepoints survive in the corpus and trip the default arm.",
+            "why_loser_doesnt": "value_profile_cmplog blocks the default arm in 10/10 trials with hitcount 0; its I2SRandReplace mutator substitutes the switch comparand u with the exact literal operands of the case comparisons (0x0020, 0x00A0, 0x2006 are exactly the cases its loser seeds land on, [L] 225/226/233, d=1 L 225/226/233), driving every space input onto an enumerated `case` and away from `default`.",
+            "mechanism_attribution": "The single technique delta is I2S, present in the loser and absent in the winner. value_profile's CMP_MAP gradient feedback lets it accumulate diverse unicode-space codepoints without forcing exact equality matches; the loser's added input-to-state substitution rewrites u with the exact case-literal operands seen in the switch comparisons, collapsing inputs onto enumerated cases and starving the default arm. The winner's enabling technique is therefore CMP_MAP gradient exploration unhampered by literal-snapping."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the default arm of a switch on the codepoint u, returning NOT_SPACE.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "hb-unicode.hh:221-224",
+            "exact_quote": "switch (u)"
+          },
+          {
+            "claim": "The default arm is the globally blocked true branch and the winner reaches it.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "line 224",
+            "exact_quote": "[W]   224        default:\t    return NOT_SPACE;\t/* U+1680 OGHAM SPACE MARK */ <-- BLOCKER"
+          },
+          {
+            "claim": "The enumerated case arms are the literal space codepoints the loser-blocking seeds land on.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 225-226",
+            "exact_quote": "[L]   225        case 0x0020u: return SPACE;\t/* U+0020 SPACE */"
+          },
+          {
+            "claim": "At the blocker line, W takes the default (true) side while L does not.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L 224",
+            "exact_quote": "d=1   L 224  T=16 F=1  T=0 F=12  default:\t    return NOT_SPACE;\t/* U+1680 OGHAM SPACE MARK */  <-- BLOCKER"
+          },
+          {
+            "claim": "value_profile is the winner and value_profile_cmplog the loser, the delta being I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "The winner resolves all trials with positive hitcount while the loser is blocked with zero hitcount.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 stats",
+            "exact_quote": "avg hitcount on branch: winner=38  loser=0"
+          },
+          {
+            "claim": "value_profile lacks the I2SRandReplace mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile_cmplog adds I2SRandReplace on top of the havoc/token stack.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile's CMP_MAP gradient feedback preserves inputs whose CMP operands get closer to matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic switch whose case literals match the comparand operands would still show value_profile_cmplog resolving the default arm as fast as value_profile (no I2S-induced collapse onto cases), with no significant hitcount gap on the default arm."
+        },
+        "weakest_evidence_point": "The claim that I2SRandReplace actively pulls vpc onto enumerated case literals (rather than vpc merely being slower for unrelated reasons) is inferred from the source switch structure plus the loser seeds landing on 0x0020/0x00A0/0x2006, not directly observed in lineage.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6343",
+      "target": "libxml2",
+      "branch_id": 6343,
+      "analysis_path": "prompts_a/libxml2_6343.analysis.json",
+      "file": "/src/libxml2/encoding.c",
+      "function": "xmlDetectCharEncoding",
+      "line": "958",
+      "source_line": "\tif ((in[0] == 0x00) && (in[1] == 0x00) &&",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "0x00 0x00 0x3C 0x00",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2S splices logged operands into the corpus, diverting mutation energy toward sibling encoding magic constants (e.g. UTF16BE), so the loser resolves a different gate rather than assembling the UCS4_2143 00 00 3C 00 window; value_profile's CMP_MAP gradient climbs toward it without that diversion.",
+        "one_line": "4-byte UCS4_2143 magic; I2S diverts corpus to sibling encoding gates"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "First 4 input bytes consumed by xmlDetectCharEncoding must equal the UCS4_2143 magic prefix 0x00 0x00 0x3C 0x00.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "The 4-byte window read by xmlDetectCharEncoding(start, 4) must hold exactly in[0]==0x00, in[1]==0x00, in[2]==0x3C, in[3]==0x00 (the UCS4_2143 magic) while NOT matching any earlier 4-byte encoding gate (e.g. 00 00 00 3C for UCS4BE) tested before line 958.",
+            "why_winner_satisfies": "value_profile resolves the true side in 9/10 trials; its CMP_MAP gradient rewards inputs whose CMP operands move bucket-by-bucket toward the 00 00 3C 00 constant, and winner-resolving seeds carry runs of 0x00 bytes (e.g. offsets 0x15-0x17 = 00 00 00) that the gradient feedback assembled into the magic prefix.",
+            "why_loser_doesnt": "value_profile_cmplog blocks the true side in 8/10 trials and spends 18.00h blocked; adding the I2SRandReplace stage diverts mutation energy into splicing logged operands, and the loser-blocking seeds instead resolve the sibling UTF16BE gate (line 980, tagged [L]) so they never present the 00 00 3C 00 window to line 958.",
+            "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix-distance bucket feedback) lets it climb toward the 4-byte magic constant incrementally; value_profile_cmplog adds the input-to-state substitution stage which here diverts effort and the pair regresses, so this is an I2S-hurts case where the winning technique is the CMP_MAP gradient, not comparison-solving substitution."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the UCS4_2143 magic gate requiring bytes 0x00 0x00 0x3C 0x00 at the detection window.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "encoding.c L958-960",
+            "exact_quote": "if ((in[0] == 0x00) && (in[1] == 0x00) && <-- BLOCKER"
+          },
+          {
+            "claim": "The detection reads exactly the first 4 input bytes via xmlDetectCharEncoding(start, 4).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "parser.c L11530 call site",
+            "exact_quote": "enc = xmlDetectCharEncoding(start, 4); <-- CALL"
+          },
+          {
+            "claim": "value_profile resolves the true side in 9/10 trials while value_profile_cmplog blocks it in 8/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 winner/loser counts",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          },
+          {
+            "claim": "The loser spends far longer blocked on this branch than the winner.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "avg duration blocked",
+            "exact_quote": "avg duration blocked: winner=2.50h  loser=18.00h"
+          },
+          {
+            "claim": "Winner-resolving seeds contain runs of 0x00 bytes that build toward the magic prefix.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "winner seed 1 id=d17e8c479b6b27ab offsets 0x15-0x17",
+            "exact_quote": "0010: 3e 0a 0a 5c 0a 00 00 00 31 32 37 37 37 32 2e 78   >..\\....127772.x"
+          },
+          {
+            "claim": "value_profile resolves the true branch while value_profile_cmplog does not at line 958.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L958 BLOCKER row",
+            "exact_quote": "d=1   L 958  T=8 F=0  T=0 F=10  if ((in[0] == 0x00) && (in[1] == 0x00) &&  <-- BLOCKER"
+          },
+          {
+            "claim": "Loser-blocking inputs resolve the sibling UTF16BE gate at line 980 instead of the UCS4_2143 gate.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "encoding.c L980 [L] tag",
+            "exact_quote": "[L]   980  \t    return(XML_CHAR_ENCODING_UTF16BE);"
+          },
+          {
+            "claim": "value_profile's instrumentation is the CMP_MAP gradient keyed by operand-distance bucket.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Instrumentation paragraph",
+            "exact_quote": "each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket)."
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator; value_profile_cmplog adds it.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators paragraph",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the exact 00 00 3C 00 magic gate where value_profile_cmplog reaches the true branch as fast as or faster than value_profile across trials would refute the I2S-hurts attribution and the CMP_MAP-gradient-only mechanism."
+        },
+        "weakest_evidence_point": "The dataflow link between the 0x00 runs in winner seeds and the precise 4-byte detection window is inferred from byte content, not directly traced through the start[] buffer fill at the call site.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6837",
+      "target": "libxml2",
+      "branch_id": 6837,
+      "analysis_path": "prompts_a/libxml2_6837.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "parser.c:xmlParseTryOrFinish",
+      "line": "11754",
+      "source_line": "\t\t    (ctxt->input->cur[8] == '[')) {",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "<![CDATA[",
+        "operand_width_bytes": 9,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2S splices logged exact-literal comparands ('<![CDATA[', '<?xml', '<!DOCTYPE') back into the corpus, biasing seeds toward completing those multi-byte gates and the CDATA state machine rather than taking the false-side general-parse path; value_profile's CMP_MAP gradient diversifies content leads without that pull.",
+        "one_line": "9-byte CDATA literal AND-chain false side; I2S biases corpus toward CDATA entry"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Resolving the false side needs content bytes that are NOT a full '<![CDATA[' literal, reached by broad parsing progress rather than exact-literal CDATA matching",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "A '<'-led content byte stream whose bytes 1-8 do NOT spell '![CDATA[' (or a non-'<' content lead), so the 9-clause AND at L11747-11754 short-circuits to its false side and the parser keeps advancing through general START_TAG / CONTENT parsing instead of entering the CDATA-section state machine.",
+            "why_winner_satisfies": "value_profile resolves the branch in 9/10 trials; its winning seed reaches the false-side START_TAG path ([W] lines 11604-11620 and the goto-done at 11500/11639) and never enters the [L] CDATA-section block, meaning the 8-byte CDATA literal was not matched so the false side was taken.",
+            "why_loser_doesnt": "value_profile_cmplog blocks 8/10; its loser seed funnels into the [L] '<?xml' declaration and '<!DOCTYPE' / CDATA-section paths (L11555-11591, L11813-11903, L11950-11984), spending energy completing exact multi-byte literal matches and the CDATA term scan rather than diversifying content to take the false side.",
+            "mechanism_attribution": "value_profile (winner) uses CMP_MAP distance-bucket gradient feedback over edge coverage and lacks the input-to-state substitution mutator; it explores diverse content leads and rides the false side. value_profile_cmplog adds the input-to-state substitution mutator, which splices logged comparands (e.g. the '<![CDATA[', '<?xml', '<!DOCTYPE' literals it intercepts) back into the input, biasing its corpus toward completing those exact-literal gates and the CDATA state machine \u2014 diverting energy away from the false-side general-parse progress. The delta is I2S and the winner is the no-I2S variant, so the winner's progress is driven by CMP_MAP gradient feedback while I2S is a net liability here, not an asset."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the false side of an 8-deep per-byte AND chain matching the literal '<![CDATA['.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L11754, globally blocked side F",
+            "exact_quote": "(ctxt->input->cur[8] == '[')) {"
+          },
+          {
+            "claim": "The decisive pair is value_profile beating value_profile_cmplog with the technique delta being I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "The winner resolves the branch in 9/10 trials while the loser blocks in 8/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "winner/loser counts",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          },
+          {
+            "claim": "The winner-only path takes the START_TAG general-parse branch off the CDATA gate's false side.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L11604-11607",
+            "exact_quote": "[W] 11604\t\t    if ((ctxt->sax) && (ctxt->sax->setDocumentLocator))"
+          },
+          {
+            "claim": "The loser-only path enters the CDATA-section state machine (the true side of the literal gate).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L11755-11756",
+            "exact_quote": "[L] 11755\t\t    SKIP(9);"
+          },
+          {
+            "claim": "The loser also spends energy on the '<?xml' declaration exact-literal path that the winner does not.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L11562-11564",
+            "exact_quote": "[L] 11562\t\t    if ((ctxt->input->cur[2] == 'x') &&"
+          },
+          {
+            "claim": "value_profile uses CMP_MAP gradient feedback and has no I2SRandReplace mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile / Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile_cmplog adds I2SRandReplace on top of the value_profile feature set.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog / Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "The loser invokes the CDATA literal-check and lookup-string functions that the winner barely touches, evidencing wasted effort on the structured-literal paths.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "xmlCheckCdataPush / xmlParseLookupString",
+            "exact_quote": "       0         5  parser.c:xmlParseLookupString  (/src/libxml2/parser.c:11137-11161)"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the same 8-byte CDATA literal gate where adding I2SRandReplace to value_profile makes the false-side branch resolve EQUALLY FAST or FASTER (no penalty), showing I2S is not diverting energy from false-side progress."
+        },
+        "weakest_evidence_point": "Whether I2S substitution in vpc actively diverts energy (corpus pollution) versus the divergence being noise/variance is not directly proven; the byte diff shows the two seeds are structurally unrelated rather than a single offset flip, so the dataflow story rests on path-coverage inference, not a clean byte-level contrast.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

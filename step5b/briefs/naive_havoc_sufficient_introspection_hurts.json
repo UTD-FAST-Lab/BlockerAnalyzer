@@ -1,0 +1,152 @@
+{
+  "feature_id": "naive_havoc_sufficient_introspection_hurts",
+  "mechanism_family": "mixed",
+  "mechanism_label": "plain_havoc_wins_i2s_and_ctx_coverage_both_harmful",
+  "definition": "Plain naive havoc mutation (BytesDelete/ByteFlip/BytesRandSet/TokenReplace) is sufficient to produce the required codepoint-pair alignment; both I2S (cmplog) and context-sensitive coverage (naive_ctx) are actively counterproductive \u2014 I2S diverts mutation energy without providing a useful gradient for this simple equality, and ctx_coverage fragments the edge signal. The gate is a shallow paired equality (b==SIN_DOT AND a==SHIN) with no deep parse state, so no gradient technique provides lift and the overhead of introspection regresses both. This is a MIXED-edge singleton (naive>cmplog AND naive>naive_ctx) requiring manual review: it is anti-I2S and anti-ctx_coverage simultaneously, bridging two separate anti- families, and may warrant its own template or merging with an I2S_anti cluster.",
+  "n_members": 1,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "naive_ctx"
+  ],
+  "techniques_seen": [
+    "I2S",
+    "ctx_coverage"
+  ],
+  "suggested_axis_partition": {},
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "harfbuzz_5802",
+      "target": "harfbuzz",
+      "branch_id": 5802,
+      "analysis_path": "prompts_b/harfbuzz_5802.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shaper-hebrew.cc",
+      "function": "hb-ot-shaper-hebrew.cc:compose_hebrew(hb_ot_shape_normalize_context_t const*, unsigned int, unsigned int, unsigned int*)",
+      "line": "151",
+      "source_line": "\t  if (a == 0x05E9u) { /* SHIN */",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "0x05E9",
+        "operand_width_bytes": 2,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "Naive havoc mutation (BytesDelete/ByteFlip/BytesRandSet/TokenReplace) is sufficient to plant the SHIN+SIN-DOT codepoint pair; cmplog's I2S introspection provides no gradient benefit for this simple equality, and ctx_coverage fragments the edge signal, so baseline mutation wins both pairs.",
+        "one_line": "Naive havoc places paired codepoint bytes; I2S and ctx-coverage both hurt"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive",
+          "loser": "cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "naive",
+          "loser": "naive_ctx",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must place SHIN (0x05E9) as base 'a' and SIN DOT (0x05C2) as combining 'b' so the Hebrew SIN-DOT case fires the true branch.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive>cmplog (I2S)",
+              "naive>naive_ctx (ctx_coverage)"
+            ],
+            "what_input_feature": "A codepoint pair reaching compose_hebrew with b==0x05C2 (SIN DOT, selecting the case at line 150) AND a==0x05E9 (SHIN), so the line-151 equality holds and the true branch (writes *ab=0xFB2Bu) is taken. The seed encodes these as little-endian codepoints: a 0x05E9 (bytes e9 05) and a 0x05C2 (bytes c2 05).",
+            "why_winner_satisfies": "Winner-resolving seeds carry dense runs of 0xe9 bytes (0x05E9 SHIN low byte) and the 'c2 05' / '05' pattern (0x05C2 SIN DOT) \u2014 e.g. seed 1 has e9 e9 e9 e9 e9 e9 e9 e9 then c2 05, and the per-role overlay marks line 152/153 (the true-branch body) as [W] hit only by the winner set.",
+            "why_loser_doesnt": "Loser-blocking seeds reach case 0x05C2 (line 150 hit, T=46) but fail the a==0x05E9 test: at line 151 the loser shows T=0 F=46, never satisfying both the SIN-DOT case AND the SHIN base operand simultaneously; their bytes are dominated by 0x00/0xb9/0xc2 fillers without the paired SHIN+SIN-DOT codepoints aligned.",
+            "mechanism_attribution": "naive's plain havoc + token byte mutation is sufficient and is what wins: the winning seeds were found by minimizer/naive havoc ops (BytesDelete/ByteFlip/BytesRandSet, TokenReplace). cmplog LOSES because its input-to-state CMP introspection diverts energy and the equality operands here are not learnable comparison gradients that help; naive_ctx LOSES because its context-indexed coverage map fragments the edge signal, slowing arrival at this single deep switch arm. The winning technique in BOTH pairs is identical: baseline naive havoc mutation, not any introspective technique."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true side of the a==0x05E9 (SHIN) test inside the 0x05C2 (SIN DOT) switch case.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6, L162",
+            "exact_quote": "if (a == 0x05E9u) { /* SHIN */"
+          },
+          {
+            "claim": "The true branch is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L7",
+            "exact_quote": "Globally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "naive resolves the branch while cmplog never does, with the I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "naive resolves the branch while naive_ctx mostly does not, with the ctx_coverage delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: naive > naive_ctx  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "The true-branch body (lines 152-153) is covered only by the winner-resolving seed set.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L163-L164",
+            "exact_quote": "[W]   152  \t      *ab = 0xFB2Bu;"
+          },
+          {
+            "claim": "Reaching this branch requires entering the 0x05C2 SIN DOT switch case.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L161",
+            "exact_quote": "case 0x05C2u: /* SIN DOT */"
+          },
+          {
+            "claim": "A winner-resolving seed contains a long run of 0xe9 (SHIN low byte) followed by the SIN-DOT codepoint encoding.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1 (id=d87fc4e9b56007ec)",
+            "exact_quote": "23 cc cc cc cc e9 e9 e9 e9 e9 e9 e9 e9 05 00 00"
+          },
+          {
+            "claim": "The winner seed encodes 0x05C2 as bytes c2 05 immediately after the SHIN run.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1 (id=d87fc4e9b56007ec)",
+            "exact_quote": "c2 05 00 00 00 1b 00 00 00 03 00"
+          },
+          {
+            "claim": "Losers reach case 0x05C2 but fail the line-151 SHIN test (T=0 F=46) while the winner satisfies it (T=6 F=1).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L151",
+            "exact_quote": "d=1   L 151  T=6 F=1  T=0 F=46  if (a == 0x05E9u) { /* SHIN */  <-- BLOCKER"
+          },
+          {
+            "claim": "Winner-resolving seeds were produced by naive/minimizer havoc and token mutators, not by I2S.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1 mutation_op",
+            "exact_quote": "mutation_op=BytesDeleteMutator,BytesDeleteMutator,BytesRandSetMutator,ByteFlipMutator,BytesDeleteMutator,BytesRandInsertMutator"
+          },
+          {
+            "claim": "naive's mutators are plain havoc + token stack with no I2S.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive section",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "naive_ctx fragments the edge map by call context, changing what counts as new coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx section",
+            "exact_quote": "the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on the same paired equality (b==SIN_DOT && a==SHIN) in which cmplog resolves the true branch as fast as or faster than naive across trials would refute the claim that I2S introspection does not help and that plain havoc is the winning mechanism."
+        },
+        "weakest_evidence_point": "The exact little-endian codepoint offsets that satisfy both b==0x05C2 and a==0x05E9 are inferred from byte runs rather than confirmed by a parsed harfbuzz codepoint trace, so the precise field alignment in the seed is uncertain.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

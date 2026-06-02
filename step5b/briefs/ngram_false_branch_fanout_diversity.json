@@ -1,0 +1,139 @@
+{
+  "feature_id": "ngram_false_branch_fanout_diversity",
+  "mechanism_family": "ngram_coverage_pro",
+  "mechanism_label": "ngram_false_branch_fanout_diversity",
+  "definition": "ngram4's 4-edge path-tuple index distinguishes among many parallel dispatch alternatives on the false side of a gate (e.g. a content-type dispatch fan-out), rewarding lateral diversity across distinct content branches and retaining varied non-default seeds that single-edge feedback under-retains.",
+  "n_members": 1,
+  "involved_fuzzers": [
+    "naive",
+    "naive_ngram4"
+  ],
+  "techniques_seen": [
+    "ngram_coverage"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "ngram_coverage",
+    "has_axis": [
+      "naive_ngram4"
+    ],
+    "lacks_axis": [
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libxml2_6835",
+      "target": "libxml2",
+      "branch_id": 6835,
+      "analysis_path": "prompts_a/libxml2_6835.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "parser.c:xmlParseTryOrFinish",
+      "line": "11752",
+      "source_line": "\t\t    (ctxt->input->cur[6] == 'T') &&",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "T",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "ngram4 rewards the false-branch content-dispatch fan-out (END_TAG, PI, start-tag, char-data) as distinct 4-edge path tuples, retaining diverse non-CDATA seeds that single-edge feedback under-retains, keeping pressure off the CDATA true side.",
+        "one_line": "ngram4 path-tuples retain non-CDATA content seeds via false-branch fan-out"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ngram4",
+          "loser": "naive",
+          "technique": "ngram_coverage",
+          "axis": "ngram_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Content-dispatch byte at cur[6] is NOT 'T' (input is not a '<![CDATA[' opener), so the parser falls through to other content branches.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ngram4>naive (ngram_coverage)"
+            ],
+            "what_input_feature": "In XML_PARSER_CONTENT state, an input whose '<' lead bytes do NOT spell the CDATA opener '<![CDATA[' at the cursor (specifically cur[6] != 'T' on the '<![CDA...' prefix), driving the dispatch chain to its false side and into the sibling content branches (end-tag '</', PI '<?', start-tag '<X', '&' reference, char-data).",
+            "why_winner_satisfies": "naive_ngram4 winner seeds carry well-formed element/tag content (e.g. '<a>m', '<dtd', '<link:' fragments) that reach XML_PARSER_CONTENT and dispatch to end-tag and PI handling; the per-role overlay marks lines 11728-11735 (END_TAG / PI transitions) as winner-only [W] and the CDATA branch false, and the blocker line shows W T=0 F=12 (always takes the false side).",
+            "why_loser_doesnt": "naive loser seeds concentrate on CDATA-opener-like and DOCTYPE prefixes (e.g. '<![C' fragments), so they enter the CDATA_SECTION arm; the overlay marks lines 11755-11757 and 11813+ as loser-only [L] and the blocker line shows L T=21 F=1 \u2014 the loser takes the true side and stalls inside the unterminated-CDATA scanning logic.",
+            "mechanism_attribution": "naive_ngram4's NgramHook folds the last 4 edge IDs into the map index, so a previously-unseen 4-edge path tuple counts as new coverage. The content-dispatch cascade (cur=='<' then the next/cur[2..6] tests) produces many distinct short edge paths as the false side fans out to END_TAG/PI/start-tag/char-data; the n-gram feedback rewards seeds that exercise these path tuples, keeping diverse non-CDATA content seeds in the corpus that resolve the false branch. Plain naive (single-edge buckets) gives no extra credit for the path context, so it under-retains those seeds and stalls."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is a byte-equality test cur[6]=='T' that is part of the '<![CDATA[' opener chain in XML_PARSER_CONTENT, and the globally-blocked side is the false branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "parser.c:11752",
+            "exact_quote": "Source line: \t\t    (ctxt->input->cur[6] == 'T') &&"
+          },
+          {
+            "claim": "The blocked side is the false branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Globally blocked side",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "The winner resolves the false branch and the loser is stuck on the true side at the blocker line.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L11752",
+            "exact_quote": "L11752  T=0 F=12  T=21 F=1  (ctxt->input->cur[6] == 'T') &&  <-- BLOCKER"
+          },
+          {
+            "claim": "Winner-only coverage marks the end-tag transition path immediately after the content-dispatch false side.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L11727-11729",
+            "exact_quote": "[W] 11728  \t\t    ctxt->instate = XML_PARSER_END_TAG;"
+          },
+          {
+            "claim": "Loser-only coverage marks the CDATA-section arm taken on the true side of the opener chain.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L11755-11757",
+            "exact_quote": "[L] 11756  \t\t    ctxt->instate = XML_PARSER_CDATA_SECTION;"
+          },
+          {
+            "claim": "Winner seeds contain well-formed element/tag content reaching the content state.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "W seed id=170e39f3164fa329",
+            "exact_quote": "12777..xll\\.<dtd"
+          },
+          {
+            "claim": "Loser seeds carry CDATA-opener-like content fragments steering into the CDATA arm.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "L seed id=442ee7fadac1ec66 offset 0x30",
+            "exact_quote": "xmlns:xlink<![C"
+          },
+          {
+            "claim": "naive_ngram4 indexes the map by a length-4 edge path so a new 4-edge tuple is new coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ngram4 Instrumentation",
+            "exact_quote": "A map slot\ntherefore encodes a length-4 edge path (an n-gram of N=4) rather than\na single edge."
+          },
+          {
+            "claim": "A new bucket under naive_ngram4 is a previously-unseen 4-edge path tuple, which rewards the content-dispatch fan-out.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ngram4 Feedback",
+            "exact_quote": "a \"new\nbucket\" is a previously-unseen 4-edge path tuple."
+          },
+          {
+            "claim": "Plain naive uses single-edge hit-count buckets with no path context and no I2S.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Feedback",
+            "exact_quote": "per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where the content-dispatch cascade is collapsed to a single edge (no distinct 4-edge path tuples on the false-side branches) shows naive_ngram4 resolving the false branch no faster than plain naive \u2014 i.e., the n-gram advantage vanishes when path context is removed."
+        },
+        "weakest_evidence_point": "Whether the winner's edge is genuinely the n-gram path-tuple credit on the content-dispatch fan-out rather than incidental corpus diversity from longer well-formed seeds; the prompt shows the coverage divergence but not the n-gram map slots directly.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

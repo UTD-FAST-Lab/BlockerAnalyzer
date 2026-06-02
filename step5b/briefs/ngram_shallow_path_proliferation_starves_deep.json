@@ -1,0 +1,151 @@
+{
+  "feature_id": "ngram_shallow_path_proliferation_starves_deep",
+  "mechanism_family": "ngram_coverage_anti",
+  "mechanism_label": "ngram4_shallow_path_proliferation_energy_starvation",
+  "definition": "The ngram4 fuzzer's 4-edge-history feedback inflates coverage credit for near-duplicate shallow tokenizer paths, retaining a corpus of malformed short inputs and starving energy from the deeper parser call chain needed to reach the blocking branch.",
+  "n_members": 1,
+  "involved_fuzzers": [
+    "naive",
+    "naive_ngram4"
+  ],
+  "techniques_seen": [
+    "ngram_coverage"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "ngram_coverage",
+    "has_axis": [
+      "naive_ngram4"
+    ],
+    "lacks_axis": [
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libxml2_6939",
+      "target": "libxml2",
+      "branch_id": 6939,
+      "analysis_path": "prompts_a/libxml2_6939.analysis.json",
+      "file": "/src/libxml2/tree.c",
+      "function": "xmlAddChild",
+      "line": "3421",
+      "source_line": "    if ((parent == NULL) || (parent->type == XML_NAMESPACE_DECL)) {",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "ngram4 inflates coverage credit for each distinct 4-edge history through shallow tokenizers (xmlParseName/xmlParseCharData), retaining near-duplicate shallow seeds and starving energy from the deep xmlParseReference->xmlAddChild path that reaches parent==NULL.",
+        "one_line": "ngram4 rewards shallow tokenizer edge variants, starving the deep reference-parser path"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive",
+          "loser": "naive_ngram4",
+          "technique": "ngram_coverage",
+          "axis": "ngram_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "An entity/char reference (&...;) parsed where ctxt->node is NULL, so xmlAddChild is called with a NULL parent and returns early.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive>naive_ngram4 (ngram_coverage)"
+            ],
+            "what_input_feature": "An XML input that drives the parser into xmlParseReference (an '&...;' reference) at a point where the current node ctxt->node is NULL, so xmlAddChild receives parent==NULL and the true side at tree.c:3421 fires returning NULL. This requires a well-formed-enough document skeleton (<?xml ...?> + reference token) plus a structural position where no parent node is open.",
+            "why_winner_satisfies": "The naive winner explores the deep parser call chain (xmlParseReference -> xmlAddChild) and reaches the true side: the per-role overlay shows the winner-only return(NULL) path at 3426-3427, and the divergent-branch table shows the true side hit only in a winner row (L3421 T=18). The winning seed carries a clean '<?xml version=\"1.0\"?>' + '<!DOCTYPE a SYSTEM \"' skeleton that the parser can advance through to reach reference handling.",
+            "why_loser_doesnt": "naive_ngram4 stays mired in shallow character-data / name-scanning parser states: its L-side hitcounts for low-level scanners (xmlParseCharData, xmlParseName, xmlIsNameChar) are an order of magnitude higher than the winner's, while it almost never reaches the true side of the blocker (L3421 false-side count 194 with true=0). Its seeds are malformed prefixes ('ef=\"http://...', repeated '\"' runs, byte garbage) rather than a clean document head.",
+            "mechanism_attribution": "The divergence is attributable to the n-gram coverage feedback granularity of naive_ngram4 (the one-technique delta). naive_ngram4 folds a rolling 4-edge history into each map slot, so every distinct 4-edge path through the shallow tokenizers (xmlParseName / xmlParseCharData / xmlIsNameChar) registers as 'new coverage'. This rewards and retains a huge population of near-duplicate shallow-parser inputs, diluting the corpus and energy away from the rare deep path into xmlParseReference -> xmlAddChild. Plain naive's single-edge MaxMapFeedback saturates the shallow tokenizer edges quickly and reallocates energy to the deep reference path, so it reaches the true side. The winner is enabled by the ABSENCE of the ngram granularity."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true side of an early NULL-parent guard inside xmlAddChild.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "tree.c:3421",
+            "exact_quote": "if ((parent == NULL) || (parent->type == XML_NAMESPACE_DECL)) {"
+          },
+          {
+            "claim": "The blocker is reached from xmlSAX2Reference, the SAX handler for entity/char references.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "SAX2.c:2530",
+            "exact_quote": "if (xmlAddChild(ctxt->node, ret) == NULL) { <-- CALL"
+          },
+          {
+            "claim": "The path is entered via reference parsing (xmlParseReference) on the call chain.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=2 parser.c:7181",
+            "exact_quote": "if (RAW != '&')"
+          },
+          {
+            "claim": "The single decisive pair has plain naive as winner and naive_ngram4 as loser, with delta = ngram_coverage.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: naive > naive_ngram4  [delta: ngram_coverage]"
+          },
+          {
+            "claim": "naive resolves 9/10 while naive_ngram4 resolves only 1/10 and is blocked 9/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "winner/loser counts",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          },
+          {
+            "claim": "The winner-only path includes the early return(NULL) on the true side.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "tree.c:3426-3427",
+            "exact_quote": "[W]  3426  \treturn(NULL);"
+          },
+          {
+            "claim": "The true side of the blocker is taken in a winner row but never in the loser (true=0, false=194 for the loser).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L3421",
+            "exact_quote": "d=1   L3421  T=18 F=5  T=0 F=194  if ((parent == NULL) || (parent->type == XML_NAMESPACE_DE...  <-- BLOCKER"
+          },
+          {
+            "claim": "The winning seed carries a clean XML document head with a DOCTYPE skeleton.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1 offsets 0x1c-0x3f",
+            "exact_quote": "ion=\"1.0\"?>.<!DO"
+          },
+          {
+            "claim": "Loser-blocking seeds are malformed fragments (URL/attribute garbage, repeated quote runs).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 1 offsets 0x00-0x1f",
+            "exact_quote": "ef=\"http://fdkeu"
+          },
+          {
+            "claim": "naive_ngram4 spends far more execution in shallow tokenizers than naive (e.g. xmlIsNameChar W=3 vs L=617).",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "xmlIsNameChar",
+            "exact_quote": "3       617  parser.c:xmlIsNameChar"
+          },
+          {
+            "claim": "naive_ngram4's map slot encodes a 4-edge path rather than a single edge, so distinct shallow 4-edge tuples count as new coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ngram4 Instrumentation",
+            "exact_quote": "A map slot\ntherefore encodes a length-4 edge path (an n-gram of N=4) rather than\na single edge."
+          },
+          {
+            "claim": "A previously-unseen 4-edge path tuple counts as a new bucket for naive_ngram4's feedback.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ngram4 Feedback",
+            "exact_quote": "a \"new\nbucket\" is a previously-unseen 4-edge path tuple."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where the reference-handling deep path sits behind exactly one edge (no shallow tokenizer fan-out) and the true side requires a NULL current node: if naive_ngram4 then reaches the true side as often as naive, the n-gram-dilution attribution is wrong and the divergence must lie elsewhere."
+        },
+        "weakest_evidence_point": "The dilution mechanism (n-gram granularity inflating the shallow-parser corpus and starving the deep reference path of energy) is inferred from hit-count ratios, not directly observed in corpus-size or energy-allocation telemetry.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

@@ -1,0 +1,771 @@
+{
+  "feature_id": "i2s_pro_format_magic_entry_gate",
+  "mechanism_family": "I2S_pro",
+  "mechanism_label": "file_format_magic_routing",
+  "definition": "I2S substitutes the binary file-format magic bytes at the start of the input so the program's format-dispatch branch routes into the correct parser; without the magic the input is treated as a different format and the entire branch-under-study is unreachable.",
+  "n_members": 7,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "naive",
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "bloaty_13",
+      "target": "bloaty",
+      "branch_id": 13,
+      "analysis_path": "prompts_a/bloaty_13.analysis.json",
+      "file": "/src/bloaty/src/bloaty.cc",
+      "function": "bloaty::Bloaty::ScanAndRollupFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, bloaty::Rollup*, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >*) const",
+      "line": "1750",
+      "source_line": "  if (!build_id.empty()) {",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "ce fa ed fe",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2S splices the Mach-O magic bytes and section-name literals intercepted from format-dispatch CMPs directly into the input, enabling build_id extraction that loser WASM-magic inputs can never reach.",
+        "one_line": "I2S supplies Mach-O magic and section bytes to yield a non-empty build_id"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must be a Mach-O object file whose magic and section structure let bloaty parse a non-empty build_id.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "The leading bytes must form a Mach-O magic constant (ce fa ed fe / cf fa ed fe) followed by enough valid Mach-O load-command/section structure (including __ section-name bytes 5f 5f) that file->GetBuildId() returns a non-empty string, so the true side of if (!build_id.empty()) is taken.",
+            "why_winner_satisfies": "All winner-resolving seeds begin with the Mach-O magic ce fa ed fe (or cf fa ed fe) and carry embedded 5f 5f (__) section-name bytes and load-command sizing fields; these parse into a Mach-O whose build_id (UUID) is recovered, populating build_id and exercising lines 1751-1757 only in W.",
+            "why_loser_doesnt": "All loser-blocking seeds begin with 00 61 73 6d (WASM \\0asm) or similar non-Mach-O magic; bloaty parses them as a format that yields an empty build_id, so GetBuildId() returns empty and line 1750 always takes the false side (T=0 in L).",
+            "mechanism_attribution": "cmplog/vpc intercept the object-file format CMPs (magic and structural-field comparisons) and I2SRandReplace splices the exact required literals (Mach-O magic, section-name bytes) into the input at the offsets where the parser compares them; naive and value_profile lack I2SRandReplace and cannot reconstruct the multi-field magic/structure by blind havoc, so they never produce a parseable build_id."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked true side requires a non-empty build_id at the if guard.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L1750, blocked side=T",
+            "exact_quote": "if (!build_id.empty()) {"
+          },
+          {
+            "claim": "build_id is produced by parsing the object file via file->GetBuildId().",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1749",
+            "exact_quote": "std::string build_id = file->GetBuildId();"
+          },
+          {
+            "claim": "Only winner-resolving seeds exercise the true-side body lines 1751-1757.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L1750",
+            "exact_quote": "L1750  T=54 F=0  T=0 F=120  if (!build_id.empty()) {  <-- BLOCKER"
+          },
+          {
+            "claim": "Winner seeds begin with the Mach-O magic ce fa ed fe and carry embedded __ (5f 5f) section-name bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id dcb7ff92fe9d1ffa, offset 0x0000",
+            "exact_quote": "0000: ce fa ed fe 02 01 01 20 20 20 01 b0 48 13 5f 5f"
+          },
+          {
+            "claim": "Another winner seed uses the alternate Mach-O 64-bit magic cf fa ed fe.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 6ac11a9dca2495f8, offset 0x0000",
+            "exact_quote": "0000: cf fa ed fe 48 13 5f 5f 02 00 00 00 02 01 01 20"
+          },
+          {
+            "claim": "Loser-blocking seeds begin with non-Mach-O magic such as 00 61 73 6d (\\0asm).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 0002812e1528da92, offset 0x0000",
+            "exact_quote": "0000: 00 61 73 6d 7b 45 4c 46 01 01 46 01 01 17 04 00"
+          },
+          {
+            "claim": "At the leading magic offsets W and L bytes are sharply concentrated and disjoint (ce/fa/ed/fe vs 00/61/73/6d).",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0000-0x0003",
+            "exact_quote": "0x0000  ce(.)x7 cf(.)x2                     00(.)x19 21(!)x1                    DIFFER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at matching input offsets, unlike naive.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace; only its vpc counterpart adds it, matching the second decisive pair direction.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on a non-empty build_id behind a Mach-O magic/structure check in which naive (no I2S) resolves the branch at the same rate as cmplog within the budget, showing the magic/structure literals are reachable by blind havoc rather than requiring I2S substitution."
+        },
+        "weakest_evidence_point": "That bloaty's GetBuildId() returns non-empty specifically for Mach-O (vs other formats) is inferred from the seed magic bytes and source guard, not directly observed from a build_id value in the prompt.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "bloaty_34",
+      "target": "bloaty",
+      "branch_id": 34,
+      "analysis_path": "prompts_a/bloaty_34.analysis.json",
+      "file": "/src/bloaty/src/elf.cc",
+      "function": "elf.cc:bloaty::(anonymous namespace)::ElfFile::Initialize()",
+      "line": "475",
+      "source_line": "    default:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": null,
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2S surfaces the ELF magic to keep the memcmp guard passing, while also exposing that the byte at EI_DATA must avoid both case-label values; cmplog reaches the default arm by landing a non-{1,2} byte that naive keeps setting to a matching case value.",
+        "one_line": "I2S preserves ELF magic while placing a non-case byte at EI_DATA to hit default"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Valid ELF magic at bytes 0-3 plus byte 0x05 (EI_DATA) holding a value other than 1 (LSB) or 2 (MSB) to reach the default arm.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "Bytes 0x00-0x03 must equal the literal magic 7f 45 4c 46 (\\177ELF) so the memcmp guard at line 452 passes, AND byte 0x05 (ident[EI_DATA]) must hold a value other than ELFDATA2LSB(1) or ELFDATA2MSB(2) so the switch at line 468 falls through to the default arm at line 475.",
+            "why_winner_satisfies": "Winning cmplog seeds keep the magic 7f 45 4c 46 at offsets 0x00-0x03 and place a non-{1,2} value at offset 0x05 (e.g. seed 1 has 0x30, seed 2 has 0x00, seed 3 has 0xe7), so EI_DATA misses both case labels and hits default.",
+            "why_loser_doesnt": "Loser naive seeds also keep the magic but set offset 0x05 to either 0x01 or 0x02 in every sample, so EI_DATA always matches case ELFDATA2LSB or ELFDATA2MSB and the switch never reaches default.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLog buffer for the switch comparison on ident[EI_DATA] and substitutes the recorded compared operand at the input offset, but unlike a single magic-number gate the winning move is to make the byte NOT equal the case labels; I2S surfaces the magic prefix (7f 45 4c 46) keeping line 452 satisfied while the switch on a single byte is escaped via a non-matching value, a combination cmplog reaches and naive's blind havoc rarely lands while preserving the magic."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the default arm of the switch on ident[EI_DATA] at elf.cc:475.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "elf.cc:475:5",
+            "exact_quote": "Location: /src/bloaty/src/elf.cc:475:5"
+          },
+          {
+            "claim": "Reaching the default requires passing the magic memcmp guard and missing both EI_DATA case labels.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L452, L468-476",
+            "exact_quote": "if (memcmp(ident, \"\\177ELF\", 4) != 0) {"
+          },
+          {
+            "claim": "The switch dispatches on ident[EI_DATA] with cases ELFDATA2LSB and ELFDATA2MSB before default.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L468-476",
+            "exact_quote": "switch (ident[EI_DATA]) {"
+          },
+          {
+            "claim": "Winning cmplog seeds preserve the ELF magic 7f 45 4c 46 at offsets 0x00-0x03.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 1 W id=0989f57862fb3e41 offset 0x00",
+            "exact_quote": "0000: 7f 45 4c 46 02 30 01 00 00 00 20 20 20 20 20 00"
+          },
+          {
+            "claim": "A winning seed places a non-{1,2} value (0xe7) at offset 0x05 so EI_DATA misses both case labels.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 3 W id=51f1d6d54d767ae6 offset 0x05",
+            "exact_quote": "0000: 7f 45 4c 46 02 e7 00 00 00 00 20 20 20 20 20 00"
+          },
+          {
+            "claim": "Loser naive seeds set offset 0x05 to 0x01 or 0x02 (a valid EI_DATA case), so the switch matches a case and never reaches default.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 1 id=01a53df0ebbce533 offset 0x05",
+            "exact_quote": "0000: 7f 45 4c 46 01 01 01 00 f2 00 20 21 df 20 00 00"
+          },
+          {
+            "claim": "The byte-diff shows W offset 0x05 concentrated on non-{1,2} values while L offset 0x05 is dominated by 01/02.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0005",
+            "exact_quote": "0x0005  68(h)x5 00(.)x2 30(0)x1 e7(.)x1 +1u  01(.)x27 02(.)x5"
+          },
+          {
+            "claim": "The divergent-branches table shows the blocker default at line 475 taken only in W (T=60) and never in L (T=0).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 elf.cc:475",
+            "exact_quote": "d=1   L 475  T=60 F=0  T=0 F=2220  default:  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other CMP operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose switch dispatches on a single byte gated behind a preceding magic memcmp showing naive resolving the default arm as often as cmplog (no cmplog>naive divergence), which would mean I2S substitution of the magic prefix is not what enables the winner."
+        },
+        "weakest_evidence_point": "Whether I2S's advantage here is solving the magic memcmp prefix (a roadblock) versus the switch byte being escaped by chance, since reaching default requires a NON-matching byte that I2S does not directly synthesize.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "bloaty_133",
+      "target": "bloaty",
+      "branch_id": 133,
+      "analysis_path": "prompts_a/bloaty_133.analysis.json",
+      "file": "/src/bloaty/src/macho.cc",
+      "function": "bloaty::TryOpenMachOFile(std::unique_ptr<bloaty::InputFile, std::default_delete<bloaty::InputFile> >&)",
+      "line": "618",
+      "source_line": "  if (magic == MH_MAGIC || magic == MH_MAGIC_64 || magic == FAT_CIGAM) {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "cf fa ed fe",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2S reads the logged magic==MH_MAGIC CMP operand and splices the exact 4-byte Mach-O magic into input offset 0x00-0x03, directly satisfying the equality gate naive never blindly hits.",
+        "one_line": "I2S substitutes 4-byte Mach-O magic at offset 0 to pass the format gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must begin with the 4-byte Mach-O magic cf fa ed fe so magic equals MH_MAGIC/MH_MAGIC_64/FAT_CIGAM.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The first 4 bytes of the input must equal the Mach-O magic word cf fa ed fe at offset 0x00-0x03 so that the read magic compares equal to one of MH_MAGIC / MH_MAGIC_64 / FAT_CIGAM at macho.cc:618, taking the true branch into the MachOObjectFile constructor.",
+            "why_winner_satisfies": "Every cmplog winner-resolving seed begins with the exact bytes cf fa ed fe at offsets 0x00-0x03, which is the little-endian Mach-O magic; the per-offset byte sets show these four offsets are fully concentrated to that value across all 10 winner seeds.",
+            "why_loser_doesnt": "The naive loser-blocking seeds begin with 00 61 73 6d ('\\0asm', the WebAssembly magic), so magic never matches any Mach-O constant and execution falls through to the nullptr return at line 623, exercising the false branch.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the logged CMP operands from the magic==MH_MAGIC comparison and splices the constant magic value into the input at the matching offset; naive has no CMP introspection and cannot synthesize the exact 4-byte magic, so it never crosses the gate."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch at macho.cc:618 fires the true side only when magic equals one of three Mach-O magic constants.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "macho.cc:618",
+            "exact_quote": "if (magic == MH_MAGIC || magic == MH_MAGIC_64 || magic == FAT_CIGAM) {"
+          },
+          {
+            "claim": "All winner-resolving seeds carry the Mach-O magic cf fa ed fe in their first four bytes.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0000-0x0003",
+            "exact_quote": "0x0000  cf(.)x10                            00(.)x10                            DIFFER"
+          },
+          {
+            "claim": "The winning seed bytes literally start with cf fa ed fe.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 492ed499061ee540",
+            "exact_quote": "0000: cf fa ed fe 00 20 20 20 20 20 00 00 00 00 00 00"
+          },
+          {
+            "claim": "The loser-blocking seeds start with the WebAssembly magic \\0asm and not a Mach-O magic.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 00050eebd8570fd9",
+            "exact_quote": "0000: 00 61 73 6d fe 00 6d 00 01 01 01 01 01 01 01 01   .asm..m........."
+          },
+          {
+            "claim": "Loser inputs fall through TryOpenMachOFile to the nullptr return because magic does not match.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L618",
+            "exact_quote": "d=1   L 618  T=96 F=0  T=0 F=120  if (magic == MH_MAGIC || magic == MH_MAGIC_64 || magic ==...  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace, which scans the input for an operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S capability.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on a 4-byte exact-equality magic where naive resolves the gate as often as cmplog (no cmplog>naive divergence), showing the magic byte is reachable by plain havoc rather than requiring I2S substitution."
+        },
+        "weakest_evidence_point": "The dash-row I2S signal is a lower-bound floor at depth 3 of one seed's chain; it confirms some I2S contribution but does not prove the specific magic-byte splice was the I2S edit rather than a later havoc refinement.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "bloaty_141",
+      "target": "bloaty",
+      "branch_id": 141,
+      "analysis_path": "prompts_a/bloaty_141.analysis.json",
+      "file": "/src/bloaty/src/range_map.cc",
+      "function": "bloaty::RangeMap::FindContaining(unsigned long) const",
+      "line": "59",
+      "source_line": "  if (it == mappings_.begin() || (--it, !EntryContains(it, addr))) {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "ce fa ed fe",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2S intercepts the format-magic comparison, logs the Mach-O magic operand, and substitutes it at offset 0x00-0x03, routing the input into the Mach-O reader where the FindContaining true branch becomes reachable.",
+        "one_line": "I2S writes Mach-O magic at byte 0 to enter the parser that exposes the gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must carry the Mach-O magic ce-fa-ed-fe at offset 0 so the Mach-O parser populates range maps reached by FindContaining.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)",
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The first four bytes must equal the Mach-O magic number ce fa ed fe (little-endian 0xFEEDFACE). Bloaty's format dispatch matches this magic to enter the Mach-O object reader, which calls AddRange / FindContaining repeatedly; without the magic match the input is routed to a different (e.g. WASM) parser whose path drives FindContaining only on the false side.",
+            "why_winner_satisfies": "Every winner-resolving seed begins with ce fa ed fe at offsets 0x00-0x03; the BYTE DIFF shows W concentrated on ce/fa/ed/fe (and a few ASCII M/Z/L/E/P/F) at those offsets, and the winners reach FindContaining 562 times and its callers far more, with the blocker true side taken (T=101/160).",
+            "why_loser_doesnt": "Every loser-blocking seed begins with 00 61 73 6d (the WASM magic '.asm'), so the Mach-O reader is never entered; FindContaining is still invoked 1720 times on the L set but the blocker true side is taken 0 times (T=0 F=1720), i.e. the loser parser path never produces the empty-result condition the true branch encodes.",
+            "mechanism_attribution": "cmplog/vpc intercept the format-magic comparison and log both operands into the CmpLogObserver buffer; I2SRandReplace then scans the input for the seed's leading bytes and substitutes the expected magic operand (ce fa ed fe) directly at offset 0. naive and value_profile lack I2SRandReplace, so they must stumble onto the exact 4-byte magic by chance via havoc, which is why naive never resolves (0/10) and value_profile resolves only 1/10."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "Both decisive pairs differ by the I2S technique and both name I2S as the delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 headers",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "The cmplog>naive pair is also an I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 header",
+            "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "The blocked side is the true branch of FindContaining's empty-result test.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "range_map.cc:59",
+            "exact_quote": "if (it == mappings_.begin() || (--it, !EntryContains(it, addr))) {"
+          },
+          {
+            "claim": "All winner-resolving seeds start with the Mach-O magic ce fa ed fe at offset 0.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1 offset 0x0000",
+            "exact_quote": "0000: ce fa ed fe 7f 95 e8 00 20 10 18 24 24 20 20 20"
+          },
+          {
+            "claim": "The W byte set at offsets 0x00-0x03 is concentrated on ce/fa/ed/fe while the L byte set is the WASM magic 00 61 73 6d.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0000-0x0003",
+            "exact_quote": "0x0000  7f(.)x10 ce(.)x9 4d(M)x1            00(.)x68 7f(.)x2"
+          },
+          {
+            "claim": "Every loser-blocking seed starts with 00 61 73 6d (the WASM '.asm' magic).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 1 offset 0x0000",
+            "exact_quote": "0000: 00 61 73 6d 00 e8 e9 2d 00 25 20 00 fe ff ff ff   .asm...-.% ....."
+          },
+          {
+            "claim": "On the loser set FindContaining's blocker true side is taken 0 times despite 1720 invocations.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 line 59",
+            "exact_quote": "d=1   L  59  T=101 F=402  T=0 F=1720"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace, which scans the input for an operand and substitutes the other operand at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator, so its only route to the exact magic is chance havoc.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "naive never resolved the branch and value_profile resolved it only once across ten trials.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "naive and value_profile rows",
+            "exact_quote": "naive                            0       10          0  loser (I2S vs cmplog)"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness that gates FindContaining behind a 4-byte magic compare shows naive resolving the true branch as often and as fast as cmplog/vpc (no I2S advantage), meaning the magic match is not the controlling feature."
+        },
+        "weakest_evidence_point": "The claim that the Mach-O magic at offset 0 is the specific gate (rather than some other 4-byte constant elsewhere in the header) is inferred from the seed-prefix divergence, not from a directly cited source-level magic comparison.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "bloaty_145",
+      "target": "bloaty",
+      "branch_id": 145,
+      "analysis_path": "prompts_a/bloaty_145.analysis.json",
+      "file": "/src/bloaty/src/range_map.cc",
+      "function": "bloaty::RangeMap::CoversRange(unsigned long, unsigned long) const",
+      "line": "315",
+      "source_line": "    } else if (it == mappings_.end() || !EntryContains(it, addr)) {",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "7f 45 4c 46",
+        "operand_width_bytes": 4,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2S reads CMP operands from ELF header field comparisons and substitutes the exact magic and structural field values, enabling the translator map to be populated and CoversRange's miss-path to be exercised.",
+        "one_line": "I2S reconstructs ELF header fields to drive translator map and reach CoversRange true side"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A well-formed ELF whose parsed structural fields build a translator map then query CoversRange with an address outside that map.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "An ELF input (magic 7f 45 4c 46) whose header/structural fields parse far enough to populate translator_ and invoke RangeMap::CoversRange via RangeSink::AddRange (bloaty.cc:1331), supplying a vmaddr/vmsize whose first lookup iterator either reaches mappings_.end() or fails EntryContains, so the else-if at range_map.cc:315 takes its true side and returns false.",
+            "why_winner_satisfies": "Winner-resolving cmplog seeds carry a clean ELF magic plus concentrated structural bytes (e.g. 7f ff-marked fields at 0x09-0x0c and the PU/0x50 0x55 pair at 0x18-0x19) that satisfy the parser CMP gates so the translator_ branch is entered and CoversRange is reached, where the W-only lines 316-317 (return false) are hit and the branch true side covered.",
+            "why_loser_doesnt": "Loser-blocking naive seeds carry malformed/space-filled bytes after the magic (runs of 0x20 across 0x0a-0x1c, swapped ELF class/data at 0x04-0x06) that never drive the parser through the translator_-establishing path with an uncovered address; their CoversRange invocations stay on the false side (line 315 L T=0 F=1260000) and the branch true side is never taken.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads intercepted integer/string CMP operands from the CmpLogObserver buffer and substitutes the expected operand into matching input offsets, letting it reconstruct the exact ELF header field values that the bloaty parser compares against; naive must hit those multi-byte field values by blind havoc and never does within budget, so only cmplog drives the input through the translator map construction that exercises the CoversRange true side."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true side of an else-if in CoversRange that returns false when the iterator is at end or EntryContains fails.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "range_map.cc:315:16",
+            "exact_quote": "} else if (it == mappings_.end() || !EntryContains(it, addr)) {"
+          },
+          {
+            "claim": "The winning side covers the return-false lines 316-317 (W-only) while the loser only ever exercises the surrounding loop.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "range_map.cc:316-317",
+            "exact_quote": "[W]   316        return false;"
+          },
+          {
+            "claim": "CoversRange is reached through the translator_ guard at the call site bloaty.cc:1331.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "bloaty.cc:1330-1331",
+            "exact_quote": "if (!translator_->vm_map.CoversRange(vmaddr, vmsize) || <-- CALL"
+          },
+          {
+            "claim": "Winner-resolving cmplog seeds begin with a clean ELF magic and concentrated structural bytes including the 50 55 pair at offset 0x18.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 05a56c847ffbf4de offsets 0x00-0x1f",
+            "exact_quote": "0000: 7f 45 4c 46 01 02 0a 0a 0a ff ff ff 7f 24 20 0a   .ELF.........$ ."
+          },
+          {
+            "claim": "Loser-blocking naive seeds fill the post-magic region with runs of 0x20 spaces rather than valid structural fields.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 43b1a3ff84794b7e offset 0x0c onward",
+            "exact_quote": "0000: 7f 45 4c 46 02 01 01 00 00 00 00 7f ff 20 20 00   .ELF.........  ."
+          },
+          {
+            "claim": "W and L bytes diverge sharply across offsets 0x06-0x1c where the winner holds concentrated values and the loser holds spaces, the dataflow signal into the parser fields.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0c-0x19",
+            "exact_quote": "0x0018  50(P)x2                             9c(.)x8 20( )x7 ae(.)x1 35(5)x1     DIFFER"
+          },
+          {
+            "claim": "On the loser side the blocker true side is taken zero times against 1260000 false on the d=1 enclosing frame.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L315",
+            "exact_quote": "d=1   L 315  T=6 F=0  T=0 F=1260000  } else if (it == mappings_.end() || !EntryContains(it, ad...  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for a CMP operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator and must reach field values by blind havoc.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic ELF-parsing harness in which the CoversRange true side is reachable purely by a length/insert mutation with no multi-byte structural-field CMP gate would let naive resolve the branch as fast as cmplog, contradicting the I2S attribution."
+        },
+        "weakest_evidence_point": "The exact ELF field whose CMP gate I2S solves to enter the translator_ path is inferred from byte-diff concentration and source structure, not directly traced to a logged CMP operand.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5389",
+      "target": "harfbuzz",
+      "branch_id": 5389,
+      "analysis_path": "prompts_b/harfbuzz_5389.analysis.json",
+      "file": "/src/harfbuzz/src/hb-open-file.hh",
+      "function": "OT::OpenTypeFontFile::get_face(unsigned int, unsigned int*) const",
+      "line": "487",
+      "source_line": "    case Typ1Tag:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "typ1",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "cmplog/vpc intercept the 4-byte sfnt-version tag comparison, log Typ1Tag ('typ1') as the expected operand, and I2SRandReplace substitutes it at offset 0x00-0x03, satisfying the switch case that naive/vp cannot hit blind.",
+        "one_line": "I2S substitutes 4-byte sfnt tag 'typ1' at offset 0 to clear switch case"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must begin with a recognized 4-byte SFNT tag (e.g. \"typ1\") at offset 0 so u.tag matches a non-collection case.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)",
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The first 4 bytes (offset 0x00-0x03) must equal a recognized non-collection SFNT signature tag such as Typ1Tag ('typ1' = 74 79 70 31), so that the switch on u.tag in get_face takes the case Typ1Tag/TrueTypeTag arm instead of falling to default.",
+            "why_winner_satisfies": "Every winner-resolving seed begins with the literal bytes 74 79 70 31 ('typ1'); the byte-diff shows W is fully concentrated on t/y/p/1 at offsets 0x00-0x03 (each 20/20), matching the Typ1Tag case.",
+            "why_loser_doesnt": "Loser-blocking seeds carry arbitrary leading bytes (00/e0/ff/87...) at offsets 0x00-0x03 that match no tag case, so the switch falls to default and returns Null, blocking the true side (L hits 491 default, never 487).",
+            "mechanism_attribution": "cmplog/vpc intercept the tag comparison and record both operands in the CmpLogObserver buffer; I2SRandReplace then substitutes the expected tag literal (Typ1Tag/etc.) into the input at the matching offset, planting the 4-byte magic that naive/value_profile must hit by blind havoc."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the case Typ1Tag arm of a switch on u.tag inside get_face, whose true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "hb-open-file.hh:487",
+            "exact_quote": "Source line:     case Typ1Tag:"
+          },
+          {
+            "claim": "The branch dispatches on the 4-byte tag value u.tag with sibling tag cases and a default fallthrough.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "hb-open-file.hh:481-491",
+            "exact_quote": "switch (u.tag) {"
+          },
+          {
+            "claim": "All five winner-resolving seeds start with the literal bytes 74 79 70 31 spelling 'typ1'.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner-resolving seed 1, offset 0x0000",
+            "exact_quote": "0000: 74 79 70 31 00 01 20 20 20 20 20 20 20 d7 01 00   typ1.."
+          },
+          {
+            "claim": "At offsets 0x00-0x03 the winner bytes are fully concentrated on t/y/p/1 (20 of 20) while loser bytes are a scattered set of other values.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0000-0x0003",
+            "exact_quote": "0x0000  74(t)x20                            00(.)x4 e0(.)x2 05(.)x2 87(.)x1 +11u  DIFFER"
+          },
+          {
+            "claim": "Loser-blocking seeds carry arbitrary leading bytes that do not spell a tag, e.g. a seed beginning 87 0e 0d 0e 22 0e.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser-blocking seed 1, offset 0x0000",
+            "exact_quote": "0000: 87 0e 0d 0e 22 0e                                 ....\"."
+          },
+          {
+            "claim": "In the loser the switch falls to the default arm (line 491 returns Null) rather than the Typ1Tag arm.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 line 491",
+            "exact_quote": "d=1   L 491  T=0 F=755  T=768 F=0  default:\t\treturn Null (OpenTypeFontFace);"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which reads the CmpLogObserver buffer and substitutes the other operand at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "Both decisive pairs differ from their loser by exactly the I2S technique.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 delta",
+            "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where naive/value_profile resolve the Typ1Tag case at the same rate as cmplog/vpc despite the gate requiring a 4-byte exact tag match, showing I2S substitution is not what plants the magic bytes."
+        },
+        "weakest_evidence_point": "The cmplog winner's lineage shows only one dash row (depth 3) and the leaf op-list is havoc/token, so the I2S contribution is a lower bound and could partly be lucky havoc.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "harfbuzz_5392",
+      "target": "harfbuzz",
+      "branch_id": 5392,
+      "analysis_path": "prompts_b/harfbuzz_5392.analysis.json",
+      "file": "/src/harfbuzz/src/hb-open-file.hh",
+      "function": "OT::OpenTypeFontFile::sanitize(hb_sanitize_context_t*) const",
+      "line": "512",
+      "source_line": "    case CFFTag:\t/* All the non-collection tags */",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "OTTO",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "cmplog/vpc log the 32-bit CFFTag ('OTTO') constant from the sfnt-version switch, then I2SRandReplace substitutes those exact 4 bytes at offset 0, directly manufacturing the magic that neither naive nor value_profile lands blind.",
+        "one_line": "I2S substitutes 4-byte 'OTTO' magic at offset 0 to satisfy sfnt-version switch"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must begin with a valid OpenType sfnt-version FOURCC (e.g. 'OTTO' / TrueType) so the tag switch hits a non-collection case.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "The first 4 input bytes must equal a recognized OpenType sfnt-version magic tag (CFFTag 'OTTO', TrueTag, Typ1Tag, or TrueTypeTag) so the switch on u.tag at line 511 reaches the case at line 512 instead of falling through to default at line 518.",
+            "why_winner_satisfies": "Every winner-resolving seed begins with the 4 bytes 4f 54 54 4f ('OTTO'); the BYTE DIFF shows offsets 0x00-0x03 are concentrated on exactly 4f/54/54/4f across all winners, matching the CFFTag literal the switch compares against.",
+            "why_loser_doesnt": "Loser-blocking seeds carry scattered, non-magic leading bytes (e.g. 87 0e 0d 0e, 00 00 00 00, e0 17 00 00); none of them equal an sfnt-version tag, so u.tag falls to default (line 518) and the true side of the switch case is never taken.",
+            "mechanism_attribution": "cmplog/vpc intercept the 32-bit tag comparison and log the constant operand (the sfnt-version magic) into CmpLogObserver; I2SRandReplace then substitutes that exact 4-byte constant into the input at the matching offset, manufacturing 'OTTO' at offset 0 directly rather than waiting for blind havoc to land 4 specific bytes. naive and value_profile lack I2SRandReplace and never resolve it."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is a switch case on the parsed tag, and the true (winning) side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "hb-open-file.hh:512",
+            "exact_quote": "case CFFTag:\t/* All the non-collection tags */"
+          },
+          {
+            "claim": "The blocker is one arm of a switch over u.tag whose default arm is what losers take.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 511-518",
+            "exact_quote": "switch (u.tag) {"
+          },
+          {
+            "claim": "Winners take line 512 case arm; losers fall through to the default arm.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 line 512 and 518",
+            "exact_quote": "d=1   L 512  T=20 F=0  T=0 F=20  case CFFTag:"
+          },
+          {
+            "claim": "Winner-resolving seeds begin with the OTTO magic FOURCC.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed a83d70d6c940be88 offset 0x0000",
+            "exact_quote": "4f 54 54 4f 00 01 20 20 20 20 1c 20 47 53 55 42   OTTO"
+          },
+          {
+            "claim": "All winners are concentrated on bytes 4f 54 54 4f at offsets 0x00-0x03 while losers are not.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0000-0x0003",
+            "exact_quote": "0x0000  4f(O)x20                            00(.)x4 e0(.)x2 05(.)x2 20( )x2 +10u  DIFFER"
+          },
+          {
+            "claim": "Loser-blocking seeds carry non-magic scattered leading bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "loser seed 003817559785f774 offset 0x0000",
+            "exact_quote": "87 0e 0d 0e 22 0e"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for a CMP operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace, explaining why it loses to vpc.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "Both decisive pairs differ by the I2S technique.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 delta",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on a 4-byte magic tag where naive/value_profile resolve the case arm as fast as cmplog/vpc would refute the I2S-substitution attribution."
+        },
+        "weakest_evidence_point": "The seed metadata cannot show the literal I2SRandReplace mutator name (logging-bug); the dash-row floor is a lower bound, so the I2S attribution relies on a single nameless ancestor row.",
+        "confidence": "high"
+      }
+    }
+  ]
+}

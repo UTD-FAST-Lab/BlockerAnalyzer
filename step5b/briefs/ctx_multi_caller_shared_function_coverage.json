@@ -1,0 +1,1264 @@
+{
+  "feature_id": "ctx_multi_caller_shared_function_coverage",
+  "mechanism_family": "ctx_coverage_pro",
+  "mechanism_label": "multi_caller_shared_function_coverage",
+  "definition": "A shared utility function is reached from multiple distinct call sites; context-sensitive coverage creates a separate (call-context, edge) bucket per caller, so each new caller keeps the function explorable rather than saturated by the first caller to reach it.",
+  "n_members": 10,
+  "involved_fuzzers": [
+    "naive",
+    "naive_ctx"
+  ],
+  "techniques_seen": [
+    "ctx_coverage"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "ctx_coverage",
+    "has_axis": [
+      "naive_ctx"
+    ],
+    "lacks_axis": [
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libxml2_12282",
+      "target": "libxml2",
+      "branch_id": 12282,
+      "analysis_path": "prompts_a/libxml2_12282.analysis.json",
+      "file": "/src/libxml2/tree.c",
+      "function": "xmlFreeNode",
+      "line": "3893",
+      "source_line": "        (cur->type != XML_COMMENT_NODE))",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "XML_COMMENT_NODE",
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "CtxHook makes the xmlFreeNode edge reached via the text/comment-node teardown path a new bucket, while naive's bare map already saw that edge via name-node frees and awards no additional reward.",
+        "one_line": "Context-indexed xmlFreeNode edge rewards text/comment teardown path naive ignores"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Free a text/comment node (cur->type is XML_TEXT_NODE or XML_COMMENT_NODE) so the name-DICT_FREE guard takes its false side.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "Input must drive xmlFreeNode on a node whose type is XML_TEXT_NODE or XML_COMMENT_NODE, so the compound guard at tree.c:3891-3893 short-circuits false on the type check; this is reached when content-bearing text/comment nodes (with cur->content != NULL) are freed during parse/teardown rather than only element/DTD-subset nodes.",
+            "why_winner_satisfies": "naive_ctx reaches the content-freeing else-if at lines 3880-3884 ([W] 3883 DICT_FREE(cur->content)) and at the blocker line 3893 takes the false side (T=0 F=3), meaning the freed node carried content and was a text/comment node; the context hook surfaced the xmlFreeDtd subset-cleanup call path (lines 1121-1132 all [W]) as new (call-context, edge) coverage that pulled the campaign into this teardown path.",
+            "why_loser_doesnt": "naive blocks the false side: at the blocker it only ever takes true (T=18 F=0) and never hits the content-free else-if (line 3883 is [L]-absent, line 3894 DICT_FREE(cur->name) is [L]); naive's bare-edge MaxMapFeedback gives no new-coverage credit for reaching xmlFreeNode through the text/comment-node call context, so it stalls (blocked 11.70h, 0 hits) freeing only name-bearing nodes.",
+            "mechanism_attribution": "naive_ctx's CtxHook folds the caller chain into the edge-map index, so the same xmlFreeNode edge reached via the text/comment-node teardown path is a new (call-context, edge) bucket and earns a corpus-add; naive's plain per-edge bucket already saw that edge via name-node frees and gives no reward, so only the context-sensitive feedback dimension rewards exploring the false side."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the false side of the comment-node type check inside xmlFreeNode's name-DICT_FREE guard.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "tree.c:3893:9",
+            "exact_quote": "Source line:         (cur->type != XML_COMMENT_NODE))"
+          },
+          {
+            "claim": "The globally blocked side is the false branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "tree.c:3893",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "The winner reaches the content-freeing else-if branch that precedes the name guard.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "tree.c:3883",
+            "exact_quote": "[W]  3883          DICT_FREE(cur->content)"
+          },
+          {
+            "claim": "At the blocker line the winner takes the false side three times while the loser takes the true side eighteen times.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L3893",
+            "exact_quote": "d=1   L3893  T=0 F=3  T=18 F=0  (cur->type != XML_COMMENT_NODE))  <-- BLOCKER"
+          },
+          {
+            "claim": "The loser only ever takes the name-bearing (true) path and reaches DICT_FREE(cur->name).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "tree.c:3894",
+            "exact_quote": "[L]  3894  \tDICT_FREE(cur->name)"
+          },
+          {
+            "claim": "The winner exercised the xmlFreeDtd subset-cleanup call path that the loser did not.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "tree.c:1128",
+            "exact_quote": "[W]  1128  \t\txmlFreeNode(c); <-- CALL"
+          },
+          {
+            "claim": "naive_ctx folds the call context into the edge-map index so the same edge is recorded at different slots per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "naive_ctx's new-coverage signal is a new (call-context, edge) pair rather than a bare edge.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+          },
+          {
+            "claim": "The naive loser uses a plain per-edge hit-count bucket as its only corpus-add signal.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive",
+            "exact_quote": "per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+          },
+          {
+            "claim": "naive resolved the branch in 0/10 trials and stayed blocked with zero hits while naive_ctx resolved 9/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "subject 35",
+            "exact_quote": "avg hitcount on branch: winner=16  loser=0"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose only divergence axis is freeing a text/comment node behind a deeper call context: if plain naive (bare-edge feedback) resolves the false side as fast as naive_ctx, the context-sensitive-coverage attribution is refuted."
+        },
+        "weakest_evidence_point": "The link from new (call-context, edge) credit to specifically reaching text/comment-node frees is inferred from the W/L overlay; no seed metadata directly proves the context hook (not throughput luck) caused the corpus-add at this edge.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6405_h2",
+      "target": "libxml2",
+      "branch_id": 6405,
+      "analysis_path": "prompts_a/libxml2_6405.analysis.json",
+      "file": "/src/libxml2/hash.c",
+      "function": "xmlHashAddEntry3",
+      "line": "580",
+      "source_line": "\t    if ((insert->name == name) &&",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "CtxHook records each distinct caller reaching xmlHashAddEntry3 as fresh (call-context, edge) coverage, sustaining exploration of entity/attribute/relaxng parse paths; naive collapses all callers to one edge slot.",
+        "one_line": "Distinct-caller coverage keeps hash insertion paths alive that naive saturates"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must drive deeper DTD/entity parsing so the dict-backed hash table accumulates a distinct (name,name2,name3) triple, reaching line 580's false branch.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "Same program-side condition, but the distinguishing requirement is that xmlHashAddEntry3 is reached via multiple distinct call contexts (entity, attribute, relaxng paths) so context-indexed coverage keeps exploring the parse paths that lead to a new-triple insertion.",
+            "why_winner_satisfies": "naive_ctx resolves 9/10 and blocks 0/10; its CtxHook folds the caller chain into the edge-map index, so the same xmlHashAddEntry3 edge reached from different callers (xmlAddEntity, xmlAddSpecialAttr, relaxng) is fresh coverage, keeping inputs that drive deeper distinct parse contexts toward an insertion.",
+            "why_loser_doesnt": "Naive folds all call paths into the same bare edge, so re-reaching xmlHashAddEntry3 from a new caller earns no new coverage; it loses the exploration pressure on the deeper parse contexts and blocks 8/10.",
+            "mechanism_attribution": "naive_ctx's context-sensitive coverage (CtxHook records (call-context, edge) pairs) makes each distinct caller-chain reaching xmlHashAddEntry3 new coverage, sustaining exploration of the parse paths that produce a distinct hash triple at line 580."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the false side of the dict-path triple-pointer comparison at hash.c:580 in xmlHashAddEntry3.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "hash.c:580:10",
+            "exact_quote": "Source line: \t    if ((insert->name == name) &&"
+          },
+          {
+            "claim": "The blocked side is the false branch, globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "globally blocked side",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "The branch is on the dict path (line 571 true).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L571",
+            "exact_quote": "if (table->dict) {"
+          },
+          {
+            "claim": "cmplog wins over naive at this branch via the I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3",
+            "exact_quote": "Pair 3: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "cmplog resolves 8/10 with branch hitcount 2 while naive stays at hitcount 0.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3 counts",
+            "exact_quote": "winner: resolved=8/10  blocked=2  unreached=0"
+          },
+          {
+            "claim": "The cmplog winner seed keeps the DTD structural literals intact.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed baca9f1cf32b3884",
+            "exact_quote": "61 20 53 59 53 54 45 4d 20 22 64 74 64 73 2f 31   a SYSTEM \"dtds/1"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace substitutes a logged CMP operand into matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile wins over naive via the value_profile delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile > naive  [delta: value_profile]"
+          },
+          {
+            "claim": "value_profile resolves 9/10 and blocks only 1/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 counts",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          },
+          {
+            "claim": "value_profile preserves inputs whose CMP operands are closer to matching via CMP_MAP buckets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "naive_ctx wins over naive via the ctx_coverage delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "naive_ctx resolves 9/10 and blocks 0/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 counts",
+            "exact_quote": "winner: resolved=9/10  blocked=0  unreached=1"
+          },
+          {
+            "claim": "naive_ctx folds the call context into the edge-map index so the same edge from different call paths is distinct coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx instrumentation",
+            "exact_quote": "the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it"
+          },
+          {
+            "claim": "xmlHashAddEntry3 is reachable from multiple distinct callers (entity, attribute, relaxng paths).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "Call chain hop 3",
+            "exact_quote": "hop 3  entities.c:xmlAddEntity  (/src/libxml2/entities.c:203-285, calls xmlHashAddEntry at line 277)"
+          },
+          {
+            "claim": "naive has no I2S and relies only on havoc/token mutation.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose only deep-parse gate is a multi-byte equality literal showing naive resolving the dict-path new-triple insertion as fast as cmplog/value_profile/naive_ctx (no per-technique divergence)."
+        },
+        "weakest_evidence_point": "The branch itself compares interned dict pointers, not input bytes, so the technique advantage is attributed to upstream parse-path gating rather than to solving this comparison directly, which the byte diff cannot confirm offset-by-offset.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6433",
+      "target": "libxml2",
+      "branch_id": 6433,
+      "analysis_path": "prompts_a/libxml2_6433.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "parser.c:xmlFatalErr",
+      "line": "340",
+      "source_line": "        case XML_ERR_NMTOKEN_REQUIRED:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "XML_ERR_NMTOKEN_REQUIRED",
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "CtxHook records (xmlParseEnumerationType\u2192xmlFatalErr, NMTOKEN case) as a distinct slot, giving the enumeration-error path its own coverage reward that bare-edge naive never grants despite many xmlFatalErr hits.",
+        "one_line": "Per-caller xmlFatalErr slot rewards NMTOKEN enumeration path naive ignores"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "An ATTLIST enumeration '(' followed by a non-NmToken so xmlParseEnumerationType fails xmlParseNmtoken and raises XML_ERR_NMTOKEN_REQUIRED.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "A DTD ATTLIST enumeration that opens with '(' (passing the XML_ERR_ATTLIST_NOT_STARTED guard) but whose first token is not a valid NmToken, so xmlParseNmtoken returns NULL inside xmlParseEnumerationType and that caller raises XML_ERR_NMTOKEN_REQUIRED.",
+            "why_winner_satisfies": "naive_ctx evolves seeds carrying ATTLIST/enumeration DTD structure (e.g. '<!ATTLIST', '(b*)' constructs), and the CtxHook makes the (xmlParseEnumerationType->xmlFatalErr, NMTOKEN case) edge a distinct coverage point, so a seed driving that specific call path is retained and refined toward the true side; the winner hits the case 30/69 times.",
+            "why_loser_doesnt": "naive folds all callers of xmlFatalErr into one edge index, so reaching the XML_ERR_NMTOKEN_REQUIRED case via this caller earns no new coverage over the many other error cases it already hits; the loser-blocking seeds reach the switch 286 times but never the NMTOKEN case (T=0 F=286).",
+            "mechanism_attribution": "naive_ctx's CtxHook folds the call-context hash into the edge-map index, so the same xmlFatalErr basic-block edge is recorded at distinct slots per call path; this gives the enumeration-error path its own coverage reward that bare-edge naive never grants, retaining and refining seeds toward the NMTOKEN case. This is context-sensitive coverage, not comparison-solving."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked branch is the XML_ERR_NMTOKEN_REQUIRED switch case in xmlFatalErr, true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "parser.c:340:9",
+            "exact_quote": "Source line:         case XML_ERR_NMTOKEN_REQUIRED:"
+          },
+          {
+            "claim": "The case is reached from xmlParseEnumerationType when xmlParseNmtoken returns NULL.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L5891-5893",
+            "exact_quote": "name = xmlParseNmtoken(ctxt);"
+          },
+          {
+            "claim": "The enumeration must first open with '(' (the ATTLIST_NOT_STARTED guard) before the NmToken is parsed.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L5883",
+            "exact_quote": "if (RAW != '(') {"
+          },
+          {
+            "claim": "The NMTOKEN case raises XML_ERR_NMTOKEN_REQUIRED at the 1-hop call site.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L5893",
+            "exact_quote": "xmlFatalErr(ctxt, XML_ERR_NMTOKEN_REQUIRED, NULL); <-- CALL"
+          },
+          {
+            "claim": "Winner naive_ctx resolves the branch in 8/10 trials, loser naive in only 2/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "The winning seeds carry ATTLIST/enumeration DTD structure exercised by xmlParseEnumerationType.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "loser seed id=0021f7e4ee3cbf8b, also winner DTD structure",
+            "exact_quote": "44 41 54 41 29 3e 0a 3c 21 41 54 54 4c 49 53 54   DATA)>.<!ATTLIST"
+          },
+          {
+            "claim": "The winner takes the NMTOKEN case true side 30 times while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L340",
+            "exact_quote": "d=1   L 340  T=30 F=39  T=0 F=286  case XML_ERR_NMTOKEN_REQUIRED:  <-- BLOCKER"
+          },
+          {
+            "claim": "naive_ctx installs a CtxHook that folds call context into the edge-map index, making each (context, edge) a distinct coverage point.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "naive uses bare per-edge coverage with no context indexing and no I2S.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose XML_ERR_NMTOKEN_REQUIRED-equivalent gate is reached from exactly one caller (no context aliasing of the error edge) showing naive_ctx with no resolution advantage over naive."
+        },
+        "weakest_evidence_point": "No naive_ctx seed in the prompt is shown to literally contain a malformed ATTLIST enumeration token sequence; winner DTD bytes are inferred from generic '<!DOCTYPE'/'SYSTEM' structure plus the loser's '<!ATTLIST' fragment rather than a directly displayed enumeration-with-bad-NmToken in a winning seed.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6924_h2",
+      "target": "libxml2",
+      "branch_id": 6924,
+      "analysis_path": "prompts_a/libxml2_6924.analysis.json",
+      "file": "/src/libxml2/tree.c",
+      "function": "xmlNewNs",
+      "line": "739",
+      "source_line": "    if ((prefix != NULL) && (xmlStrEqual(prefix, BAD_CAST \"xml\"))) {",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "\"xml\"",
+        "operand_width_bytes": null,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "Context-sensitive coverage treats the xmlNewNs edge reached via the SAX2 namespace-attribute call path as a new (call-context, edge) pair, retaining inputs that drive the attribute namespace path that bare naive already considers covered.",
+        "one_line": "xmlNewNs reached via SAX2 attribute call path; ctx distinguishes caller context"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Reaching xmlNewNs's false branch requires a well-formed XML doc with a non-xml namespace declaration parsed through the SAX2 attribute path.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "An XML input that reaches xmlNewNs through the SAX2 attribute-internal call context (xmlSAX2AttributeInternal -> xmlNewNs at SAX2.c:1214), where the call path itself is the distinguishing signal.",
+            "why_winner_satisfies": "naive_ctx folds the caller chain into the edge-map index, so reaching the xmlNewNs edge via the SAX2 namespace-declaration call context counts as new (call-context, edge) coverage; this rewards inputs progressing down the attribute path and lifts branch hitcount to 79 with 8/10 resolved.",
+            "why_loser_doesnt": "plain naive records only the bare edge, so once any path has touched the xmlNewNs region it earns no further credit for reaching it through the namespace-declaration context, leaving the path under-explored \u2014 naive resolves only 2/10 with hitcount 4.",
+            "mechanism_attribution": "context-sensitive coverage: naive_ctx's CtxHook keeps a running hash of the caller chain and indexes the edge map by (call-context, edge), so the SAX2-attribute call path into xmlNewNs is treated as fresh coverage and explored, whereas naive collapses it to one already-seen edge."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the false side of the prefix=='xml' test in xmlNewNs; the winners take the false branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "tree.c:739:9",
+            "exact_quote": "if ((prefix != NULL) && (xmlStrEqual(prefix, BAD_CAST \"xml\"))) {"
+          },
+          {
+            "claim": "The globally blocked side is the false branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "blocked side",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "xmlNewNs is reached through xmlSAX2AttributeInternal at SAX2.c:1214 on a winner-only path.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "SAX2.c:1214",
+            "exact_quote": "nsret = xmlNewNs(ctxt->node, val, NULL); <-- CALL"
+          },
+          {
+            "claim": "The path to xmlNewNs passes through multi-byte 'xmlns' character-equality gates.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "SAX2.c:1170-1171",
+            "exact_quote": "(name[3] == 'n') && (name[4] == 's') && (name[5] == 0)) {"
+          },
+          {
+            "claim": "value_profile (pair 3) raises branch hitcount to 89 vs naive's 4 while resolving 9/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3 value_profile > naive",
+            "exact_quote": "avg hitcount on branch: winner=89  loser=4"
+          },
+          {
+            "claim": "value_profile_cmplog (pair 1) resolves 10/10 and raises hitcount to 15 vs cmplog's 1.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 value_profile_cmplog > cmplog",
+            "exact_quote": "avg hitcount on branch: winner=15  loser=1"
+          },
+          {
+            "claim": "value_profile's CMP_MAP encodes operand closeness and preserves inputs that get closer to matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "grimoire (pair 2) drives branch hitcount to 1959 vs cmplog's 1.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 grimoire > cmplog",
+            "exact_quote": "avg hitcount on branch: winner=1959  loser=1"
+          },
+          {
+            "claim": "grimoire winning seeds carry Grimoire structural-mutator provenance.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 9ac54fe3dd9be284",
+            "exact_quote": "mutation_op=GrimoireRecursiveReplacementMutator"
+          },
+          {
+            "claim": "grimoire's single-technique delta over cmplog is generalization plus Grimoire structural mutators (both have I2S).",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire",
+            "exact_quote": "The single-technique delta is therefore\n`grimoire` vs `cmplog` (both have I2S; grimoire adds generalization +\nGrimoire mutators), not vs naive."
+          },
+          {
+            "claim": "Grimoire mutators splice grammar-free structural mutations over generalised token/gap structures.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire stages",
+            "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+          },
+          {
+            "claim": "naive_ctx (pair 4) resolves 8/10 vs naive 2/10 and raises hitcount to 79 vs 4.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 4 naive_ctx > naive",
+            "exact_quote": "avg hitcount on branch: winner=79  loser=4"
+          },
+          {
+            "claim": "naive_ctx folds call-context into the edge-map index so the same edge is new coverage per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "For naive_ctx a new bucket is a new (call-context, edge) pair rather than a bare edge.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx feedback",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+          },
+          {
+            "claim": "value_profile uses only naive's havoc/token mutators with no I2S substitution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating xmlNewNs behind the 'xmlns' string-equality CMPs in which value_profile fails to resolve the false branch faster than naive/cmplog (no resolution-rate gain from the CMP_MAP distance gradient)."
+        },
+        "weakest_evidence_point": "The BYTE DIFF section reports no informative W-vs-L byte divergence, so the specific input bytes that distinguish the three winning techniques are inferred from source/hitcount rather than directly diffed.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6925_h2",
+      "target": "libxml2",
+      "branch_id": 6925,
+      "analysis_path": "prompts_a/libxml2_6925.analysis.json",
+      "file": "/src/libxml2/tree.c",
+      "function": "xmlNewNs",
+      "line": "766",
+      "source_line": "    if (prefix != NULL)",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "Context-sensitive coverage makes the xmlNewNs edge reached through the default-namespace SAX caller (xmlns= attribute) a fresh (call-context, edge) bucket, preserving the intermediate seeds that bare-edge naive collapses to an already-seen edge.",
+        "one_line": "Default-namespace xmlns= reaches xmlNewNs; ctx rewards SAX caller-context edge"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A default-namespace attribute (xmlns=\"...\" with no prefix) parsed deep in SAX2, so xmlNewNs is called with prefix==NULL and takes the false branch.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "The same default-namespace `xmlns=\"...\"` attribute reaching xmlNewNs(ctxt->node, val, NULL); the distinguishing feature is that xmlNewNs is reached via a particular SAX call context (xmlSAX2AttributeInternal at SAX2.c:1214) that context-sensitive coverage treats as new.",
+            "why_winner_satisfies": "naive_ctx folds the caller chain into the edge-map index, so reaching xmlNewNs through the default-namespace call path (xmlSAX2AttributeInternal at line 1214) is a new (call-context, edge) pair that gets preserved as corpus; this keeps inputs that drive the attribute path alive and it resolves the false branch (8/10, hitcount 79 vs 4).",
+            "why_loser_doesnt": "naive's plain edge-bucket feedback gives no extra credit for reaching xmlNewNs through the namespaced-attribute caller versus other callers, so the intermediate inputs that almost reach the call site are not retained and it stays blocked (8/10, hitcount 4).",
+            "mechanism_attribution": "naive_ctx's context-sensitive coverage (CtxHook (call-context, edge) pairs) rewards reaching xmlNewNs through the default-namespace SAX caller as new coverage, retaining the path that bare naive discards."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is xmlNewNs's prefix-NULL test at tree.c:766, globally blocked on the false side.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "tree.c:766:9",
+            "exact_quote": "Source line:     if (prefix != NULL)\nGlobally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "The winning false branch is taken when xmlNewNs is called with a NULL prefix from the default-namespace SAX path.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "SAX2.c:1214",
+            "exact_quote": "nsret = xmlNewNs(ctxt->node, val, NULL); <-- CALL"
+          },
+          {
+            "claim": "The unprefixed xmlns attribute name is gated by a chained per-character equality cascade in the SAX attribute path.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "SAX2.c L1170/L1724",
+            "exact_quote": "if ((att[0] == 'x') && (att[1] == 'm') && (att[2] == 'l') &&"
+          },
+          {
+            "claim": "value_profile wins over cmplog and over naive with the same value_profile delta and resolves at much higher hitcount than its losers.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 3",
+            "exact_quote": "avg hitcount on branch: winner=15  loser=1"
+          },
+          {
+            "claim": "value_profile vs naive is a decisive value_profile-delta pair with the winner resolving 9/10 and loser blocked 8/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3",
+            "exact_quote": "--- Pair 3: value_profile > naive  [delta: value_profile] ---"
+          },
+          {
+            "claim": "value_profile's CMP_MAP gradient preserves inputs that get a CMP-operand pair closer to matching, which is the partial-progress credit on the xmlns cascade.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "cmplog's I2S only substitutes an operand where the matching byte sequence already appears in the input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "grimoire beats cmplog under the grimoire_structural delta and resolves the branch with an extreme hitcount of 1959 versus 1.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "avg hitcount on branch: winner=1959  loser=1"
+          },
+          {
+            "claim": "The grimoire winning seeds were produced by Grimoire structural mutators.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 2/3",
+            "exact_quote": "mutation_op=GrimoireRecursiveReplacementMutator"
+          },
+          {
+            "claim": "grimoire's structural mutators splice and recurse on generalised token/gap structures (grammar-free structural mutation).",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire",
+            "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+          },
+          {
+            "claim": "naive_ctx beats naive under the ctx_coverage delta, resolving 8/10 versus loser blocked 8/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 4",
+            "exact_quote": "--- Pair 4: naive_ctx > naive  [delta: ctx_coverage] ---"
+          },
+          {
+            "claim": "naive_ctx folds the caller chain into the edge-map index so the same edge is a distinct slot per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "The default-namespace branch in xmlNewNs is reached only by the winner-resolving seed set in the caller (1214).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "tree.c:766 / SAX2.c:1214",
+            "exact_quote": "/* a default namespace definition */"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating xmlNewNs on a multi-byte literal `xmlns` comparison cascade where value_profile does NOT outperform naive (no partial-progress credit advantage) and grimoire does NOT outperform cmplog \u2014 i.e. all four winners tie their losers \u2014 would refute that these techniques each independently enable the prefix==NULL path."
+        },
+        "weakest_evidence_point": "The BYTE DIFF section reports no informative W-vs-L divergence, so the precise input bytes that flip the branch are inferred from source/caller structure (the xmlns name cascade) rather than observed directly in the seed diff.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6926_h2",
+      "target": "libxml2",
+      "branch_id": 6926,
+      "analysis_path": "prompts_a/libxml2_6926.analysis.json",
+      "file": "/src/libxml2/tree.c",
+      "function": "xmlFreeNs",
+      "line": "835",
+      "source_line": "    if (cur->prefix != NULL) xmlFree((char *) cur->prefix);",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "Context-sensitive coverage indexes xmlFreeNs edges by the xmlTextReader call chain, so the namespace-free path reached via the reader's node-freeing context is new coverage that bare-edge naive has already saturated.",
+        "one_line": "xmlFreeNs via xmlTextReader call chain; ctx indexes edges by reader caller context"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must parse a well-formed XML namespace node carrying a non-NULL prefix so xmlFreeNs frees a prefixed ns",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "The same parsed-namespace-with-prefix condition driving xmlFreeNs's false side, with the divergence attributable to which call-context reaches the shared parsing/free edges rather than to comparison solving.",
+            "why_winner_satisfies": "naive_ctx resolves 8/10 with branch hitcount 79 (vs naive's 4); its CtxHook folds the caller chain into the edge-map index, so the same edges reached via the xmlTextReaderFreeNode/xmlFreeNsList call path register as new (call-context, edge) coverage and keep seeds that drive deeper into the reader's node-freeing path.",
+            "why_loser_doesnt": "naive blocks 8/10 with branch hitcount 4; with bare edge coverage it saturates the shared edges quickly and stops rewarding inputs that reach xmlFreeNs through the distinct reader call contexts visible in the loser-blocking d=3 xmlTextReaderRead / d=2 xmlTextReaderFreeNode chain.",
+            "mechanism_attribution": "context-sensitive coverage: naive_ctx's CtxHook indexes edges by call-context hash so (call-context, edge) pairs count as new coverage, preserving seeds that exercise the namespace-free path via the xmlTextReader call chain that naive's plain edge feedback treats as already-covered."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the false side of the prefix-null check in xmlFreeNs, taken only when the freed namespace has a non-NULL prefix.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "tree.c:835",
+            "exact_quote": "Source line:     if (cur->prefix != NULL) xmlFree((char *) cur->prefix);"
+          },
+          {
+            "claim": "The blocked side at the branch is the false branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "tree.c:835",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "value_profile_cmplog and value_profile win their pairs via the value_profile technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 / Pair 3",
+            "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "value_profile beats naive with the value_profile technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3",
+            "exact_quote": "Pair 3: value_profile > naive  [delta: value_profile]"
+          },
+          {
+            "claim": "The value_profile winners hit the branch far more often than their losers (15 vs 1; 89 vs 4).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 hitcount",
+            "exact_quote": "avg hitcount on branch: winner=15  loser=1"
+          },
+          {
+            "claim": "value_profile's CMP_MAP rewards inputs whose operand pair gets closer to matching, providing a parsing gradient naive lacks.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "Loser-blocking seeds keep mutating leading length/header bytes rather than stabilizing a prefixed-namespace parse.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser seed 4 offset 0x00",
+            "exact_quote": "ff 7f ff ff 31 32 c8 37 37 32 2e 78 6d 6c 5c 0a   ....12.772.xml\\."
+          },
+          {
+            "claim": "grimoire beats cmplog via the grimoire_structural technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: grimoire > cmplog  [delta: grimoire_structural]"
+          },
+          {
+            "claim": "grimoire resolves 10/10 with branch hitcount 1959 versus cmplog's 1.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 hitcount",
+            "exact_quote": "avg hitcount on branch: winner=1959  loser=1"
+          },
+          {
+            "claim": "grimoire winning seeds carry intact XML structure with a prefixed element '<b k:9'.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 3 offset 0x30",
+            "exact_quote": "22 3e 3c 61 3e 20 3c 62 20 6b 3a 39 3c 2f 62 3e   \"><a> <b k:9</b>"
+          },
+          {
+            "claim": "grimoire's GeneralizationStage and structural mutators splice generalized token/gap structures, which cmplog lacks.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire mutators/stages",
+            "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+          },
+          {
+            "claim": "naive_ctx beats naive via the ctx_coverage technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 4",
+            "exact_quote": "Pair 4: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "naive_ctx resolves 8/10 with branch hitcount 79 versus naive's 4.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 4 hitcount",
+            "exact_quote": "avg hitcount on branch: winner=79  loser=4"
+          },
+          {
+            "claim": "naive_ctx's CtxHook folds the caller chain into the edge-map index so the same edge counts as new (call-context, edge) coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx instrumentation",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "The blocker is reached through the xmlTextReader free-node call chain (xmlTextReaderFreeNode at d=2).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=2 xmlTextReaderFreeNode",
+            "exact_quote": "--- d=2  xmlreader.c:xmlTextReaderFreeNode  (/src/libxml2/xmlreader.c:386-451) ---"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose namespace node is freed via xmlFreeNs but where value_profile/naive_ctx/grimoire resolve the false side no faster than their losers (equal time-to-coverage and equal branch hitcount), showing the divergence is not driven by reaching a prefixed-namespace free."
+        },
+        "weakest_evidence_point": "The BYTE DIFF section reports no informative W-vs-L divergence, so the prefixed-namespace ('k:') feature is inferred from winner seed structure rather than a clean per-offset W/L contrast.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6948_h2",
+      "target": "libxml2",
+      "branch_id": 6948,
+      "analysis_path": "prompts_a/libxml2_6948.analysis.json",
+      "file": "/src/libxml2/tree.c",
+      "function": "xmlSearchNs",
+      "line": "6182",
+      "source_line": "\t\tif ((cur->prefix == NULL) && (nameSpace == NULL) &&",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "Context-sensitive coverage records the xmlSearchNs prefix==NULL/nameSpace==NULL edge distinctly per call path (e.g. via xmlSAX2StartElement), rewarding inputs that reach the default-namespace lookup through that caller context.",
+        "one_line": "NULL prefix+nameSpace in xmlSearchNs; ctx distinguishes per-caller edge bucket"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must build XML carrying a default (unprefixed) namespace declaration xmlns=\"...\" so xmlSearchNs hits a nsDef with prefix==NULL and nameSpace==NULL",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "The same default-namespace nsDef lookup, but reached via xmlSearchNs invoked from the element-start call context where ctxt's namespace stack makes prefix==NULL/nameSpace==NULL the live case.",
+            "why_winner_satisfies": "naive_ctx resolves 8/10 with branch hitcount 144 vs naive's 8; its context-indexed edge map records xmlSearchNs edges separately per call path (e.g. the xmlSAX2StartElement caller at SAX2.c:1737), so reaching the blocker under the namespace-search context is rewarded as new coverage and that input is preserved.",
+            "why_loser_doesnt": "naive blocks 8/10 (L6182 T=0 F=180); with a bare edge map the xmlSearchNs edge is already covered from some other call path, so an input that first reaches the prefix==NULL/nameSpace==NULL case is not seen as new coverage and is not retained.",
+            "mechanism_attribution": "naive_ctx's CtxHook folds the caller chain into the edge-map index, so the (call-context, edge) pair at the xmlSearchNs namespace lookup is novel coverage that naive's bare edge counter cannot distinguish, retaining the input that exercises the default-namespace path."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked true branch requires cur->prefix==NULL, nameSpace==NULL, and cur->href!=NULL \u2014 a default-namespace nsDef looked up with a NULL prefix.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L6182-6184",
+            "exact_quote": "if ((cur->prefix == NULL) && (nameSpace == NULL) &&"
+          },
+          {
+            "claim": "The winner returns at line 6184 (W only) while the loser returns at the prefixed-namespace line 6188 (L only).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L6184 / L6188",
+            "exact_quote": "[W]  6184  \t\t    return(cur);"
+          },
+          {
+            "claim": "At the blocker the winner takes the true side and the loser is entirely on the false side / a different prefixed compare.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L6182, L6185",
+            "exact_quote": "d=1   L6182  T=735 F=0  T=0 F=180  if ((cur->prefix == NULL) && (nameSpace == NULL) &&  <-- BLOCKER"
+          },
+          {
+            "claim": "Pair 1 (vpc>cmplog) and Pair 3 (value_profile>naive) are both attributable to the value_profile technique.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 / Pair 3",
+            "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "Pair 3 winner is value_profile over naive on the value_profile delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3",
+            "exact_quote": "Pair 3: value_profile > naive  [delta: value_profile]"
+          },
+          {
+            "claim": "A value_profile winning seed carries an xmlns default-namespace attribute token.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 5, offset 0x10",
+            "exact_quote": "lns=\"1.0"
+          },
+          {
+            "claim": "value_profile uses CMP_MAP distance-bucket feedback that preserves inputs whose CMP operands move closer to matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "Pair 2 (grimoire>cmplog) is attributable to the grimoire_structural technique.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: grimoire > cmplog  [delta: grimoire_structural]"
+          },
+          {
+            "claim": "A grimoire winning seed is produced by Grimoire structural mutators.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 2",
+            "exact_quote": "mutation_op=GrimoireRandomDeleteMutator,GrimoireExtensionMutator"
+          },
+          {
+            "claim": "grimoire's GeneralizationStage plus Grimoire structural mutators recombine generalized token/gap structures.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire",
+            "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+          },
+          {
+            "claim": "grimoire resolves 10/10 with a far higher branch hitcount (2199) than cmplog (2).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "avg hitcount on branch: winner=2199  loser=2"
+          },
+          {
+            "claim": "Pair 4 (naive_ctx>naive) is attributable to the ctx_coverage technique.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 4",
+            "exact_quote": "Pair 4: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "naive_ctx folds the call context into the edge-map index so the same edge is recorded at different slots per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "xmlSearchNs is invoked from the element-start caller xmlSAX2StartElement at SAX2.c:1737.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1737",
+            "exact_quote": "ns = xmlSearchNs(ctxt->myDoc, ret, prefix); <-- CALL"
+          },
+          {
+            "claim": "naive_ctx resolves 8/10 with branch hitcount 144 vs naive's 8.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 4",
+            "exact_quote": "avg hitcount on branch: winner=144  loser=8"
+          },
+          {
+            "claim": "value_profile has no I2S stage, so the value_profile pairs are not an I2S substitution mechanism.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with a default-namespace lookup (prefix==NULL, nameSpace==NULL) where value_profile, grimoire, and naive_ctx fail to out-resolve their respective baselines (cmplog/naive) \u2014 i.e. all four involved winners block as often as their losers despite the gate being present."
+        },
+        "weakest_evidence_point": "The byte-level link is weak: BYTE DIFF reports no informative divergence, so the xmlns-token evidence in winning seeds is partial and the exact program-side condition is inferred from source plus per-role branch directions rather than a clean W-vs-L byte contrast.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5503_h2",
+      "target": "harfbuzz",
+      "branch_id": 5503,
+      "analysis_path": "prompts_b/harfbuzz_5503.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-layout-gsubgpos.hh",
+      "function": "OT::hb_ot_apply_context_t::skipping_iterator_t::init(OT::hb_ot_apply_context_t*, bool)",
+      "line": "486",
+      "source_line": "      matcher.set_ignore_zwnj (c->table_index == 1 || (context_match && c->auto_zwnj));",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "derived_integer",
+        "operand_literal": "1",
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "CtxHook makes the same init() edge a distinct coverage bucket per caller (iter_input vs iter_context vs CFF paths), so the layout-matching call path that reaches table_index==1 is retained where bare-edge coverage stops rewarding it.",
+        "one_line": "per-caller context buckets keep layout init() edge alive across multiple call sites"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must carry a valid GPOS table (table_index==1) so init() sets ignore_zwnj, reaching deep GSUB/GPOS layout-matching code.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "Same structural requirement (a table whose parse drives init with table_index==1), but the winner benefits because reaching init() through distinct call contexts (iter_input vs iter_context, CFF dict paths) counts as new coverage.",
+            "why_winner_satisfies": "naive_ctx resolves 9/10 with avg hitcount 30402 vs loser 2810; init() is invoked from multiple callers (iter_input.init(this,false) and iter_context.init(this,true) at lines 735-736, plus CFF cff2 dict paths), so the context-indexed map rewards each (call-context, edge) pair and retains the seeds that drive deeper into layout matching.",
+            "why_loser_doesnt": "naive collapses all calls to init() into one bare edge bucket, so once that edge is hit it earns no further corpus credit for reaching it via the GPOS-resolving context, and stays blocked 8/10.",
+            "mechanism_attribution": "naive_ctx's CtxHook folds the caller chain into the edge-map index, so the same init() edge reached through the GPOS-table call path is a NEW (call-context, edge) bucket; MaxMapFeedback preserves those inputs, building a corpus that explores the table-driven contexts naive's bare-edge feedback ignores."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the ignore_zwnj assignment whose true side requires c->table_index==1 (the GPOS table).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L75 (line 486)",
+            "exact_quote": "matcher.set_ignore_zwnj (c->table_index == 1 || (context_match && c->auto_zwnj)); <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog winner seeds carry the literal 'GPOS' tag bytes at offset 0x0c.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 002c9ad92acce91b, offset 0x0c",
+            "exact_quote": "00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+          },
+          {
+            "claim": "naive loser seeds are tiny and tagless, e.g. a 6-byte blob.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 003817559785f774",
+            "exact_quote": "87 0e 0d 0e 22 0e                                 ....\"."
+          },
+          {
+            "claim": "cmplog wins the pair, resolving 10/10 versus naive's 2/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile wins via CMP_MAP distance bucketing, with hitcount 21383 vs loser 2810.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "avg hitcount on branch: winner=21383  loser=2810"
+          },
+          {
+            "claim": "value_profile's CMP_MAP encodes how close the two operands were and preserves inputs closer to matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "The tag offsets 0x0c-0x0f differ between W and L with winners concentrating on G/P/O/S and k/e/r/n.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0c-0x0f",
+            "exact_quote": "0x000c  6b(k)x30 47(G)x10                   20( )x1 80(.)x1 70(p)x1 01(.)x1 +5u  DIFFER"
+          },
+          {
+            "claim": "naive_ctx wins via context-indexed coverage with hitcount 30402 vs loser 2810.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3",
+            "exact_quote": "avg hitcount on branch: winner=30402  loser=2810"
+          },
+          {
+            "claim": "naive_ctx folds the call context into the edge-map index so the same edge is recorded at different slots per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Instrumentation",
+            "exact_quote": "the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "init() is called from two distinct contexts iter_input(false) and iter_context(true).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 735-736",
+            "exact_quote": "iter_input.init (this, false); <-- CALL"
+          },
+          {
+            "claim": "minimizer wins via calibrated energy with hitcount 41433 vs loser 2810.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 4",
+            "exact_quote": "avg hitcount on branch: winner=41433  loser=2810"
+          },
+          {
+            "claim": "minimizer derives per-seed energy from calibration so faster, smaller, more-stable seeds earn more mutations.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "minimizer Mutators/stages",
+            "exact_quote": "faster, smaller,\nmore-stable seeds earn more mutations."
+          },
+          {
+            "claim": "Several winner-resolving seeds bearing font-table content are minimizer finds.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 0130d32717d6abb0",
+            "exact_quote": "fuzzer=minimizer, trial=1, discovered_at=2656s"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where the GPOS table tag is placed at a fixed known offset (so naive can hit it with no comparison-solving) showing cmplog NOT outperforming naive at the table_index==1 branch."
+        },
+        "weakest_evidence_point": "The four mechanisms all gate on the same GPOS-table structural feature, so the per-axis attributions (especially calibrated_energy vs ctx_coverage) are inferred from mechanism descriptions plus aggregate hitcounts rather than from technique-specific byte evidence.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5839",
+      "target": "harfbuzz",
+      "branch_id": 5839,
+      "analysis_path": "prompts_b/harfbuzz_5839.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+      "function": "hb-ot-shaper-indic.cc:initial_reordering_consonant_syllable(hb_ot_shape_plan_t const*, hb_face_t*, hb_buffer_t*, unsigned int, unsigned int)",
+      "line": "584",
+      "source_line": "\t      info[i - 1].indic_category() == I_Cat(H))",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "I_Cat(H)",
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "CtxHook makes the same reordering-code edge yield distinct coverage buckets per caller (consonant_syllable vs standalone_cluster vs myanmar), sustaining energy on the syllable-reorder region until havoc assembles the H-then-ZWJ glyph sequence the true branch needs.",
+        "one_line": "context buckets across reorder callers sustain energy until H,ZWJ sequence found"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Indic syllable with a non-consonant ZWJ at position i whose immediately-preceding glyph info[i-1] is a Halant (H), encountered during backward base-consonant search.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "A glyph buffer that, after Indic categorization, produces a syllable where the backward base-consonant scan hits a non-consonant glyph that is a ZWJ (info[i].indic_category()==ZWJ) with start<i AND the glyph one position earlier is a Halant (info[i-1].indic_category()==I_Cat(H)). This requires a specific multi-glyph ordering (..., H, ZWJ, ...) inside one syllable reached via the consonant-syllable / standalone-cluster reordering path.",
+            "why_winner_satisfies": "naive_ctx resolves the true side in 10/10 trials with avg 18 hits on the branch; the CtxHook folds the call context into the edge-map index, so the line-584 edge reached via initial_reordering_consonant_syllable's two callers (standalone_cluster at line 960, myanmar at line 314) counts as distinct new coverage, keeping the reordering region rewarding and letting havoc keep building the H,ZWJ glyph ordering. The winner seeds carry 'uu-han'/'-han' ASCII runs and dense 0x0d/0x20 glyph-id bytes that map into the joiner/halant categories.",
+            "why_loser_doesnt": "naive sees the same bare edge regardless of which caller reached it, so once the reordering edges are bucketed it stops getting coverage reward there; it resolves true only 2/10 (blocked 8/10, avg 1 hit, avg 16.60h blocked) and never assembles the H-immediately-before-ZWJ ordering, taking the false side 12 times at L 584 (T=0 F=12).",
+            "mechanism_attribution": "naive_ctx's CtxHook (HookableInProcessExecutor) makes a (call-context, edge) pair the unit of new coverage instead of a bare edge. The same reordering code reached from consonant_syllable vs standalone_cluster vs myanmar yields fresh map slots, so the fuzzer keeps energy on the syllable-reordering region and havoc eventually lands the H,ZWJ glyph sequence the true branch needs. This is context-sensitive coverage, not any comparison-solving technique."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker true side requires info[i] to be ZWJ with the immediately preceding glyph info[i-1] being a Halant (H), inside a syllable.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L584 BLOCKER",
+            "exact_quote": "info[i - 1].indic_category() == I_Cat(H))"
+          },
+          {
+            "claim": "The decisive pair is naive_ctx over naive with delta ctx_coverage, winner resolving 10/10 and loser blocked 8/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "--- Pair 1: naive_ctx > naive  [delta: ctx_coverage] ---"
+          },
+          {
+            "claim": "Winner resolves all trials with 18 avg hits while loser averages 1 hit and 16.60h blocked.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 aggregates",
+            "exact_quote": "avg hitcount on branch: winner=18  loser=1"
+          },
+          {
+            "claim": "At the blocker line the loser takes the true side 0 times against 12 false, while the winner takes it 13 times.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L 584",
+            "exact_quote": "L 584  T=13 F=7  T=0 F=12  info[i - 1].indic_category() == I_Cat(H))  <-- BLOCKER"
+          },
+          {
+            "claim": "Winner seeds contain ASCII han-tag runs and dense 0x0d/0x20 glyph bytes feeding the categorizer.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1 id=204647f407d75add offset 0x2c-0x33",
+            "exact_quote": "00 4e 09 00 75 75 2d 68   .. ... ..N..uu-h"
+          },
+          {
+            "claim": "The CtxHook folds the call context into the edge-map index so the same edge is recorded at different slots per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Instrumentation",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "naive_ctx treats a new (call-context, edge) pair as new coverage rather than a bare edge.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Feedback",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+          },
+          {
+            "claim": "naive has no comparison introspection in its mutators or instrumentation.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "The blocker function is reached from multiple distinct callers including standalone_cluster and myanmar reorder, giving the CtxHook distinct contexts.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "Call chain hop 2",
+            "exact_quote": "hop 2  hb-ot-shaper-myanmar.cc:reorder_syllable_myanmar"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness reaching the line-584 syllable-reordering code from only ONE call context shows no naive_ctx-over-naive advantage in taking the H-before-ZWJ true side (both resolve or both block equally), demonstrating the divergence is not driven by context-indexed coverage."
+        },
+        "weakest_evidence_point": "Whether the winner's advantage is specifically the call-context multiplicity (vs naive_ctx merely getting more total execs in that region) cannot be isolated from the byte/source evidence alone; the byte diff is diffuse PARTIAL with no concentrated I2S-style operand.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5990",
+      "target": "harfbuzz",
+      "branch_id": 5990,
+      "analysis_path": "prompts_b/harfbuzz_5990.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-shaper-use.cc",
+      "function": "hb-ot-shaper-use.cc:is_halant_use(hb_glyph_info_t const&)",
+      "line": "357",
+      "source_line": "  return (info.use_category() == USE(H) || info.use_category() == USE(HVM) || info.use_category() == USE(IS)) &&",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "USE(H)",
+        "operand_width_bytes": null,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "CtxHook records the is_halant_use edge at separate slots for each of its two call sites in reorder_syllable_use, manufacturing extra new-bucket signals that retain partial-progress seeds and eventually drive a glyph with H/HVM/IS category into the test.",
+        "one_line": "dual-callsite context buckets for is_halant_use drive H/HVM/IS category match"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A glyph buffer whose category at a reorder position is USE(H)/USE(HVM)/USE(IS) and unligated, reached via the multi-call-site is_halant_use path.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "A USE-shaper syllable whose glyph at a reorder index carries use_category H, HVM, or IS and is not ligated, so the is_halant_use true branch fires; is_halant_use is invoked from reorder_syllable_use at two distinct call sites (lines 401 and 425), so the same blocker edge is reachable through multiple call paths.",
+            "why_winner_satisfies": "naive_ctx resolves the true branch in all 10 trials, hitting it 76 times on average; the per-role coverage overlay shows the loser-blocking seeds reach line 357 with T=33 (true side taken 33 times) while never satisfying it during the loser run, and the CtxHook indexes each (call-context, edge) pair separately so reaching the halant test via a fresh call path registers as new coverage and is retained, driving the corpus toward the H/HVM/IS-category configuration.",
+            "why_loser_doesnt": "plain naive blocks the true branch in 8 of 10 trials with avg hitcount 0; its bare edge-bucket feedback cannot distinguish reaching is_halant_use via different call sites, so it never builds the corpus pressure to discover an input whose reorder-position glyph category is H/HVM/IS and unligated.",
+            "mechanism_attribution": "naive_ctx's CtxHook (HookableInProcessExecutor) folds a running call-context hash into the edge-map index, so the same is_halant_use edge is recorded at different map slots per caller chain; because is_halant_use is called from reorder_syllable_use at two sites, context-sensitive coverage manufactures extra 'new bucket' signals that retain partial-progress seeds plain naive discards, eventually solving the H/HVM/IS category condition."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true side of a disjunction over use_category equal to H, HVM, or IS conjoined with not-ligated.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6 hb-ot-shaper-use.cc:357",
+            "exact_quote": "return (info.use_category() == USE(H) || info.use_category() == USE(HVM) || info.use_category() == USE(IS)) &&"
+          },
+          {
+            "claim": "The blocker is_halant_use is called from reorder_syllable_use at two distinct call sites (line 425 and line 401).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L47, L71 call chain hop 2",
+            "exact_quote": "calls hb-ot-shaper-use.cc:is_halant_use(hb_glyph_info_t const&) at line 401"
+          },
+          {
+            "claim": "naive_ctx is the winner of the only decisive pair with delta ctx_coverage, resolving 10/10 vs naive's 2/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L26-L29 Pair 1",
+            "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "The winner takes the true branch 76 times on average while the loser averages 0 hits on the branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L31",
+            "exact_quote": "avg hitcount on branch: winner=76  loser=0"
+          },
+          {
+            "claim": "Loser-blocking seeds reach line 357 and take the true side 33 times in the W run (T=33) but the loser-run column shows T=0.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L88 d=1 357 BLOCKER",
+            "exact_quote": "d=1   L 357  T=33 F=116  T=0 F=146  return (info.use_category() == USE(H) || info.use_categor...  <-- BLOCKER"
+          },
+          {
+            "claim": "plain naive uses only bare per-edge hit-count bucket feedback with no context indexing and no I2S.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "L190-L191, L202 naive",
+            "exact_quote": "per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+          },
+          {
+            "claim": "naive_ctx's CtxHook folds the call context into the edge-map index so the same edge is recorded at different slots per call path, making a (call-context, edge) pair the unit of new coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "L206-L216 naive_ctx",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "naive_ctx uses only havoc/token mutators with no I2SRandReplace and no CMP_MAP, so the divergence is a feedback-granularity effect not a comparison-solving one.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "L219 naive_ctx",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness in which is_halant_use (or its analogue gate) is reached from a single call site only, where naive_ctx then shows no resolution advantage over naive on the H/HVM/IS true branch."
+        },
+        "weakest_evidence_point": "The claim that the multi-call-site reachability of is_halant_use is what gives naive_ctx its edge is inferred from the call-chain showing two call sites plus the CtxHook description, not directly measured per-context bucket counts.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

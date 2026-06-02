@@ -1,0 +1,149 @@
+{
+  "feature_id": "havoc_shrink_below_fixed_read_length",
+  "mechanism_family": "havoc_anti",
+  "mechanism_label": "havoc_deletion_underflows_fixed_length_read_gate",
+  "definition": "Havoc BytesDeleteMutator shrinks the input below a fixed minimum read length (e.g., a header size constant), causing a record-count read to return fewer than expected and firing the failure branch; I2S and context-coverage techniques keep their corpora anchored to large, structurally valid inputs and never emit inputs short enough to trigger the underflow.",
+  "n_members": 1,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "naive_ctx",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S",
+    "ctx_coverage"
+  ],
+  "suggested_axis_partition": {},
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "lcms_2149",
+      "target": "lcms",
+      "branch_id": 2149,
+      "analysis_path": "prompts_a/lcms_2149.analysis.json",
+      "file": "/src/Little-CMS/src/cmsio0.c",
+      "function": "_cmsReadHeader",
+      "line": "776",
+      "source_line": "    if (io -> Read(io, &Header, sizeof(cmsICCHeader), 1) != 1) {",
+      "signature": {
+        "gate_structure": "length_or_count_check",
+        "operand_kind": "length_or_count",
+        "operand_literal": "sizeof(cmsICCHeader) (128)",
+        "operand_width_bytes": null,
+        "byte_signature": "length_field",
+        "mechanism_summary": "Havoc BytesDeleteMutator shrinks the input below the 128-byte ICC header size so io->Read underflows and the !=1 true (return FALSE) branch fires; I2S and ctx_coverage keep the loser fuzzers anchored to large valid-header inputs.",
+        "one_line": "Havoc shrinks input under a fixed header-length read gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive",
+          "loser": "naive_ctx",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        },
+        {
+          "winner": "naive",
+          "loser": "cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile",
+          "loser": "value_profile_cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input shorter than sizeof(cmsICCHeader) so Read returns <1 and the true (return FALSE) branch fires.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive>naive_ctx (ctx_coverage)",
+              "naive>cmplog (I2S)",
+              "value_profile>value_profile_cmplog (I2S)"
+            ],
+            "what_input_feature": "A short input whose total length is less than sizeof(cmsICCHeader) (128 bytes), so io->Read cannot return the requested 1 record and the comparison `!= 1` is true. The winning seeds are 83 and 110 bytes; the losing seeds are 7717-25258 bytes carrying a full, valid ICC header (magic 'lcms'/'acsp', signature bytes at the header offsets).",
+            "why_winner_satisfies": "Both winner-resolving seeds are well under 128 bytes (83 and 110) and their resolving mutation chains are pure havoc byte deletions (BytesDeleteMutator appears repeatedly in the leaf op), which shrink the buffer below the header size so Read fails and the true branch is taken (W: T=2 F=0 at line 776).",
+            "why_loser_doesnt": "Every loser-blocking seed is many KB long and begins with a well-formed ICC header (magic 'lcms', 'acsp APPL', size/version fields), so Read returns 1, the false branch is taken, and the seed proceeds deep into tag-table parsing (loser executes MemoryRead 23700 times and SearchOneTag/_cmsSearchTag thousands of times) \u2014 these large valid-header inputs never get shrunk below 128 bytes by the loser fuzzers.",
+            "mechanism_attribution": "The winner technique is plain havoc byte mutation (havoc-only): naive and value_profile shrink the input via BytesDeleteMutator until Read underflows below the header size. The loser fuzzers' distinguishing techniques actively keep them on the valid-header path instead: cmplog/vpc I2S substitution solves the magic/signature CMPs and rewards deeper-parsing larger inputs, and naive_ctx's call-context-folded edge map credits new (call-context, edge) pairs inside the tag loop, so both stay anchored to large structured inputs and rarely emit a short one. So this is an anti branch resolved purely by havoc shrinking, agreeing with claimed_mechanism havoc-only."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker compares the Read return against 1 and the globally blocked side is the true branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6-L7",
+            "exact_quote": "if (io -> Read(io, &Header, sizeof(cmsICCHeader), 1) != 1) {"
+          },
+          {
+            "claim": "The required input feature is a short input; winner seeds are 83 and 110 bytes.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed b315fe... / dc1054...",
+            "exact_quote": "Seed 1 (id=b315fe7774d6b0eb, size=83 bytes, fuzzer=value_profile, trial=1"
+          },
+          {
+            "claim": "The second winner-resolving seed is 110 bytes and its leaf mutation chain is dominated by byte-deletion havoc ops.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed dc1054...",
+            "exact_quote": "Seed 2 (id=dc1054345f4c8291, size=110 bytes, fuzzer=naive, trial=1, discovered_at=2s, mutation_op=BytesDeleteMutator,BitFlipMutator,ByteAddMutator,BytesDeleteMutator,BytesDeleteMutator,BytesExpandMutator)"
+          },
+          {
+            "claim": "Loser-blocking seeds are many KB and carry a valid ICC header (magic lcms / acsp APPL).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 015923... bytes 0x00-0x2f",
+            "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 6d 6e 74 72   ..b.lcms.@..mntr"
+          },
+          {
+            "claim": "A loser-blocking seed is 7717 bytes, far exceeding the 128-byte header size.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 015923...",
+            "exact_quote": "Seed 1 (id=015923cbb72c2cf8, size=7717 bytes, fuzzer=naive_ctx, trial=1"
+          },
+          {
+            "claim": "On the loser, line 776 takes the false branch only (T=0) and execution proceeds deep into tag parsing.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L776",
+            "exact_quote": "d=1   L 776  T=2 F=0  T=0 F=38  if (io -> Read(io, &Header, sizeof(cmsICCHeader), 1) != 1) {  <-- BLOCKER"
+          },
+          {
+            "claim": "The loser spends thousands of invocations in tag-table reading functions that the winner never enters, evidence it stays on the valid-header path.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "MemoryRead / SearchOneTag",
+            "exact_quote": "       2     23700  cmsio0.c:MemoryRead  (/src/Little-CMS/src/cmsio0.c:148-166)"
+          },
+          {
+            "claim": "cmplog and vpc add I2SRandReplace which substitutes one CMP operand into the input wherever the other operand appears, biasing them toward solving header signatures rather than shrinking.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive_ctx folds call context into the edge map so new (call-context, edge) pairs inside the tag loop are rewarded, anchoring it to large structured inputs.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Feedback",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+          },
+          {
+            "claim": "naive has no I2S stage; its only mutators are the havoc + token stack, which is what produces the short winning input.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where cmplog/vpc and naive_ctx resolve the short-input branch as often as naive/value_profile when the only feature is an input-length-vs-header-size gate (i.e. I2S and ctx-coverage do NOT depress reaching short-input states) would refute the claim that havoc shrinking is the distinguishing winner mechanism."
+        },
+        "weakest_evidence_point": "The dash row at depth 5 in the naive winner's lineage is unexpected for a naive seed and leaves slight ambiguity about whether some cross-pollinated I2S ancestor contributed before the final havoc-deletion shrink.",
+        "confidence": "high"
+      }
+    }
+  ]
+}

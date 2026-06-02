@@ -1,0 +1,1292 @@
+[
+  {
+    "id": "bloaty_301",
+    "family": "I2S_anti",
+    "target": "bloaty",
+    "branch_id": 301,
+    "analysis_path": "prompts_a/bloaty_301.analysis.json",
+    "file": "/src/bloaty/third_party/abseil-cpp/absl/strings/numbers.cc",
+    "function": "numbers.cc:absl::(anonymous namespace)::safe_parse_sign_and_base(std::basic_string_view<char, std::char_traits<char> >*, int*, bool*)",
+    "line": "659",
+    "source_line": "    if (start >= end) {",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A byte region parsed as a number where, after leading/trailing whitespace is consumed and exactly one sign char (0x2b '+' or 0x2d '-') is consumed at start[0], start advances to meet end \u2014 i.e. a sign-only token with nothing after the sign.",
+    "why_winner_satisfies": "The winning value_profile seed contains a long contiguous run of 0x2b ('+') bytes (offsets 0x1d-0x2b) feeding the parser; once the sign is consumed start immediately equals end, so line 659 takes the true branch (W shows T=6 F=0 at 659 vs L T=0 F=12). value_profile reaches it via CMP_MAP gradient feedback on the start>=end / isspace comparisons plus havoc, with no I2S stage.",
+    "why_loser_doesnt": "The value_profile_cmplog loser seeds embed a sign (0x2d '-') but surrounded by digits and other content (e.g. 'elf -444444440'), so after consuming the sign there are still bytes before end; line 659 always falls through (L T=0 F=12) and the downstream base-parsing/safe_parse_positive_int path executes 24x while it never runs in W (0 hits).",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs that bring the start>=end and whitespace/sign comparisons closer to matching, preserving the sign-only-token corpus member; the input-to-state delta added in vpc does not help here because the gate is a pointer-arithmetic relation (start>=end) with no input-byte literal to substitute, so vpc's extra per-exec CMP-buffer cost yields no benefit and it loses, leaving CMP_MAP gradient as the technique that distinguishes the winner."
+  },
+  {
+    "id": "lcms_2137",
+    "family": "I2S_anti",
+    "target": "lcms",
+    "branch_id": 2137,
+    "analysis_path": "prompts_a/lcms_2137.analysis.json",
+    "file": "/src/Little-CMS/src/cmsio0.c",
+    "function": "cmsio0.c:_validatedVersion",
+    "line": "729",
+    "source_line": "    if (*pByte > 0x09) *pByte = (cmsUInt8Number) 0x09;",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "The first byte of the ICC Header.version field at file offset 0x08 must be greater than 0x09 (e.g. 0x0a or 0x29) rather than a small valid version major number like 0x03; the input is otherwise a short, structurally-loose buffer rather than a large well-formed multi-tag profile.",
+    "why_winner_satisfies": "Both value_profile winner seeds carry a byte > 0x09 at offset 0x08 (seed1 = 0x0a, seed2 = 0x29) so *pByte > 0x09 is true; the seeds are small (505 and 1832 bytes) loosely-structured buffers produced by plain havoc byte mutation, letting a high byte land in the version slot.",
+    "why_loser_doesnt": "All value_profile_cmplog blocking seeds hold the valid version byte 0x03 at offset 0x08 inside a complete 'lcms'-magic ICC header and are huge (25244 / 10346 bytes); I2S substitution drove them toward structurally-valid headers whose version major stays <= 0x09, so the branch condition is false.",
+    "mechanism_attribution": "havoc-only: the winner value_profile reaches the >0x09 side by ordinary havoc byte mutation dropping a high byte into the version field, with no comparison-introspection mutator available to it. The loser value_profile_cmplog's extra input-to-state substitution stage splices logged comparand bytes (magic 'lcms', valid version) back into the input, pulling its corpus toward valid headers that keep the version byte small and never trip the branch \u2014 so the input-to-state delta actively diverts the loser away from this side (I2S-hurts), and the winner's success rests on plain havoc, not on any comparison-solving technique."
+  },
+  {
+    "id": "libpng_3974_h0",
+    "family": "I2S_anti",
+    "target": "libpng",
+    "branch_id": 3974,
+    "analysis_path": "prompts_a/libpng_3974.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_handle_cHRM",
+    "line": "1280",
+    "source_line": "       xy.redy   == PNG_FIXED_ERROR ||",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A small (sub-1.4KB) PNG with a 32-byte cHRM chunk placed before any IDAT/PLTE, where the 4 bytes at cHRM-data offset 12 (buf+12) decode through png_get_fixed_point to PNG_FIXED_ERROR (0x7fffffff), driving the redy==PNG_FIXED_ERROR comparison true.",
+    "why_winner_satisfies": "naive's winning seeds are short (656-1314 bytes), invoke png_handle_cHRM 64 times vs 20, and actually take the L1280 true side 12 times (T=12) while never sinking budget into the IDAT/read-row decode machinery; pure havoc byte/word/dword arithmetic mutators repeatedly perturb the redy field until one execution lands the 0x7fffffff sentinel.",
+    "why_loser_doesnt": "cmplog's blocking seeds are large (738-8759 bytes, several 4902-8771) carrying full IDAT image streams; they pour execution budget into png_read_finish_row/png_combine_row/png_read_IDAT_data (hundreds of L hits, zero W hits), reach cHRM only 20 times, and never produce redy==PNG_FIXED_ERROR (T=0 at L1280).",
+    "mechanism_attribution": "naive wins by raw havoc throughput: with no CMP interception tax it runs more executions per second and its byte/Word/Dword arithmetic mutators stochastically hit the 4-byte 0x7fffffff sentinel in the redy slot, whereas cmplog's per-CMP callback + I2S buffer processing cost lowers throughput and its I2S substitution offers no help (PNG_FIXED_ERROR is an internal sentinel produced by overflow logic, not a value present as an input-byte pre-image to splice)."
+  },
+  {
+    "id": "libpng_3977",
+    "family": "I2S_anti",
+    "target": "libpng",
+    "branch_id": 3977,
+    "analysis_path": "prompts_a/libpng_3977.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_handle_cHRM",
+    "line": "1283",
+    "source_line": "       xy.bluex  == PNG_FIXED_ERROR ||",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A cHRM chunk of exactly length 32 (so png_handle_cHRM passes the length!=32 guard and reads all eight png_get_fixed_point values), with the bluex sub-field at chunk-data offset +24 carrying a 4-byte value that png_get_fixed_point rejects as PNG_FIXED_ERROR (an out-of-range/overflowing fixed-point integer).",
+    "why_winner_satisfies": "naive's undirected havoc (ByteRand/ByteInc/Word/DwordAdd, BytesSet) freely drives the 4 bluex bytes into the overflow range that decodes to PNG_FIXED_ERROR; the winner takes the true side (T=12) and resolves in all 10 trials with avg 17 hits on the branch.",
+    "why_loser_doesnt": "cmplog's input-to-state substitution copies operands logged from the png_get_fixed_point comparisons back into the input, biasing the bluex bytes toward valid (non-error) fixed-point magnitudes, so the loser never takes the true side (T=0 F=42) and stays blocked in 8/10 trials.",
+    "mechanism_attribution": "The WINNER is naive, whose enabling technique is havoc-only: raw undirected byte mutation (Byte/Word/Dword adds, BytesSet) stumbles the bluex field into the overflow range that decodes to the error sentinel, with no comparison introspection. cmplog's extra input-to-state substitution stage is the technique delta and acts as the hindrance \u2014 it pulls bluex toward in-range operands seen at the fixed-point comparison sites and away from the error branch (I2S-anti). The winning mechanism credited here is havoc-only."
+  },
+  {
+    "id": "libpng_4002",
+    "family": "I2S_anti",
+    "target": "libpng",
+    "branch_id": 4002,
+    "analysis_path": "prompts_a/libpng_4002.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_handle_bKGD",
+    "line": "2018",
+    "source_line": "         if (buf[0] != 0 || buf[2] != 0 || buf[4] != 0)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A truecolor (RGB) bKGD chunk reached with bit_depth<=8 and at least one of the high-order background bytes buf[0], buf[2] or buf[4] non-zero, so that the line-2018 disjunction takes its TRUE side ('invalid color').",
+    "why_winner_satisfies": "naive produces short inputs (375-793 bytes) that error out of image decoding early and re-enter the bKGD path repeatedly while havoc randomizes the chunk payload bytes; it reaches L2018 with T=13 F=1, i.e. it lucky-hits a non-zero buf[0]/buf[2]/buf[4] many times.",
+    "why_loser_doesnt": "cmplog produces large, structurally-valid inputs (8360-8771 bytes) that pass the length/CRC roadblocks and sink execution into IDAT row decoding; at L2018 it is stuck at T=0 F=19, always seeing all-zero background bytes and never flipping a high byte non-zero.",
+    "mechanism_attribution": "This is an I2S-anti branch where the I2S fuzzer LOSES. cmplog's comparison-solving substitution clears the structural integer-CMP roadblocks (length, CRC, magic) and drives the corpus toward big valid images deep in IDAT decoding, starving the bKGD color bytes of random mutation. naive's plain havoc byte/word mutation, having no CMP introspection to chase, keeps inputs small and blindly randomizes the chunk bytes, so it lucky-flips a high background byte non-zero. The winning technique is havoc-only mutation, not any CMP-solving."
+  },
+  {
+    "id": "libpng_4072_h1",
+    "family": "I2S_anti",
+    "target": "libpng",
+    "branch_id": 4072,
+    "analysis_path": "prompts_a/libpng_4072.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_read_IDAT_data",
+    "line": "4245",
+    "source_line": "         if (png_ptr->zstream.avail_in > 0 || png_ptr->idat_size > 0)",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "The same condition: a valid PNG whose IDAT stream leaves avail_in>0 or idat_size>0 after Z_STREAM_END, taking the True branch at L4245. The discriminating bytes are header/IDAT-size fields (offsets 0x11 and 0x17), not a magic-constant CMP that I2S could substitute.",
+    "why_winner_satisfies": "value_profile resolves 8/10 using naive's havoc stack (no I2SRandReplace). Three of its four winning seeds carry varied 0x11 (00/01/02) and 0x17 (45/46) bytes, exercising the extra-data path with ordinary mutation throughput rather than I2S substitution.",
+    "why_loser_doesnt": "value_profile_cmplog adds a per-execution CmpLog buffer plus the I2SRandReplace stage on top of value_profile. The blocker is not gated by an exact integer/string comparand that I2S can copy from input to state, so I2S provides no traction here; instead its per-execution CMP-record overhead lowers throughput and it resolves 0/10 (blocked 10/10, avg blocked 23.10h).",
+    "mechanism_attribution": "The winner value_profile is enabled by havoc-only byte mutation reaching the loop-deep extra-data state. The loser value_profile_cmplog is penalized by its I2S/CmpLog overhead, which yields no comparison-solving benefit on this non-CMP-gated branch while taxing throughput."
+  },
+  {
+    "id": "libxml2_6343",
+    "family": "I2S_anti",
+    "target": "libxml2",
+    "branch_id": 6343,
+    "analysis_path": "prompts_a/libxml2_6343.analysis.json",
+    "file": "/src/libxml2/encoding.c",
+    "function": "xmlDetectCharEncoding",
+    "line": "958",
+    "source_line": "\tif ((in[0] == 0x00) && (in[1] == 0x00) &&",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "The 4-byte window read by xmlDetectCharEncoding(start, 4) must hold exactly in[0]==0x00, in[1]==0x00, in[2]==0x3C, in[3]==0x00 (the UCS4_2143 magic) while NOT matching any earlier 4-byte encoding gate (e.g. 00 00 00 3C for UCS4BE) tested before line 958.",
+    "why_winner_satisfies": "value_profile resolves the true side in 9/10 trials; its CMP_MAP gradient rewards inputs whose CMP operands move bucket-by-bucket toward the 00 00 3C 00 constant, and winner-resolving seeds carry runs of 0x00 bytes (e.g. offsets 0x15-0x17 = 00 00 00) that the gradient feedback assembled into the magic prefix.",
+    "why_loser_doesnt": "value_profile_cmplog blocks the true side in 8/10 trials and spends 18.00h blocked; adding the I2SRandReplace stage diverts mutation energy into splicing logged operands, and the loser-blocking seeds instead resolve the sibling UTF16BE gate (line 980, tagged [L]) so they never present the 00 00 3C 00 window to line 958.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix-distance bucket feedback) lets it climb toward the 4-byte magic constant incrementally; value_profile_cmplog adds the input-to-state substitution stage which here diverts effort and the pair regresses, so this is an I2S-hurts case where the winning technique is the CMP_MAP gradient, not comparison-solving substitution."
+  },
+  {
+    "id": "libxml2_6837",
+    "family": "I2S_anti",
+    "target": "libxml2",
+    "branch_id": 6837,
+    "analysis_path": "prompts_a/libxml2_6837.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "parser.c:xmlParseTryOrFinish",
+    "line": "11754",
+    "source_line": "\t\t    (ctxt->input->cur[8] == '[')) {",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A '<'-led content byte stream whose bytes 1-8 do NOT spell '![CDATA[' (or a non-'<' content lead), so the 9-clause AND at L11747-11754 short-circuits to its false side and the parser keeps advancing through general START_TAG / CONTENT parsing instead of entering the CDATA-section state machine.",
+    "why_winner_satisfies": "value_profile resolves the branch in 9/10 trials; its winning seed reaches the false-side START_TAG path ([W] lines 11604-11620 and the goto-done at 11500/11639) and never enters the [L] CDATA-section block, meaning the 8-byte CDATA literal was not matched so the false side was taken.",
+    "why_loser_doesnt": "value_profile_cmplog blocks 8/10; its loser seed funnels into the [L] '<?xml' declaration and '<!DOCTYPE' / CDATA-section paths (L11555-11591, L11813-11903, L11950-11984), spending energy completing exact multi-byte literal matches and the CDATA term scan rather than diversifying content to take the false side.",
+    "mechanism_attribution": "value_profile (winner) uses CMP_MAP distance-bucket gradient feedback over edge coverage and lacks the input-to-state substitution mutator; it explores diverse content leads and rides the false side. value_profile_cmplog adds the input-to-state substitution mutator, which splices logged comparands (e.g. the '<![CDATA[', '<?xml', '<!DOCTYPE' literals it intercepts) back into the input, biasing its corpus toward completing those exact-literal gates and the CDATA state machine \u2014 diverting energy away from the false-side general-parse progress. The delta is I2S and the winner is the no-I2S variant, so the winner's progress is driven by CMP_MAP gradient feedback while I2S is a net liability here, not an asset."
+  },
+  {
+    "id": "curl_398",
+    "family": "I2S_anti",
+    "target": "curl",
+    "branch_id": 398,
+    "analysis_path": "prompts_b/curl_398.analysis.json",
+    "file": "/src/curl/lib/setopt.c",
+    "function": "Curl_vsetopt",
+    "line": "3110",
+    "source_line": "  default:",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "The early option-selector bytes (the `option` value switched on at setopt.c:197) must decode to a CURLOPT value that matches NO enumerated case, so control falls through every `case` to the `default:` arm at line 3110.",
+    "why_winner_satisfies": "naive (winner) seeds carry varied selector bytes at offset 0x0001 (2f, 01, 06, 05) and hit the default arm 6 times with the W set reaching `default:` exclusively (line 3110 marked [W]); plain havoc byte mutation lands on arbitrary, non-enumerated option values with no force pulling them onto a valid case.",
+    "why_loser_doesnt": "cmplog (loser) seeds are pinned to selector byte 0x01 at offset 0x0001 (all 19 instances), keeping `option` on an enumerated case so they never reach default; I2SRandReplace substitutes the very CURLOPT case-constants the switch compares against back into the input, steering the option toward a matching case and away from the unknown-option default.",
+    "mechanism_attribution": "The decisive I2S technique HANDICAPS the loser: cmplog's CMP-buffer-driven input-to-state substitution keeps copying enumerated case-constants into the selector, so the option keeps matching a known case. The winner naive has no comparison logging and wins by plain havoc byte mutation that drifts the selector onto an arbitrary, non-enumerated value, taking default. The winner-enabling mechanism is havoc-only."
+  },
+  {
+    "id": "harfbuzz_5311_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5311,
+    "analysis_path": "prompts_b/harfbuzz_5311.analysis.json",
+    "file": "/src/harfbuzz/src/hb-buffer.cc",
+    "function": "hb_buffer_t::delete_glyphs_inplace(bool (*)(hb_glyph_info_t const*))",
+    "line": "633",
+    "source_line": "\t  for (unsigned k = j; k && info[k - 1].cluster == old_cluster; k--)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A font/shaping input that drives delete_glyphs_inplace through a backward cluster merge whose loop k && info[k-1].cluster == old_cluster fails on the first iteration (k reaches 0 or the immediately-prior glyph cluster already differs), taking line 633's false side. This requires deep, high-volume traversal of the glyph buffer (many merge_clusters invocations), which broad havoc byte mutation on a valid font reaches faster than I2S.",
+    "why_winner_satisfies": "naive resolves 10/10 with avg hitcount 24 on the branch and only 1.30h blocked; its broad havoc/token byte churn produces large multi-table inputs (101-byte seed of repeated runs like dc dc dc and 62 62 62) that drive merge_clusters 42x (W) and exercise the loop body until the guard falls false.",
+    "why_loser_doesnt": "cmplog resolves only 2/10, blocked 18.10h with hitcount 1; its CMP-buffer processing and I2SRandReplace substitution spend execution budget aligning comparison operands rather than growing buffer volume, so it reaches the loop far fewer times (merge_clusters L hits 6) and rarely drives the guard to its false exit.",
+    "mechanism_attribution": "The winning technique is plain naive havoc byte/word mutation: this branch has no integer/string CMP gate that I2S could solve, so cmplog's I2SRandReplace introspection is pure overhead and naive's faster, broader mutation reaches the data-volume-dependent loop-exit more often. Mechanism is havoc-only (absence of I2S helps, not its presence)."
+  },
+  {
+    "id": "harfbuzz_5323",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5323,
+    "analysis_path": "prompts_b/harfbuzz_5323.analysis.json",
+    "file": "/src/harfbuzz/src/hb-common.cc",
+    "function": "hb_script_get_horizontal_direction",
+    "line": "594",
+    "source_line": "    case HB_SCRIPT_THAANA:",
+    "covers_pairs": [
+      "naive>cmplog (I2S)",
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "An input whose leading bytes (offset 0x00-0x01) drive buffer->props.script to one of the RTL script tags handled by the switch in hb_script_get_horizontal_direction, taking the true (THAANA-group) case at line 594. The winning inputs are short, low-structure byte blobs (e.g. 2-byte `9b 07`, `97 07`, `b1 07`, `ab 07`) rather than well-formed font files with a valid sfnt header.",
+    "why_winner_satisfies": "Winner seeds are tiny/loosely-structured blobs found by plain byte havoc mutators (naive/value_profile leaf op ByteInterestingMutator,ByteIncMutator,ByteFlipMutator); their first two bytes vary across many values (offset 0x0000 has 07+ distinct bytes, offset 0x0001 is 07 in 10 of them), exploring the script-tag space until one lands on the RTL case. naive resolves 10/10 and value_profile 8/10.",
+    "why_loser_doesnt": "Loser seeds are well-formed OpenType inputs pinned to the sfnt header `00 01 00 00` at offset 0x00-0x03 with real table tags (GSUB/GPOS/MATH at offset 0x0c-0x0f), so their script never reaches the THAANA RTL case. cmplog/vpc converge on these CMP-satisfying font-structure literals via I2SRandReplace and rarely mutate the leading script bytes freely, blocking 8/10 and 9/10 respectively.",
+    "mechanism_attribution": "The winner is enabled by plain havoc byte mutation: naive and value_profile share the same havoc+token mutator stack and lack the input-to-state CMP-substitution stage. Input-to-state substitution actively hurts here: cmplog/vpc spend energy substituting CmpLogObserver operands to satisfy font-table magic comparisons, locking inputs into the `00 01 00 00`+tag structure and away from the free leading-byte mutation that lands the RTL script case. This is an anti-roadblock branch where the absence of CMP-driven substitution (havoc-only exploration) is the discriminating capability."
+  },
+  {
+    "id": "harfbuzz_5350",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5350,
+    "analysis_path": "prompts_b/harfbuzz_5350.analysis.json",
+    "file": "/src/harfbuzz/src/hb-common.cc",
+    "function": "hb_script_get_horizontal_direction",
+    "line": "652",
+    "source_line": "    case HB_SCRIPT_OLD_UYGHUR:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "An input whose script-tag field is driven to the exact 4-byte FOURCC for HB_SCRIPT_OLD_UYGHUR so the switch ((hb_tag_t) script) at hb-common.cc:586 dispatches to the case HB_SCRIPT_OLD_UYGHUR arm at line 652 (true side), returning HB_DIRECTION_RTL.",
+    "why_winner_satisfies": "value_profile resolves the branch in all 10 trials (avg 52 hits) within 0.70h; its CMP_MAP distance-bucket feedback rewards inputs whose script-tag operand grows closer (matching-prefix length) to the OLD_UYGHUR constant, so havoc bytes that incrementally approach the FOURCC are retained as corpus and the tag is solved without the per-execution cost of the I2S/CmpLog stage.",
+    "why_loser_doesnt": "value_profile_cmplog blocks the branch in 9/10 trials (avg 0 hits, 22.10h blocked); it adds the per-execution CmpLog buffer + I2SRandReplace stage on top of value_profile, but that extra per-execution cost slows throughput on this deep call chain without delivering the tag, so it never drives the script field to the OLD_UYGHUR constant within budget.",
+    "mechanism_attribution": "The winner is value_profile, which has no input-to-state substitution mutator; its enabling technique is the CMP_MAP gradient (matching-prefix / Hamming-distance bucket feedback) that incrementally rewards script-tag bytes approaching the OLD_UYGHUR constant. Adding the I2S+CmpLog stage (the value_profile_cmplog loser) only adds per-execution overhead here, so the divergence is attributable to value_profile's CMP_MAP gradient working unencumbered, not to comparison substitution."
+  },
+  {
+    "id": "harfbuzz_5353",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5353,
+    "analysis_path": "prompts_b/harfbuzz_5353.analysis.json",
+    "file": "/src/harfbuzz/src/hb-common.cc",
+    "function": "hb_script_get_horizontal_direction",
+    "line": "660",
+    "source_line": "    case HB_SCRIPT_RUNIC:",
+    "covers_pairs": [
+      "naive>cmplog (I2S)",
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A short/degenerate byte payload that decodes to an unrecognized script (the RUNIC fall-through arm), NOT a well-formed font with real table FOURCCs like GSUB/GPOS/MATH that route to recognized RTL/LTR script cases.",
+    "why_winner_satisfies": "Winner seeds are tiny near-random payloads (e.g. 2-byte 'f6 16' and short runs) lacking valid font-table tags, so script resolution falls through the switch to the RUNIC/INVALID arm and the true side at line 660 is taken (W: T=5 F=43 vs L: T=0 F=381).",
+    "why_loser_doesnt": "The I2S fuzzers' blocking seeds are well-formed fonts carrying literal table FOURCCs (GSUB, GPOS, MATH) which steer script resolution onto recognized cases, never reaching the RUNIC fall-through (loser blocked 8/10).",
+    "mechanism_attribution": "The winning technique is undirected havoc-only byte mutation: the winners (naive, value_profile) lack the input-to-state comparison-substitution stage the losers (cmplog, value_profile_cmplog) possess, so havoc is free to produce malformed/unrecognized table tags that decode to the RUNIC fall-through. The losers' comparison-substitution stage reads CMP operands (harfbuzz table-tag FOURCC comparisons) and rewrites input bytes to MATCH those tags, pulling cmplog/vpc onto the valid well-formed-font path and away from the degenerate input that hits the RUNIC arm."
+  },
+  {
+    "id": "harfbuzz_5391",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5391,
+    "analysis_path": "prompts_b/harfbuzz_5391.analysis.json",
+    "file": "/src/harfbuzz/src/hb-open-file.hh",
+    "function": "OT::OpenTypeFontFile::get_face(unsigned int, unsigned int*) const",
+    "line": "490",
+    "source_line": "    case DFontTag:\treturn u.rfHeader.get_face (i, base_offset);",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "The leading header bytes must form a tag value that the switch on u.tag classifies as DFontTag (Apple resource-fork dfont container), exercising the ResourceForkHeader/ResourceMap path, NOT the TrueType/OpenType SFNT layout. Winner inputs start 00 00 01 00 with the trailing structure-bytes spread across many distinct values; loser inputs start 00 01 00 00 and carry ASCII OpenType table tags (MATH/GPOS/GSUB) keeping u.tag on the TrueTypeTag arm.",
+    "why_winner_satisfies": "Naive winner seeds begin 00 00 01 00 (offset 0x00-0x03) and resolve the true side at offset 0x01=00, 0x02=01 (W bytes) with no embedded SFNT table tags; the per-role overlay shows only the W set reaching the ResourceFork/ResourceMap functions (e.g. ResourceForkHeader::get_face W=154 L=0) and taking case DFontTag T=154.",
+    "why_loser_doesnt": "Cmplog loser seeds begin 00 01 00 00 (offset 0x01=01, 0x02=00) and embed canonical SFNT/OpenType table tags MATH/GPOS/GSUB/OS at offsets 0x0c-0x0f, so u.tag classifies as TrueTypeTag (L takes case TrueTypeTag T=384) and the OffsetTable/TableRecord::cmp path runs (TableRecord::cmp W=0 L=384) instead of the dfont arm.",
+    "mechanism_attribution": "The winner is the baseline fuzzer (naive) with only havoc/token mutators and no CMP introspection; its undirected byte mutation stumbles into the rare DFont magic. Cmplog LOSES because its input-to-state substitution mutator, fed the logged SFNT/OpenType-tag CMP operands, keeps substituting the input toward those well-known table tags (MATH/GPOS/GSUB), pinning u.tag on the common TrueTypeTag arm and starving the DFontTag arm. The enabling technique for the winner is therefore havoc-only mutation."
+  },
+  {
+    "id": "harfbuzz_5576",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5576,
+    "analysis_path": "prompts_b/harfbuzz_5576.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-layout.cc",
+    "function": "void hb_ot_map_t::apply<GPOSProxy>(GPOSProxy const&, hb_ot_shape_plan_t const*, hb_font_t*, hb_buffer_t*) const",
+    "line": "1989",
+    "source_line": "    if (stage->pause_func)",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)",
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A font blob structurally valid enough that hb_ot_map_t::apply<GPOSProxy> runs the stage loop and evaluates `if (stage->pause_func)` at line 1989. No specific magic literal or comparison operand gates this branch \u2014 it is reached by generic table/loop traversal, not by matching a CMP operand. The branch is therefore an I2S-ANTI branch: presence of I2SRandReplace in the loser fuzzers diverts mutation effort into expensive GPOS subtable sanitize/coverage paths (PairPosFormat1_3, MarkMarkPosFormat1_2, MarkLigPosFormat1_2) that the winners never enter, slowing or preventing the winner's fast havoc-driven arrival at the stage-pause check.",
+    "why_winner_satisfies": "Both winners lack I2SRandReplace (naive and value_profile run only the havoc+token stack). They reach the branch quickly (winner avg duration blocked 0.00h, resolved 10/10) via plain byte/word mutation that builds a parseable font driving the GSUB/GPOS apply loop. The winning seeds carry only havoc/token mutation_op chains (e.g. DwordAddMutator,BytesDeleteMutator,ByteInterestingMutator,TokenInsert...) and contain font-table-shaped bytes (e.g. ASCII tag fragments and 0x20-run filler) sufficient to enter apply<GPOSProxy>.",
+    "why_loser_doesnt": "Both losers (cmplog, value_profile_cmplog) add I2SRandReplace / CMP-buffer processing. Their seeds get pulled toward GPOS subtable code: the HIT-COUNT DIVERGENCE shows loser-only invocations of GPOSProxy::GPOSProxy (0 vs 189), PairPosFormat1_3::sanitize (0 vs 49) and the Mark*PosFormat1_2 sanitize/get_coverage functions, all W=0 / L>0. This off-chain divergence means the losers spend execution budget where the winners do not, and they block the stage-pause branch (loser avg duration blocked 24.00h/19.20h, resolved 0/10 and 2/10).",
+    "mechanism_attribution": "The technique enabling the WINNER is plain havoc/token coverage-guided exploration with no CMP introspection. The branch carries no comparison operand to solve, so the loser's input-to-state substitution stage gives no shortcut here; instead its per-execution cost and operand-driven substitution divert the loser into expensive GPOS sanitize paths, an anti effect. The winner reaches the branch by lucky havoc byte mutation building a parseable font, matching the havoc-only mechanism."
+  },
+  {
+    "id": "harfbuzz_5619",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5619,
+    "analysis_path": "prompts_b/harfbuzz_5619.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shape-fallback.cc",
+    "function": "hb-ot-shape-fallback.cc:recategorize_combining_class(unsigned int, unsigned int)",
+    "line": "46",
+    "source_line": "      switch (u)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)",
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A glyph codepoint u satisfying (u & ~0xFF) == 0x0E00u (a Thai/Lao codepoint in 0x0E00-0x0EFF) with combining class klass==0 and < 200, so the inner if at line 44 holds and control reaches the switch(u) at line 46. No specific 4-byte magic literal need match a CMP operand; the gate is a range/mask test plus a per-glyph category, reached by raw bytes near 0x0E.",
+    "why_winner_satisfies": "naive and value_profile resolve 10/10 trials using plain havoc/token mutation. Their winning seeds are dense with 0x0e bytes (e.g. value_profile seed 053d0247... has runs '0e 0e 0e 0e' and naive seed 060872d3... has '0e' bytes) that decode into the 0x0E00-block codepoints needed to drive switch(u) and downstream the klass switch (lines 97/107/110/129 hit only by W).",
+    "why_loser_doesnt": "cmplog (resolved 1/10) and value_profile_cmplog (resolved 2/10) stay blocked because the switch operand u is a font-derived Unicode codepoint produced by a range/mask test, not a literal that appears as a logged CMP operand. I2SRandReplace/CMP_MAP have no useful operand to substitute or hill-climb toward, so the I2S stages spend execution budget without progressing this gate, while their havoc share is diluted.",
+    "mechanism_attribution": "The winner's enabling technique is plain havoc byte mutation (havoc-only): naive and value_profile lack any input-to-state substitution mutator entirely and reach the Thai-codepoint switch by stochastically producing 0x0E-block bytes. The comparison-solving stage in the losers gains no traction because the gate is a mask/range test on a derived codepoint, not a comparison whose operand can be copied from the per-execution CMP buffer."
+  },
+  {
+    "id": "harfbuzz_5623",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5623,
+    "analysis_path": "prompts_b/harfbuzz_5623.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shape-fallback.cc",
+    "function": "hb-ot-shape-fallback.cc:recategorize_combining_class(unsigned int, unsigned int)",
+    "line": "51",
+    "source_line": "\tcase 0x0E36u:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A 4-byte little-endian codepoint field holding exactly 0x0E36 (bytes 36 0e 00 00), so that recategorize_combining_class is called with u==0x0E36 and the switch dispatches to case 0x0E36u at line 51, taking the true side.",
+    "why_winner_satisfies": "value_profile resolves all 10 trials and the winner-resolving seeds embed the literal codepoint 36 0e at the parsed field (Seed 1 has 36 0e 00 00 at offset 0x0c; Seed 5 has 36 0e at offset 0x20); the byte-diff at offset 0x36 shows the value 36 concentrated on the W side. value_profile's CMP_MAP gradient rewards inputs whose comparison operand grows closer (Hamming/prefix bucket) to the constant 0x0E36, climbing the integer-equality gate without needing I2S substitution.",
+    "why_loser_doesnt": "value_profile_cmplog blocks all 10 trials with hitcount 0 on the branch; the loser-blocking seeds carry other codepoints (e.g. 37 0e, 31 0e, 32 0e, 35 0f) at the codepoint field and never place 0x0E36. Adding the extra input-to-state substitution mutator to value_profile diverts mutation effort/corpus budget away from the CMP_MAP gradient climb that value_profile uses to find 0x0E36, so vpc fails to match the exact constant.",
+    "mechanism_attribution": "The winner value_profile is enabled by its CMP_MAP gradient: each integer-CMP callback writes a (PC, operand-distance bucket) entry, so inputs that bring the codepoint operand closer to 0x0E36 register new buckets and are preserved, ratcheting toward the exact match. The loser vpc differs only by also carrying the extra input-to-state substitution stage; that extra technique does not help and the divergence is attributable to value_profile's CMP_MAP gradient-driven match."
+  },
+  {
+    "id": "harfbuzz_5624_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5624,
+    "analysis_path": "prompts_b/harfbuzz_5624.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shape-fallback.cc",
+    "function": "hb-ot-shape-fallback.cc:recategorize_combining_class(unsigned int, unsigned int)",
+    "line": "52",
+    "source_line": "\tcase 0x0E37u:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A glyph codepoint equal to 0x0E37 reaching recategorize_combining_class so that switch(u) selects case 0x0E37u; in the serialized input this appears as the 2-byte little-endian literal 37 0e.",
+    "why_winner_satisfies": "value_profile winner seeds repeatedly contain the 37 0e byte run (e.g. seed 025be01a9b9fc036 has '37 0e 00 00' at 0x2c and seed 087d01cc6daaeb6f has '37 0e 00 00' near 0x10); the CMP_MAP Hamming-distance feedback rewards inputs whose CMP operand creeps toward the 0x0E37 constant, and value_profile resolves 10/10.",
+    "why_loser_doesnt": "value_profile_cmplog blocks 9/10 with avg hitcount 5 on the branch versus the winner's 166, so it rarely drives the compared codepoint to exactly 0x0E37; loser-blocking seeds carry different trailing bytes (e.g. 47 0e / 31 0e / 1f e2) rather than a stable 37 0e at the decisive offset.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient bucket on the codepoint==0x0E37 comparison gives a continuous distance signal that ratchets the operand to the exact constant; adding the cmplog I2S stage (the only delta to value_profile_cmplog) interferes here, so the gradient-only fuzzer wins."
+  },
+  {
+    "id": "harfbuzz_5660_h1",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5660,
+    "analysis_path": "prompts_b/harfbuzz_5660.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shape-fallback.cc",
+    "function": "hb-ot-shape-fallback.cc:recategorize_combining_class(unsigned int, unsigned int)",
+    "line": "145",
+    "source_line": "    case HB_MODIFIED_COMBINING_CLASS_CCC118: /* sign u / sign uu */",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "The same Lao CCC118 codepoint slot (bytes in the 0x0E00 block, low byte b9/0xEB9 etc.) must be present so klass == CCC118 at the line-145 case; value_profile reaches it via CMP_MAP-bucket-guided byte steering rather than I2S substitution.",
+    "why_winner_satisfies": "value_profile resolves 10/10 (winner: resolved=10/10) with hitcount 267 on the branch; its winning seed contains 0e-suffixed codepoint slots (47 0e, 4b 0e, b9 0e, 4c 0e), found by CMP_MAP Hamming-distance feedback that preserves inputs whose codepoint bytes edge closer to a 0x0E00-block Lao value.",
+    "why_loser_doesnt": "Adding I2S to value_profile (-> value_profile_cmplog) flips it to loser (loser: resolved=2/10 blocked=8) with avg duration blocked 19.90h and hitcount 0; the I2S substitution stage floods the corpus with off-path CMP-substituted seeds that crowd out the CMP_MAP-steered path, so vpc never sustains the codepoint.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix-distance buckets) rewards inputs whose codepoint bytes approach a 0x0E00-block Lao value, steering byte mutation toward CCC118; the I2S technique that vpc adds is the loss axis (corpus pollution), so the winner is enabled by CMP_MAP gradient, not I2S."
+  },
+  {
+    "id": "harfbuzz_5662",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5662,
+    "analysis_path": "prompts_b/harfbuzz_5662.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shape-fallback.cc",
+    "function": "hb-ot-shape-fallback.cc:recategorize_combining_class(unsigned int, unsigned int)",
+    "line": "154",
+    "source_line": "    case HB_MODIFIED_COMBINING_CLASS_CCC129: /* sign aa */",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A structured font input that, after shaping, yields a non-spacing-mark glyph whose modified combining class is exactly 129 (CCC129), so the switch(klass) at line 154 takes the case CCC129 true side. This is a derived integer state set deep in the shaping pipeline, not a literal byte compared at a fixed offset.",
+    "why_winner_satisfies": "naive's plain havoc/byte stack explores diverse multi-byte structured font content (winner seeds carry varied tables and string-like fields such as 97 97 97, 61 61 61 61 'aaaa', and 73 6e 2d 'sn-'), giving it a higher chance to land an input whose recategorized combining class reaches 129; naive resolved the branch in 8/10 trials.",
+    "why_loser_doesnt": "cmplog spends per-execution budget on CMP interception and I2S substitution, but the blocker has no input-to-state CMP edge feeding klass==129 (klass is derived from glyph property tables, not from a byte compared against a constant), so I2S substitution gains nothing here while the extra cost slows exploration; cmplog blocked in 8/10 trials and its blocking seeds are dominated by low-diversity uniform runs (08 08 08..., 44 44 44...).",
+    "mechanism_attribution": "The winner is naive, which has NO I2S. The branch is enabled by lucky havoc byte mutation discovering structured font content that produces combining class 129; cmplog's input-to-state substitution finds no useful CMP operand for this derived-state switch (klass is not a byte compared against a constant), so its comparison-solving machinery confers no advantage while its per-execution CMP overhead leaves it behind. This is a havoc-only win."
+  },
+  {
+    "id": "harfbuzz_5664",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5664,
+    "analysis_path": "prompts_b/harfbuzz_5664.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shape-fallback.cc",
+    "function": "hb-ot-shape-fallback.cc:recategorize_combining_class(unsigned int, unsigned int)",
+    "line": "160",
+    "source_line": "    case HB_MODIFIED_COMBINING_CLASS_CCC132: /* sign u */",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)",
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A structurally valid font blob that, after shaping, produces a non-spacing-mark glyph whose modified combining class equals HB_MODIFIED_COMBINING_CLASS_CCC132 so the deep switch arm at line 160 is taken. This is a high-arity switch over a combining-class integer derived from glyph tables, not a single comparison against an input literal.",
+    "why_winner_satisfies": "The non-I2S winners (naive, value_profile) drive plain byte/havoc mutation on a valid font structure and accumulate the table/glyph bytes that yield a CCC132 mark; the winner-resolving seeds hit the true side 23 times (L160 W T=23) and the winner's edge/CMP_MAP feedback rewards reaching new combining-class arms incrementally without diverting budget into operand substitution.",
+    "why_loser_doesnt": "Both losers add I2SRandReplace, whose per-execution CMP-buffer processing and operand substitution spend mutation budget chasing byte-level CMP matches; but line 5664's true side is gated by a derived combining-class value computed from font tables, not by any input byte literal an I2S operand could supply, so the I2S stage yields no progress and the losers never take the CCC132 arm (L160 L T=0), blocking all 10 trials.",
+    "mechanism_attribution": "The winner is enabled by plain coverage-guided havoc/byte mutation over valid font structure; the input-to-state substitution technique that distinguishes the losers is actively counterproductive here, diverting budget to operand substitution that cannot influence a table-derived combining-class switch. The winning side requires no CMP introspection, so the enabling technique is havoc-only byte mutation."
+  },
+  {
+    "id": "harfbuzz_5683",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5683,
+    "analysis_path": "prompts_b/harfbuzz_5683.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shape-normalize.cc",
+    "function": "hb-ot-shape-normalize.cc:decompose_current_character(hb_ot_shape_normalize_context_t const*, bool)",
+    "line": "195",
+    "source_line": "    if (space_type != hb_unicode_funcs_t::NOT_SPACE &&",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A font/buffer input whose current codepoint passes the _hb_glyph_info_is_unicode_space guard at line 191 yet has space_fallback_type == NOT_SPACE at line 194, so the line-195 comparison `space_type != NOT_SPACE` evaluates false. This requires bytes that drive a real glyph-decomposition path (kern/GPOS/GSUB table structure) rather than degenerate ASCII-space runs that resolve to a true space type.",
+    "why_winner_satisfies": "value_profile winner-resolving seeds carry structured table tags (kern at offset 0x0c, the 0x00 0x01 0x00 0x00 sfnt-version header) and diverse non-space codepoints; the per-role overlay shows the winner set taking the line-195 false side (W F=16) and the line-196 short-circuit chain, exercising the branch 38 times on average.",
+    "why_loser_doesnt": "value_profile_cmplog blocking seeds are dominated by 0x20 (ASCII space) and 0x18 byte runs that resolve to an actual space type, so at line 195 space_type != NOT_SPACE is true (L T=12 F=0) and control diverts into the space-fallback block at 196-202; the loser never lands on the false side, blocking 10/10 trials for 23.9h.",
+    "mechanism_attribution": "The winner is value_profile, whose CMP_MAP gradient (Hamming/prefix distance buckets) rewards inputs that incrementally approach valid table-structure CMPs, steering the corpus toward well-formed non-space glyph inputs that reach line 195 with a non-space codepoint. The loser value_profile_cmplog adds input-to-state substitution, which copies intercepted comparison operands (e.g. the 0x0020 space codepoint compared at line 196 and unicode-space class constants) directly into the input, biasing vpc's corpus toward space-classified codepoints that satisfy line 195's != NOT_SPACE TRUE side and thus block the false branch. So the divergence is attributable to the I2S delta but the technique that *helps* is CMP_MAP gradient on the value_profile arm."
+  },
+  {
+    "id": "harfbuzz_5723",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5723,
+    "analysis_path": "prompts_b/harfbuzz_5723.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shape.cc",
+    "function": "hb-ot-shape.cc:hb_set_unicode_props(hb_buffer_t*)",
+    "line": "491",
+    "source_line": "      if (i + 1 < count &&",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A buffer whose decoded codepoint sequence contains a ZWJ (joiner) glyph that is either at the final position (i+1 >= count) or whose following codepoint is NOT an Emoji Extended_Pictographic, so the conjunct at line 491 short-circuits to false.",
+    "why_winner_satisfies": "naive resolves the false branch in all 10/10 trials; its winning seeds are dominated by long runs of repeated filler bytes (e.g. 0x85, 0x32, 0x95) and trailing 0d 20 sequences that decode into multi-glyph buffers where a ZWJ appears as the trailing/penultimate glyph, so i+1 reaches count or the next codepoint is not Extended_Pictographic.",
+    "why_loser_doesnt": "cmplog blocks the false branch in 9/10 trials (resolved only 1/10); the I2S substitution mutator steers its inputs toward CMP-matched operands so it tends to satisfy the true-branch condition (ZWJ followed by an Extended_Pictographic), keeping i+1<count AND the pictographic test true, which is exactly the blocked-side L behavior shown at line 491 (L true=11, false=0).",
+    "mechanism_attribution": "The winner is naive, which has NO comparison introspection \u2014 it explores the false branch purely by havoc byte mutation (havoc-only) that happens to produce ZWJ-terminal or ZWJ-then-non-pictographic buffers. The loser cmplog's input-to-state substitution actively biases bytes toward the operands recorded at the line-492 pictographic comparison, pulling it onto the true side and starving the false branch; thus the divergence is attributable to the ABSENCE of comparison steering in naive, i.e. naive's lucky havoc exploration is what enables the winning side."
+  },
+  {
+    "id": "harfbuzz_5761",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5761,
+    "analysis_path": "prompts_b/harfbuzz_5761.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-arabic-joining-list.hh",
+    "function": "hb-ot-shaper-use.cc:has_arabic_joining(hb_script_t)",
+    "line": "32",
+    "source_line": "    case HB_SCRIPT_OLD_UYGHUR:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "An input that drives plan->props.script through the use-shaper data path so the script enum lands on the HB_SCRIPT_OLD_UYGHUR switch-case at line 32 (true side, return true), rather than the MONGOLIAN/NKO/default arms the loser reaches; the controlling value is the script enum derived from parsed font/table bytes, not a literal that can be substituted directly into a CMP.",
+    "why_winner_satisfies": "value_profile reaches the true side in all 10 trials with hitcount 26 on the branch; its CMP_MAP gradient feedback rewards inputs whose CMP operands move closer to a matching script tag, walking the corpus toward OLD_UYGHUR without an I2S stage diverting energy.",
+    "why_loser_doesnt": "value_profile_cmplog resolves only 1/10 and is blocked 9/10 at avg 22h, hitting MONGOLIAN/NKO/default instead; its added I2SRandReplace mutator spends mutation energy on direct operand substitution that cannot reach a script enum computed indirectly from font tables, diluting the corpus and starving the CMP_MAP gradient that actually works.",
+    "mechanism_attribution": "The winner is enabled by the CMP_MAP gradient (Hamming/prefix-distance bucket feedback) shared by both fuzzers; the loser's only extra technique is the I2S substitution mutator, and since this delta is the sole difference, adding it hurts here \u2014 it pollutes/dilutes the corpus and energy budget rather than helping reach an indirectly-computed switch value, so the operative winning technique is the CMP_MAP gradient running undiluted in value_profile."
+  },
+  {
+    "id": "harfbuzz_5784",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5784,
+    "analysis_path": "prompts_b/harfbuzz_5784.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-hebrew.cc",
+    "function": "hb-ot-shaper-hebrew.cc:compose_hebrew(hb_ot_shape_normalize_context_t const*, unsigned int, unsigned int, unsigned int*)",
+    "line": "81",
+    "source_line": "  if (!found && !c->plan->has_gpos_mark)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)",
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A font/buffer payload where the base Unicode composition c->unicode->compose(a,b,ab) succeeds (found==true) or has_gpos_mark is set, so the conjunction !found && !has_gpos_mark is false. Winning seeds carry BCP47-tag/structural bytes (e.g. 'zh-hant-ht', 'zh-H[nt-ht') that steer the shaper into a font path producing successful composition rather than the Hebrew presentation-form fallback.",
+    "why_winner_satisfies": "Winner-resolving seeds reach line 81 and take BOTH sides (T=14 F=12), i.e. they do reach the false branch and resolve it; avg hitcount on branch winner=8 vs loser=0. They are diverse naive/value_profile havoc/structural inputs (ASCII language-tag runs) that occasionally make found==true so the fallback is skipped.",
+    "why_loser_doesnt": "Loser-blocking seeds hit line 81 only on the true side (T=67 F=0) and never the false side; their bytes are Hebrew-combining-mark-like sequences that miss compose() and keep re-entering the switch(b) fallback. The I2S fuzzers are stuck pumping CMP-matched combining-mark codepoints into the switch arms and never escape to found==true.",
+    "mechanism_attribution": "The WINNERS are the non-I2S fuzzers (naive beats cmplog; value_profile beats value_profile_cmplog). The escape to the false branch is NOT a CMP-solving event: it needs the broad structural/havoc exploration of the input that occasionally yields a successfully-composing base+mark pair. The I2S/CMP_MAP machinery actively over-fits the loser onto the switch(b) equality arms (matching Hebrew mark literals like 0x05B7/0x05BC), which is exactly the true-branch trap, so the I2S fuzzers blocked. Winner = plain havoc/structural mutation, with no CMP-operand substitution involved (havoc-only)."
+  },
+  {
+    "id": "harfbuzz_5810_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5810,
+    "analysis_path": "prompts_b/harfbuzz_5810.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic-machine.hh",
+    "function": "find_syllables_indic(hb_buffer_t*)",
+    "line": "531",
+    "source_line": "\tcase 19:",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A buffer whose decoded indic_category() byte run drives the Ragel state machine to a state whose _indic_syllable_machine_trans_actions slot equals 19, taking the true side of 'case 19:' and calling found_syllable(indic_symbol_cluster). The dword-aligned 0x0c / 0x00 category bytes in the naive winners (e.g. f3 a8 00 00 / repeated ..0c.. runs) are not CMP-comparison operands, so coverage progress depends on raw byte exploration of the category stream.",
+    "why_winner_satisfies": "naive resolves 10/10 with avg hitcount 87 on the branch using pure havoc/token mutation; winner seeds (id=0d2bd6067cf33275, id=39a78dfab3b51ba9, id=27cac4a8a08f303f) are naive-discovered with mutation_op chains like DwordAddMutator,BytesInsertCopyMutator and BytesExpandMutator,QwordAddMutator that arithmetic-perturb the category bytes feeding the machine.",
+    "why_loser_doesnt": "cmplog resolves only 1/10 and stays blocked 9/10 for avg 22.50h with hitcount 0; adding the I2SRandReplace stage on top of naive's mutators diverts the energy budget toward CMP-operand substitution that does not apply to this comparison-free, table-driven category dispatch, so cmplog under-explores the byte runs naive reaches by chance.",
+    "mechanism_attribution": "The winner naive succeeds via havoc-only arithmetic/insert byte mutation of the glyph-category stream; the I2S technique present only in the loser cmplog provides no substitution leverage on this Ragel table dispatch (the gate is an array index comparison _keys[0]<=cat<=_keys[1], not a logged scalar/string CMP whose operand I2S could copy), so the I2S delta is anti-helpful and the enabling mechanism is plain havoc byte exploration."
+  },
+  {
+    "id": "harfbuzz_5812",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5812,
+    "analysis_path": "prompts_b/harfbuzz_5812.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic-machine.hh",
+    "function": "find_syllables_indic(hb_buffer_t*)",
+    "line": "547",
+    "source_line": "\tcase 3:",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "Input bytes whose indic_category() values trace a long enough run through the syllable-machine transition table to reach the act=6 / case 3 vowel-syllable reduction (the te=p+1 then act=6 state followed by an EOF/transition that fires case 3). Requires a dense, mutation-friendly run of glyph-category bytes rather than a single exact magic operand.",
+    "why_winner_satisfies": "naive resolves 10/10 with avg hitcount 18 on the branch; its winning seeds are long (62-120 bytes) dense byte runs (e.g. repeated 0xcb, 0x19, 0x28 runs) produced by havoc/token stacks (CrossoverReplaceMutator, BytesCopyMutator, DwordAddMutator, TokenReplace, TokenInsert) that pile up category bytes and explore many syllable-machine states, hitting case 12 (act=6) and case 3 (W).",
+    "why_loser_doesnt": "cmplog resolves only 1/10 and is blocked 9/10 with avg hitcount 0; its blocking seeds are shorter (38-48 bytes) and its loser-blocking coverage never reaches case 12 / act=6 (L 590 T=0) nor case 3 (L 547 T=0), so the vowel-syllable reduction never fires. The I2S CMP-buffer substitution gives no purchase because the gate is a multi-byte state-machine traversal over a category table, not a single CMP operand to match-and-substitute.",
+    "mechanism_attribution": "This is an anti-I2S branch: the WINNER is naive, which has no comparison-solving. naive wins by plain havoc + token byte mutation (havoc-only) that lengthens and diversifies the category-byte run; cmplog's per-execution CMP interception and operand-substitution mutator add cost and steer mutation toward exact operand matches that do not help traverse the Ragel transition table, so cmplog spends 21.4h blocked vs naive's 2.8h."
+  },
+  {
+    "id": "harfbuzz_5815",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5815,
+    "analysis_path": "prompts_b/harfbuzz_5815.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic-machine.hh",
+    "function": "find_syllables_indic(hb_buffer_t*)",
+    "line": "559",
+    "source_line": "\tcase 4:",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "Input bytes that map to a dense run of indic glyph categories (consonant/halant/etc.) so the Ragel syllable machine walks transitions into the indic_broken_cluster lookahead action at case 4, taking the True side. No magic CMP literal gates this branch; what matters is glyph-category content density, evidenced by the repeated 0xcb/0x0c/0x0b/0xed byte runs in the winner seeds.",
+    "why_winner_satisfies": "naive havoc-mutated seeds carry long repeated runs (e.g. cb cb cb cb, ed ed ed ed, 0c 00 00 ... cb 0c) that feed many same-category glyphs through info[p].indic_category(); the per-role overlay shows the winner reaches case 4 and the broken-cluster sister arms (case 15/16/12) while accumulating 14 True hits on the blocker, with is_one_of/is_consonant called 182/104 times.",
+    "why_loser_doesnt": "cmplog seeds are short and dominated by table-tag ASCII (kern, ke, jdfm) injected by I2S CMP substitution toward OpenType tag comparisons; they never build the dense indic-category run, so the machine takes only the False side (L: T=0 F=169 at case 4) and the branch stays blocked across all 10 trials.",
+    "mechanism_attribution": "The winner is plain naive havoc/byte mutation (havoc-only): with no CMP literal guarding case 4, naive's unconstrained byte churn freely produces the long same-byte glyph-category runs the state machine needs. The loser cmplog's input-to-state CMP substitution stage wastes mutation budget steering bytes toward intercepted compare operands (table tags like 'kern'), diverting it away from the category-density region, so the comparison-solving stage is a net handicap here and naive wins on havoc alone."
+  },
+  {
+    "id": "harfbuzz_5831_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5831,
+    "analysis_path": "prompts_b/harfbuzz_5831.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+    "function": "hb-ot-shaper-indic.cc:initial_reordering_consonant_syllable(hb_ot_shape_plan_t const*, hb_face_t*, hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "479",
+    "source_line": "      start + 3 <= end &&",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A KANNADA-script buffer whose current syllable spans >=3 glyphs so that start+3<=end holds; produced by long repeated multi-byte glyph runs (e.g. runs of 0x74 'tttttttt' and repeated 'cb 0c 00 00' structures) that decode into syllables of length >=3.",
+    "why_winner_satisfies": "naive resolves the branch in all 10 trials with avg hitcount 52; its winning seeds carry long homogeneous runs (Seed 3/5 'ssssssssss', Seed 1 'tttttttt') that produce multi-glyph syllables, and naive's pure havoc byte-insert/copy mutators grow input length unconstrained, frequently producing >=3-glyph syllables.",
+    "why_loser_doesnt": "cmplog blocks in 8/10 trials with avg hitcount 0; at the blocker line L479 the loser takes True 0 times (T=0 F=15) while still reaching the Kannada script check at L478 (T=15), i.e. it enters Kannada syllables but they are never long enough; cmplog's loser seeds are short (10-60 bytes) and its I2S substitution pins bytes to intercepted CMP operands rather than lengthening the input.",
+    "mechanism_attribution": "naive wins by pure havoc length-growth; this is a branch where the I2S technique HURTS: cmplog (loser) spends mutation budget on I2SRandReplace operand substitutions that do not increase syllable length, while naive's unconstrained byte-insert/copy havoc readily reaches start+3<=end. The differentiating winner mechanism is havoc-only mutation, not comparison solving."
+  },
+  {
+    "id": "harfbuzz_5835",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5835,
+    "analysis_path": "prompts_b/harfbuzz_5835.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+    "function": "hb-ot-shaper-indic.cc:initial_reordering_consonant_syllable(hb_ot_shape_plan_t const*, hb_face_t*, hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "534",
+    "source_line": "    } else if (indic_plan->config->reph_mode == REPH_MODE_LOG_REPHA && info[start].indic_category() == I_Cat(Repha))",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A font/text input that drives an Indic shape plan with reph_mode == REPH_MODE_LOG_REPHA AND a syllable whose start glyph has indic_category == Repha, so the else-if at line 534 evaluates true. This is a structural/categorical font-table condition (glyph category + plan config), not a literal magic-number compared against an input field.",
+    "why_winner_satisfies": "The naive (havoc-only) winner resolved the true branch in all 10 trials with 36 average hits, and its resolving seeds are structured, highly repetitive font-table-like blobs (e.g. the 12-byte run 4e 0d 00 00 2a 07 00 13 1a 06 15 00 repeated twice) that drive the shaper into the Repha-categorized standalone/consonant syllable path.",
+    "why_loser_doesnt": "The cmplog loser blocked the branch in 8/10 trials with 0 average hits; its seeds are short, scattered, non-repetitive blobs (e.g. 38 bytes df 6b 66 20 72 8b 20 20 ...) that never construct the Repha-categorized syllable. Because the gate is a category/config condition with no input-side literal to match, cmplog's input-to-state CMP-substitution mutator has no CMP operand to substitute and its extra per-CMP overhead diverts mutation energy away from the structural exploration naive performs.",
+    "mechanism_attribution": "The winning technique is naive's plain havoc + token byte-mutation stack (havoc-only). The branch is gated on a font-derived glyph category (I_Cat(Repha)) and plan config (REPH_MODE_LOG_REPHA), neither of which is an input-byte literal that the cmplog CMP-substitution mutator could discover from a CmpLogObserver entry; so the input-to-state technique provides no lift and cmplog actually loses to naive (anti-I2S direction)."
+  },
+  {
+    "id": "harfbuzz_5840",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5840,
+    "analysis_path": "prompts_b/harfbuzz_5840.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+    "function": "hb-ot-shaper-indic.cc:initial_reordering_consonant_syllable(hb_ot_shape_plan_t const*, hb_face_t*, hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "595",
+    "source_line": "    if (has_reph && base == start && limit - base <= 2) {",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "Font/buffer bytes that classify the first glyph as an Indic Repha under REPH_MODE_LOG_REPHA (line 534 taken), giving has_reph=true and base=start, with a syllable so short that the backward base-search adds no further consonant, so limit-base<=2 and the true branch fires.",
+    "why_winner_satisfies": "Winner-resolving seeds drive the [W] LOG_REPHA arm at lines 534-541 (limit+=1; base=start; has_reph=true) and never enter the [L] consonant-found arm at 550-558 that would move base off start; at the blocker line 595 the winner shows T=6 F=0 while the loser shows T=0, so the winner alone takes the true side.",
+    "why_loser_doesnt": "Loser-blocking seeds fall through to the backward base-search and hit the [L] is_consonant / set-base arm (lines 550-558, base=i), so base!=start and the line-595 conjunction is false; the loser's line-595 counts are T=0 F=0 / T=0 F=14, never the true side.",
+    "mechanism_attribution": "naive's plain havoc+token byte mutation stumbles onto the short Repha-leading glyph configuration; cmplog's input-to-state CMP-operand substitution adds no help here (the gate is a position/category-classification predicate on already-shaped glyphs, not an integer/string CMP whose operand could be substituted), and the I2S mutator's bias appears to steer cmplog away from the rare short-syllable layout, so the non-I2S havoc-only baseline wins."
+  },
+  {
+    "id": "harfbuzz_5843",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5843,
+    "analysis_path": "prompts_b/harfbuzz_5843.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+    "function": "hb-ot-shaper-indic.cc:initial_reordering_consonant_syllable(hb_ot_shape_plan_t const*, hb_face_t*, hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "643",
+    "source_line": "  if (has_reph)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A structured font/glyph input that drives initial_reordering_consonant_syllable down the REPH_MODE_LOG_REPHA else-if at line 534 (info[start] classified as Repha), which sets has_reph=true so the line 643 'if (has_reph)' true side is taken. The winner inputs are 64-byte binary font tables with repeating little-endian record patterns (e.g. bf 0c 00 00), not the short text-like blobs the loser produces.",
+    "why_winner_satisfies": "Winner-resolving seed 61118ed1d1d7f65e is a 64-byte binary blob of repeating 4-byte records; in the per-role overlay the winner is the ONLY role that hits lines 534-541 ([W]) which set has_reph=true, and line 644 ([W]) which is the body of the blocked true branch. Naive's broad havoc/token mutation reaches a structurally valid Repha-bearing syllable.",
+    "why_loser_doesnt": "Loser-blocking cmplog seeds are short text-like inputs (38-48 bytes) containing 'kern' and long 0x1a runs; on the chain the loser hits the line 643 branch 14 times but takes the true side ZERO times (L 643 T=0 F=14), and never executes the [W]-only LOG_REPHA body, so has_reph stays false.",
+    "mechanism_attribution": "The enabling technique is naive's plain havoc + token mutation stack: it explores the font/glyph structure broadly enough to land a Repha-classified first glyph. cmplog spends its comparison-substitution budget on CMP operands (e.g. table magic like 'kern'), steering its corpus toward a different syllable-type region and under-exploring the LOG_REPHA path; here input-to-state substitution is not helpful and the I2S-free havoc-only baseline wins."
+  },
+  {
+    "id": "harfbuzz_5844_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5844,
+    "analysis_path": "prompts_b/harfbuzz_5844.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+    "function": "hb-ot-shaper-indic.cc:initial_reordering_consonant_syllable(hb_ot_shape_plan_t const*, hb_face_t*, hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "678",
+    "source_line": "      if (info[i].indic_category() == I_Cat(H))",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A byte sequence decoding to an old-spec Indic syllable (indic_plan->is_old_spec true) where, after the base consonant, position i carries indic_category() == I_Cat(H) (a Halant), so the true side of line 678 is taken.",
+    "why_winner_satisfies": "naive resolves 10/10 with avg hitcount 34 on the branch; its winning seeds reach the true side via pure havoc/token byte mutation that happens to assemble the H-after-base glyph layout (e.g. seed bd95f0d9... carries an 'antd'/'do-hant-mo' style structural payload built by Crossover/Delete/Neg/Insert/BitFlip ops).",
+    "why_loser_doesnt": "cmplog resolves only 1/10 and the branch hitcount is 0; its I2SRandReplace mutator overwrites byte runs to match intercepted CMP operands, displacing the carefully-positioned Halant category bytes so the post-base scan at line 677-678 never sees an H, leaving the true side unhit (DIVERGENT BRANCHES line 678 L: T=0 F=17).",
+    "mechanism_attribution": "Pair winner is naive (no I2S); the differentiating technique I2S is what the LOSER has. Plain havoc/token byte mutation in naive assembles the structural glyph sequence, while cmplog's I2SRandReplace substitutions actively perturb the same bytes toward CMP operands, so the winner is enabled by havoc-only mutation, not by any comparison-solving."
+  },
+  {
+    "id": "harfbuzz_5857",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5857,
+    "analysis_path": "prompts_b/harfbuzz_5857.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+    "function": "hb-ot-shaper-indic.cc:initial_reordering_consonant_syllable(hb_ot_shape_plan_t const*, hb_face_t*, hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "849",
+    "source_line": "    for (unsigned int i = start; i < end && info[i].indic_position() == POS_RA_TO_BECOME_REPH; i++)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "An input whose decoded glyph stream forms an Indic consonant syllable beginning with Ra+Halant in a Reph-capable script, so that has_reph becomes true and info[start] is tagged POS_RA_TO_BECOME_REPH, making the loop at line 849 take its true side. Winner seeds carry repeated 4-byte little-endian glyph-record words (e.g. bf 0c 00 00) rather than ASCII sfnt table tags.",
+    "why_winner_satisfies": "The naive winner-resolving seed is filled with structured repeated 4-byte records (bf 0c 00 00 ... bf 0c 00 00) that decode into the glyph sequence needed to set POS_RA_TO_BECOME_REPH; the W role hits line 850 (the reph-mask loop body) and line 644 (info[start].indic_position() = POS_RA_TO_BECOME_REPH), both W-only.",
+    "why_loser_doesnt": "The cmplog loser-blocking seeds are dominated by ASCII sfnt table tags surfaced by CMP interception (kern at offset 0x05, GPOS spelled by G/P/O/S at offsets 0x0c-0x0f); these steer the corpus toward valid-table-name inputs on non-reph paths, so info[start].indic_position() never equals POS_RA_TO_BECOME_REPH and line 849 stays on its false side.",
+    "mechanism_attribution": "The winner is naive, which has no input-to-state mutator and reaches the branch by plain havoc byte mutation (BytesCopyMutator/ByteAddMutator/BytesSetMutator) drifting into the structured-glyph-record byte regime. The delta is the comparison-solving technique: cmplog substitutes intercepted font-table-tag operands (kern/GPOS) back into the input, fixating the cmplog corpus on table-name strings and steering it AWAY from the glyph-record bytes needed for Reph. This is an anti-comparison-solving effect: the enabling technique for the winner is havoc-only byte mutation, and the comparison-solving substitution actively hurts the loser."
+  },
+  {
+    "id": "harfbuzz_5865",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5865,
+    "analysis_path": "prompts_b/harfbuzz_5865.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+    "function": "hb-ot-shaper-indic.cc:initial_reordering_consonant_syllable(hb_ot_shape_plan_t const*, hb_face_t*, hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "937",
+    "source_line": "      } while (j > start && !is_consonant (info[j]));",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "An input decoding to an Indic consonant-syllable cluster of multiple glyphs containing a joiner (ZWJ/ZWNJ) at position i>start with a consonant somewhere before it, so the line-937 do-while (decrementing j from the joiner) exits via its false condition because is_consonant(info[j]) becomes true. The seeds are little-endian glyph-index records; the recurring 0c 20 00 00 / 09 00 00 dwords plus 0xa4 bytes encode the Indic glyph stream that set_indic_properties classifies into consonants + joiners.",
+    "why_winner_satisfies": "value_profile resolved 10/10 with avg 32 hits on the branch; its CMP_MAP Hamming/prefix-distance gradient incrementally rewards inputs whose CMP operands approach the glyph-classification thresholds, building well-formed multi-glyph consonant syllables. Winner seeds carry repeated 0c 20 00 00 and 09 00 00 structural dwords and 0xa4 runs that produce the consonant+joiner stream the loop needs; the loop at 937 is reached and exits false (T=7 F=12 on one count line).",
+    "why_loser_doesnt": "value_profile_cmplog blocked 8/10 (resolved 0/10) despite sharing the same CMP_MAP gradient; its extra I2SRandReplace stage substitutes whole CMP operands, displacing the gradient's incremental corpus growth so it rarely assembles the multi-consonant joiner syllable. Loser seeds are shorter, joiner-poor records (e.g. dense 0c 20 00 00 / 47 0c 00 00 dwords) that take the line-937 true side (T=4 F=3) and never satisfy the consonant-before-joiner exit; the enclosing function fires only 2 times for L vs 27 for W.",
+    "mechanism_attribution": "The winner value_profile is enabled by the CMP_MAP gradient (Hamming/prefix-distance bucket feedback) without input-to-state substitution. The divergence is anti-I2S: the only technique value_profile_cmplog adds over value_profile is the per-execution CmpLog buffer plus input-to-state operand substitution, and that addition HURTS \u2014 the literal operand replacement disrupts the steady gradient-driven assembly of the structured Indic syllable. So the technique enabling the winner is CMP_MAP gradient."
+  },
+  {
+    "id": "harfbuzz_5866_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5866,
+    "analysis_path": "prompts_b/harfbuzz_5866.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+    "function": "hb-ot-shaper-indic.cc:initial_reordering_syllable_indic(hb_ot_shape_plan_t const*, hb_face_t*, hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "982",
+    "source_line": "    case indic_symbol_cluster:",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "Byte content that, after Indic-shaper categorization, yields a syllable whose low nibble equals indic_symbol_cluster; reached by broad havoc byte mutation that varies the codepoint/category bytes rather than by CMP substitution.",
+    "why_winner_satisfies": "naive resolves 10/10 with hitcount 88; its havoc/token stack (DwordAddMutator, ByteInterestingMutator, TokenReplace etc.) randomly perturbs the codepoint bytes and lands category-bearing inputs, e.g. the naive seed prefixed f3 a8 00 00 with long a2 runs.",
+    "why_loser_doesnt": "cmplog blocks 9/10 with hitcount 0; its added I2SRandReplace stage finds no input-byte CMP to substitute because syllable_type is an internal nibble classification, so I2S energy is wasted and naive's plain havoc out-explores it.",
+    "mechanism_attribution": "The syllable_type switch is a category dispatch, not an integer/string CMP against an input constant, so cmplog's I2SRandReplace substitution gains no traction; the win is plain havoc byte mutation (havoc-only) that naive spends fully on category exploration while cmplog dilutes effort on fruitless I2S."
+  },
+  {
+    "id": "harfbuzz_5881",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5881,
+    "analysis_path": "prompts_b/harfbuzz_5881.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+    "function": "hb-ot-shaper-indic.cc:final_reordering_syllable_indic(hb_ot_shape_plan_t const*, hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "1149",
+    "source_line": "    if (buffer->props.script != HB_SCRIPT_MALAYALAM && buffer->props.script != HB_SCRIPT_TAMIL)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "An input whose shaped buffer has script != HB_SCRIPT_MALAYALAM AND != HB_SCRIPT_TAMIL while still entering the pre-base-matra block (start+1<end && start<base), i.e. an Indic-classified syllable that is neither Malayalam nor Tamil. The false branch at L1149 requires the script to be any OTHER Indic script.",
+    "why_winner_satisfies": "naive resolves 10/10 with avg hitcount 74 on the branch. Its broad havoc/byte mutation explores a wide range of script-tag byte combinations: winning seeds carry diverse non-Malayalam/non-Tamil byte content (e.g. 'rafc', 'radupe', 'an-' ASCII runs and varied 0x0c/0xcb/0xbd fills) that drive the buffer into the false (non-Malayalam, non-Tamil) branch (L1149 W: T=0 F=29).",
+    "why_loser_doesnt": "cmplog blocks 9/10 with avg hitcount 0; at L1149 the loser only ever takes the TRUE side (L1149 L: T=14 F=0), meaning cmplog inputs keep producing Malayalam or Tamil scripts. cmplog's I2S substitution copies CMP operands (e.g. script-tag/codepoint constants) back into the input, repeatedly anchoring the buffer onto the Malayalam/Tamil branch rather than diversifying away from it.",
+    "mechanism_attribution": "The winner is naive, whose plain coverage-guided havoc/token mutation stack (havoc-only, no comparison introspection) performs broad undirected byte exploration of the script/codepoint bytes, hitting the common non-Malayalam/non-Tamil false branch. cmplog's added input-to-state operand substitution is counter-productive here: it pins CMP operand values that bias the buffer toward the Malayalam/Tamil true side, so the divergence is attributable to the loser's comparison-solving technique making it worse, not to any comparison the havoc-only winner had to solve."
+  },
+  {
+    "id": "harfbuzz_5885",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5885,
+    "analysis_path": "prompts_b/harfbuzz_5885.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+    "function": "hb-ot-shaper-indic.cc:final_reordering_syllable_indic(hb_ot_shape_plan_t const*, hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "1159",
+    "source_line": "      if (is_halant (info[new_pos]) &&",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "An input that, after harfbuzz's Indic GSUB shaping, yields a non-Malayalam/non-Tamil syllable whose pre-base-matra search (line 1153 loop) lands new_pos on a glyph that passes is_halant() and whose indic_position is not POS_PRE_M (line 1159 true side). This is a deep structural/state property of the shaped glyph buffer, not a literal byte-comparison operand at a fixed offset.",
+    "why_winner_satisfies": "naive resolves the true branch in all 10 trials (resolved=10/10, hitcount=35), and its winning seeds carry varied font-table-like ASCII fragments (uu-hant, o-bok, px-) plus long runs of repeated bytes (0x6b/0xeb/0xed/0xd2) produced by havoc expand/copy/insert ops, giving the broad structural diversity needed to produce a halant-bearing Indic syllable. Broad undirected havoc exploration explores the shaping state space without being pulled toward CMP operands.",
+    "why_loser_doesnt": "cmplog blocks the true branch in all 10 trials (blocked=10/10, hitcount=0) and never takes line 1159 true (L row T=0 F=14). Its I2SRandReplace mutator biases mutations toward substituting bytes that match intercepted integer/string CMP operands; at this branch there is NO informative byte-comparison gate (the gate is is_halant on a post-shaping glyph category), so I2S substitutions waste energy and steer the corpus away from the structural diversity that reaches the halant state.",
+    "mechanism_attribution": "The winner is naive via plain havoc/token byte mutation (havoc-only). There is no CMP-solvable roadblock here, so cmplog's comparison-substitution mutator confers no advantage and actively diverts mutation energy, making the I2S delta anti-correlated with reaching this state-machine-derived branch."
+  },
+  {
+    "id": "harfbuzz_5893",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5893,
+    "analysis_path": "prompts_b/harfbuzz_5893.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+    "function": "hb-ot-shaper-indic.cc:final_reordering_syllable_indic(hb_ot_shape_plan_t const*, hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "1242",
+    "source_line": "      info[start].indic_position() == POS_RA_TO_BECOME_REPH &&",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A 4-byte little-endian codepoint array decoding to a well-formed Indic consonant syllable that starts with a Ra classified POS_RA_TO_BECOME_REPH (Ra followed by Halant at the syllable head), so info[start].indic_position() == POS_RA_TO_BECOME_REPH at line 1242.",
+    "why_winner_satisfies": "naive's winning seed is a clean, repetitive 4-byte little-endian record array (00 00 00 80 / 4e 0d 00 00 / af 0c 00 00 / bf 0c 00 00 runs) that drives the syllable through final_reordering reaching the reph block: it actually takes the L1242 true side (W T=2) and proceeds into reph_move (W marks lines 1244-1373).",
+    "why_loser_doesnt": "cmplog's blocking seeds are short, byte-noisy inputs that reach L1242 but never produce a reph-classified Ra at start (L T=0 F=12); they instead reach the syllable through the matra-search path (L marks lines 1150-1190) and never enter the reph reorder block.",
+    "mechanism_attribution": "This is an anti-direction branch: naive (no CMP introspection) WINS and cmplog LOSES. The blocker is not a CMP roadblock against a literal constant; reaching POS_RA_TO_BECOME_REPH requires a structurally valid multi-glyph Indic syllable that emerges from broad havoc byte mutation building plausible 4-byte codepoint records. cmplog's extra comparison-substitution stage keys mutations to intercepted CMP operands, which do not help synthesize the multi-glyph syllabic structure and divert mutation energy away from the structural exploration that naive's plain havoc/token stack performs, so naive's lucky havoc byte mutation reaches the true side first."
+  },
+  {
+    "id": "harfbuzz_5913",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5913,
+    "analysis_path": "prompts_b/harfbuzz_5913.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-khmer-machine.hh",
+    "function": "find_syllables_khmer(hb_buffer_t*)",
+    "line": "369",
+    "source_line": "\tcase 3:",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "An input whose bytes map (after cmap) to a sustained run of a single khmer_category, long enough to drive the Ragel khmer state machine to a transition whose action is case 3 (te=p; p--; found_syllable(khmer_broken_cluster)). No specific magic constant or comparison operand is needed; the gate is a multi-glyph structural repetition, not a value match.",
+    "why_winner_satisfies": "Naive havoc/token seeds contain long contiguous identical-byte runs (e.g. a block of 0x7c '|' bytes spanning offsets ~0x1c-0x2d in winning seeds 1/2, and 0x99/0x61 runs in seed 5), exactly the homogeneous category stream that walks the state machine into the case-3 broken-cluster action; the winner takes case 3 True=12 times.",
+    "why_loser_doesnt": "Cmplog seeds are short (40-76 bytes) and lack the long homogeneous category runs; their bytes are scattered/punctuated (e.g. 0xe2 17 00 00 patterns, mixed spaces and OTTO/kern tokens), so the loser never reaches the case-3 transition (case 3 True=0).",
+    "mechanism_attribution": "Naive's plain havoc/token mutation stack stumbles onto and extends long uniform byte runs (BytesRandSetMutator, BytesRandInsertMutator copy/repeat operators), which is what this structural gate needs. Cmplog's distinguishing input-to-state operand-substitution stage targets value-equality CMP operands; the case-3 gate is a Ragel key-span range check over repeated categories, not a discrete constant, so operand substitution has no equality to solve and instead spends mutation energy rewriting CMP operands that break the homogeneous run \u2014 the comparison-solving technique is the differentiator that HURTS cmplog, so the winning technique is naive havoc-only mutation."
+  },
+  {
+    "id": "harfbuzz_5920",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5920,
+    "analysis_path": "prompts_b/harfbuzz_5920.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-khmer.cc",
+    "function": "hb-ot-shaper-khmer.cc:reorder_consonant_syllable(hb_ot_shape_plan_t const*, hb_face_t*, hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "245",
+    "source_line": "    if (info[i].khmer_category() == K_Cat(H) && num_coengs <= 2 && i + 1 < end)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "Bytes that decode to a Khmer text run containing a Coeng codepoint (U+17D2, classified as K_Cat(H)) positioned so info[i].khmer_category()==K_Cat(H) holds with num_coengs<=2 and i+1<end, i.e. a non-final Coeng glyph inside a consonant/broken-cluster syllable.",
+    "why_winner_satisfies": "naive-discovered winners carry repeated 17/d2 byte runs (e.g. seed 1 d2 17 .. d2 00 1a 17) that decode to Coeng-bearing Khmer syllables; on the W role the H/Coeng arm at 246-274 is taken and the branch hits 203 times in 10/10 trials.",
+    "why_loser_doesnt": "cmplog-discovered losers instead drive the input into the sibling VPre arm (line 277 else-if, tagged [L] 278-283) so the K_Cat(H) true side is never satisfied; the loser blocks the branch in 10/10 trials with hitcount 0.",
+    "mechanism_attribution": "The winner is naive (plain havoc byte stack), not cmplog. The compared operand K_Cat(H) is a Unicode-property-derived glyph category computed inside harfbuzz, not a literal present in the input bytes, so cmplog's input-to-state CMP-operand substitution has no operand to swap and gains no traction; broad havoc byte mutation is what stumbles onto the Coeng-producing byte arrangement. cmplog's comparison-solving effort is wasted/misdirected here, so the havoc-only baseline (naive) wins."
+  },
+  {
+    "id": "harfbuzz_5931",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5931,
+    "analysis_path": "prompts_b/harfbuzz_5931.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-myanmar-machine.hh",
+    "function": "find_syllables_myanmar(hb_buffer_t*)",
+    "line": "502",
+    "source_line": "\tcase 8:",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A short byte buffer (~24-44 bytes) of mostly small low-valued bytes (0x00, 0x0c, 0x20, 0xfe) repeated in a structured pattern so info[p].myanmar_category() walks the Ragel myanmar syllable machine into the trans_action == 8 broken-cluster transition at line 502.",
+    "why_winner_satisfies": "Naive's plain havoc byte mutators (BytesCopy/BytesInsert/ByteInc/ByteAdd) produce the small structured low-byte buffers (e.g. '10 10 00 00 0c 0c 0c 00' repeated 0c/20/fe units) that map onto the myanmar_category ranges; all 10 naive trials resolve and the winner hits case 8 with hitcount 38 (W: case 8 T=21).",
+    "why_loser_doesnt": "Cmplog's inputs are dominated by repeated CMP-derived literals (runs of f9, magic ASCII like 'hasc', 'csah', 'SHOT'/'OTS' fragments) that satisfy table-header comparisons elsewhere but never form the small-category state-machine sequence; the loser never reaches case 8 (L: case 8 T=0, blocked 8/10).",
+    "mechanism_attribution": "The winner is enabled by naive's undirected havoc byte mutation (BytesCopy/BytesInsert/ByteInc/ByteAdd), which freely explores the small low-byte structured space that drives the myanmar_category state machine. Cmplog's input-to-state CMP-operand substitution actively rewrites bytes toward intercepted comparison operands (table magic / ASCII tokens), pulling inputs AWAY from the small-category pattern, so the comparison-substitution technique is a net liability here and the pure-havoc naive arm wins. The winning mechanism is therefore havoc-only byte mutation."
+  },
+  {
+    "id": "harfbuzz_5934",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5934,
+    "analysis_path": "prompts_b/harfbuzz_5934.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-myanmar.cc",
+    "function": "hb-ot-shaper-myanmar.cc:initial_reordering_consonant_syllable(hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "190",
+    "source_line": "\tinfo[start  ].myanmar_category() == M_Cat(Ra) &&",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "Font/text input that, after shaping, produces a syllable whose first three buffer slots carry myanmar_category Ra then As then H, with start+3<=end, so the reph-detection trigraph at line 190-192 fires its true side.",
+    "why_winner_satisfies": "naive resolves 10/10 with avg hitcount 6 on the branch; its winning seeds carry diverse high-byte content (long 0x38 runs, language-tag ASCII like 'np-hant-hk', 'carf', 'hak') that broaden the buffer category space until the Ra/As/H trigraph appears, taking the true side (DIVERGENT BRANCHES W=T4 F0 at line 190).",
+    "why_loser_doesnt": "cmplog resolves only 1/10 and is blocked 8/10 with hitcount 0; its blocking seeds are saturated with a repeating '72 10 00'/'8d 10 00' lexical pattern that never decodes to the Ra/As/H prefix, so line 190 only ever takes the false side (L=T0 F7).",
+    "mechanism_attribution": "naive's plain havoc/token byte mutation (ByteRand/WordAdd/BytesDelete etc.) freely explores the glyph-category space and stumbles into the rare Ra-As-H trigraph; the input-to-state comparison-substitution stage that cmplog adds gains nothing here because there is no integer/string CMP whose operand is the category sequence (categories are table-derived, not compared as literals), so cmplog wastes mutation energy on CMP-operand substitution and collapses onto a self-reinforcing repeated byte motif instead. The winning technique is naive's havoc breadth, not comparison-solving."
+  },
+  {
+    "id": "harfbuzz_5938_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5938,
+    "analysis_path": "prompts_b/harfbuzz_5938.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-myanmar.cc",
+    "function": "hb-ot-shaper-myanmar.cc:initial_reordering_consonant_syllable(hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "234",
+    "source_line": "      if (info[i].myanmar_category() == M_Cat(VPre)) /* Left matra */",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A multi-record buffer whose bytes decode to a Myanmar consonant syllable with at least one glyph carrying myanmar_category VPre, built from the repeated 4-byte little-endian record pattern (e.g. 84 10 00 00 / 1a 10 00 00) seen in winner seeds.",
+    "why_winner_satisfies": "naive's plain havoc/token stack iterates freely over the periodic record layout (size grows 20->57 bytes, mutation_op chains like BytesExpandMutator/CrossoverInsertMutator), accumulating enough VPre-categorized glyphs that the true side fires 46 times (W T=46) and naive resolves 10/10.",
+    "why_loser_doesnt": "cmplog spends its execution budget on CMP-buffer processing and I2SRandReplace substitutions that do not help reach a category-table classification (no literal CMP operand maps to the VPre category), so it blocks 8/10 with the true side never taken (L T=0 F=20) and only hitcount 1.",
+    "mechanism_attribution": "naive wins because it lacks I2S overhead/misdirection: with no CmpLogObserver to drive substitutions, its havoc budget is spent purely on byte/length mutation of the periodic record array, which is what actually produces a VPre glyph; the I2S technique present in cmplog provides no traction on a category-table lookup and is net-negative here."
+  },
+  {
+    "id": "harfbuzz_5941",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5941,
+    "analysis_path": "prompts_b/harfbuzz_5941.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-myanmar.cc",
+    "function": "hb-ot-shaper-myanmar.cc:initial_reordering_consonant_syllable(hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "245",
+    "source_line": "      if (pos == POS_AFTER_MAIN && info[i].myanmar_category() == M_Cat(VBlw))",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A sfnt/font byte stream that parses into a Myanmar consonant (or broken-cluster) syllable in which a below-base vowel glyph (myanmar_category M_Cat(VBlw)) follows the base consonant once pos has advanced to POS_AFTER_MAIN, so line 245's true branch fires. The discriminating condition is a derived glyph-classification state, not a literal operand present in the input bytes.",
+    "why_winner_satisfies": "naive resolves the branch in all 10 trials (avg hitcount 59) using its havoc + token stack: winning seeds carry mutation ops like TokenReplace and TokenInsert,TokenReplace,ByteRandMutator,QwordAddMutator and show repeated 0x59 0x10 0x00 0x00 (Y...) byte runs that drive the consonant-loop into the VBlw arm. Free byte/token exploration explores the glyph-sequence space that produces the POS_AFTER_MAIN + VBlw state.",
+    "why_loser_doesnt": "cmplog blocks 9/10 trials (avg 20.80h, hitcount 0) because its extra I2SRandReplace stage spends mutation budget substituting CMP operands captured from __sanitizer_cov_trace_cmp* callbacks, but the gating comparison at line 245 is info[i].myanmar_category() == M_Cat(VBlw) \u2014 a comparison against a compile-time category constant on a value DERIVED from parsing, with no matching literal in the raw input. I2S substitution cannot place bytes that influence that derived category, so cmplog's budget is wasted relative to naive's structural exploration.",
+    "mechanism_attribution": "The winner is naive, whose technique relative to cmplog is the ABSENCE of input-to-state substitution: plain havoc + token mutation explores the font byte space that builds a VBlw-after-main glyph sequence. cmplog's extra substitution stage targets input-resident CMP operands, but this gate keys on a parser-derived category constant, so the extra stage diverts effort and the comparison-equipped fuzzer loses (I2S-anti). claimed_mechanism = havoc-only."
+  },
+  {
+    "id": "harfbuzz_5947_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5947,
+    "analysis_path": "prompts_b/harfbuzz_5947.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-myanmar.cc",
+    "function": "hb-ot-shaper-myanmar.cc:initial_reordering_consonant_syllable(hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "280",
+    "source_line": "    if (info[i].myanmar_position() == POS_PRE_M)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "Bytes that decode to a valid Myanmar consonant syllable whose glyph stream includes a VPre (left-matra) category item, so line 236 assigns POS_PRE_M and the blocker true side at line 280 fires; the byte layout is a stream of little-endian 16-bit-ish category records (winner seeds are dense runs of 0x84 0x10 / 0xd7 patterns).",
+    "why_winner_satisfies": "naive's pure havoc+token byte mutation drifts the input into a category mix containing VPre: the loser's I2S substitutions actively pin operand bytes to CMP-derived values that never produce a VPre, so naive (no I2S) explores more freely and reaches the VPre arm; line 234 shows the VPre test is taken (W T=46) and line 280 fires (W T=46).",
+    "why_loser_doesnt": "cmplog blocks on 8/10 trials with avg 19.10h and hitcount 1; its I2S substitutions lock operand bytes onto logged CMP values that decode to non-VPre categories, so line 234 VPre test is never true (L T=0) and POS_PRE_M is never assigned, leaving line 280 true-side at L T=0.",
+    "mechanism_attribution": "Pair 1 winner is naive, which has NO I2S; the delta technique I2S is detrimental here. The enabling mechanism is plain havoc-only byte mutation: cmplog's I2SRandReplace over-constrains operand bytes toward logged comparison values, narrowing exploration away from the VPre category, while naive's unconstrained havoc drifts into a VPre-bearing syllable."
+  },
+  {
+    "id": "harfbuzz_5949",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5949,
+    "analysis_path": "prompts_b/harfbuzz_5949.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-myanmar.cc",
+    "function": "hb-ot-shaper-myanmar.cc:initial_reordering_consonant_syllable(hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "288",
+    "source_line": "  if (first_left_matra < last_left_matra)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A run of repeated near-identical 4-byte little-endian glyph records (e.g. 00 10 00 00 / 84 10 00 00) that the Myanmar shaper categorizes as multiple M_Cat(VPre) left-matras, yielding >=2 glyphs assigned POS_PRE_M so first_left_matra < last_left_matra.",
+    "why_winner_satisfies": "naive winner seeds are clean periodic 4-byte records (00 10 00 00 then 84 10 00 00 repeated); the per-role overlay shows W taking lines 234-237 (VPre -> POS_PRE_M) and 280-285 multiple times, then line 288 true (W T=5 F=0).",
+    "why_loser_doesnt": "cmplog loser seeds are heterogeneous noise (f9 runs, token fragments like hasc/csah, GMOSH-like bytes at 0x0c-0x0f) that do not produce a multi-VPre run; L never reaches POS_PRE_M (line 280 L T=0 F=20) and line 288 is false-only (L T=0 F=17).",
+    "mechanism_attribution": "The winner is naive, which has only the havoc+token mutator stack and no input-to-state substitution. Plain havoc byte mutation (ByteNeg/BitFlip/BytesExpand/QwordAdd on an already-periodic seed) preserves and extends the repeating 4-byte record run, accumulating multiple VPre matras. cmplog's extra comparison-solving mutator substitutes CMP-derived operands into the input, derailing it toward heterogeneous CMP-matching content that breaks the uniform multi-matra run; so the comparison-solving technique is actively counterproductive here and havoc-only naive wins."
+  },
+  {
+    "id": "harfbuzz_5954",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5954,
+    "analysis_path": "prompts_b/harfbuzz_5954.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-thai.cc",
+    "function": "hb-ot-shaper-thai.cc:get_consonant_type(unsigned int)",
+    "line": "53",
+    "source_line": "  if (u == 0x0E1Bu || u == 0x0E1Du || u == 0x0E1Fu/* || u == 0x0E2Cu*/)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A 16-bit little-endian codepoint slot whose value equals exactly one of 0x0E1B, 0x0E1D, or 0x0E1F (the Thai consonants matched at line 53), appearing in the buffer as the byte pair 1f 0e (or 1b 0e / 1d 0e) so get_consonant_type takes its first if-true branch.",
+    "why_winner_satisfies": "Multiple naive winner seeds carry the literal little-endian pair 1f 0e at codepoint slots (seed 1 offset 0x28, seed 2 offset 0x3c, seed 5 repeated at 0x0c/0x13/0x17/0x38), i.e. the exact value 0x0E1F that satisfies u == 0x0E1Fu; naive reaches True 20 times on this branch.",
+    "why_loser_doesnt": "cmplog loser seeds contain 0x0E-high codepoints but with non-matching low bytes (e.g. 4d 0e=0x0E4D, 34 0e=0x0E34, 08 0e, 10 0e, 0f 0e), which fall through to the range check at line 59 (NC) and never equal 0x0E1B/0x0E1D/0x0E1F; loser took the true branch 0 times.",
+    "mechanism_attribution": "The winner is the non-I2S fuzzer naive: plain havoc/byte mutation (ByteRandMutator, ByteInterestingMutator, BytesRandSetMutator) randomly lands the low byte on 0x1B/0x1D/0x1F while the high byte sits at 0x0E, so the enabling technique is havoc-only. cmplog gains nothing here because the equality comparison u == 0x0E1Fu in get_consonant_type is on a value decoded inside harfbuzz, not a direct memcmp/cmp of an input byte run, so cmplog's input-to-state substitution rewrites the wrong offsets and its mutation budget is diverted away from the lucky havoc that naive performs freely. This is an I2S-anti divergence (naive > cmplog)."
+  },
+  {
+    "id": "harfbuzz_5958_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5958,
+    "analysis_path": "prompts_b/harfbuzz_5958.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-thai.cc",
+    "function": "hb-ot-shaper-thai.cc:get_consonant_type(unsigned int)",
+    "line": "57",
+    "source_line": "  if (u == 0x0E0Eu || u == 0x0E0Fu)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)",
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A two-byte little-endian codepoint run equal to 0x0E0E or 0x0E0F (bytes 0e 0e or 0f 0e) positioned where the Thai shaper reads it as a glyph codepoint, so the exact-equality gate u == 0x0E0Eu || u == 0x0E0Fu takes its true branch and returns DC.",
+    "why_winner_satisfies": "The non-I2S winners (naive, value_profile) reach the branch via lucky havoc/token byte mutation that lands the literal codepoint bytes: winning seeds carry explicit 0f 0e 00 00 runs (Seed 1 fuzzer=value_profile, Seed 4/5 fuzzer=naive), and these fuzzers resolve in 10/10 trials.",
+    "why_loser_doesnt": "The I2S-equipped losers (cmplog, value_profile_cmplog) block in 9/10 and 8/10 trials with hitcount 0 on the branch; their I2SRandReplace stage substitutes CMP operands at matching offsets, which does not help here and apparently diverts mutation energy away from simply hitting the literal codepoint, so they take the false branch.",
+    "mechanism_attribution": "The winner needs no comparison introspection \u2014 the codepoint bytes arise from plain havoc/token byte mutation (havoc-only). Adding I2S (cmplog/vpc) is a regression at this branch (I2S-anti): the loser variants differ from winners ONLY by the I2SRandReplace stage, so the divergence is attributable to that stage being unhelpful/harmful, not to a feature it unlocks."
+  },
+  {
+    "id": "harfbuzz_5967",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5967,
+    "analysis_path": "prompts_b/harfbuzz_5967.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-thai.cc",
+    "function": "hb-ot-shaper-thai.cc:thai_pua_shape(unsigned int, thai_action_t, hb_font_t*)",
+    "line": "148",
+    "source_line": "    case SDL: pua_mappings = SDL_mappings; break;",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "Bytes decoded as a Thai cluster (mark following a consonant) whose state-machine transition yields the SDL action rather than NOP/SD/SL/RD, so the switch on `action` reaches `case SDL: pua_mappings = SDL_mappings`.",
+    "why_winner_satisfies": "All five winner-resolving seeds are naive-discovered and take the true branch; naive's broad havoc/token byte mutation explores enough Thai mark+consonant byte combinations that the action variable equals SDL, hitting line 148 (W) where the loser only reaches case SD (L 147).",
+    "why_loser_doesnt": "cmplog reaches SDL true only 2/10 trials and is blocked 8/10 for 17.40h; the SDL action is produced by internal state-machine table lookups (thai_above/below_state_machine), not by any CMP of an input byte against a constant, so cmplog's I2S substitution has no literal operand to inject here while its per-CMP callback cost slows raw byte exploration relative to naive (winner blocked only 3.90h).",
+    "mechanism_attribution": "The winner is naive, whose plain havoc + token mutators randomly walk the input bytes until the decoded Thai cluster transitions to the SDL action. No comparison introspection is involved on the winning side; cmplog's added input-to-state substitution stage targets CMP operands but the SDL dispatch is a switch on a value derived from state-machine tables, not an input-vs-constant compare, so I2S provides no aim and merely adds per-execution overhead, leaving naive's unencumbered havoc byte fuzzing to win."
+  },
+  {
+    "id": "harfbuzz_5968",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5968,
+    "analysis_path": "prompts_b/harfbuzz_5968.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-thai.cc",
+    "function": "hb-ot-shaper-thai.cc:thai_pua_shape(unsigned int, thai_action_t, hb_font_t*)",
+    "line": "149",
+    "source_line": "    case SL:  pua_mappings = SL_mappings; break;",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)",
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "An input byte sequence that the harness interprets as a Thai text run whose mark/consonant sequence drives the thai_above/below state machine to produce action == SL, selecting the SL_mappings switch arm at line 149. The switch operand is an enum derived from a state-machine table lookup, not a literal compared against input bytes.",
+    "why_winner_satisfies": "The non-I2S winners (naive, value_profile) reach the SL arm by accumulating Thai mark/consonant codepoints through ordinary havoc byte mutation; their winning seeds carry only havoc/token mutation ops and resolve the branch in 10/10 trials, taking the SL true side 23 times in the W coverage dump.",
+    "why_loser_doesnt": "The input-to-state losers (cmplog, value_profile_cmplog) block the branch in 8/10 and 9/10 trials respectively; their CMP-operand substitution finds no input-byte comparison feeding the enum-valued switch operand, so it cannot steer toward SL and its corpus pollution diverts effort, leaving the SL true side unhit (T=0) in the L dump.",
+    "mechanism_attribution": "The branch is enabled by plain havoc byte mutation, not by any CMP introspection: the switch operand `action` is an enum produced by Thai state-machine table lookups, with no direct input-to-state comparison for operand-substitution mutators to exploit. The comparison-solving fuzzers confer no advantage here and are the decisive losers, making this a roadblock-anti branch where the baseline havoc winner prevails."
+  },
+  {
+    "id": "harfbuzz_5969",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5969,
+    "analysis_path": "prompts_b/harfbuzz_5969.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-thai.cc",
+    "function": "hb-ot-shaper-thai.cc:thai_pua_shape(unsigned int, thai_action_t, hb_font_t*)",
+    "line": "150",
+    "source_line": "    case RD:  pua_mappings = RD_mappings; break;",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "An input long enough and structured so the Thai shaper's above/below state machine emits action == RD at line 256, which dispatches the switch into case RD at line 150; this requires a multi-glyph Thai mark sequence rather than any single literal byte value.",
+    "why_winner_satisfies": "Naive winning seeds are large (128-236 bytes) and built by byte-expansion/insert havoc (BytesExpandMutator, BytesInsertCopyMutator, BytesRandInsertMutator), carrying repeated 0e / 3a 0e 00 Thai-region byte runs that feed many state-machine transitions until action == RD fires; naive resolves the branch in all 10 trials (hitcount 37).",
+    "why_loser_doesnt": "Cmplog blocking seeds are short (21-78 bytes) and lack the sustained Thai-mark sequence, so action == RD (line 256, L T=0) never fires and the switch never reaches case RD; cmplog stays blocked 10/10 trials with hitcount 0 for 21.5h.",
+    "mechanism_attribution": "The winner is naive, whose only edge is plain havoc/token byte mutation (no CMP introspection). The RD action is reached by accumulating enough Thai glyphs through the state machine, a quantitative/structural property that byte-expansion havoc stumbles onto. Cmplog's added CMP-operand substitution stage gives no advantage here; if anything cmplog's CMP-biased budget produced shorter inputs that under-drive the state machine, so naive's pure havoc wins."
+  },
+  {
+    "id": "harfbuzz_5972",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5972,
+    "analysis_path": "prompts_b/harfbuzz_5972.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-thai.cc",
+    "function": "hb-ot-shaper-thai.cc:do_thai_pua_shaping(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+    "line": "256",
+    "source_line": "    if (action == RD)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "An input containing a multi-glyph Thai sequence (a base consonant followed by mark glyphs) of sufficient length that, when run through the thai_above/below state machines, the resolved edge produces action==RD so the true branch at line 256 executes and line 257 (info[base] reshaping) is reached.",
+    "why_winner_satisfies": "Naive's winning seeds are large (128-236 bytes) and were grown by sequence-building byte mutators (BytesExpandMutator, BytesInsertCopyMutator, BytesCopyMutator, CrossoverInsertMutator), accumulating repeated mark-like byte runs; under the winner seed set the true side fires (line 256 T=11) and line 257 [W] is reached, i.e. naive built the long enough glyph sequence to reach the RD action.",
+    "why_loser_doesnt": "Cmplog's blocking seeds are short (21-126 bytes) and never take the true side (line 256 L T=0, all 15 hits are False), so the cmplog inputs lack the long multi-glyph Thai sequence; I2S substitution chases individual codepoint CMP operands rather than growing the glyph sequence, leaving cmplog blocked on the branch for 21.5h vs naive's 4.10h.",
+    "mechanism_attribution": "The winner is naive, which relies on its havoc + token byte-mutation stack (BytesExpand/Insert/Copy/Crossover) to grow the input into a long multi-glyph sequence that traverses the state machine to action==RD. The loser cmplog's only added technique (input-to-state CMP-operand substitution) does not help and is associated with the loser staying blocked: that substitution targets matched CMP operands at fixed offsets and does not build the longer glyph sequence the state machine needs, so naive's free sequence-growth havoc wins. The mechanism enabling the winner is havoc-only byte mutation."
+  },
+  {
+    "id": "harfbuzz_5977_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5977,
+    "analysis_path": "prompts_b/harfbuzz_5977.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-use-machine.hh",
+    "function": "hb-ot-shaper-use.cc:find_syllables_use(hb_buffer_t*)::{lambda(hb_pair_t<unsigned int, hb_glyph_info_t const&>)#1}::operator()(hb_pair_t<unsigned int, hb_glyph_info_t const&>) const",
+    "line": "917",
+    "source_line": "\t\t     for (unsigned i = p.first + 1; i < buffer->len; ++i)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "An input that drives the USE shaper to build a glyph buffer containing a ZWNJ glyph (USE(ZWNJ)) followed at some later index by a glyph that is not_ccs_default_ignorable and not a Unicode mark, so the false-branch return path is reached; in practice readable script/language tag bytes (e.g. 'srch', 'jy-hant', 'an-hant', 'nt-hk').",
+    "why_winner_satisfies": "naive winning seeds carry intact, human-readable script/language tag substrings ('srch' at offset 0x1d-0x20, 'jy-hant' / 'an-hant', 'nt-hk') that map to real USE categories and populate the buffer with a ZWNJ-plus-following-glyph structure, letting the lambda iterate the loop and exit on the false side.",
+    "why_loser_doesnt": "cmplog blocking seeds are dominated by repeated CMP-derived byte runs ('00 72 10' x4, '0c 18 00 00 0c 20') that do not assemble into the categorized glyph sequence; without a real ZWNJ-then-non-ignorable structure the loop body never reaches the false-branch return.",
+    "mechanism_attribution": "naive's plain havoc/token byte mutation is free to keep and recombine the intact tag substrings that survive in the corpus; cmplog's I2SRandReplace continually overwrites byte offsets with operands harvested from the CMP buffer, displacing the readable tag bytes and steering the corpus toward CMP-satisfying noise rather than the structural glyph sequence \u2014 so the WINNER (naive) succeeds by NOT applying I2S substitution. This is havoc-only."
+  },
+  {
+    "id": "harfbuzz_5983_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5983,
+    "analysis_path": "prompts_b/harfbuzz_5983.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-use-machine.hh",
+    "function": "hb-ot-shaper-use.cc:find_syllables_use(hb_buffer_t*)",
+    "line": "993",
+    "source_line": "\tcase 14:",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A byte sequence that, after the USE shaper maps each glyph to a use_category(), produces the category sequence that drives the Ragel state machine into the numeral-cluster accepting transition (trans_action 14 -> use_numeral_cluster at line 993). No exact magic constant is compared; the gate is structural over a run of category-classified bytes.",
+    "why_winner_satisfies": "naive's pure havoc/token stack (e.g. BytesInsertCopyMutator, WordAddMutator, ByteRandMutator) churns the multi-byte glyph records freely, and in 8/10 trials lands a category run that hits case 14 (winner hitcount=5 on the branch); the winning seeds show repeated structured runs like '0c 20 00 00' record patterns that the category classifier accepts.",
+    "why_loser_doesnt": "cmplog spends its mutation budget on I2SRandReplace substitutions keyed to intercepted integer CMPs; the USE category gate is not an exact-value CMP it can solve, so I2S substitutions are off-target, polluting the corpus and starving the havoc churn that actually reaches case 14 (cmplog resolved 0/10, blocked 10/10, hitcount 0).",
+    "mechanism_attribution": "The winner is naive, which lacks I2S entirely. Reaching the numeral cluster needs broad structural byte mutation of the glyph stream, which havoc supplies. cmplog's added I2SRandReplace stage diverts energy toward non-existent exact-match comparison targets, so adding the I2S technique strictly hurts here (anti-I2S). Mechanism enabling the winner = havoc-only byte mutation."
+  },
+  {
+    "id": "harfbuzz_5985",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5985,
+    "analysis_path": "prompts_b/harfbuzz_5985.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-use-machine.hh",
+    "function": "hb-ot-shaper-use.cc:find_syllables_use(hb_buffer_t*)",
+    "line": "1013",
+    "source_line": "\tcase 11:",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "An input whose bytes, after USE-category classification, drive the Ragel syllable machine into the case 11 transition action (use_virama_terminated_cluster via the te=p;p-- end-of-buffer-resolved arm at line 1013) rather than the broken/standard arms. This requires a sequence of glyph use_category values matching the virama-terminated-cluster grammar with the terminating lookahead, not any specific literal byte constant.",
+    "why_winner_satisfies": "naive resolves the branch in 10/10 trials. Its winning seeds carry long homogeneous byte runs (e.g. e7 e7 e7..., dc dc dc..., f5 f5...) and havoc op chains (BytesExpandMutator, BytesRandInsertMutator+WordAddMutator+ByteIncMutator, BytesCopyMutator) that lengthen and vary glyph sequences; broad byte-space exploration eventually produces a category run that the state machine routes into case 11, which fires only at line 1013 with T=7 on the W side.",
+    "why_loser_doesnt": "cmplog blocks the branch in 10/10 trials (T=0 on the L side at line 1013). The blocking arm it does reach is the broken-cluster arm (case 4 / case 17, L-tagged). Its CMP-interception budget is spent generating I2S substitutions keyed to intercepted integer/string compares, but the syllable dispatch is a category-table range lookup (_keys[0] <= use_category() <= _keys[1]), so there is no literal operand for I2SRandReplace to substitute toward the virama-terminated path; that effort displaces the broad havoc exploration naive uses to stumble into the category sequence.",
+    "mechanism_attribution": "The winner is naive, whose only mutators are the havoc + token stack with no CMP introspection; the divergence is attributable to plain havoc byte mutation exploring glyph-category sequences, while cmplog's added comparison-substitution stage provides no traction on a table-range dispatch and crowds out that exploration. This is a havoc-only win in the input-to-state-anti direction."
+  },
+  {
+    "id": "harfbuzz_5989",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5989,
+    "analysis_path": "prompts_b/harfbuzz_5989.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-use.cc",
+    "function": "hb-ot-shaper-use.cc:is_halant_use(hb_glyph_info_t const&)",
+    "line": "357",
+    "source_line": "  return (info.use_category() == USE(H) || info.use_category() == USE(HVM) || info.use_category() == USE(IS)) &&",
+    "covers_pairs": [
+      "naive>cmplog (I2S)",
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A font/text input that drives at least one glyph into the USE shaper's halant category (use_category() == USE(H) || USE(HVM) || USE(IS)) while that glyph is NOT ligated, so the true branch at line 357 fires. The category is assigned by harfbuzz's USE machine-class tables from glyph properties, not by a literal integer/string CMP against an input byte field.",
+    "why_winner_satisfies": "naive resolves 10/10 and value_profile resolves 10/10; their winner-resolving seeds are broad havoc/interesting-byte mutations (e.g. BitFlipMutator / DwordInterestingMutator / QwordAddMutator chains) that produce varied glyph-category inputs and hit the true side 18 and 15 times respectively.",
+    "why_loser_doesnt": "cmplog blocks 10/10 and value_profile_cmplog blocks 8/10 with hitcount 0 on the branch; their I2SRandReplace stage substitutes intercepted CMP operands into the input, steering bytes toward solved integer comparisons that do not control the shaper-derived USE category, so budget is diverted away from producing a halant-category glyph.",
+    "mechanism_attribution": "The winner is enabled by plain havoc byte mutation (naive's havoc/token stack, also present unmodified in value_profile), not by any comparison-solving. The branch condition tests a shaper-derived glyph category, not a byte-equality roadblock, so the comparison-operand substitution added by the I2S-bearing fuzzers is counterproductive here and those fuzzers are the losers."
+  },
+  {
+    "id": "harfbuzz_5991",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5991,
+    "analysis_path": "prompts_b/harfbuzz_5991.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-use.cc",
+    "function": "hb-ot-shaper-use.cc:is_halant_use(hb_glyph_info_t const&)",
+    "line": "357",
+    "source_line": "  return (info.use_category() == USE(H) || info.use_category() == USE(HVM) || info.use_category() == USE(IS)) &&",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "Bytes that drive the USE shaper to assign at least one glyph the use_category USE(H), USE(HVM), or USE(IS) AND leave that glyph un-ligated, so is_halant_use returns true at line 357 inside reorder_syllable_use's move-back loop. The gate is a glyph-category equality on a runtime-derived classification table, not a literal byte field copied from the input.",
+    "why_winner_satisfies": "naive resolved=10/10 and reaches the true side with hitcount 26; its winning seeds are produced entirely by havoc/structural byte mutators (BytesExpandMutator, BitFlipMutator, ByteRandMutator, BytesSwapMutator, CrossoverInsertMutator) that broadly explore the input space and stumble onto byte arrangements the shaper classifies as a halant glyph.",
+    "why_loser_doesnt": "cmplog blocked=10/10 with avg blocked duration 23.60h and hitcount 0; it never reaches the true side because the gate is a derived glyph-category comparison with no input-resident operand for I2SRandReplace to substitute, so cmplog spends its budget on fruitless CMP-operand replacement plus per-execution CMP-logging overhead instead of the broad havoc exploration that pays off here.",
+    "mechanism_attribution": "The winner naive uses plain havoc + token byte mutation with no CMP introspection (havoc-only); the divergence is attributable to the ABSENCE of comparison-solving, not its presence. cmplog's input-to-state operand-substitution mutator reads CmpLogObserver operands and substitutes them at matching input offsets, which is wasted here because the branch condition is a USE-table glyph-category equality (USE(H)/USE(HVM)/USE(IS)) computed from the shaped buffer rather than a direct comparison against bytes lying in the input; the CMP buffer holds no operand that maps back to an input offset, so substitution cannot manufacture the required glyph category, and the per-execution CMP cost slows cmplog's throughput relative to naive's broad havoc exploration."
+  },
+  {
+    "id": "harfbuzz_5992_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5992,
+    "analysis_path": "prompts_b/harfbuzz_5992.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-use.cc",
+    "function": "hb-ot-shaper-use.cc:reorder_syllable_use(hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "394",
+    "source_line": "  if (info[start].use_category() == USE(R) && end - start > 1)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A buffer of repeated fixed-stride glyph records (offset 0x00=0x64, 0x01=0xa8, then a 02 1f 01 00 tail) that yields a syllable of length >1 whose first glyph maps to use_category USE(R); the leading-record byte and multiplicity must both hold simultaneously.",
+    "why_winner_satisfies": "Naive winner seeds 2-5 are built from the repeated record skeleton (e.g. seed 2 '64 a8 00 05 02 1f 01 00 63 a8 00 00 02 1f 01 00'), and the BYTE DIFF shows W concentrates 64(d)x4 at 0x00 and a8(.)x4 at 0x01, so havoc byte-add/inc/delete on this self-similar layout reliably produces >1 USE(R)-led glyphs.",
+    "why_loser_doesnt": "Cmplog loser seeds carry CMP/token-derived literal runs (e.g. 'true', ';;;;;sn', 'art', repeated 'b8'/'3b' fills) rather than the 64 a8 record stride, so they do not present a USE(R) leading glyph in a length>1 syllable and the true side never fires (loser resolved=0/10, blocked=10).",
+    "mechanism_attribution": "I2SRandReplace HURTS here: cmplog spends mutation energy substituting CmpLogObserver operands into the input, dragging it toward literal CMP targets and away from the self-similar repeated-record layout that the structural USE(R) gate needs; naive, lacking I2S, keeps doing plain havoc on the record skeleton and wins. The enabling technique for the winner is havoc-only mutation."
+  },
+  {
+    "id": "harfbuzz_5998_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 5998,
+    "analysis_path": "prompts_b/harfbuzz_5998.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-use.cc",
+    "function": "hb-ot-shaper-use.cc:reorder_syllable_use(hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "425",
+    "source_line": "    if (is_halant_use (info[i]))",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A multi-glyph USE-cluster input where reorder_syllable_use iterates a syllable whose info[i] carries the halant use_category, taking the is_halant_use true branch at line 425. No exact magic-value match against any program constant gates this; it requires populating the buffer with enough varied glyph categories that one resolves to halant.",
+    "why_winner_satisfies": "naive resolves 10/10 in 0.60h average with W hitcount 45 on the branch. Its pure havoc/token byte mutation broadly perturbs the input so the font-mapped glyph stream reaches a halant-bearing reorder syllable; the W cov overlay shows lines 425/426/429 hit (true side taken).",
+    "why_loser_doesnt": "cmplog blocks 10/10 for 23.60h with hitcount 0. The added I2SRandReplace stage spends mutation budget substituting logged CMP operands, which does not help build the structural glyph-category state this branch needs, so cmplog never takes the true side (L 425 shows T=0).",
+    "mechanism_attribution": "naive's havoc + token stack explores the byte space without CMP introspection; this branch is gated by accumulated structural glyph-category state rather than an exact comparison, so naive's broad mutation reaches it while cmplog's I2S budget is misallocated. Enabling technique = havoc-only."
+  },
+  {
+    "id": "harfbuzz_6010",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 6010,
+    "analysis_path": "prompts_b/harfbuzz_6010.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+    "function": "_hb_preprocess_text_vowel_constraints(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+    "line": "68",
+    "source_line": "\t      case 0x0946u: case 0x0949u: case 0x094Au: case 0x094Bu:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A glyph buffer routed to HB_SCRIPT_DEVANAGARI whose current codepoint is 0x0905 and whose next codepoint (buffer->cur(1)) equals one of 0x0946/0x0949/0x094A/0x094B, so the inner switch on cur(1).codepoint takes the true arm at line 68.",
+    "why_winner_satisfies": "value_profile wins 8/10 and reaches the branch true side (avg hitcount 9 vs 0); its CMP_MAP gradient steadily preserves inputs whose CMP operands inch toward the required Devanagari codepoint constants, and the resolving seed carries 09 09 05 09 byte runs consistent with the 0x0905/0x094X 16-bit codepoints driving the switch.",
+    "why_loser_doesnt": "value_profile_cmplog resolves only 2/10 (avg hitcount 0); it pays I2SRandReplace per-execution cost and corpus churn on top of the same CMP_MAP gradient, and its blocking seeds stay on the false arm (line 68 L counts T=0/T=1 F=17/F=18) without assembling the 0x0905-then-0x094X pair.",
+    "mechanism_attribution": "Both involved fuzzers share the CMP_MAP gradient (Hamming/prefix distance feedback) that incrementally rewards inputs whose codepoint CMP operands approach the case constants; value_profile beats value_profile_cmplog because the winner relies on that gradient unburdened, whereas adding the I2S input-to-state substitution mutator (the single technique delta) does not help solve this nested 16-bit-codepoint switch and its overhead/corpus churn dilutes the loser's progress."
+  },
+  {
+    "id": "harfbuzz_6086_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 6086,
+    "analysis_path": "prompts_b/harfbuzz_6086.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+    "function": "_hb_preprocess_text_vowel_constraints(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+    "line": "275",
+    "source_line": "\t  case 0x0D12u:",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A structured OpenType font whose parsed buffer reaches the HB_SCRIPT_MALAYALAM switch arm AND carries glyph codepoint 0x0D12 at the current position, so the inner switch hits case 0x0D12u (the true side at line 275).",
+    "why_winner_satisfies": "naive resolves the true side in 8/10 trials with avg hitcount 5; its plain havoc/token byte mutation perturbs the structured font tables (GSUB/GPOS tags) enough to land the MALAYALAM script and the 0x0D12 codepoint without any wasted CMP-substitution work.",
+    "why_loser_doesnt": "cmplog blocks in 8/10 trials with avg hitcount 0; its loser-blocking seeds are short, unstructured byte blobs that never drive the parser into the MALAYALAM arm, and the added I2SRandReplace stage spends mutation budget substituting CMP operands that do not advance toward this script/codepoint gate.",
+    "mechanism_attribution": "This is an anti-I2S divergence: naive (no I2S) is the winner over cmplog (I2S added). Plain havoc byte mutation finds the structured font faster than cmplog, whose I2SRandReplace substitutions misdirect effort here. The enabling winner mechanism is therefore lucky/structural havoc, not CMP introspection."
+  },
+  {
+    "id": "harfbuzz_6124_h0",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 6124,
+    "analysis_path": "prompts_b/harfbuzz_6124.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+    "function": "_hb_preprocess_text_vowel_constraints(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+    "line": "409",
+    "source_line": "\t  case 0x1148Bu: case 0x1148Du:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A 4-byte little-endian codepoint 0x1148D (bytes 8d 14 01 00) or 0x1148B (8b 14 01 00) positioned as the current glyph in a TIRHUTA-script buffer, so the switch on buffer->cur().codepoint hits case 0x1148Bu/0x1148Du (line 409 true).",
+    "why_winner_satisfies": "value_profile (winner) seeds carry the literal run 8d 14 01 00 (= 0x1148D LE) repeated across the input (e.g. winner-resolving Seed 1 at offset 0x00), so the switch dispatch lands on the blocker case; line 409 takes its true side T=14 for W.",
+    "why_loser_doesnt": "value_profile_cmplog (loser) blocked seed carries 81 14 01 00 (0x11481, a sibling case at line 406), not the 8b/8d 14 01 00 run; the CMP_MAP/I2S machinery steers the loser toward neighboring Tirhuta codepoints rather than the specific 0x1148B/0x1148D value, so line 409 true is never taken (T=0 for L).",
+    "mechanism_attribution": "The winner is the baseline value_profile fuzzer; it discovers the required literal 4-byte codepoint by plain havoc byte mutation. Adding the I2SRandReplace mutator in value_profile_cmplog is an anti-divergence: the loser's I2S substitution latches onto whichever sibling Tirhuta operand it last logged (0x11481/0x114AA), diluting the havoc budget so the exact 0x1148B/0x1148D value is found less often. The enabling technique for the winner is therefore lucky havoc, not I2S."
+  },
+  {
+    "id": "harfbuzz_6162",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 6162,
+    "analysis_path": "prompts_b/harfbuzz_6162.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper.hh",
+    "function": "hb-ot-shape-normalize.cc:hb_ot_shaper_categorize(hb_ot_shape_planner_t const*)",
+    "line": "300",
+    "source_line": "    case HB_SCRIPT_PHAGS_PA:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A font whose parsed script property (planner->props.script) resolves to one of the Unicode-5.0+ scripts handled by the shared USE case block at line 300 (HB_SCRIPT_PHAGS_PA). This requires valid OpenType table magic (e.g. GSUB/GPOS) plus script/script-tag bytes that decode to a USE-routed script rather than DFLT/latn, so the categorize switch lands on the line-300 arm.",
+    "why_winner_satisfies": "value_profile winning seeds carry structured table-ish byte runs (e.g. ascii 'darf', repeated 0x06/0x64/0x6e fields and embedded tags like 'h-hans', 'h-min') that drive the script property into the USE case block; the W-only overlay marks line 300 and the entire downstream USE block (lines 303-398) as hit, and the branch averages 34 hits for the winner.",
+    "why_loser_doesnt": "value_profile_cmplog blocking seeds are dominated by literal magic-table tokens 'GSUB'/'GPOS' at offset 0x0c with long 0x20/0x5a/0x47 filler runs; they resolve to scripts handled by earlier arms (the L-only overlay hits the Indic/Telugu block at 231-244 and the Myanmar block at 249-262, never line 300), so the loser blocks on this branch in 9/10 trials with 0 hits.",
+    "mechanism_attribution": "The winner value_profile uses the CMP_MAP gradient: each script-tag / table-magic CMP writes a Hamming/prefix-distance bucket, and an input that is one bucket closer to a USE-routed script tag is preserved, letting the corpus incrementally walk the operand toward the line-300 USE block. The loser value_profile_cmplog additionally carries the input-to-state comparison-substitution mutator (the only technique delta), which swaps whole CMP operands toward the nearest matching literal (the GSUB/GPOS magic and the DFLT/latn anchor arms), over-committing the corpus to the earlier high-frequency literal case arms and starving exploration of the line-300 USE case; thus the gradient-only fuzzer wins. The winner-enabling technique is the CMP_MAP gradient, not the comparison-substitution mutator."
+  },
+  {
+    "id": "harfbuzz_6210",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 6210,
+    "analysis_path": "prompts_b/harfbuzz_6210.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper.hh",
+    "function": "hb-ot-shape-normalize.cc:hb_ot_shaper_categorize(hb_ot_shape_planner_t const*)",
+    "line": "380",
+    "source_line": "    case HB_SCRIPT_OLD_UYGHUR:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "The 4-byte script tag dispatched by the switch on (hb_tag_t) planner->props.script must hold one of the Unicode-14.0/15.0 values whose case-arm falls through to line 380 (HB_SCRIPT_OLD_UYGHUR and siblings). The winner inputs supply a short header whose leading bytes (e.g. 75 0f 01 / 88 0f 01 / 80 0f 01 at offsets 0x00-0x02) drive props.script into that USE-shaper case group rather than the default/DFLT/latn arms.",
+    "why_winner_satisfies": "value_profile winner seeds carry a concentrated low-byte head pattern at offsets 0x00-0x02 (75/88/80 then 0f then 01) and are short (10-73 bytes); the CMP_MAP distance-bucket feedback rewards each input whose script-tag CMP operand gets closer to a target case constant, ratcheting props.script into the Old Uyghur case so the true branch is hit 26 times.",
+    "why_loser_doesnt": "value_profile_cmplog loser seeds are large (56-323 bytes) well-formed-looking sfnt tables beginning 00 01 00 00 with GSUB/GPOS directory tags; they resolve a chosen_script of DFLT/latn or an earlier (lower-Unicode) script case, never reaching the line-380 case group, and stay blocked for 22.10h.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix distance-bucket feedback on the switch-dispatch CMP) incrementally rewards inputs whose script-tag operand approaches a line-380 case constant. The loser adds an input-to-state substitution stage on top, but that extra substitution diverts the mutation budget toward solving the GSUB/GPOS table-tag comparisons (the only literals it can lift from the corpus), pulling it away from the script-tag dispatch; the winning technique here is the CMP_MAP gradient, not the substitution stage."
+  },
+  {
+    "id": "harfbuzz_6253",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 6253,
+    "analysis_path": "prompts_b/harfbuzz_6253.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ucd.cc",
+    "function": "hb-ucd.cc:_hb_ucd_compose_hangul(unsigned int, unsigned int, unsigned int*)",
+    "line": "98",
+    "source_line": "  else if (a >= LBASE && a < (LBASE + LCOUNT) && b >= VBASE && b < (VBASE + VCOUNT))",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)",
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A codepoint pair (a,b) where a falls in the half-open range [LBASE, LBASE+LCOUNT) and b falls in [VBASE, VBASE+VCOUNT) \u2014 i.e. a Hangul leading-consonant (L) jamo paired with a vowel (V) jamo. The gate is two conjoined RANGE checks, not exact-equality comparisons, so no single literal value satisfies it.",
+    "why_winner_satisfies": "The non-I2S winners (naive, value_profile) reach the true side by lucky havoc byte mutation that lands codepoints inside the two jamo ranges; winner avg hitcount on the branch is non-zero (8 and 5) and the per-role overlay shows the blocker line taking T=14 and T=4 under the winner-resolving seed set, whereas the loser set never takes it.",
+    "why_loser_doesnt": "The I2S losers (cmplog, value_profile_cmplog) spend execution and mutation budget on input-to-state operand substitution / CMP_MAP gradient feedback that targets exact-match comparisons; a two-sided range gate yields no single CMP operand to copy in, so the I2S stage provides no useful substitution and the loser stays blocked (avg hitcount 0, longer avg blocked duration ~22h vs ~10h).",
+    "mechanism_attribution": "The winner is the fuzzer WITHOUT the input-to-state stage. The branch is a conjunction of range comparisons (a>=LBASE && a<LBASE+LCOUNT && b>=VBASE && b<VBASE+VCOUNT), which has no exact magic operand for an operand-substitution stage to copy in. Naive havoc byte mutation explores the codepoint ranges directly and wins; the comparison-solving machinery in cmplog/vpc adds per-execution cost and corpus pollution without solving a range gate, so this is a havoc-only win."
+  },
+  {
+    "id": "harfbuzz_6263",
+    "family": "I2S_anti",
+    "target": "harfbuzz",
+    "branch_id": 6263,
+    "analysis_path": "prompts_b/harfbuzz_6263.analysis.json",
+    "file": "/src/harfbuzz/src/hb-unicode.hh",
+    "function": "hb_unicode_funcs_t::space_fallback_type(unsigned int)",
+    "line": "224",
+    "source_line": "      default:\t    return NOT_SPACE;\t/* U+1680 OGHAM SPACE MARK */",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "An input whose decoded codepoint u reaches space_fallback_type but does NOT equal any enumerated switch case literal (0x0020, 0x00A0, 0x2000, 0x2006, 0x3000, ...), so the switch on u takes the `default:` arm at line 224 instead of a `case` arm.",
+    "why_winner_satisfies": "value_profile resolves the default arm in 10/10 trials with hitcount 38 and W reaches line 224 ([W] 224, d=1 L 224 W=T:16/F:1); its CMP_MAP gradient feedback rewards producing unicode-space codepoints that route into space_fallback_type, but lacking I2SRandReplace it is not snapped onto the exact case literals, so non-enumerated space codepoints survive in the corpus and trip the default arm.",
+    "why_loser_doesnt": "value_profile_cmplog blocks the default arm in 10/10 trials with hitcount 0; its I2SRandReplace mutator substitutes the switch comparand u with the exact literal operands of the case comparisons (0x0020, 0x00A0, 0x2006 are exactly the cases its loser seeds land on, [L] 225/226/233, d=1 L 225/226/233), driving every space input onto an enumerated `case` and away from `default`.",
+    "mechanism_attribution": "The single technique delta is I2S, present in the loser and absent in the winner. value_profile's CMP_MAP gradient feedback lets it accumulate diverse unicode-space codepoints without forcing exact equality matches; the loser's added input-to-state substitution rewrites u with the exact case-literal operands seen in the switch comparisons, collapsing inputs onto enumerated cases and starving the default arm. The winner's enabling technique is therefore CMP_MAP gradient exploration unhampered by literal-snapping."
+  },
+  {
+    "id": "openthread_13300",
+    "family": "I2S_anti",
+    "target": "openthread",
+    "branch_id": 13300,
+    "analysis_path": "prompts_b/openthread_13300.analysis.json",
+    "file": "/src/openthread/src/core/common/linked_list.hpp",
+    "function": "ot::LinkedList<ot::AddressResolver::CacheEntry>::PopAfter(ot::AddressResolver::CacheEntry*)",
+    "line": "218",
+    "source_line": "        if (aPrevEntry == nullptr)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)",
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "Input must drive the IPv6/Netif address-management call chain (otIp6SetEnabled -> ThreadNetif::Down -> Unsubscribe/RemoveExternal... -> LinkedList::Remove -> PopAfter) so that Find() locates a matching entry and returns a NON-null predecessor, making aPrevEntry != nullptr at linked_list.hpp:218 (the false branch). This is a structural state requirement built from broad byte coverage of the harness command/address bytes, NOT a single comparison operand to solve.",
+    "why_winner_satisfies": "The winners are the fuzzers WITHOUT the I2S substitution mutator (naive beats cmplog; value_profile beats value_profile_cmplog). naive resolves 9/10 and hits the branch 712 times on average; its undiluted havoc/token mutation stack explores the deep address add/remove state space that populates the linked list, so Find() returns a non-null prev. Winning seeds carry plain havoc/token mutation_op chains (e.g. BytesSetMutator,ByteInterestingMutator and WordInterestingMutator,ByteFlipMutator,ByteAddMutator,ByteFlipMutator).",
+    "why_loser_doesnt": "cmplog and value_profile_cmplog block 8/10 with avg blocked duration 19.20h and hitcount 0 on the branch. Their per-execution CMP interception + I2SRandReplace mutation budget is spent substituting CMP operands, which buys nothing here because the false branch is gated by accumulated list state rather than by matching a logged comparison operand; the diverted budget slows the broad state-building exploration that reaches a non-null predecessor.",
+    "mechanism_attribution": "The winner is enabled by plain coverage-guided havoc/token mutation (naive's mutator stack, shared by value_profile minus the CMP-buffer mutator). No CMP introspection helps because the blocker is a pointer/state predicate, not a literal-value comparison; the I2S-equipped variants are the losers, so the enabling technique is havoc-only."
+  },
+  {
+    "id": "openthread_13302",
+    "family": "I2S_anti",
+    "target": "openthread",
+    "branch_id": 13302,
+    "analysis_path": "prompts_b/openthread_13302.analysis.json",
+    "file": "/src/openthread/src/core/common/linked_list.hpp",
+    "function": "ot::AddressResolver::CacheEntry const* ot::LinkedList<ot::AddressResolver::CacheEntry>::FindMatching<ot::Ip6::Address>(ot::AddressResolver::CacheEntry const*, ot::AddressResolver::CacheEntry const*, ot::Ip6::Address const&, ot::AddressResolver::CacheEntry const*&) const",
+    "line": "472",
+    "source_line": "            if (entry->Matches(aIndicator))",
+    "covers_pairs": [
+      "naive>cmplog (I2S)",
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A SRP/DNS-update payload diverse enough to build a multi-entry router/cache linked list whose first scanned entry does NOT match the Ip6::Address indicator, so the FindMatching loop iterates and the entry->Matches() comparison takes its false side instead of matching/terminating immediately.",
+    "why_winner_satisfies": "Winner seeds (naive, value_profile) carry heterogeneous, structured byte content (e.g. naive seed 1 begins dc 62 5c 00 00 00 ff fe ff 78 30 30 ... with varied fields) and the winner hit the false branch 1140 times (naive), evidence the loop iterated over non-matching entries.",
+    "why_loser_doesnt": "Loser seeds (cmplog, value_profile_cmplog) are dominated by repetitive `5c 78 30 30` (\"\\x00\") escape runs; the loser's comparison-substitution mutator overwrites byte spans with logged CMP operands, collapsing inputs toward a single homogeneous pattern that never builds the diverse list needed to drive the loop's false side (loser hitcount on branch = 0).",
+    "mechanism_attribution": "The winner wins by LACKING the comparison-substitution stage: plain havoc/token mutation (BytesSetMutator, TokenReplace, ByteDecMutator, WordInterestingMutator) preserves input diversity, so the corpus retains varied list-building payloads. The loser's operand-substitution mutator repeatedly rewrites byte spans to matching CMP operands, homogenizing the input and starving the false-branch path \u2014 an anti-comparison-solving divergence won by pure havoc exploration."
+  },
+  {
+    "id": "openthread_13349",
+    "family": "I2S_anti",
+    "target": "openthread",
+    "branch_id": 13349,
+    "analysis_path": "prompts_b/openthread_13349.analysis.json",
+    "file": "/src/openthread/src/core/net/ip6.cpp",
+    "function": "ot::Ip6::Headers::GetChecksum() const",
+    "line": "1761",
+    "source_line": "    case kProtoIcmp6:",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "The parsed IPv6 next-header / protocol field must equal kProtoIcmp6 (0x3a = 58); winner seeds carry a run of 0x3a bytes around offsets 0x07-0x0e so GetIpProto() returns ICMP6 and the switch enters case kProtoIcmp6.",
+    "why_winner_satisfies": "Winner (naive) seeds hold concentrated 0x3a (ASCII ':') bytes at offsets 0x07 and 0x08 (W bytes '3a(:)x3') and a 0x3a run through 0x0b-0x0d, the literal ICMP6 protocol value, so the true side at L1761 is taken (W: T=3 F=0).",
+    "why_loser_doesnt": "Loser (cmplog) seeds carry 0x00 / 0x29 at offset 0x07 (L bytes '00(.)x7 29())x3') and never plant 0x3a, so GetIpProto() yields a non-ICMP6 value and the switch falls to default (L: T=0 F=32 at L1761, T=32 F=0 at default L1765).",
+    "mechanism_attribution": "The winner is the I2S-free baseline (naive): its havoc/interesting-value stack lands the 0x3a protocol byte by plain byte mutation, and the I2S-free arm WINS here. cmplog's input-to-state operand substitution, anchored on CMP operands captured upstream, keeps planting non-ICMP6 protocol values and steers the queue toward the UDP/default arms, so the comparison-solving technique is the harmful delta and the surviving feature is reached by plain havoc-only byte mutation."
+  },
+  {
+    "id": "openthread_13391",
+    "family": "I2S_anti",
+    "target": "openthread",
+    "branch_id": 13391,
+    "analysis_path": "prompts_b/openthread_13391.analysis.json",
+    "file": "/src/openthread/src/core/utils/history_tracker.cpp",
+    "function": "ot::Utils::HistoryTracker::RecordMessage(ot::Message const&, ot::Mac::Address const&, ot::Utils::HistoryTracker::MessageType)",
+    "line": "131",
+    "source_line": "    entry->mIcmp6Type            = headers.IsIcmp6() ? headers.GetIcmpHeader().GetType() : 0;",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A parsed IPv6 header whose next-header / IP-proto field equals ICMPv6 (58 = 0x3a). Concretely the input must carry the byte 0x3a in the header region (offsets ~0x07-0x0e in the winner seeds) so that headers.IsIcmp6() returns true at line 131 and GetIcmpHeader().GetType() is reached.",
+    "why_winner_satisfies": "Winner (naive) seeds are dense with the byte 0x3a in offsets 0x07-0x0e (e.g. '3a 3a 33 31 3a 3a 3a 30'), giving the ICMPv6 proto marker that drives the IsIcmp6() true branch; the byte diff confirms W concentrates on 3a at those offsets while L does not.",
+    "why_loser_doesnt": "Loser (cmplog) seeds put non-ICMPv6 values in the same header region (offset 0x07 = 00 or 29, offset 0x08 = 7f/40/ff), so IsIcmp6() stays false; line 131 in L is taken false 32 times and true 0 times.",
+    "mechanism_attribution": "This is an I2S-ANTI divergence: the winner is plain naive, the loser is cmplog (the comparison-logging fuzzer). naive's undirected havoc/byte mutation stumbles onto the 0x3a ICMPv6 marker by saturating the header bytes with a single repeated value (havoc-only). cmplog adds nothing useful here: the proto check is a constant compare not surfaced as a productive CmpLog operand, so cmplog's extra comparison-substitution stage finds no operand to substitute toward 0x3a and instead spends mutation budget on substitutions that misdirect away from this branch. Plain havoc byte mutation wins; the comparison-substitution technique is a net disadvantage."
+  }
+]

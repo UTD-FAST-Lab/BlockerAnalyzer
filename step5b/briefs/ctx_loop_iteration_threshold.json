@@ -1,0 +1,254 @@
+{
+  "feature_id": "ctx_loop_iteration_threshold",
+  "mechanism_family": "ctx_coverage_pro",
+  "mechanism_label": "loop_iteration_threshold_via_context_depth",
+  "definition": "The blocker requires a loop or recursive function to execute beyond a threshold count; context-sensitive coverage rewards each re-entry or recursive call under a new call context as novel, incrementally growing the iteration/recursion depth until the threshold fires.",
+  "n_members": 2,
+  "involved_fuzzers": [
+    "naive",
+    "naive_ctx"
+  ],
+  "techniques_seen": [
+    "ctx_coverage"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "ctx_coverage",
+    "has_axis": [
+      "naive_ctx"
+    ],
+    "lacks_axis": [
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libxml2_6467_h0",
+      "target": "libxml2",
+      "branch_id": 6467,
+      "analysis_path": "prompts_a/libxml2_6467.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "xmlParseCharRef",
+      "line": "2353",
+      "source_line": "\t    if (count++ > 20) {",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": "20",
+        "operand_width_bytes": 4,
+        "byte_signature": "length_field",
+        "mechanism_summary": "CtxHook makes the loop-body edge in xmlParseCharRef a new bucket per call context, rewarding seeds that grow the digit run until the count++>20 reset fires; bare-edge naive saturates the loop after a few iterations.",
+        "one_line": "Context credit for loop edges rewards growing digit run past count 20"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Take true side requires a decimal char-ref (&#) whose digit run drives the count++ loop past 20 iterations.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "A decimal character reference (`&#` followed by many ASCII digits, no terminating `;` early) so the `while (RAW != ';')` loop in xmlParseCharRef iterates more than 20 times and the count++>20 reset branch becomes a distinct (call-context, edge) coverage event.",
+            "why_winner_satisfies": "naive_ctx winner-resolving seeds drive the loop deeply: the loop header L2352 is taken True 111 times and the blocker L2353 True 9 times under W, with an average branch hitcount of 57, so the count overflow side is exercised. Context-sensitive indexing records each call path into this loop as fresh coverage, keeping such seeds in the corpus.",
+            "why_loser_doesnt": "naive's loser-blocking seeds enter the loop only 4 times (L2352 T=4) and never reach the count overflow (L2353 T=0), with average hitcount 1; bare edge feedback already saturates the loop edges after a few iterations so naive has no coverage incentive to keep growing the digit run.",
+            "mechanism_attribution": "naive_ctx's CtxHook folds the caller chain into the edge-map index, so the same loop-body edge inside xmlParseCharRef is a new bucket per call context. This rewards seeds that re-enter the digit loop along new paths, pushing the iteration count up until count++>20 fires \u2014 a feedback-granularity effect, not comparison solving."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the count overflow guard inside the decimal char-ref loop, and its true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "parser.c:2353:10",
+            "exact_quote": "Source line: \t    if (count++ > 20) {\nGlobally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "The blocker sits inside the decimal-branch while loop reached when input is `&#` without `x`.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2349-L2353",
+            "exact_quote": "} else if  ((RAW == '&') && (NXT(1) == '#')) {"
+          },
+          {
+            "claim": "naive_ctx winner drives the loop header True 111 times while the naive loser reaches it only 4 times.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L2352",
+            "exact_quote": "d=1   L2352  T=111 F=0  T=4 F=0  while (RAW != ';')"
+          },
+          {
+            "claim": "The winner takes the count-overflow true side 9 times while the loser takes it 0 times.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L2353",
+            "exact_quote": "d=1   L2353  T=9 F=102  T=0 F=4  if (count++ > 20) {  <-- BLOCKER"
+          },
+          {
+            "claim": "The naive_ctx pair resolves 10/10 vs naive 2/10 with a large branch hitcount gap.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 subject 35",
+            "exact_quote": "avg hitcount on branch: winner=57  loser=1"
+          },
+          {
+            "claim": "naive_ctx's mechanism makes each (call-context, edge) pair a distinct coverage event.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge"
+          },
+          {
+            "claim": "The loop compares each byte against the decimal-digit range, the comparison value_profile rewards approaching.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2359",
+            "exact_quote": "if ((RAW >= '0') && (RAW <= '9'))"
+          },
+          {
+            "claim": "The value_profile pair resolves 9/10 vs naive 2/10 with hitcount 8 vs 1.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 subject 32",
+            "exact_quote": "avg hitcount on branch: winner=8  loser=1"
+          },
+          {
+            "claim": "value_profile records a coarse operand-distance bucket per CMP, preserving inputs whose operands approach matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the same count++>20 decimal-loop where naive resolves the true side as often as naive_ctx and value_profile across trials, showing neither context-sensitive coverage nor CMP_MAP gradient is needed to grow the digit run past 20 iterations."
+        },
+        "weakest_evidence_point": "The byte-diff seeds are single-provenance (naive_ctx/naive) so the value_profile hypothesis leans on the loop's digit-range comparison plus hitcount divergence rather than on a value_profile-stored seed.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "sqlite3_14535",
+      "target": "sqlite3",
+      "branch_id": 14535,
+      "analysis_path": "prompts_b/sqlite3_14535.analysis.json",
+      "file": "/src/sqlite3/bld/sqlite3.c",
+      "function": "sqlite3.c:heightOfExprList",
+      "line": "100230",
+      "source_line": "",
+      "signature": {
+        "gate_structure": "other:loop_continuation",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "CtxHook rewards each new recursion depth of heightOfExprList as a distinct (call-context, edge) bucket, incrementally guiding the fuzzer to deepen SQL nesting until the expression-list loop runs more than one iteration and takes the false branch.",
+        "one_line": "context buckets per recursion depth incrementally grow SQL nesting past one iteration"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Deeply nested SELECT expression tree that drives heightOfExprList through many recursive call contexts so its loop iterates past the first element.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "A SQL input building a deeply nested expression tree (recursive SELECT with many nested '(' groups and chained '+' operators) so that heightOfExprList is invoked from many distinct call contexts and its per-element loop continues past the first item, taking the false (loop-continuation/exit) branch at line 100230.",
+            "why_winner_satisfies": "The naive_ctx winner seeds are 297-619 byte inputs all prefixed 'SELECT' with stacked '(' groups and long '+' runs (e.g. 'SELECT+...+PSELE(+++S...((((((SELECT'), which build a tall expression tree; the blocker line records W T=13 F=20 (false side hit 20x) and the function fires heavily (W hits 392 on branch, deep call chain through sqlite3Select/sqlite3PExpr/sqlite3ExprAttachSubtrees).",
+            "why_loser_doesnt": "The naive loser seeds are tiny / shallow ('vacuum', ';vacuum;', and a flat 'SELECT+SE,++LE...' with no nesting depth) that never build a multi-element expression list deep enough to re-enter the loop, so the blocker line shows L T=16 F=0 \u2014 the false branch is never taken and naive resolves 0/10.",
+            "mechanism_attribution": "naive_ctx installs a CtxHook that folds the call-context hash into the edge-map index, so the same heightOfExprList edge recorded under a deeper/different recursive call path counts as new coverage. This rewards incremental deepening of the expression tree (each new recursion context is a new bucket), guiding the fuzzer to grow nesting until the list loop runs >1 iteration and falls through the false side. Plain naive sees only the bare edge, so once heightOfExprList's first edge is hit it gets no further coverage signal for deeper nesting and stalls on the true side."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The decisive pair is naive_ctx > naive with delta ctx_coverage, winner resolving 9/10 and loser 0/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "naive blocks the branch in all 10 trials while naive_ctx resolves it.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "naive / naive_ctx rows",
+            "exact_quote": "naive                            0       10          0  loser (ctx_coverage vs naive_ctx)"
+          },
+          {
+            "claim": "The blocker is the false branch of heightOfExprList at line 100230.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "sqlite3.c:100230:7",
+            "exact_quote": "Enclosing function: sqlite3.c:heightOfExprList"
+          },
+          {
+            "claim": "The winner takes the false side of the blocker 20 times while the loser never takes it.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L100230",
+            "exact_quote": "d=1   L100230  T=13 F=20  T=16 F=0    <-- BLOCKER"
+          },
+          {
+            "claim": "The winner fires the branch heavily (avg hitcount 392) while the loser never reaches it (0).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 hitcount",
+            "exact_quote": "avg hitcount on branch: winner=392  loser=0"
+          },
+          {
+            "claim": "heightOfExprList is reached via a deep call chain rooted in expression-tree construction (sqlite3Select, sqlite3PExpr, sqlite3ExprAttachSubtrees).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "Call chain",
+            "exact_quote": "hop 5  sqlite3.c:sqlite3PExpr  (/src/sqlite3/bld/sqlite3.c:100428-100442, calls sqlite3.c:sqlite3ExprAttachSubtrees at line 100435)"
+          },
+          {
+            "claim": "Winner seeds are large SELECT inputs with stacked nested groups and chained operators building a deep expression tree.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1 / Seed 4",
+            "exact_quote": ".++++((((((SELEC"
+          },
+          {
+            "claim": "Loser seeds are tiny shallow inputs such as 'vacuum' that build no nested expression list.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 1",
+            "exact_quote": "76 61 63 75 75 6d                                 vacuum"
+          },
+          {
+            "claim": "The winning side spends far less blocked time, consistent with naive_ctx steadily deepening recursion rather than stalling.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 duration",
+            "exact_quote": "avg duration blocked: winner=4.60h  loser=19.00h"
+          },
+          {
+            "claim": "naive_ctx's CtxHook folds the call-context hash into the edge-map index so the same edge under a new call path is new coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Instrumentation",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "For naive_ctx a new coverage bucket is a new (call-context, edge) pair rather than a bare edge.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Feedback",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+          },
+          {
+            "claim": "Plain naive carries no I2S or CMP_MAP introspection, only havoc/token mutation over a bare per-edge bucket.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Mutators / Feedback",
+            "exact_quote": "per-edge hit-count bucket; a new bucket triggers a"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with a single fixed-depth (non-recursive, single call-context) expression-list path where naive_ctx still resolves the loop-exit false branch much faster than naive would refute the context-sensitivity attribution, since without multiple call contexts the CtxHook offers no extra signal."
+        },
+        "weakest_evidence_point": "The blocker source lines 100227-100236 are all unhit in the per-role overlay, so the exact loop predicate at line 100230 is inferred from the function name and call chain rather than read directly.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

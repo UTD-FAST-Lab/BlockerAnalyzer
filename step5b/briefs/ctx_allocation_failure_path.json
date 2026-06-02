@@ -1,0 +1,248 @@
+{
+  "feature_id": "ctx_allocation_failure_path",
+  "mechanism_family": "ctx_coverage_pro",
+  "mechanism_label": "allocation_failure_subpath_coverage",
+  "definition": "The blocker is a NULL-return allocation-failure branch; context-sensitive coverage records the allocation sub-path as new coverage per call context, steering the corpus toward the heap or input state that makes the allocator return NULL rather than staying on the fast non-NULL path.",
+  "n_members": 2,
+  "involved_fuzzers": [
+    "naive",
+    "naive_ctx"
+  ],
+  "techniques_seen": [
+    "ctx_coverage"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "ctx_coverage",
+    "has_axis": [
+      "naive_ctx"
+    ],
+    "lacks_axis": [
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libpng_4032",
+      "target": "libpng",
+      "branch_id": 4032,
+      "analysis_path": "prompts_a/libpng_4032.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_sCAL",
+      "line": "2415",
+      "source_line": "   if (buffer == NULL)",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "CtxHook gives every call path through png_handle_sCAL and png_read_buffer its own edge-map bucket, so the allocation-failure sub-state traversal registers as new coverage and the corpus is steered toward the heap state that makes the buffer return NULL; bare-edge naive never rewards this sub-path.",
+        "one_line": "context-indexed edges reward allocation-failure sub-path through sCAL handler naive's flat map ignores"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A PNG with an sCAL chunk whose length+1 allocation via png_read_buffer fails, returning NULL and taking the out-of-memory true branch.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "A well-formed PNG (IHDR present, no prior IDAT, no duplicate sCAL, sCAL length >= 4) that reaches png_read_buffer(png_ptr, length+1, ...) in OSS_FUZZ_png_handle_sCAL under a heap/allocation state where the buffer allocation returns NULL, so the blocked true branch at L2415 is taken. The feature is not a specific literal byte gate but reaching the sCAL handler with an allocation-failing program state.",
+            "why_winner_satisfies": "naive_ctx resolves the branch in all 10 trials (resolved=10/10, avg hitcount 14, blocked side taken T=11 in the per-role overlay). Its context-sensitive coverage records the sCAL edge under distinct call-context indices, so reaching png_handle_sCAL along varied call paths (and the allocation sub-paths inside png_read_buffer) registers as new coverage and is retained, steering the corpus toward the input/heap state that makes the allocation fail.",
+            "why_loser_doesnt": "naive blocks the branch in 9/10 trials (resolved=1/10, blocked side L2415 T=0 F=12). With plain edge coverage the bare sCAL edge is counted once regardless of call context, so once the false (buffer non-NULL) side is hit, traversing png_handle_sCAL again yields no new edge-bucket signal and the campaign is never rewarded for exploring the allocation-failure sub-state.",
+            "mechanism_attribution": "naive_ctx installs a CtxHook that folds a running call-context hash into the edge-map index, so the same basic-block edge is a new coverage entry per call path. This (call-context, edge) granularity rewards reaching png_read_buffer / png_handle_sCAL via more contexts, driving exploration into the rarely-taken out-of-memory branch. naive's plain MaxMapFeedback over bare edges gives no such gradient. The divergence is attributable to the context-sensitive coverage technique, the single difference between the two fuzzers."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true branch of 'if (buffer == NULL)' in the sCAL handler, where buffer is the result of png_read_buffer(png_ptr, length+1, ...).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2413-L2415",
+            "exact_quote": "buffer = png_read_buffer(png_ptr, length+1, 2/*silent*/);"
+          },
+          {
+            "claim": "The blocked side is the true branch of the buffer == NULL test.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L2415",
+            "exact_quote": "Globally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "naive_ctx resolves the branch in every trial while naive almost always blocks it, with a large probability divergence.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+          },
+          {
+            "claim": "The loser naive resolves the branch in only 1 of 10 trials.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 loser",
+            "exact_quote": "loser:  resolved=1/10  blocked=9  unreached=0"
+          },
+          {
+            "claim": "In per-role coverage the winner takes the true (out-of-memory) side at L2415 while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L2415",
+            "exact_quote": "L2415  T=11 F=1  T=0 F=12  if (buffer == NULL)  <-- BLOCKER"
+          },
+          {
+            "claim": "The winner's resolving path goes to the out-of-memory error block (W-only lines 2416-2420).",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2417",
+            "exact_quote": "png_chunk_benign_error(png_ptr, \"out of memory\");"
+          },
+          {
+            "claim": "naive_ctx's CtxHook folds the call context into the edge-map index, making the same edge a distinct coverage slot per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "For naive_ctx a new coverage bucket is a new (call-context, edge) pair rather than a bare edge.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Feedback",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+          },
+          {
+            "claim": "naive uses plain per-edge hit-count bucketing with no context indexing.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Feedback",
+            "exact_quote": "per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+          },
+          {
+            "claim": "The buffer is allocated from length+1 bytes, the size whose allocation must fail to return NULL.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2411",
+            "exact_quote": "length + 1);"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with an sCAL-like allocation-failure branch reached through only a single call context, where naive_ctx and naive resolve the out-of-memory true branch at statistically indistinguishable rates, would refute the claim that context-sensitive coverage is what drives the win."
+        },
+        "weakest_evidence_point": "The exact program-state that makes png_read_buffer return NULL is inferred from the source path rather than directly observed in seed bytes, since the byte-diff offsets (e.g. IHDR/length fields) only weakly tie to the allocation-failure condition.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_4042",
+      "target": "libpng",
+      "branch_id": 4042,
+      "analysis_path": "prompts_a/libpng_4042.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_zTXt",
+      "line": "2634",
+      "source_line": "   if (buffer == NULL)",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "length_field",
+        "mechanism_summary": "CtxHook re-indexes the png_read_buffer edge per call path, so large-length zTXt inputs that force a NULL allocation earn new (call-context, edge) coverage that bare-edge naive's saturated map never rewards.",
+        "one_line": "Context indexing keeps large-length zTXt seeds alive toward NULL return"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A zTXt chunk with a length large enough that png_read_buffer fails to allocate, returning NULL into the buffer==NULL true branch.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "A zTXt chunk whose declared length field is large enough that the call buffer = png_read_buffer(png_ptr, length, 2) cannot satisfy the allocation and returns NULL, so the (buffer == NULL) condition at pngrutil.c:2634 evaluates true and control enters the out-of-memory bailout at 2635-2639.",
+            "why_winner_satisfies": "naive_ctx resolves the branch in all 10 trials (resolved=10/10, hitcount on branch=8) and takes the true side 16 times (L2634 T=16 F=0 for W), i.e. it repeatedly drives png_read_buffer down the NULL-return path; the CtxHook re-indexes each edge by call context so the png_read_buffer / handle_zTXt edges count as fresh coverage under each distinct chunk-processing call path, rewarding the rare large-length zTXt inputs that exhaust the read buffer.",
+            "why_loser_doesnt": "naive blocks the branch in 9 of 10 trials (resolved=1/10, blocked=9) and never takes the true side (L2634 T=0 F=35 for L) \u2014 its bare edge-bucket feedback marks the png_read_buffer edge covered after the first ordinary zTXt and stops rewarding inputs that push length high enough to force a NULL allocation, so it stays on the false branch and proceeds into the keyword-parsing tail (L2641, L2647-2708 hit only in L).",
+            "mechanism_attribution": "naive_ctx's CtxHook folds a running call-context hash into the edge-map index (HookableInProcessExecutor), so the same png_read_buffer edge is recorded at different map slots per call path; a new (call-context, edge) pair is novel coverage that keeps the large-length / OOM zTXt inputs alive in the corpus, whereas plain naive's MaxMapFeedback over the bare edge map saturates the edge and abandons that direction. This is a coverage-granularity (feedback-dimension) advantage, not comparison solving."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking condition is buffer == NULL, whose buffer comes from png_read_buffer with the chunk length.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "pngrutil.c:2632-2634",
+            "exact_quote": "buffer = png_read_buffer(png_ptr, length, 2/*silent*/);"
+          },
+          {
+            "claim": "The true (winning) side at L2634 is the globally blocked side and leads to the out-of-memory bailout.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "pngrutil.c:2634-2638",
+            "exact_quote": "png_chunk_benign_error(png_ptr, \"out of memory\");"
+          },
+          {
+            "claim": "naive_ctx wins decisively over naive with ctx_coverage as the single-technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "The winner resolves the branch in all trials while the loser blocks it.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 counts",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+          },
+          {
+            "claim": "The loser blocks the branch in 9 of 10 trials and almost never resolves it.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 counts",
+            "exact_quote": "loser:  resolved=1/10  blocked=9  unreached=0"
+          },
+          {
+            "claim": "In W the branch takes the true side; in L it takes only the false side.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L2634 BLOCKER",
+            "exact_quote": "L2634  T=16 F=0  T=0 F=35  if (buffer == NULL)  <-- BLOCKER"
+          },
+          {
+            "claim": "The winner satisfies the allocation-failure path; the out-of-memory bailout lines 2635-2639 are hit only in W.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "pngrutil.c:2635",
+            "exact_quote": "[W]  2635     {"
+          },
+          {
+            "claim": "The loser stays on the false branch and proceeds into the keyword-parsing/CRC tail that only L exercises.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "pngrutil.c:2641",
+            "exact_quote": "[L]  2641     png_crc_read(png_ptr, buffer, length);"
+          },
+          {
+            "claim": "naive_ctx's mechanism re-indexes each edge by call context, making a context+edge pair count as new coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Feedback",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+          },
+          {
+            "claim": "Plain naive uses MaxMapFeedback over the bare edge map, with no I2S or CMP introspection.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Feedback",
+            "exact_quote": "a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "If a synthetic zTXt harness sweeping chunk length showed plain naive resolving the buffer==NULL true branch as often as naive_ctx (no separation), the context-sensitive-coverage attribution would be refuted."
+        },
+        "weakest_evidence_point": "No seed-byte offset directly shows the zTXt length field driving the allocation past the cap; the OOM trigger is inferred from source plus the W-only out-of-memory lines rather than a byte-diff at the length offset.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

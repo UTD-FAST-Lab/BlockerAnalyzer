@@ -27,7 +27,10 @@ from collections import OrderedDict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-STEP5A = REPO_ROOT / "step5a"
+# Default to the aggregated cross-server tree (step5a_all). Override with --in-dir
+# for a single-server tree (step5a_a / step5a_b) or the legacy step5a.
+DEFAULT_IN_DIR = "step5a_all"
+STEP5A = REPO_ROOT / DEFAULT_IN_DIR
 OUT_DIR = REPO_ROOT / "step5b" / "briefs"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -56,18 +59,16 @@ def fuzzers_with(axis):
     tok = TECH_ALIAS.get(axis, axis)
     return {f for f, techs in TECH.items() if tok in techs}
 
-def discover_families():
-    """Families = step5a/<family>/ subdirs that actually carry a clusters.json.
+def discover_families(base=None):
+    """Families = <in-dir>/<family>/ subdirs that actually carry a clusters.json.
 
     Auto-discovered (not hardcoded) so it never drifts from the Pass-B output.
-    As of 2026-05-31 the 12 families are: I2S_pro, I2S_anti, VP_pro,
-    grimoire_structural_pro, grimoire_structural_anti, ctx_coverage_pro,
-    ctx_coverage_anti, ngram_coverage_pro, ngram_coverage_anti,
-    calibrated_energy_pro, aflfast_rarity_anti, havoc_anti.
+    In the aggregated step5a_all tree (2026-06-02) there are 17 families.
     """
-    if not STEP5A.is_dir():
+    base = base or STEP5A
+    if not base.is_dir():
         return []
-    return sorted(p.parent.name for p in STEP5A.glob("*/clusters.json"))
+    return sorted(p.parent.name for p in base.glob("*/clusters.json"))
 
 
 FAMILIES = discover_families()
@@ -182,10 +183,10 @@ def build_brief(cluster, sigs_by_id):
     ])
 
 
-def load_sigs(family):
+def load_sigs(family, base):
     """signatures by id, augmented with locators from the family cards."""
-    sig_path = STEP5A / family / "signatures.json"
-    card_path = STEP5A / f"{family}.cards.json"
+    sig_path = base / family / "signatures.json"
+    card_path = base / f"{family}.cards.json"
     out = {}
     if sig_path.is_file():
         for s in json.loads(sig_path.read_text()):
@@ -201,23 +202,28 @@ def load_sigs(family):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--family", choices=FAMILIES + ["all"], default="all")
+    ap.add_argument("--in-dir", default=DEFAULT_IN_DIR,
+                    help="step5a tree to read clusters/signatures/cards from "
+                         "(default step5a_all; use step5a_a/step5a_b for one server)")
+    ap.add_argument("--family", default="all",
+                    help="family name (as found under --in-dir) or 'all'")
     ap.add_argument("--feature-id", default=None,
                     help="only this cluster (across families)")
     ap.add_argument("--out-dir", default=str(OUT_DIR))
     args = ap.parse_args()
 
+    base = REPO_ROOT / args.in_dir
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    fams = FAMILIES if args.family == "all" else [args.family]
+    fams = discover_families(base) if args.family == "all" else [args.family]
 
     written = []
     for fam in fams:
-        cl_path = STEP5A / fam / "clusters.json"
+        cl_path = base / fam / "clusters.json"
         if not cl_path.is_file():
             print(f"  skip {fam}: no clusters.json")
             continue
-        sigs = load_sigs(fam)
+        sigs = load_sigs(fam, base)
         for cluster in json.loads(cl_path.read_text()):
             if args.feature_id and cluster["feature_id"] != args.feature_id:
                 continue

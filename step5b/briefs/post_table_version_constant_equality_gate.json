@@ -1,0 +1,726 @@
+{
+  "feature_id": "post_table_version_constant_equality_gate",
+  "mechanism_family": "synergy",
+  "mechanism_label": "post_table_version_constant_equality_gate",
+  "definition": "A 4-byte version field in the OpenType post table must equal the exact 32-bit constant 0x00020000 (big-endian bytes 00 02 00 00), with downstream gating on a numeric range check (glyph index vs. glyphNameIndex length); I2S substitutes the exact constant from the CmpLogObserver operand into the version offset while VP's CMP_MAP Hamming-distance gradient preserves near-miss version inputs as corpus stepping stones, both being jointly necessary because the all-or-nothing single-field equality gives VP no usable gradient without I2S to seed the constant, and I2S alone cannot ratchet the downstream integer bound.",
+  "n_members": 6,
+  "involved_fuzzers": [
+    "cmplog",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S",
+    "value_profile"
+  ],
+  "suggested_axis_partition": {},
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "harfbuzz_5609_h0",
+      "target": "harfbuzz",
+      "branch_id": 5609,
+      "analysis_path": "prompts_b/harfbuzz_5609.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-post-table.hh",
+      "function": "OT::post::accelerator_t::accelerator_t(hb_face_t*)",
+      "line": "141",
+      "source_line": "      if (version != 0x00020000) return;",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "0x00020000",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace reads the version != 0x00020000 CMP from the CmpLogObserver buffer and substitutes the exact 4-byte constant 0x00020000 at the version offset, turning the all-or-nothing equality that value_profile's gradient cannot resolve.",
+        "one_line": "I2S substitutes exact 32-bit post-table version constant 0x00020000"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must carry the 4-byte post-table version field equal to 0x00020000 to take the false branch and parse the v2 tail.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "The 4-byte post-table version field must equal the exact 32-bit constant 0x00020000 (bytes 00 02 00 00) at the version offset, so the equality test version != 0x00020000 fails and the function continues into v2 parsing instead of returning.",
+            "why_winner_satisfies": "Every winner-resolving seed carries the version bytes (00 02 00 00 at offset 0x17-0x1a window: 18 00 02 00 00), and the winner resolves 10/10 with hitcount 39 on the branch; the I2S stage in value_profile_cmplog substitutes the logged comparison operand 0x00020000 into the input.",
+            "why_loser_doesnt": "value_profile loser seeds do not place 0x00020000 at the version field (byte-diff offsets 0x17/0x19 show W=18/02 vs scattered L bytes), so version != 0x00020000 stays true and it blocks 10/10.",
+            "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which reads the CmpLogObserver entry for the version != 0x00020000 comparison and substitutes the constant operand 0x00020000 directly into the input; plain value_profile lacks I2SRandReplace and only gets a coarse CMP_MAP distance bucket, which gives no gradient on an all-or-nothing 4-byte equality."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the equality test version != 0x00020000.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "line 6 / source line",
+            "exact_quote": "if (version != 0x00020000) return;"
+          },
+          {
+            "claim": "The blocked side is the false branch (continue into v2 parsing).",
+            "cited_section": "BLOCKER",
+            "cited_locator": "line 7",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "Pair 1 is value_profile_cmplog beating value_profile with an I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "Winner resolves 10/10 with branch hitcount 39 on pair 1.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 stats",
+            "exact_quote": "avg hitcount on branch: winner=39  loser=0"
+          },
+          {
+            "claim": "Winner-resolving seeds carry the version bytes 00 02 00 00 after the table_length field.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1, offset 0x18",
+            "exact_quote": "00 02 00 00 00 0a 03 00"
+          },
+          {
+            "claim": "The W-side byte at offset 0x19 is concentrated as 02 while loser bytes are scattered.",
+            "cited_section": "BYTE DIFF (W vs L at common offsets)",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  02(.)x5"
+          },
+          {
+            "claim": "After resolving, the winner enters the v2 tail and parses glyphNameIndex via table->v2X.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 143-145",
+            "exact_quote": "const postV2Tail &v2 = table->v2X;"
+          },
+          {
+            "claim": "value_profile_cmplog adds I2SRandReplace on top of edge counters and the CMP buffer.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "I2SRandReplace substitutes a logged CMP operand into the input at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "Pair 2 is value_profile_cmplog beating cmplog with a value_profile delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "On pair 2 the winner resolves 10/10 (hitcount 39) while cmplog resolves only 2/10 (hitcount 3).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 stats",
+            "exact_quote": "avg hitcount on branch: winner=39  loser=3"
+          },
+          {
+            "claim": "value_profile/vpc CMP_MAP feedback preserves inputs whose operand pair is closer to matching as new corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile_cmplog's instrumentation includes the CMP_MAP gradient buckets that cmplog lacks.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Instrumentation",
+            "exact_quote": "per-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic 4-byte exact-equality magic gate where cmplog (I2S, no CMP_MAP) resolves as fast as value_profile_cmplog, showing the version constant is reachable by I2S substitution alone without any CMP_MAP gradient contribution."
+        },
+        "weakest_evidence_point": "The pair-2 attribution to CMP_MAP gradient is the weakest claim: an all-or-nothing 4-byte equality gives a coarse distance signal, so vpc's pair-2 edge over cmplog may partly reflect run-to-run variance rather than a clean gradient stepping-stone effect.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5609_h1",
+      "target": "harfbuzz",
+      "branch_id": 5609,
+      "analysis_path": "prompts_b/harfbuzz_5609.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-post-table.hh",
+      "function": "OT::post::accelerator_t::accelerator_t(hb_face_t*)",
+      "line": "141",
+      "source_line": "      if (version != 0x00020000) return;",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "0x00020000",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "CMP_MAP distance-bucket feedback rewards inputs whose version operand is Hamming-closer to 0x00020000, preserving near-miss corpus stepping stones that cmplog discards and accelerating convergence to the constant.",
+        "one_line": "CMP_MAP gradient steps version field toward 0x00020000 through near-misses"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must carry the 4-byte post-table version field equal to 0x00020000 to take the false branch and parse the v2 tail.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "The same 4-byte version field must reach 0x00020000; here the discriminating capability is the CMP_MAP closeness gradient that preserves intermediate inputs whose version operand is progressively nearer to the constant.",
+            "why_winner_satisfies": "value_profile_cmplog resolves 10/10 (hitcount 39) versus cmplog's 2/10 (hitcount 3); the winner's extra CMP_MAP gradient bucket signal preserves near-miss version inputs as corpus, accelerating convergence to the exact 0x00020000 magic.",
+            "why_loser_doesnt": "cmplog has I2SRandReplace but no CMP_MAP gradient feedback, so it only resolves 2/10 and blocks 8/10 with avg duration 19.80h, lacking the closeness-bucket signal that rewards inputs approaching the constant.",
+            "mechanism_attribution": "value_profile_cmplog's CMP_MAP gradient feedback (Hamming-distance buckets on the integer compare) gives new coverage credit to inputs whose version operand is closer to 0x00020000, retaining stepping-stones cmplog discards; this distance-bucket feedback is the technique cmplog lacks."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the equality test version != 0x00020000.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "line 6 / source line",
+            "exact_quote": "if (version != 0x00020000) return;"
+          },
+          {
+            "claim": "The blocked side is the false branch (continue into v2 parsing).",
+            "cited_section": "BLOCKER",
+            "cited_locator": "line 7",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "Pair 1 is value_profile_cmplog beating value_profile with an I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "Winner resolves 10/10 with branch hitcount 39 on pair 1.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 stats",
+            "exact_quote": "avg hitcount on branch: winner=39  loser=0"
+          },
+          {
+            "claim": "Winner-resolving seeds carry the version bytes 00 02 00 00 after the table_length field.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1, offset 0x18",
+            "exact_quote": "00 02 00 00 00 0a 03 00"
+          },
+          {
+            "claim": "The W-side byte at offset 0x19 is concentrated as 02 while loser bytes are scattered.",
+            "cited_section": "BYTE DIFF (W vs L at common offsets)",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  02(.)x5"
+          },
+          {
+            "claim": "After resolving, the winner enters the v2 tail and parses glyphNameIndex via table->v2X.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 143-145",
+            "exact_quote": "const postV2Tail &v2 = table->v2X;"
+          },
+          {
+            "claim": "value_profile_cmplog adds I2SRandReplace on top of edge counters and the CMP buffer.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+          },
+          {
+            "claim": "I2SRandReplace substitutes a logged CMP operand into the input at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "Pair 2 is value_profile_cmplog beating cmplog with a value_profile delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "On pair 2 the winner resolves 10/10 (hitcount 39) while cmplog resolves only 2/10 (hitcount 3).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 stats",
+            "exact_quote": "avg hitcount on branch: winner=39  loser=3"
+          },
+          {
+            "claim": "value_profile/vpc CMP_MAP feedback preserves inputs whose operand pair is closer to matching as new corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile_cmplog's instrumentation includes the CMP_MAP gradient buckets that cmplog lacks.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Instrumentation",
+            "exact_quote": "per-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic 4-byte exact-equality magic gate where cmplog (I2S, no CMP_MAP) resolves as fast as value_profile_cmplog, showing the version constant is reachable by I2S substitution alone without any CMP_MAP gradient contribution."
+        },
+        "weakest_evidence_point": "The pair-2 attribution to CMP_MAP gradient is the weakest claim: an all-or-nothing 4-byte equality gives a coarse distance signal, so vpc's pair-2 edge over cmplog may partly reflect run-to-run variance rather than a clean gradient stepping-stone effect.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5614_h0",
+      "target": "harfbuzz",
+      "branch_id": 5614,
+      "analysis_path": "prompts_b/harfbuzz_5614.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-post-table.hh",
+      "function": "OT::post::accelerator_t::get_glyph_count() const",
+      "line": "223",
+      "source_line": "      if (version == 0x00020000)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "0x00020000",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace reads the version==0x00020000 CMP from the CmpLogObserver buffer and substitutes the exact constant 0x00020000 at offset 0x18-0x1b, which value_profile (no I2SRandReplace) cannot do.",
+        "one_line": "I2S copies exact 0x00020000 version constant into post-table field"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "The post sub-table version field at offset 0x18 must equal the 32-bit constant 0x00020000 to take the true branch.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A 4-byte field at offset 0x18 holding the big-endian value 00 02 00 00 (0x00020000), the post-table version 2.0, matched exactly by the gate at line 223.",
+            "why_winner_satisfies": "All five winner-resolving seeds carry the bytes 00 02 00 00 at offsets 0x18-0x1b; the byte-diff shows offset 0x18 W=00x5, 0x19 W=02x5, 0x1a W=00x5, 0x1b W=00x5, exactly the 0x00020000 the version==0x00020000 gate requires.",
+            "why_loser_doesnt": "value_profile lacks I2SRandReplace, so it cannot copy the intercepted 0x00020000 CMP operand into the input; its loser-blocking seeds carry arbitrary bytes at offset 0x18 (e.g. 0x1b loser=47(G)x8) and never satisfy the version-2.0 gate, blocking on the false side.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the per-execution CmpLogObserver buffer for the version==0x00020000 comparison and substitutes the recorded constant 0x00020000 at the matching input offset, which value_profile (no I2SRandReplace) cannot do."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is a 32-bit exact-equality test against the constant 0x00020000.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L223 hb-ot-post-table.hh:223:11",
+            "exact_quote": "if (version == 0x00020000)"
+          },
+          {
+            "claim": "The winner-resolving seeds carry 00 02 00 00 at offset 0x18.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "winner seed 7253f27adf424cfd offset 0x18",
+            "exact_quote": "0010: a0 20 20 20 00 00 00 18 00 02 00 00 00 0a 03 00"
+          },
+          {
+            "claim": "At offset 0x19 the winner concentrates on 02 while it differs from the loser distribution.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  02(.)x5"
+          },
+          {
+            "claim": "At offset 0x1b the winner is 00 while the loser concentrates on 0x47.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x001b",
+            "exact_quote": "0x001b  00(.)x5                             47(G)x8"
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "I2SRandReplace substitutes a recorded CMP operand at matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "The vpc>vp pair resolves the winner 10/10 versus the loser 0/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 subject 14",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "value_profile's CMP_MAP preserves inputs producing a closer-matching CMP operand pair as corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "Bare cmplog buffers operands per execution and is consumed by the mutator, not by feedback (no CMP_MAP gradient).",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Feedback",
+            "exact_quote": "The CMP buffer is\nconsumed by the mutator, not by feedback."
+          },
+          {
+            "claim": "The vpc>cmplog pair resolves the winner 10/10 versus the cmplog loser 2/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 subject 13",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=2/10  blocked=8  unreached=0"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on version==0x00020000 in which value_profile (no I2SRandReplace) reaches the true branch as often as value_profile_cmplog, showing the 32-bit constant match does not require I2S substitution."
+        },
+        "weakest_evidence_point": "Pair 2's value_profile attribution rests on the CMP_MAP gradient narrative; the byte diff alone cannot distinguish a gradient hill-climb from a lucky single-step match, since both pairs converge on the same 0x00020000 bytes.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "harfbuzz_5614_h1",
+      "target": "harfbuzz",
+      "branch_id": 5614,
+      "analysis_path": "prompts_b/harfbuzz_5614.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-post-table.hh",
+      "function": "OT::post::accelerator_t::get_glyph_count() const",
+      "line": "223",
+      "source_line": "      if (version == 0x00020000)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "0x00020000",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "CMP_MAP records (PC, operand-distance bucket) for the version==0x00020000 comparison; an input closer to the constant adds a new bucket and is kept as corpus, giving the vpc winner a gradient toward the constant that bare cmplog lacks.",
+        "one_line": "CMP_MAP bucket gradient climbs version field toward 0x00020000"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "The post sub-table version field at offset 0x18 must equal the 32-bit constant 0x00020000 to take the true branch.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "The same 4-byte version field at offset 0x18 must reach the 32-bit constant 0x00020000 checked by the line-223 gate.",
+            "why_winner_satisfies": "value_profile_cmplog's CMP_MAP gradient preserves intermediate inputs whose version field is progressively closer (smaller Hamming distance) to 0x00020000, and the winner resolves 10/10 with hitcount 39 on the branch versus cmplog's 2/10 and hitcount 3.",
+            "why_loser_doesnt": "cmplog alone has no CMP_MAP gradient feedback, so partial-match version values are not retained as corpus and the search lacks the distance-bucket hill-climb; cmplog blocks 8/10 with avg duration 19.80h on this branch.",
+            "mechanism_attribution": "value_profile's CMP_MAP records a (PC, operand-distance bucket) for the version==0x00020000 comparison; an input closer to 0x00020000 adds a new bucket and is preserved as corpus, giving the vpc winner a gradient toward the constant that bare cmplog lacks."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is a 32-bit exact-equality test against the constant 0x00020000.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L223 hb-ot-post-table.hh:223:11",
+            "exact_quote": "if (version == 0x00020000)"
+          },
+          {
+            "claim": "The winner-resolving seeds carry 00 02 00 00 at offset 0x18.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "winner seed 7253f27adf424cfd offset 0x18",
+            "exact_quote": "0010: a0 20 20 20 00 00 00 18 00 02 00 00 00 0a 03 00"
+          },
+          {
+            "claim": "At offset 0x19 the winner concentrates on 02 while it differs from the loser distribution.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  02(.)x5"
+          },
+          {
+            "claim": "At offset 0x1b the winner is 00 while the loser concentrates on 0x47.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x001b",
+            "exact_quote": "0x001b  00(.)x5                             47(G)x8"
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "I2SRandReplace substitutes a recorded CMP operand at matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "The vpc>vp pair resolves the winner 10/10 versus the loser 0/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 subject 14",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "value_profile's CMP_MAP preserves inputs producing a closer-matching CMP operand pair as corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "Bare cmplog buffers operands per execution and is consumed by the mutator, not by feedback (no CMP_MAP gradient).",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Feedback",
+            "exact_quote": "The CMP buffer is\nconsumed by the mutator, not by feedback."
+          },
+          {
+            "claim": "The vpc>cmplog pair resolves the winner 10/10 versus the cmplog loser 2/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 subject 13",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=2/10  blocked=8  unreached=0"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on version==0x00020000 in which value_profile (no I2SRandReplace) reaches the true branch as often as value_profile_cmplog, showing the 32-bit constant match does not require I2S substitution."
+        },
+        "weakest_evidence_point": "Pair 2's value_profile attribution rests on the CMP_MAP gradient narrative; the byte diff alone cannot distinguish a gradient hill-climb from a lucky single-step match, since both pairs converge on the same 0x00020000 bytes.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "harfbuzz_5616_h0",
+      "target": "harfbuzz",
+      "branch_id": 5616,
+      "analysis_path": "prompts_b/harfbuzz_5616.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-post-table.hh",
+      "function": "OT::post::accelerator_t::find_glyph_name(unsigned int) const",
+      "line": "255",
+      "source_line": "      if (version != 0x00020000 || glyph >= glyphNameIndex->len)",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "0x00020000",
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace intercepts the version-vs-0x00020000 CMP and substitutes the literal constant into the version offset, satisfying the first clause of the OR gate; value_profile lacks this mutator.",
+        "one_line": "I2S plants 0x00020000 version magic to clear first OR clause"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A post table whose version field equals exactly 0x00020000 with an in-bounds glyph index, so both clauses of the OR are false.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "The 4-byte post-table version field must equal the exact magic 0x00020000; the winner seeds carry version 0x0002 (bytes 00 02) where the loser seeds carry other values.",
+            "why_winner_satisfies": "Every winner-resolving seed begins with the post-table header and shows the byte run 00 02 00 00 at the version offset (0x18 region: '00 02 00 00 00 0a'), so version != 0x00020000 is false and the OR short-circuit does not fire.",
+            "why_loser_doesnt": "value_profile seeds carry no I2S substitution stage, so they never copy the intercepted 0x00020000 comparison operand into the version offset; their byte sets at 0x18 are dominated by 00 and unrelated values, leaving version != 0x00020000 true.",
+            "mechanism_attribution": "cmplog's I2SRandReplace intercepts the version-vs-0x00020000 CMP, finds the input bytes matching one operand, and substitutes the literal 0x00020000 into the input; value_profile lacks this mutator (I2S delta)."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is an OR whose false side requires version == 0x00020000 and glyph in bounds.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6 / line 255",
+            "exact_quote": "if (version != 0x00020000 || glyph >= glyphNameIndex->len)"
+          },
+          {
+            "claim": "Pair 1 vpc>value_profile is decisive with the I2S technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L26",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "Winner-resolving seeds carry the post-table version 0x0002 at the version-field offset.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 7253f27adf424cfd, offset 0x18",
+            "exact_quote": "00 00 00 18 00 02 00 00 00 0a 03 00"
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "cmplog's I2SRandReplace substitutes one CMP operand into the input at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "Pair 2 vpc>cmplog is decisive with the value_profile technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L34",
+            "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "value_profile's CMP_MAP preserves inputs whose operands are closer to matching as new corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "The winner hits the branch 55089 times while cmplog hits it only 1820 times.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L39 Pair 2",
+            "exact_quote": "avg hitcount on branch: winner=55089  loser=1820"
+          },
+          {
+            "claim": "Resolving the false branch proceeds into the array-indexing body lines 258-272 marked winner-only.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 258-272",
+            "exact_quote": "[W]   258        unsigned int index = glyphNameIndex->arrayZ[glyph];"
+          },
+          {
+            "claim": "Winner resolves 10/10 while cmplog resolves only 2/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L37 Pair 2",
+            "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on version==0x00020000 where value_profile (no I2S) resolves the branch as often as value_profile_cmplog, showing the exact-magic substitution is not what value_profile lacks."
+        },
+        "weakest_evidence_point": "The value_profile delta for the in-bounds glyph index (Pair 2) is inferred from hitcount/resolve gaps and CMP_MAP semantics; no seed-byte offset directly pins the glyph-index bound being closed by gradient feedback.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "harfbuzz_5616_h1",
+      "target": "harfbuzz",
+      "branch_id": 5616,
+      "analysis_path": "prompts_b/harfbuzz_5616.analysis.json",
+      "file": "/src/harfbuzz/src/hb-ot-post-table.hh",
+      "function": "OT::post::accelerator_t::find_glyph_name(unsigned int) const",
+      "line": "255",
+      "source_line": "      if (version != 0x00020000 || glyph >= glyphNameIndex->len)",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "length_or_count",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "CMP_MAP records (PC, operand-distance bucket) for the glyph-vs-len bound comparison, preserving inputs that incrementally close the gap; cmplog lacks this gradient so it cannot ratchet glyph count into range.",
+        "one_line": "CMP_MAP gradient narrows glyph-index vs glyphNameIndex bound"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A post table whose version field equals exactly 0x00020000 with an in-bounds glyph index, so both clauses of the OR are false.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "Beyond matching the version magic, the glyph index must be brought in bounds (glyph < glyphNameIndex->len), which requires the CMP_MAP gradient feedback to preserve near-matching length/index comparisons.",
+            "why_winner_satisfies": "The winner hits the false side 55089 times and proceeds into the array-indexing body (lines 258-272 marked [W]), indicating the glyph-vs-len bound was satisfied repeatedly under the combined CMP_MAP gradient signal.",
+            "why_loser_doesnt": "cmplog resolves only 2/10 with avg hitcount 1820 versus the winner's 55089; without value_profile's CMP_MAP bucket feedback it cannot retain inputs that incrementally close the glyph>=glyphNameIndex->len bound comparison.",
+            "mechanism_attribution": "value_profile's CMP_MAP records (PC, operand-distance bucket) so an input closer to matching the bound is preserved as corpus; cmplog lacks this gradient feedback (value_profile delta)."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is an OR whose false side requires version == 0x00020000 and glyph in bounds.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6 / line 255",
+            "exact_quote": "if (version != 0x00020000 || glyph >= glyphNameIndex->len)"
+          },
+          {
+            "claim": "Pair 1 vpc>value_profile is decisive with the I2S technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L26",
+            "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+          },
+          {
+            "claim": "Winner-resolving seeds carry the post-table version 0x0002 at the version-field offset.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 7253f27adf424cfd, offset 0x18",
+            "exact_quote": "00 00 00 18 00 02 00 00 00 0a 03 00"
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "cmplog's I2SRandReplace substitutes one CMP operand into the input at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "Pair 2 vpc>cmplog is decisive with the value_profile technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L34",
+            "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+          },
+          {
+            "claim": "value_profile's CMP_MAP preserves inputs whose operands are closer to matching as new corpus.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "The winner hits the branch 55089 times while cmplog hits it only 1820 times.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L39 Pair 2",
+            "exact_quote": "avg hitcount on branch: winner=55089  loser=1820"
+          },
+          {
+            "claim": "Resolving the false branch proceeds into the array-indexing body lines 258-272 marked winner-only.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "lines 258-272",
+            "exact_quote": "[W]   258        unsigned int index = glyphNameIndex->arrayZ[glyph];"
+          },
+          {
+            "claim": "Winner resolves 10/10 while cmplog resolves only 2/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "L37 Pair 2",
+            "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on version==0x00020000 where value_profile (no I2S) resolves the branch as often as value_profile_cmplog, showing the exact-magic substitution is not what value_profile lacks."
+        },
+        "weakest_evidence_point": "The value_profile delta for the in-bounds glyph index (Pair 2) is inferred from hitcount/resolve gaps and CMP_MAP semantics; no seed-byte offset directly pins the glyph-index bound being closed by gradient feedback.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

@@ -35,7 +35,9 @@ from collections import defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-STEP5A = REPO_ROOT / "step5a"
+# Default to the aggregated cross-server tree (step5a_all). Override with --in-dir
+# for a single-server tree (step5a_a / step5a_b) or the legacy step5a.
+DEFAULT_IN_DIR = "step5a_all"
 
 REQUIRED_CLUSTER = ("feature_id", "mechanism_family", "mechanism_label",
                     "definition", "n_members", "members")
@@ -51,10 +53,14 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--family", default="synergy")
+    ap.add_argument("--in-dir", default=DEFAULT_IN_DIR,
+                    help="step5a tree to validate (default step5a_all; "
+                         "use step5a_a/step5a_b for a single server)")
     a = ap.parse_args()
 
-    cards_path = STEP5A / f"{a.family}.cards.json"
-    clusters_path = STEP5A / a.family / "clusters.json"
+    base = REPO_ROOT / a.in_dir
+    cards_path = base / f"{a.family}.cards.json"
+    clusters_path = base / a.family / "clusters.json"
     for p in (cards_path, clusters_path):
         if not p.is_file():
             print(f"MISSING: {p}", file=sys.stderr)
