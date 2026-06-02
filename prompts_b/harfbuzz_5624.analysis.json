@@ -1,0 +1,100 @@
+{
+  "branch_id": 5624,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry codepoint 0x0E37 (Thai U+0E37, little-endian bytes 37 0e) at a buffer-glyph offset so switch(u) takes case 0x0E37u.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A glyph codepoint equal to 0x0E37 reaching recategorize_combining_class so that switch(u) selects case 0x0E37u; in the serialized input this appears as the 2-byte little-endian literal 37 0e.",
+      "why_winner_satisfies": "value_profile winner seeds repeatedly contain the 37 0e byte run (e.g. seed 025be01a9b9fc036 has '37 0e 00 00' at 0x2c and seed 087d01cc6daaeb6f has '37 0e 00 00' near 0x10); the CMP_MAP Hamming-distance feedback rewards inputs whose CMP operand creeps toward the 0x0E37 constant, and value_profile resolves 10/10.",
+      "why_loser_doesnt": "value_profile_cmplog blocks 9/10 with avg hitcount 5 on the branch versus the winner's 166, so it rarely drives the compared codepoint to exactly 0x0E37; loser-blocking seeds carry different trailing bytes (e.g. 47 0e / 31 0e / 1f e2) rather than a stable 37 0e at the decisive offset.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient bucket on the codepoint==0x0E37 comparison gives a continuous distance signal that ratchets the operand to the exact constant; adding the cmplog I2S stage (the only delta to value_profile_cmplog) interferes here, so the gradient-only fuzzer wins."
+    },
+    {
+      "covers_pairs": ["cmplog>value_profile_cmplog (value_profile)"],
+      "what_input_feature": "The same exact-equality target: a glyph codepoint of 0x0E37 (little-endian 37 0e) substituted into the input so switch(u) takes case 0x0E37u.",
+      "why_winner_satisfies": "cmplog winner seed d484b55bd133cd62 ends in '37 0e' (offset 0x18) and its ancestor chain contains an I2S-floor dash row at depth 5; I2SRandReplace reads the intercepted codepoint==0x0E37 CMP and copies the constant 0x0E37 directly into the input, letting cmplog resolve 8/10.",
+      "why_loser_doesnt": "value_profile_cmplog blocks 9/10 (loser in this pair too); adding the CMP_MAP gradient delta on top of cmplog does not help and the combined fuzzer fails to place 0x0E37 reliably, with loser hitcount 5 vs winner-resolving runs.",
+      "mechanism_attribution": "cmplog's I2SRandReplace performs direct input-to-state substitution of the 0x0E37 operand at matching byte offsets; the lone delta to the loser value_profile_cmplog is the value_profile CMP_MAP stage, which interferes, so the I2S-only fuzzer wins."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the switch case for the literal codepoint 0x0E37.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 / source line",
+      "exact_quote": "Source line: \tcase 0x0E37u:"
+    },
+    {
+      "claim": "The branch is reached only when the codepoint u flows through switch(u) inside the Thai/Lao block.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L59-L65",
+      "exact_quote": "switch (u)"
+    },
+    {
+      "claim": "value_profile is the winner over value_profile_cmplog and the delta technique is I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile resolves 10/10 while value_profile_cmplog blocks 9/10, with winner branch hitcount 166 vs loser 5.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 stats",
+      "exact_quote": "avg hitcount on branch: winner=166  loser=5"
+    },
+    {
+      "claim": "A value_profile winner seed carries the little-endian 0x0E37 byte run 37 0e.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 025be01a9b9fc036 offset 0x2c",
+      "exact_quote": "68 7a 6f 2d 68 61 6e 74 2d 6d 6f 00 37 0e 00 00"
+    },
+    {
+      "claim": "Another value_profile winner seed also carries 37 0e near offset 0x10.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 087d01cc6daaeb6f offset 0x10",
+      "exact_quote": "37 0e 00 00 47 0e 00 00 37 0e 00 00 00 00 0e 00"
+    },
+    {
+      "claim": "value_profile uses CMP_MAP distance-bucket feedback that rewards operands creeping toward a match, with no I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "cmplog is the winner over value_profile_cmplog and the delta technique is value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: cmplog > value_profile_cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The cmplog winner seed ends in the 37 0e little-endian 0x0E37 literal.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed d484b55bd133cd62 offset 0x18",
+      "exact_quote": "20 00 1a 4d 6b 64 00 f8 37 0e"
+    },
+    {
+      "claim": "I2SRandReplace substitutes an intercepted CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile_cmplog loses both pairs, blocking 9/10 at this branch.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "value_profile_cmplog row",
+      "exact_quote": "value_profile_cmplog             1        9          0  loser (I2S vs value_profile); loser (value_profile vs cmplog)"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": true,
+    "verification_method": "Multi-feature branch: pair 1 winner mechanism is CMP_MAP gradient (value_profile, no lineage required). For corroboration of the pair-2 I2S hypothesis I ran `python3 tools/db_query.py lineage --branch 5624 --role W --fuzzer cmplog --trial 1 --seed d484b55bd133cd62` and observed an I2S-floor dash row (mutation_op = -) at depth 5 of the ancestor chain, confirming an I2SRandReplace contribution to the cmplog winner."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on codepoint==0x0E37 where value_profile_cmplog resolves as fast as or faster than both value_profile and cmplog (no interference), with winner/loser branch hitcounts within noise."
+  },
+  "weakest_evidence_point": "Why combining BOTH techniques (value_profile_cmplog) underperforms each single technique is an interference inference; the prompt shows the divergence but no direct mechanism trace of why the union regresses.",
+  "confidence": "medium"
+}

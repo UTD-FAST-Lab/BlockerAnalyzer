@@ -1,0 +1,100 @@
+{
+  "branch_id": 16118,
+  "target": "sqlite3",
+  "summary_one_line": "Reaching this yy_reduce PRAGMA reduce action needs a literal 'PRAGMA' keyword token, requiring BOTH I2S substitution and CMP_MAP gradient.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must begin with the exact SQL keyword bytes 'PRAGMA' (50 52 41 47 4d 41) so the SQLite tokenizer emits the PRAGMA token that drives yy_reduce to this reduce action at 157969.",
+      "why_winner_satisfies": "Both winner-resolving seeds carry the literal ASCII 'PRAGMA' at offsets 0x00-0x05 (PRAGMA Ostor / PRAGMA vdbe_), and only the winner takes the true branch (W T=2 F=17 vs L T=0 F=135 at L157969).",
+      "why_loser_doesnt": "value_profile-discovered loser seeds are SELECT-family / punctuation garbage (e.g. ELE...CT, ;;\\;;E<) with no contiguous PRAGMA keyword, so the tokenizer never emits the PRAGMA token and the true side stays at T=0.",
+      "mechanism_attribution": "Adding I2S (cmplog's I2SRandReplace) to value_profile lets the mutator read the per-execution CMP buffer and substitute the keyword-matching bytes for 'PRAGMA' at the input head; the winning vpc seed's ancestor chain contains an I2S-floor dash row, confirming an I2S contribution that value_profile alone lacks."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Same PRAGMA-keyword reduce target, but reaching it also requires progressively closing the comparison distance on the keyword/operand bytes so a near-match input is preserved as a corpus stepping stone.",
+      "why_winner_satisfies": "Adding value_profile's CMP_MAP gradient to cmplog gives the winner the new-CMP_MAP-bucket feedback that retains partial-keyword inputs; the winner resolves 9/10 and reaches the branch (avg hitcount on branch winner=5), whereas plain cmplog does not.",
+      "why_loser_doesnt": "cmplog-only loser seeds (SELEEC, \"\"/\"\") are short corrupted fragments discovered at 1-81s that block 10/10 (loser resolved=0/10 blocked=10) — without the CMP_MAP gradient cmplog cannot accrete the partial-keyword corpus needed to assemble PRAGMA.",
+      "mechanism_attribution": "value_profile's CMP_MAP records a Hamming/prefix-distance bucket per CMP; an input whose operand pair is closer to matching the PRAGMA comparison adds a new bucket and is kept as corpus, supplying I2S with a better substitution substrate that cmplog alone cannot retain."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of a branch at sqlite3.c:157969 inside the parser reduce function yy_reduce.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "sqlite3.c:157969:7",
+      "exact_quote": "Location: /src/sqlite3/bld/sqlite3.c:157969:7\nEnclosing function: sqlite3.c:yy_reduce"
+    },
+    {
+      "claim": "value_profile_cmplog wins both decisive pairs while cmplog-alone and value_profile-alone each block 10/10, the joint-necessity signature.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "The I2S delta pair shows value_profile loses 0/10 resolved against the vpc winner.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 loser line",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "Both winner-resolving seeds carry the literal ASCII 'PRAGMA' keyword at the input head.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 69cbf4dccc13a12b and 995af0cf34ba0c6c, offset 0x0000",
+      "exact_quote": "50 52 41 47 4d 41 20 4f 73 74 6f 72 3b 2d 14 22   PRAGMA Ostor;-.\""
+    },
+    {
+      "claim": "The second winner seed also begins with PRAGMA.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 995af0cf34ba0c6c, offset 0x0000",
+      "exact_quote": "50 52 41 47 4d 41 20 76 64 62 65 5f 00 70 6f 72   PRAGMA vdbe_.por"
+    },
+    {
+      "claim": "Winner bytes at offsets 0x00-0x05 are P R A G M A while loser bytes are scattered punctuation and SELECT-family characters.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0000-0x0005",
+      "exact_quote": "   0x0000  50(P)x2                             3b(;)x5 53(S)x2 22(\")x1 ac(.)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "At the blocker line the winner takes the true side a few times while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L157969 BLOCKER row",
+      "exact_quote": "d=1   L157969  T=2 F=17  T=0 F=135    <-- BLOCKER"
+    },
+    {
+      "claim": "Loser-blocking seeds discovered by cmplog and value_profile are short SELECT-family or punctuation fragments with no PRAGMA keyword.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seeds 00150fd27837b85b and 001712063f69369f",
+      "exact_quote": "0000: 53 45 4c 45 45 43 20 02 60                        SELEEC .`"
+    },
+    {
+      "claim": "cmplog gains I2SRandReplace, which scans the input for bytes matching one CMP operand and substitutes the other.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile's CMP_MAP preserves an input whose CMP operands are closer to matching than any previously seen pair.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 16118 --role W --fuzzer value_profile_cmplog --trial 1 --seed 69cbf4dccc13a12b` and observed an I2S-floor dash row (mutation_op = -, ancestor 56c5e17287f92940) at depth 6 of the chain; the tool reported '1 ancestor dash row(s) at depth 6', confirming an unwrapped I2SRandReplace find in this vpc winner's ancestry."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on a literal PRAGMA keyword that value_profile_cmplog resolves but where cmplog-alone (with I2S) also resolves it at the same rate, showing value_profile is not jointly necessary."
+  },
+  "weakest_evidence_point": "The value_profile-axis claim that CMP_MAP gradient retention of partial-PRAGMA corpus is jointly necessary rests on inference from feedback mechanics, not a direct observation of a retained partial-keyword stepping-stone seed.",
+  "confidence": "medium"
+}

@@ -1,0 +1,93 @@
+{
+  "branch_id": 5827,
+  "target": "harfbuzz",
+  "summary_one_line": "A valid sfnt font with a cmap table that maps the Indic virama codepoint to a real glyph, so get_nominal_glyph succeeds.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed sfnt/TrueType font (version magic 00 01 00 00 at offset 0, a parseable table directory including a 'cmap' table) whose cmap maps config->virama to a non-zero glyph, so the line-282 expression is false (config->virama truthy AND get_nominal_glyph returns true).",
+      "why_winner_satisfies": "The winning value_profile_cmplog seed begins with the sfnt version magic 00 01 00 00 and embeds the literal table tag 'cmap' at offset 0x0c plus a 'SUN ' tag at 0x1c; these are exact 4-byte structural tokens that let the font parse far enough to expose a cmap lookup, and the W role then takes the false side (line 282 W: T=0 F=1) and enters the consonant-position loop at 447-458.",
+      "why_loser_doesnt": "The value_profile loser seeds are short, unstructured byte runs (e.g. 8a 8a 8a, 86 86 86, 02 02 02, 55 55) with no sfnt magic and no 'cmap' tag, so the font never produces a virama glyph; all 10 L trials block on the true side of line 282 (L 282: T=10 F=0) and load_virama_glyph returns false at the d=2 caller (L 447: T=0 F=10).",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of the comparison-distance feedback that value_profile already has. The exact 4-byte sfnt magic and 'cmap'/'SUN ' table tags are produced by I2SRandReplace copying intercepted comparison operands (table-tag and version-magic equality checks in the font loader) directly into the input. value_profile's coarse Hamming-distance feedback can approach but not land these multi-byte exact-equality tokens; only the I2S substitution stage in vpc plants them, which is the single technique that differs between winner and loser."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked false side of line 282 requires config->virama truthy AND get_nominal_glyph to succeed.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 282",
+      "exact_quote": "if (!config->virama || !font->get_nominal_glyph (config->virama, &glyph))"
+    },
+    {
+      "claim": "The false branch is the globally blocked side at this branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "The winning seed embeds sfnt version magic and the literal 'cmap' table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 94ee6502f4aed8ba offsets 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 07 ff 80 20 3f 21 20 63 6d 61 70   ........ ?! cmap"
+    },
+    {
+      "claim": "The winning seed also embeds a 'SUN ' table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 94ee6502f4aed8ba offsets 0x10-0x1f",
+      "exact_quote": "1d 1d 00 01 00 00 00 21 11 fb 20 83 53 55 4e 20   .......!.. .SUN "
+    },
+    {
+      "claim": "The winner resolves the branch and runs the consonant-position loop while the loser blocks at the load_virama_glyph caller.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=2 L447 and d=1 L282",
+      "exact_quote": "if (indic_plan->load_virama_glyph (font, &virama))"
+    },
+    {
+      "claim": "The loser blocks the true side of line 282 in all 10 trials while the winner takes the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L282 BLOCKER row",
+      "exact_quote": "T=0 F=1  T=10 F=0  if (!config->virama || !font->get_nominal_glyph (config->..."
+    },
+    {
+      "claim": "The loser value_profile seeds are short unstructured byte runs with no font structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0097c8dd9cd41be2 offsets 0x08-0x17",
+      "exact_quote": "00 80 00 01 8a 8a 8a 8a   ................"
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace whereas value_profile has no I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators line",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, only havoc plus token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators line",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile uses a coarse Hamming/prefix distance bucket rather than exact-byte substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation",
+      "exact_quote": "Hamming distance bucket for `trace_cmp*`; matching-prefix\nlength for string/memory CMPs"
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog over value_profile with delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5827 --role W --fuzzer value_profile_cmplog --trial 2 --seed 94ee6502f4aed8ba` over the 42-level ancestor chain; observed exactly 1 I2S-floor dash row (mutation_op = -) at depth 41, the ParentInfo-only signature of an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile resolves the line-282 false branch as often as value_profile_cmplog despite the gate requiring an exact multi-byte cmap/sfnt token would refute the I2S-substitution attribution."
+  },
+  "weakest_evidence_point": "Only one winner seed is shown, so the claim that the 'cmap'/'SUN ' tags (rather than some other parsed structure) are the specific operands I2S planted to satisfy get_nominal_glyph is inferred, not directly traced byte-by-byte.",
+  "confidence": "medium"
+}

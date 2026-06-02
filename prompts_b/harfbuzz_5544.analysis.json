@@ -1,0 +1,87 @@
+{
+  "branch_id": 5544,
+  "target": "harfbuzz",
+  "summary_one_line": "A valid sfnt table-tag literal (GPOS/GSUB at offset 0x0c) plus version=1 header so get_script_list dispatches version1, not the default Null arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed sfnt/OpenType font header: the 4-byte table tag 'GPOS' or 'GSUB' at offset 0x0c-0x0f, plus the 0x00 01 00 00 sfnt version and a 0x0001 GSUBGPOS major version at offset 0x04-0x05, so that get_script_list() takes case 1 (version1.scriptList) and the enclosing switch resolves a real ScriptList rather than falling through to the blocked default Null arm.",
+      "why_winner_satisfies": "Every winner-resolving seed carries the literal ASCII tag at offset 0x0c-0x0f: W bytes are constant 47(G)x20 / 50(P)x16 53(S)x4 / 4f(O)x16 55(U)x4 / 53(S)x16 42(B)x4, i.e. the recognized 'GPOS'/'GSUB' fourCC, with a 00 01 00 00 00 01 header opening, which routes execution through case 1 and into the GSUBGPOS table machinery (ChainContext::dispatch fires 1040x in W, 0x in L).",
+      "why_loser_doesnt": "Loser-blocking seeds have scattered, non-tag bytes at offset 0x0c-0x0f (00(.)x3 01(.)x2 20( )x2 etc.) and tiny/garbage headers (one is 6 bytes), so the table is never recognized; get_script_list never reaches a valid version and L takes the true side (Null) 2640 times while never executing the GSUBGPOS dispatch functions.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver buffer where the harfbuzz table-tag comparison logged the expected literal ('GPOS'/'GSUB') against the input bytes, then substitutes that operand directly into the input at the matching offset, planting the exact 4-byte fourCC that the magic-byte gate demands; naive and value_profile lack this substitution and must stumble on the 4-byte literal by chance."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of a switch on the GSUBGPOS major version; the false side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L4243",
+      "exact_quote": "default: return Null (ScriptList);"
+    },
+    {
+      "claim": "The winning side is reached via case 1 dispatching to version1.scriptList, which only W executes.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L4239",
+      "exact_quote": "[W]  4239      case 1: return this+u.version1.scriptList;"
+    },
+    {
+      "claim": "Winner seeds hold a constant ASCII table tag at offset 0x0c-0x0f while loser seeds are scattered there.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "The remaining tag bytes P, O, S/B are also constant in W forming GPOS/GSUB fourCCs.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000d-0x000f",
+      "exact_quote": "0x000d  50(P)x16 53(S)x4                    20( )x4 00(.)x4 18(.)x1 17(.)x1  +8u  DIFFER"
+    },
+    {
+      "claim": "Winner seeds open with the 00 01 00 00 00 01 sfnt+version header and carry the GPOS/GSUB tag in their bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 002c9ad92acce91b",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+    },
+    {
+      "claim": "One loser seed is only 6 bytes of garbage, far too small to present a valid table header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 003817559785f774",
+      "exact_quote": "Seed 1 (id=003817559785f774, size=6 bytes, fuzzer=naive, trial=1, discovered_at=0s, mutation_op=ByteDecMutator,WordAddMutator):"
+    },
+    {
+      "claim": "Only winner inputs execute the GSUBGPOS ChainContext dispatch machinery; loser inputs never do.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "ChainContext::dispatch",
+      "exact_quote": "    1040         0  OT::hb_ot_apply_context_t::return_t OT::ChainContext::dispatch<OT::hb_ot_apply_context_t>(OT::hb_ot_apply_context_t*) const"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile (the loser of pair 2) has no I2SRandReplace, so it cannot perform the substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs differ by the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta",
+      "exact_quote": "value_profile_cmplog > value_profile  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5544 --role W --fuzzer cmplog --trial 1 --seed 002c9ad92acce91b`; the 31-level ancestor chain contains 2 I2S-floor dash rows (mutation_op = -) at depths 29 and 30, the lower-bound signal of an unwrapped I2SRandReplace find under the current cmplog/vpc build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the same default-arm switch where placing the exact GPOS/GSUB tag literal at offset 0x0c shows no resolution advantage for cmplog/vpc over naive/value_profile (i.e. naive resolves the 4-byte literal gate just as fast), which would mean the divergence is not driven by I2S literal substitution."
+  },
+  "weakest_evidence_point": "The CMP that logs the table-tag literal is inferred from harfbuzz's fourCC lookup rather than observed in the cmplog buffer directly, so the precise comparison I2S exploits is assumed, not proven.",
+  "confidence": "high"
+}

@@ -1,0 +1,119 @@
+{
+  "branch_id": 5708,
+  "target": "harfbuzz",
+  "summary_one_line": "Font must carry a structurally valid kern table that reaches has_machine_kerning returning false, not all-0x20 padding.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "A font blob whose kern-table region (offsets ~0x10-0x2f) holds concrete non-padding sub-table offset/length fields rather than 0x20 filler, so kerning-table parsing advances far enough to evaluate has_machine_kerning and return false.",
+      "why_winner_satisfies": "Winner seeds carry varied structural bytes at the table region (e.g. 0x10=00, 0x18=01/35, 0x1a=00/35) instead of uniform 0x20; value_profile's CMP_MAP distance feedback rewards inputs whose parsed table-length/offset comparisons move closer to satisfying the kern-table validity checks, preserving partial progress as corpus.",
+      "why_loser_doesnt": "Loser (naive) seeds are dominated by 0x20 padding across 0x06-0x2f, so the kern sub-table fields never form a valid offset chain; naive has no distance signal to incrementally close the gap and stays blocked on the true side.",
+      "mechanism_attribution": "value_profile's CMP_MAP records a Hamming/prefix-distance bucket per CMP; an input whose kern-parse comparisons get closer to passing adds a new bucket and is kept, giving a gradient toward the structurally-valid font that naive lacks."
+    },
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "A font that reaches the kern-table path through the same edges naive hits but under a call context that registers as new coverage, sustaining corpus entries that drive deeper into hb_ot_shape_planner_t::compile toward the blocker.",
+      "why_winner_satisfies": "naive_ctx folds the caller chain (compile <- init0 <- create2 ...) into the edge-map index, so edges in the kern-decision block at L168-L187 are recorded as new (call-context, edge) pairs, keeping more intermediate font states alive and exploring the false side.",
+      "why_loser_doesnt": "naive uses bare edge buckets, so once the L185-L187 edges are hit once under any context they no longer yield new coverage; the loser's 0x20-padded inputs never accrue the structural variety needed and it remains blocked (resolved 2/10).",
+      "mechanism_attribution": "naive_ctx's CtxHook indexes edges by call context, turning the same kern-decision edge into multiple distinct coverage slots and thereby preserving inputs that incrementally build the valid kern table that flips the branch false."
+    },
+    {
+      "covers_pairs": ["minimizer>naive (calibrated_energy)"],
+      "what_input_feature": "A compact, fast-executing font seed whose kern-table fields are concrete enough to reach the has_machine_kerning evaluation; the calibrated power schedule then spends extra mutation energy on such seeds to complete the valid structure.",
+      "why_winner_satisfies": "minimizer's winning seeds are small (44-66 bytes) with concrete table bytes (e.g. F2020 28f6 6b65726e 'kern' header at 0x06-0x0f); calibrated energy gives faster/smaller/stabler seeds more havoc mutations per visit, concentrating effort on the near-valid font and reaching the false side fastest (avg blocked 2.90h vs loser 15.40h).",
+      "why_loser_doesnt": "naive runs a plain mutational stage with uniform energy, so it dilutes effort across many 0x20-padded seeds that never form a valid kern table; it stays blocked 8/10 trials.",
+      "mechanism_attribution": "minimizer's CalibrationStage + StdPowerMutationalStage derives per-seed energy from a calibration perf_score (no rarity weighting), so small fast near-valid font seeds earn disproportionate havoc mutations that complete the kern-table structure flipping the branch false."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a structural kerning-table predicate, not a magic-number comparison gate.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L187 source line",
+      "exact_quote": "|| !hb_ot_layout_has_machine_kerning (face)"
+    },
+    {
+      "claim": "Three distinct techniques each beat naive at this branch, so divergence is multi-axis.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "pairs 1-3 deltas",
+      "exact_quote": "Pair 1: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "ctx_coverage is the delta for the naive_ctx pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "pair 2",
+      "exact_quote": "Pair 2: naive_ctx > naive  [delta: ctx_coverage]"
+    },
+    {
+      "claim": "calibrated_energy is the delta for the minimizer pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "pair 3",
+      "exact_quote": "Pair 3: minimizer > naive  [delta: calibrated_energy]"
+    },
+    {
+      "claim": "Loser-blocking seeds are dominated by 0x20 padding in the table region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 1 id=d1945e96aad02f88 offsets 0x06-0x0f",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 6b 65 72 6e   ......      kern"
+    },
+    {
+      "claim": "Winner-resolving seeds carry concrete non-padding structural bytes in the table region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 1 id=9c4c9afb9e3f0195 offsets 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 01 46 20 20 20 28 f6 6b 65 72 6e   ......F   (.kern"
+    },
+    {
+      "claim": "The byte diff shows winners diverge from losers' uniform 0x20 at structural offsets like 0x18-0x1a.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x18",
+      "exact_quote": "0x0018  01(.)x7 35(5)x7 00(.)x5 6a(j)x2     20( )x6 61(a)x1                     DIFFER"
+    },
+    {
+      "claim": "value_profile rewards CMP-operand pairs that get closer to matching by adding a new CMP_MAP bucket.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile feedback",
+      "exact_quote": "An input that produces a CMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "naive_ctx folds call context into the edge-map index so the same edge is recorded at different slots per call path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx instrumentation",
+      "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "The kern-decision edges at L168-L187 are on the call chain to the blocker and show W/L divergence.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L187 blocker",
+      "exact_quote": "|| !hb_ot_layout_has_machine_kerning (face)  <-- BLOCKER"
+    },
+    {
+      "claim": "minimizer derives per-seed mutation energy from calibration so faster, smaller, more-stable seeds earn more mutations.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "minimizer power stage",
+      "exact_quote": "faster, smaller,\nmore-stable seeds earn more mutations"
+    },
+    {
+      "claim": "minimizer reaches the resolving side fastest, with the lowest blocked duration of the three winners.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "pair 3 avg duration",
+      "exact_quote": "avg duration blocked: winner=2.90h  loser=15.40h"
+    },
+    {
+      "claim": "The W role takes the false (winning) branch side at L187 while the L role never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L187 W/L counts",
+      "exact_quote": "L 187  T=0 F=40  T=14 F=0  || !hb_ot_layout_has_machine_kerning (face)  <-- BLOCKER"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Not an I2SRandReplace claim, so no lineage query is mandatory. The decisive deltas are value_profile (CMP_MAP gradient), ctx_coverage, and calibrated_energy — none is cmplog/vpc I2S. The primary hypothesis (Pair 1) attributes the winner to value_profile's CMP_MAP distance feedback; MECHANISM CONTEXT confirms value_profile uses no I2SRandReplace and only havoc/token mutators, so the dash-row floor check does not apply here."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the kern-table region is replaced with uniform 0x20 padding still resolves the false branch under naive as often as under value_profile/naive_ctx/minimizer, showing the structural-validity feature is not what gates the branch."
+  },
+  "weakest_evidence_point": "Whether value_profile's win is specifically CMP_MAP distance feedback on kern-table length comparisons rather than incidental extra corpus diversity from CMP buckets is not directly observable in the prompt.",
+  "confidence": "medium"
+}

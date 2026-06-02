@@ -1,0 +1,106 @@
+{
+  "branch_id": 165,
+  "target": "curl",
+  "summary_one_line": "Input must spell a Host-header literal so the cookie engine activates and the host pointer is taken at L2792.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed 'Host:' header literal at byte offsets 0x24-0x29 (case-varying H-o-s-t-:) plus the leading proto/host structure, so the cookie engine path executes and the host pointer is computed at line 2792.",
+      "why_winner_satisfies": "Winner seeds carry a concentrated 'Host:' token at offsets 0x24-0x29 (W bytes 47/48 'GH', 48 'H', 6f/4f 'o', 73/53 's', 74 't', 3a/3b ':') matching the literal the CMP callbacks log; the true side at L2792 is taken 30 times in W.",
+      "why_loser_doesnt": "Loser seeds have scattered, low-concentration bytes at those same offsets (e.g. 0x25 has 25/34/2e/41 rather than a stable H), never assembling the Host header, so L2792 false side is taken 30 times and the branch stays blocked.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver buffer for the intercepted Host-header string comparison and substitutes the matching operand into the input at the right offsets; naive and value_profile lack I2SRandReplace and cannot synthesize the literal, so only cmplog and value_profile_cmplog resolve."
+    },
+    {
+      "covers_pairs": ["fast>minimizer (aflfast_rarity)"],
+      "what_input_feature": "Same structural Host-header / cookie-engine input as above, but reached without CMP introspection — purely via more havoc energy budgeted to the rarely-hit seed that approaches the cookie path.",
+      "why_winner_satisfies": "fast uses the AFLFast FAST power schedule giving rarely-hit coverage buckets up to 4x energy, so the seed near the cookie branch receives more havoc mutations and resolves 8/10 with avg hitcount 214 on the branch.",
+      "why_loser_doesnt": "minimizer uses PowerSchedule None (intrinsic calibration energy only, not weighted by region rarity), so the same rare path gets ordinary budget and resolves only 2/10 with avg hitcount 53.",
+      "mechanism_attribution": "fast's AFLFast rare-edge power schedule (n_fuzz-based perf_score boost) concentrates havoc budget on the rarely-exercised cookie path; minimizer's calibration-only energy does not, so fast wins by scheduling not by CMP-solving."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the host-pointer ternary at L2792, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L2792",
+      "exact_quote": "const char *host = data->state.aptr.cookiehost ?"
+    },
+    {
+      "claim": "Two pairs differ by the I2S technique: cmplog>naive and value_profile_cmplog>value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile_cmplog>value_profile is also an I2S-delta decisive pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner seeds carry a concentrated Host-header literal at offsets 0x24-0x29.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x24-0x29",
+      "exact_quote": "0x0025  48(H)x30                            25(%)x4 34(4)x3 2e(.)x3 41(A)x2 +3u  DIFFER"
+    },
+    {
+      "claim": "Winner side offset 0x28 is t and 0x27 is s/S, spelling Host with case variation.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x27-0x28",
+      "exact_quote": "0x0028  74(t)x30                            25(%)x5 48(H)x2 2e(.)x2 33(3)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "The true side at L2792 is taken 30 times in W and 0 times in L.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2792",
+      "exact_quote": "const char *host = data->state.aptr.cookiehost ?  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "fast wins by AFLFast power schedule giving rarely-hit paths up to 4x energy.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "fast Mutators / stages",
+      "exact_quote": "Rarely-hit\npaths get up to 4× energy; saturated paths are damped to 0.4×."
+    },
+    {
+      "claim": "minimizer uses PowerSchedule None so energy is not weighted by region hit-frequency.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "minimizer Mutators / stages",
+      "exact_quote": "PowerSchedule is `None`, so the\nenergy uses ONLY intrinsic calibration and is NOT weighted by how often\na region has been hit."
+    },
+    {
+      "claim": "fast resolves 8/10 with avg hitcount 214 vs minimizer 2/10 with avg hitcount 53.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 3",
+      "exact_quote": "avg hitcount on branch: winner=214  loser=53"
+    },
+    {
+      "claim": "fast vs minimizer is the aflfast_rarity single-technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 3",
+      "exact_quote": "Pair 3: fast > minimizer  [delta: aflfast_rarity]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 165 --role W --fuzzer cmplog --trial 1 --seed 0a3f81ed7ca3e7e4` and observed two I2S-floor dash rows (mutation_op = -) at depths 14 and 15 of the ancestor chain, confirming an unwrapped I2SRandReplace find under the current build. (A second seed 01d33da9d2a42feb had an all-havoc 50-level chain with no dash rows, which is consistent with the floor being a lower bound.)"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating L2792 on a Host-header literal where cmplog/vpc fail to resolve it while naive/value_profile resolve it at equal rates would refute the I2S attribution; for the aflfast hypothesis, fast and minimizer resolving at equal rates on a rare-path harness would refute it."
+  },
+  "weakest_evidence_point": "The Host-header byte interpretation rests on case-varying offsets 0x24-0x29 spelling 'Host:'; the leading 'G' at 0x24 and the proto bytes are noisy, so the exact CMP operand string is inferred rather than directly logged.",
+  "confidence": "medium"
+}

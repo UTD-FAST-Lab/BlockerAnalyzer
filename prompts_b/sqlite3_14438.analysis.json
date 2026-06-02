@@ -1,0 +1,87 @@
+{
+  "branch_id": 14438,
+  "target": "sqlite3",
+  "summary_one_line": "SQL text whose parse yields an OP_ShiftRight/OP_ShiftLeft VDBE opcode, i.e. a '>>' or '<<' bit-shift operator inside a parseable SELECT expression.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "Input bytes that the SQL tokenizer accepts as a valid expression containing a bit-shift operator ('>>' = 0x3e 0x3e, or '<<'), so the code generator emits an OP_ShiftRight/OP_ShiftLeft opcode that the VDBE then dispatches via the shared 'case OP_ShiftRight' at sqlite3.c:86941. Reaching it requires a SELECT-like prefix plus a two-operand shift sub-expression.",
+      "why_winner_satisfies": "Winner-resolving seeds are well-formed SELECT statements carrying shift/comparison operator bytes: Seed 1 'SELECT 1*9988878...>9=...' and Seed 3 'sELECT' followed by repeated '>>' (0x3e 0x3e) runs. The BYTE DIFF shows the winner concentrates the readable prefix S/E/L/E/C/T and '>'(0x3e) bytes at the operand offsets, and OP_ShiftRight is hit T=6 on the winner side.",
+      "why_loser_doesnt": "Loser-blocking naive seeds are short, syntactically broken byte soup dominated by ';'(0x3b), '+'(0x2b) and high bytes (e.g. Seed 1 'i;;;;;;; . Z;ELE', Seed 2 '#1;.. S..#$'); they never form a parseable shift expression, so the parser/codegen never emits the opcode and OP_ShiftRight stays T=0 (blocked) for the loser.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs whose intercepted CMPs (the tokenizer/keyword matching and operator-character comparisons) get progressively closer to matching valid SQL keyword/operator literals; the distance-bucket signal preserves partial-prefix SELECT/shift-operator inputs that naive's plain edge feedback cannot ratchet toward, letting value_profile assemble a parseable '>>' expression."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the shared OP_ShiftRight/OP_ShiftLeft case in the VDBE main dispatch loop, requiring a shift opcode to be emitted.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "sqlite3.c:86941:1",
+      "exact_quote": "Source line: case OP_ShiftRight: {           /* same as TK_RSHIFT, in1, in2, out3 */"
+    },
+    {
+      "claim": "OP_ShiftLeft falls through into the OP_ShiftRight case, so either '>>' or '<<' reaches the blocker.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L86940-86941",
+      "exact_quote": "case OP_ShiftLeft:              /* same as TK_LSHIFT, in1, in2, out3 */"
+    },
+    {
+      "claim": "value_profile resolves the branch in all 10 trials while naive blocks it in 9 of 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 subject 32",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "A winner-resolving seed is a SELECT with a multiply/comparison expression carrying '>' bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 id=b147bf945d398d12",
+      "exact_quote": "53 45 4c 45 43 54 20 31 2a 39 39 38 38 38 37 38   SELECT 1*9988878"
+    },
+    {
+      "claim": "A winner-resolving seed contains literal '>>' (0x3e 0x3e) right-shift operator bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 3 id=3fa6e2911ec7c69f offset 0x10",
+      "exact_quote": "3e 3e 0d 31 2e 20 20 20 3e 3e 0d 31 2e 20 3e 3e   >>.1.   >>.1. >>"
+    },
+    {
+      "claim": "Loser-blocking naive seeds are short, non-parseable byte soup dominated by ';' and high bytes, not valid SQL.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 2 id=006bfd1b4dc38d0d",
+      "exact_quote": "23 31 3b ff 12 20 53 f0 7f 23 24                  #1;.. S..#$"
+    },
+    {
+      "claim": "OP_ShiftRight is taken (true) 6 times on the winner side but never on the loser side, confirming the directional divergence.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L86941",
+      "exact_quote": "L86941  T=6 F=348  T=0 F=40  case OP_ShiftRight: {           /* same as TK_RSHIFT, in1...  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner concentrates readable SELECT-prefix bytes at the leading offsets where the loser shows scattered ';'/high bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0000-0x0005",
+      "exact_quote": "0x0001  45(E)x3                             3b(;)x5 20( )x3 43(C)x2 0d(.)x2 +8u  DIFFER"
+    },
+    {
+      "claim": "value_profile adds a corpus entry whenever an input's CMP operands get closer to matching than any seen before, providing the gradient naive lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "The CMP_MAP distance bucket encodes matching-prefix length for string/memory comparisons, the signal that ratchets toward valid keyword/operator literals.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation",
+      "exact_quote": "The distance bucket is a coarse encoding of how close the two\noperands were (Hamming distance bucket for `trace_cmp*`; matching-prefix\nlength for string/memory CMPs)."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Lineage verification is not required for CMP_MAP gradient (only I2SRandReplace mandates a db_query.py lineage check). The winner is value_profile, whose MECHANISM CONTEXT explicitly states it uses 'No I2SRandReplace' and logs 'havoc/token names only', so no dash-row I2S floor is expected; the gradient signal is the distance-bucketed CMP_MAP feedback, evidenced by the source/byte trail rather than lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the SQL operator-character CMPs are made non-intercepted (e.g. a single-byte equality not exposed to CMP_MAP) would predict value_profile loses its edge over naive; if value_profile still resolves OP_ShiftRight at the same rate with no operator-prefix CMP gradient available, the CMP_MAP-gradient attribution is refuted."
+  },
+  "weakest_evidence_point": "Whether value_profile's win is specifically driven by operator-literal CMP gradient versus simply preserving more SELECT-prefix partial inputs via tokenizer keyword CMPs is not directly distinguishable from the seed bytes alone.",
+  "confidence": "medium"
+}

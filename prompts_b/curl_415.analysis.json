@@ -1,0 +1,81 @@
+{
+  "branch_id": 415,
+  "target": "curl",
+  "summary_one_line": "Winner inputs encode the HTTP/2 protocol-version literal so conn->httpversion reaches >=20, satisfying the PROTO_FAMILY_HTTP && httpversion>=20 gate.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Bytes that drive conn->httpversion to a value >= 20 (HTTP/2) while keeping PROTO_FAMILY_HTTP set — concretely the literal HTTP-version token 'HTTP/2' present in the seed (offsets ~0x24-0x2a: 47 48 54 54 50 2f 32 = 'GHTTP/2').",
+      "why_winner_satisfies": "Every winner-resolving seed carries the literal 'HTTP/2' bytes (offset 0x24 G=47 concentrated x16, then HTTP/2 at 0x25-0x2a), and the per-role overlay shows the winner taking the true branch at line 470 (W T=1010) with httpversion==20 detected at readwrite_data L540.",
+      "why_loser_doesnt": "Loser-blocking seeds carry no HTTP/2 version token at those offsets (e.g. offset 0x24 is P/B/junk, not the concentrated G; HTTP-version field absent), so conn->httpversion never reaches 20 and the true side at line 470 is never taken (L T=20 only on the false-direction row, never resolving the blocked true side).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer for the httpversion / version-string comparison and substitutes the matching operand (the HTTP/2 version literal) directly into the input at the right offset; naive/value_profile have no I2SRandReplace and must stumble onto the exact multi-byte version token by blind havoc, which they fail to do in 10 trials. value_profile_cmplog wins over value_profile for the same I2S reason."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the HTTP/2 gate requiring conn->httpversion >= 20 under PROTO_FAMILY_HTTP.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "transfer.c:470",
+      "exact_quote": "((conn->handler->protocol&PROTO_FAMILY_HTTP) && conn->httpversion >= 20) ||"
+    },
+    {
+      "claim": "Both decisive pairs are I2S deltas and the winners resolve while losers block.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "The second decisive pair is also an I2S delta (value_profile_cmplog over value_profile).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the literal HTTP/2 version token.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 32d10b449c4075ee offset 0x20-0x2f",
+      "exact_quote": "47 48 54 54 50 2f 32 37 2e 30 2e 2f   ....GHTTP/27.0./"
+    },
+    {
+      "claim": "The HTTP-version token byte 'G' is concentrated at offset 0x24 in winners but not losers.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0024",
+      "exact_quote": "0x0024  47(G)x16                            50(P)x2 42(B)x1 9e(.)x1 2e(.)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "The winner takes the true (blocked) side of line 470 while the loser does not resolve it.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L470",
+      "exact_quote": "d=1   L 470  T=1010 F=0  T=20 F=0  ((conn->handler->protocol&PROTO_FAMILY_HTTP) && conn->htt...  <-- BLOCKER"
+    },
+    {
+      "claim": "The HTTP/2 detection (httpversion==20) fires in the winner at readwrite_data L540 but not the loser.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=2 L540",
+      "exact_quote": "d=2   L 540  T=1010 F=12  T=0 F=20  (conn->httpversion == 20));"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a CMP operand at matching input offsets; naive has no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the second pair's win is also attributable to I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 415 --role W --fuzzer cmplog --trial 1 --seed 32d10b449c4075ee` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 23 and 24 of the 25-level ancestor chain, the direct lower-bound signal of an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose HTTP/2 version-establishing comparison is gated on a value never reached via operand substitution (e.g. computed, not literal-compared) on which cmplog still resolves the >=20 branch as fast as naive — showing the win was not from I2S literal substitution of the version token."
+  },
+  "weakest_evidence_point": "The exact CMP whose operand I2S substitutes (httpversion integer vs the 'HTTP/2' string parse) is inferred from source plus the concentrated version-token bytes, not directly observed in a CmpLog trace.",
+  "confidence": "high"
+}

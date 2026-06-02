@@ -1,0 +1,81 @@
+{
+  "branch_id": 14475,
+  "target": "sqlite3",
+  "summary_one_line": "A three-part dotted name (schema.table.column) so the parser sets zDb non-NULL and lookupName takes the if(zDb) true branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)", "value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "SQL text that parses as a three-part qualified name 'X.Y.Z' (two dots) reaching the TK_DOT case in resolveExprStep, so lookupName is called with zDb != 0; reaching the true side of `if( zDb )` at line 97837.",
+      "why_winner_satisfies": "The winner-resolving seed is 'SELECT M.L. .L.4 ...' with multiple '.' (0x2e) separators producing dotted X.Y.Z tokens; per-role overlay shows the winner alone hits lines 97838-97861 (the zDb body) and line 98387 lookupName call after the TK_DOT path, and the blocker count shows W T=1 vs L T=0 at L97837.",
+      "why_loser_doesnt": "Loser-blocking seeds are 'SELECT CC........' / 'SELECT+SSE++++++' with no two-dot qualified-name structure, so the parser yields TK_ID (or no dotted name) and lookupName is called with zDb==0; the overlay marks the zDb-body lines as not-hit for L and the blocker shows L T=0 F=20.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs whose CMP operands get closer to producing the dotted-name token structure: each near-match on the byte comparisons in the tokenizer/parser adds a new CMP_MAP distance bucket, preserving partial-progress seeds so the rare two-dot qualified-name layout is assembled incrementally. Naive/cmplog (without CMP_MAP) lack this gradient and only rarely stumble onto the structure via havoc."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the true branch of `if( zDb )` in lookupName at sqlite3.c:97837.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "sqlite3.c:97837:7",
+      "exact_quote": "Source line:   if( zDb ){"
+    },
+    {
+      "claim": "Both decisive pairs are won by the value_profile-adding fuzzer, delta = value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+    },
+    {
+      "claim": "The second decisive pair adds value_profile on top of cmplog.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "zDb originates from the TK_DOT parsing path that calls lookupName with a database/table qualifier.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L98387 caller block",
+      "exact_quote": "return lookupName(pParse, zDb, zTable, zColumn, pNC, pExpr); <-- CALL"
+    },
+    {
+      "claim": "The winner-resolving seed contains dotted qualified-name structure (multiple '.' separators) consistent with X.Y.Z.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id b6b3c8f861d310d6 offset 0x00-0x0f",
+      "exact_quote": "SELECT M.L. .L.4"
+    },
+    {
+      "claim": "The loser-blocking seed lacks the dotted qualified-name structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 473c3c8f9d2c27ed offset 0x00-0x0f",
+      "exact_quote": "SELECT CC......."
+    },
+    {
+      "claim": "Only the winner takes the zDb-body lines while the loser does not, and the blocker itself shows W true vs L false.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L97837",
+      "exact_quote": "d=1   L97837  T=1 F=0  T=0 F=20  if( zDb ){  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile preserves an input when its CMP operand pair is closer to matching than any previously seen, via a new CMP_MAP distance bucket.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile encodes operand closeness as a distance bucket (Hamming distance / matching-prefix length).",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation",
+      "exact_quote": "The distance bucket is a coarse encoding of how close the two\noperands were (Hamming distance bucket for `trace_cmp*`; matching-prefix\nlength for string/memory CMPs)."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile delta), not I2SRandReplace, so the mandatory lineage I2S-floor check does not apply; the value_profile winner has no I2S mutator stage and the dash-row floor signal would not be the relevant evidence here."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on `if(zDb)` reached only via a two-dot qualified name shows value_profile NOT outperforming naive (no separation across the dose-response sweep on the dotted-structure knob), indicating CMP_MAP gradient is not what assembles the qualified name."
+  },
+  "weakest_evidence_point": "The single winner-resolving seed is from value_profile trial 1 and its mutation_op is havoc operators (QwordAddMutator,DwordAddMutator,BytesCopyMutator), so the CMP_MAP gradient role is inferred from the value_profile feedback mechanism and corpus-preservation rather than directly observed in the seed's own mutator chain.",
+  "confidence": "medium"
+}

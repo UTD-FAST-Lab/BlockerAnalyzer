@@ -1,0 +1,93 @@
+{
+  "branch_id": 14675,
+  "target": "sqlite3",
+  "summary_one_line": "A parseable VACUUM statement whose trailing tokens drive sqlite3Vacuum's true-side branch, reached via CMP_MAP comparison-distance gradient credit.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)", "value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "An input that lexes/parses into a VACUUM statement reaching sqlite3Vacuum and satisfying the line-138735 condition on its true side; the seed begins with the 'vacuum' keyword plus additional structured trailing bytes (';', token bytes) that complete the parse path into the VACUUM reduce action.",
+      "why_winner_satisfies": "Both winner-resolving seeds begin with the literal 'vacuum'/';vacuum' keyword and carry substantial structured trailing bytes (e.g. seed aa08bf50: ';vacuum\\n\\nEL.;...' 139 bytes; seed 8cb368bd: 'vacuum''m''d''''''' 115 bytes). value_profile's CMP_MAP records operand-distance buckets for the integer/string comparisons in the lexer/parser, so partial-match inputs that are progressively closer to a valid VACUUM-reduce parse are preserved as corpus, climbing the gradient to take the true branch (winner avg hitcount on branch=4 / =2).",
+      "why_loser_doesnt": "Loser-blocking seeds either are the bare 6-byte 'vacuum' (seed 84fc92d4) or 'vacuum' plus short noisy suffixes (seeds a68a9e5a, c8a20ace, f035a5db) that take the false side of L138735 (loser hitcount on branch=0; L138735 shows T=0 F=4). naive and cmplog lack the CMP_MAP distance feedback, so they get no partial-progress credit toward the parser comparisons that gate the true branch and remain blocked ~9/10 trials for 15-18h.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient: each intercepted CMP writes a (PC, operand-distance bucket) entry, and an input producing a closer-than-seen comparison pair adds a new bucket and is kept. This Hamming/prefix-distance feedback lets value_profile incrementally build the parser comparisons gating sqlite3Vacuum's true branch; naive and cmplog (the losers) lack CMP_MAP, which is the single technique delta in both decisive pairs."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs differ by the value_profile technique and the value_profile-equipped fuzzer is the winner in each.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "Pair 1: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "The second decisive pair is value_profile_cmplog over cmplog, also a value_profile delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The blocker is the true branch of a line inside sqlite3Vacuum.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location + globally blocked side",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "The winner-resolving seed begins with the vacuum keyword and carries long structured trailing bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed aa08bf5050d49a18",
+      "exact_quote": "3b 76 61 63 75 75 6d 0a 0a 45 4c ac 3b c5 0a 0a   ;vacuum..EL.;..."
+    },
+    {
+      "claim": "A second winner-resolving seed also starts with vacuum plus extended trailing structured bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 8cb368bd2cb2d84d",
+      "exact_quote": "76 61 63 75 75 6d 27 6d 27 64 27 27 27 27 27 27   vacuum'm'd''''''"
+    },
+    {
+      "claim": "A loser-blocking seed is the bare 6-byte 'vacuum' with no trailing structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 84fc92d40773c99e, size=6 bytes",
+      "exact_quote": "76 61 63 75 75 6d                                 vacuum"
+    },
+    {
+      "claim": "At the blocker line the winner takes the true side while the loser takes only the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L138735",
+      "exact_quote": "d=1   L138735  T=2 F=0  T=0 F=4    <-- BLOCKER"
+    },
+    {
+      "claim": "The winner hits the branch (hitcount 4) while the loser never does (hitcount 0).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 hitcount line",
+      "exact_quote": "avg hitcount on branch: winner=4  loser=0"
+    },
+    {
+      "claim": "value_profile preserves an input whose CMP operand pair is closer to matching than any previously seen, via CMP_MAP distance buckets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback paragraph",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile's CMP_MAP encodes how close the two operands were as a distance bucket.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation paragraph",
+      "exact_quote": "The distance bucket is a coarse encoding of how close the two\noperands were"
+    },
+    {
+      "claim": "value_profile does not use I2SRandReplace, so the mechanism is the gradient feedback rather than operand substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators paragraph",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Not required: claimed_mechanism is CMP_MAP gradient (value_profile delta in both decisive pairs), not I2SRandReplace. Lineage dash-row verification applies only to I2S claims; the value_profile mechanism is established from MECHANISM CONTEXT (CMP_MAP distance-bucket feedback, no I2SRandReplace) plus the seed-byte and DIVERGENT BRANCHES evidence."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic VACUUM-parser harness whose true-side gate is a single exact-equality CMP would refute the gradient hypothesis if value_profile showed no advantage over naive (i.e. only cmplog/vpc resolved it), indicating I2S substitution rather than CMP_MAP distance climbing drives the divergence."
+  },
+  "weakest_evidence_point": "The exact line-138735 condition source text is not shown (SOURCE CONTEXT lines are blank), so the specific comparison that CMP_MAP credits is inferred from the parser call chain rather than read directly.",
+  "confidence": "medium"
+}

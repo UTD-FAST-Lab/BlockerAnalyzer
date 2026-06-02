@@ -1,0 +1,75 @@
+{
+  "branch_id": 5728,
+  "target": "harfbuzz",
+  "summary_one_line": "Font carrying both a 'morx' AAT table and a 'GPOS' OpenType table, so plan->apply_morx && plan->apply_gpos both hold.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A font blob whose sfnt table directory simultaneously contains a 'morx' (AAT morph) table tag and a 'GPOS' positioning table tag, so the shape plan sets both apply_morx and apply_gpos true and the line-931 AND condition takes its true side.",
+      "why_winner_satisfies": "The winning vpc seeds embed the exact 4-byte table-tag literals: seed 1 carries the OTTO sfnt magic plus the ASCII 'morx' tag at offset 0x0c, and seed 2 carries the ASCII 'GPOS' tag at offset 0x0c. Presenting both tags makes both apply_morx and apply_gpos plan flags true, so line 931 evaluates true and line 932 (hb_aat_layout_remove_deleted_glyphs) executes — the W-only resolving region.",
+      "why_loser_doesnt": "The value_profile loser seeds carry no 'morx'/'GPOS'/'OTTO' tag literals at those offsets (e.g. seed 1 holds ASCII 'y-hant-hk', seed 4 holds repeated 0x4c 0x0e dwords); without the matching 4-byte tags the plan flags stay false and line 931 takes only its false side (loser hit_div=0, branch never reaching the true side over all 10 trials).",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator on top of value_profile's CMP_MAP buckets: cmplog records the 4-byte table-tag comparisons (sfnt tag fourcc equality checks against 'morx'/'GPOS') and I2SRandReplace splices the captured constants directly into the input at the comparison offset, manufacturing both tags in one step. value_profile has only the Hamming/prefix-distance coverage feedback and no I2SRandReplace, so it must stumble onto the exact 4-byte fourcc by chance — which it never does over 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the AND condition requiring both apply_morx and apply_gpos to be true, with the true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L931",
+      "exact_quote": "if (c->plan->apply_morx && c->plan->apply_gpos)"
+    },
+    {
+      "claim": "The true side of the blocker guards hb_aat_layout_remove_deleted_glyphs, which only the winner-resolving seeds reach.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L932",
+      "exact_quote": "[W]   932      hb_aat_layout_remove_deleted_glyphs (c->buffer);"
+    },
+    {
+      "claim": "A winning vpc seed contains the OTTO sfnt magic and the ASCII 'morx' table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id ae73a8c9233c3cb8 offset 0x00-0x0f",
+      "exact_quote": "4f 54 54 4f 00 01 20 20 21 21 20 20 6d 6f 72 78   OTTO..  !!  morx"
+    },
+    {
+      "claim": "A second winning vpc seed contains the ASCII 'GPOS' table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 47909b1df33a210f offset 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 02 ee ff 00 30 00 20 47 50 4f 53   .........0. GPOS"
+    },
+    {
+      "claim": "A loser value_profile seed carries unrelated ASCII content (a BCP-47-like 'y-hant-hk' string) and no font table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00546490999c9c0b offset 0x10-0x1f",
+      "exact_quote": "79 2d 68 61 6e 74 2d 68 6b 00 20 00 00 00 ff 01   y-hant-hk. ....."
+    },
+    {
+      "claim": "The loser never accumulates any hits on the branch while the winner does, giving hit divergence of 46.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 avg hitcount",
+      "exact_quote": "avg hitcount on branch: winner=46  loser=0"
+    },
+    {
+      "claim": "value_profile lacks the I2SRandReplace mutator and relies only on havoc plus token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator on top of the havoc and token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5728 --role W --fuzzer value_profile_cmplog --trial 1 --seed ae73a8c9233c3cb8` and observed an I2S-floor row (mutation_op = -, ParentInfo-only) at depth 18 of the 19-level ancestor chain; the dash-row floor is the I2S signal under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on apply_morx && apply_gpos where the table tags are required, in which value_profile resolves the true side as often as value_profile_cmplog within the same trial budget (showing the 4-byte fourcc match is reachable without I2S substitution)."
+  },
+  "weakest_evidence_point": "The chain only shows one I2S-floor dash row at depth 18 (not at the immediate parent), so the exact 'morx'/'GPOS' fourcc substitution step is inferred from the byte presence rather than read directly off a labeled I2SRandReplace lineage entry.",
+  "confidence": "high"
+}

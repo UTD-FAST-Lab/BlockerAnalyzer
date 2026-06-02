@@ -1,0 +1,75 @@
+{
+  "branch_id": 5334,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must be a parseable sfnt font with valid table tags so shaping resolves a script reaching the RTL case block",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed TrueType/OpenType sfnt header (magic 00 01 00 00 at offset 0x00) followed by recognized 4-byte table tags (e.g. 'MATH'/'GPOS' at offset 0x0c) so the font parses far enough that hb_script_get_horizontal_direction is reached with a script that falls into the contiguous RTL case block (line 589-654) containing case HB_SCRIPT_OLD_TURKIC at line 615.",
+      "why_winner_satisfies": "All winning seeds start with the sfnt magic 00 01 00 00 00 01 and carry valid ASCII FOURCC table tags ('MATH' at 0x0c in seed 1, 'GPOS' in seeds 2-5), forming a structurally valid font that drives the shaper down to the blocker case arm; the branch is taken 14 times in the winner role (T=14) vs 0 in the loser role.",
+      "why_loser_doesnt": "Loser-blocking seeds begin with non-magic bytes (ef/ff/99/e1 at offset 0x00) and lack the table-tag region, so the font fails to parse into a shapeable buffer; they never reach the OLD_TURKIC case (L1 615: T=0 F=191) and instead spend execution in fallback/mark-positioning code paths.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer where harfbuzz's sfnt-header and table-tag comparisons recorded the expected literals (magic word and FOURCC tags), then substitutes those literals into the input at the matching offsets, synthesizing the valid header/tags that naive must stumble onto by blind havoc mutation."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the case HB_SCRIPT_OLD_TURKIC arm inside the switch on the script tag, whose true side resolves to HB_DIRECTION_RTL.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L587 switch, L615 blocker, L654 return",
+      "exact_quote": "case HB_SCRIPT_OLD_TURKIC: <-- BLOCKER"
+    },
+    {
+      "claim": "Winning seeds begin with the sfnt magic word and carry ASCII FOURCC table tags such as MATH and GPOS.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "W seed 1 offset 0x00-0x0f, W seeds 2-5 offset 0x0c",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 4d 41 54 48   ......      MATH"
+    },
+    {
+      "claim": "Multiple winning seeds carry the GPOS table tag at the tag region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "W seed 2 offset 0x0c",
+      "exact_quote": "00 01 00 00 00 01 20 02 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+    },
+    {
+      "claim": "The byte diff shows the winner concentrates the FOURCC tag bytes (G/P/O/S, M/A/T/H) at offsets 0x0c-0x0f where the loser has no such structure.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x6 4d(M)x1"
+    },
+    {
+      "claim": "Loser-blocking seeds start with non-magic bytes rather than the sfnt header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "L seed 1 offset 0x00",
+      "exact_quote": "ef 01 0e 00 00 0d 00 00 04 20 00 00 00 80 1a 20"
+    },
+    {
+      "claim": "The loser never takes the OLD_TURKIC case while the winner takes it 14 times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L615",
+      "exact_quote": "T=14 F=147  T=0 F=191  case HB_SCRIPT_OLD_TURKIC:"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a recorded CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S capability and must reach the magic/tag literals by blind havoc.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5334 --role W --fuzzer cmplog --trial 1 --seed ae1635cd677d2b15`; the ancestor chain has 24 levels with two I2S-floor dash rows (mutation_op = -) at depth 22 and 23, the lower-bound signal of an unwrapped I2SRandReplace find under the current cmplog build (dash rows are cmplog/vpc-exclusive vs naive)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the script tag is set directly without requiring a parseable font header/table-tag CMP chain shows no cmplog>naive divergence at the OLD_TURKIC arm, indicating the I2S advantage was not from solving the header/tag literal comparisons."
+  },
+  "weakest_evidence_point": "It is inferred but not directly observed that the RTL script selected at runtime is OLD_TURKIC specifically rather than another script in the same contiguous case block sharing the same return HB_DIRECTION_RTL.",
+  "confidence": "medium"
+}

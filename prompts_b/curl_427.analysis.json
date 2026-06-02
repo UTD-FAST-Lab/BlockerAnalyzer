@@ -1,0 +1,75 @@
+{
+  "branch_id": 427,
+  "target": "curl",
+  "summary_one_line": "Winner must construct a well-formed HTTP response that drives the header parser to set stop_reading=TRUE; loser produces garbage that never parses cleanly.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "An input whose payload contains a recognizable protocol literal (e.g. the HTTP/POP3 magic prefix and a 'HTTP/' response token) so Curl_http_readwrite_headers parses a complete header block and sets stop_reading=TRUE at transfer.c:646; the bytes must reproduce structured ASCII protocol tokens at specific offsets rather than random fill.",
+      "why_winner_satisfies": "All four winner seeds (value_profile_cmplog) carry coherent protocol tokens: a 'pop3' prefix near offset 0x06 and a literal 'HTTP/' run at offset 0x24-0x28 (47 48 54 54 50 = GHTTP/P), giving the parser the well-formed response it needs to declare stop_reading and take the true branch.",
+      "why_loser_doesnt": "Loser seeds (value_profile) are dominated by repeated '%' fill bytes and scattered non-token bytes (e.g. seed 2 is '%%%%!%' runs); they lack the concentrated 'HTTP/' literal at 0x24-0x28, so header parsing never completes and stop_reading stays FALSE (false branch, blocked 10/10).",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile: the CMP buffer records the comparisons inside the header parser against the literal protocol tokens, and I2SRandReplace substitutes those exact operand bytes into the input, synthesizing the 'HTTP/' / magic tokens that value_profile's CMP_MAP-gradient-only search cannot assemble."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is value_profile_cmplog > value_profile with technique delta I2S, winner resolving 8/10 and loser blocked 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The blocked side is the true branch of if(stop_reading) at transfer.c:646.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "transfer.c:646",
+      "exact_quote": "if(stop_reading) {"
+    },
+    {
+      "claim": "stop_reading is set by the header-parsing call Curl_http_readwrite_headers, so taking the true branch requires a parseable header block.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "transfer.c:633",
+      "exact_quote": "result = Curl_http_readwrite_headers(data, conn, &nread, &stop_reading);"
+    },
+    {
+      "claim": "Winner seeds contain a 'pop3' protocol token and an 'HTTP/' response token.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 5a3e2f72e926894a",
+      "exact_quote": "70 6f 70 33 4b 2f 2f 3f 32 37   ......pop3K//?27"
+    },
+    {
+      "claim": "Winner seeds carry a literal 'HTTP/' run at offsets 0x24-0x29.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x24-0x28",
+      "exact_quote": "   0x0024  47(G)x4                             42(B)x1 9e(.)x1 2e(.)x1 44(D)x1 +3u  DIFFER"
+    },
+    {
+      "claim": "Loser seeds are dominated by repeated '%' fill bytes lacking protocol tokens.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00225bc4819174d2",
+      "exact_quote": "26 25 65 24 25 64 45 72 46 25 41 27 25 31 25 25   &%e$%dErF%A'%1%%"
+    },
+    {
+      "claim": "value_profile_cmplog's mutator set includes I2SRandReplace, which value_profile lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace and relies only on CMP_MAP distance buckets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 427 --role W --fuzzer value_profile_cmplog --trial 1 --seed 5a3e2f72e926894a` and observed two I2S-floor dash rows (mutation_op = -) at depth 10 and 11 of the ancestor chain, the floor signal for an unwrapped I2SRandReplace find in vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile resolves the stop_reading branch at the same rate as value_profile_cmplog once the required 'HTTP/' literal is reachable by CMP_MAP gradient alone (no I2S substitution needed)."
+  },
+  "weakest_evidence_point": "The byte-diff shows winner-concentrated 'HTTP/' bytes but does not directly prove those exact bytes are what Curl_http_readwrite_headers compares against to set stop_reading.",
+  "confidence": "medium"
+}

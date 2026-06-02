@@ -1,0 +1,69 @@
+{
+  "branch_id": 13389,
+  "target": "openthread",
+  "summary_one_line": "Input must encode a ServerTlv whose 16-bit Server16 value equals the queried RLOC16 (or the broadcast constant 0xFFFE), an exact equality gate.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed Service TLV containing a Server sub-TLV whose 16-bit GetServer16() field exactly matches the iterated aRloc16 (or aRloc16 set to Mac::kShortAddrBroadcast). The match is a two-operand 16-bit equality comparison at line 259.",
+      "why_winner_satisfies": "cmplog-discovered winning seeds reach the true side: the BLOCKER branch shows W taking T=15 vs L T=0 on one row, and cmplog resolves 10/10 trials. The CMP between server->GetServer16() and aRloc16 is logged by cmplog and the matching operand is substituted into the seed by I2SRandReplace, satisfying the equality.",
+      "why_loser_doesnt": "naive only mutates bytes blindly (havoc + token, no CMP introspection); it almost never lands the exact 16-bit Server16==aRloc16 equality, blocking 8/10 trials with loser hitcount 2 vs winner 16, and on the blocker row L takes only the false side (L T=0 F=20).",
+      "mechanism_attribution": "cmplog intercepts the integer CMP at line 259 (server->GetServer16() == aRloc16), records both operands in the CmpLogObserver buffer, and I2SRandReplace substitutes the comparand operand into the input at the matching offset, directly solving the exact-equality roadblock that naive's blind havoc cannot."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is a two-clause equality comparison on aRloc16, where one clause compares server->GetServer16() to aRloc16.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "network_data.cpp:259",
+      "exact_quote": "if ((aRloc16 == Mac::kShortAddrBroadcast) || (server->GetServer16() == aRloc16))"
+    },
+    {
+      "claim": "The true (blocked) side is the globally blocked side, so taking it is the winning behavior.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "globally blocked side",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "cmplog resolves all 10 trials while naive blocks 8 of 10, the decisive divergence.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "naive (loser) takes the true side far less; winner hitcount on branch is 16 vs loser 2.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "avg hitcount on branch",
+      "exact_quote": "avg hitcount on branch: winner=16  loser=2"
+    },
+    {
+      "claim": "On the blocker source line the winner takes the true side (T=15) where the loser does not (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L 259",
+      "exact_quote": "d=1   L 259  T=15 F=6  T=0 F=20  if ((aRloc16 == Mac::kShortAddrBroadcast) || (server->Get..."
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which reads the CMP buffer and substitutes one operand at matching offsets in the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S; it only does blind havoc and token mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 13389 --role W --fuzzer cmplog --trial 1 --seed 29c3bac95a89ef85`; the chain has 25 levels and the trailing I2S-floor signal reports 1 ancestor dash row (mutation_op = -) at depth 24. The winner is cmplog (not mopt/grimoire), so the dash-row floor is I2S-exclusive here and is lower-bound evidence of an I2SRandReplace find in the ancestry."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the 16-bit Server16==aRloc16 equality gate where cmplog and naive resolve the branch at statistically indistinguishable rates (cmplog shows no advantage)."
+  },
+  "weakest_evidence_point": "The single dash row sits at depth 24 of the chain, far from the leaf, so the I2S substitution that solved this exact branch may be one of the leaked havoc-bucket finds rather than this specific dash ancestor.",
+  "confidence": "high"
+}

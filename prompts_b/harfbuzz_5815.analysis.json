@@ -1,0 +1,81 @@
+{
+  "branch_id": 5815,
+  "target": "harfbuzz",
+  "summary_one_line": "A byte run of repeated indic_category glyph codes that drives the syllable state machine into the broken-cluster (case 4) action.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "Input bytes that map to a dense run of indic glyph categories (consonant/halant/etc.) so the Ragel syllable machine walks transitions into the indic_broken_cluster lookahead action at case 4, taking the True side. No magic CMP literal gates this branch; what matters is glyph-category content density, evidenced by the repeated 0xcb/0x0c/0x0b/0xed byte runs in the winner seeds.",
+      "why_winner_satisfies": "naive havoc-mutated seeds carry long repeated runs (e.g. cb cb cb cb, ed ed ed ed, 0c 00 00 ... cb 0c) that feed many same-category glyphs through info[p].indic_category(); the per-role overlay shows the winner reaches case 4 and the broken-cluster sister arms (case 15/16/12) while accumulating 14 True hits on the blocker, with is_one_of/is_consonant called 182/104 times.",
+      "why_loser_doesnt": "cmplog seeds are short and dominated by table-tag ASCII (kern, ke, jdfm) injected by I2S CMP substitution toward OpenType tag comparisons; they never build the dense indic-category run, so the machine takes only the False side (L: T=0 F=169 at case 4) and the branch stays blocked across all 10 trials.",
+      "mechanism_attribution": "The winner is plain naive havoc/byte mutation (havoc-only): with no CMP literal guarding case 4, naive's unconstrained byte churn freely produces the long same-byte glyph-category runs the state machine needs. The loser cmplog's input-to-state CMP substitution stage wastes mutation budget steering bytes toward intercepted compare operands (table tags like 'kern'), diverting it away from the category-density region, so the comparison-solving stage is a net handicap here and naive wins on havoc alone."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is naive > cmplog with delta technique I2S; naive is the winner.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "naive resolved the branch in all 10 trials while cmplog was blocked in all 10.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive / cmplog rows",
+      "exact_quote": "naive                           10        0          0  winner (I2S vs cmplog)"
+    },
+    {
+      "claim": "The blocker is a Ragel switch arm that emits the indic_broken_cluster syllable on the True side.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L559-L561",
+      "exact_quote": "{{p = ((te))-1;}{ found_syllable (indic_broken_cluster); buffer->scratch_flags |= HB_BUFFER_SCRATCH_FLAG_HAS_BROKEN_SYLLABLE; }}"
+    },
+    {
+      "claim": "The transition is selected purely by info[p].indic_category() against the machine key spans, not by any magic literal compare.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L500-L502",
+      "exact_quote": "_trans = _inds[ _slen > 0 && _keys[0] <=( info[p].indic_category()) &&"
+    },
+    {
+      "claim": "Winner seeds carry long repeated byte runs (glyph-category density) such as cb cb cb cb and ed ed ed ed.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 4 id=9e2deddcf7f46594",
+      "exact_quote": "bd bf bd 55 55 55 15 bd cb cb ed ed ed ed ed ed"
+    },
+    {
+      "claim": "The winner reaches case 4 and accumulates True hits on the blocker that the loser never reaches.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L559",
+      "exact_quote": "d=1   L 559  T=14 F=188  T=0 F=169  case 4:  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser cmplog seeds are short and contain OpenType table-tag ASCII like 'kern' produced by CMP-driven byte insertion.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 id=0237ec581d21f6c0",
+      "exact_quote": "ff 20 20 20 20 6b 65 72 6e 20 df 10 20 0a 00 00"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace scans the input for an operand and substitutes the other intercepted operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "picks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive's only mutators are havoc + token byte mutators with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "The winner is naive, not cmplog/vpc, so the I2S-floor (dash-row) lineage check does not apply: naive has no I2SRandReplace and emits no ParentInfo-only dash rows. The winner-resolving seeds are all fuzzer=naive (per BRANCH SEEDS), confirmed by mutation_op chains that are pure havoc operators (BytesSwapMutator, WordAddMutator, ByteFlipMutator, etc.). No mandatory I2S lineage verification is required because claimed_mechanism is havoc-only; cmplog is the loser here, so I2S is implicated as a handicap, not as the winning technique."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the case-4 transition is gated by an exact multi-byte literal compare (so I2S substitution is required to satisfy it) and cmplog then beats naive on reaching case 4 — that would show this branch is an I2S magic gate rather than a category-density region naive reaches by free byte churn."
+  },
+  "weakest_evidence_point": "The claim that cmplog's table-tag ASCII (kern/ke) is actively diverting mutation budget away from the category-density region is inferred from seed content; the byte diff shows differences but does not prove I2S caused cmplog's failure rather than mere trial variance.",
+  "confidence": "medium"
+}

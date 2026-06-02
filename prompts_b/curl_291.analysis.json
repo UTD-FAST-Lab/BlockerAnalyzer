@@ -1,0 +1,87 @@
+{
+  "branch_id": 291,
+  "target": "curl",
+  "summary_one_line": "A %d/%i integer conversion whose decimal value is negative (or with a +/space sign flag), making the sign-prefix branch true",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The fuzz input must form a format directive routed to FORMAT_INT decimal conversion (base 10) whose signed value is negative, so is_neg becomes 1 and the sign-prefix guard at line 780 takes its true side; this requires a coherent %d/%i spec with an argument byte sequence decoding to a negative integer.",
+      "why_winner_satisfies": "Winner-resolving seeds carry a structured header/URL-like prefix (e.g. bytes 00 01 00 00 00 19 then a 'WS'/'po' tag, ':/', '127.0.0.1:9001', '850') that drives the parser into the decimal-integer arm; the W-only overlay shows lines 738-741 (negative-to-positive conversion) and 781 (--width) hit, and the DIVERGENT BRANCHES table shows line 735/736 reaching is_neg true (T=5) and line 787 OUTCHAR('-') reached only under W.",
+      "why_loser_doesnt": "Loser-blocking seeds are short (34-36 bytes) and dominated by literal '%'/'A'/'+' bytes (e.g. %`%a, %A, %C@%, %%Cb%ca) that route into the FLAGS_CHAR ('%c') arm and string formatting rather than a base-10 integer with a negative value; the L overlay never reaches lines 738-741 or 781, and line 736 is_neg shows T=0 F=40 for L.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes intercepted CMP operands into the input at matching offsets, letting it construct the precise parser-routing bytes (tag/colon/path/numeric fields) that produce a negative decimal integer; naive lacks CMP interception and must hit this multi-byte structural condition by blind havoc, which it does only 1/10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the sign-prefix guard combining is_neg with FLAGS_SHOWSIGN/FLAGS_SPACE in the integer-formatting path, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "mprintf.c:780",
+      "exact_quote": "if(is_neg || (p->flags & FLAGS_SHOWSIGN) || (p->flags & FLAGS_SPACE))"
+    },
+    {
+      "claim": "The branch lies in the FORMAT_INT decimal arm where is_neg is derived from a negative signed value.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "mprintf.c:735",
+      "exact_quote": "is_neg = (p->data.num.as_signed < (mp_intmax_t)0) ? 1 : 0;"
+    },
+    {
+      "claim": "Only winner seeds reach the negative-to-positive conversion block and the --width sign-prefix consequence.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "mprintf.c:738-741, 781",
+      "exact_quote": "[W]   738          signed_num = p->data.num.as_signed + (mp_intmax_t)1;"
+    },
+    {
+      "claim": "Only the winner reaches the negative-sign output, confirming is_neg taken true under W.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "mprintf.c:788",
+      "exact_quote": "[W]   788          OUTCHAR('-');"
+    },
+    {
+      "claim": "Winner-resolving seeds contain a structured header/URL-like prefix with tag, colon, path and numeric fields.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 6543e87c49a8de08",
+      "exact_quote": "2e 30 23 30 2e 31 3a 39 30 30 31 2f 38 35 30 00   .0#0.1:9001/850."
+    },
+    {
+      "claim": "The is_neg-true side is reached only in the winner role at line 736 (W T=5 vs L T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "mprintf.c:736",
+      "exact_quote": "d=1   L 736  T=5 F=20  T=0 F=40  if(is_neg) {"
+    },
+    {
+      "claim": "Loser-blocking seeds are short and dominated by literal percent/char bytes rather than a numeric negative argument.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0024e5972fc0b2e0",
+      "exact_quote": "00 01 00 00 00 19 25 60 25 61 3e 66 9f 9f 63 25   ......%`%a>f..c%"
+    },
+    {
+      "claim": "The loser exercises the FLAGS_CHAR arm extensively (L T=163) while the winner does not.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "mprintf.c:703",
+      "exact_quote": "d=1   L 703  T=0 F=60  T=163 F=167  if(p->flags & FLAGS_CHAR) {"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes one intercepted CMP operand for the other at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S and relies only on havoc/token mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 291 --role W --fuzzer cmplog --trial 1 --seed 6543e87c49a8de08` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 12 and 13 of the 14-level ancestor chain"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose %d argument is forced to a negative value (is_neg=1 unconditionally) shows naive resolving the line-780 true side as fast as cmplog, i.e. no I2S advantage when the negative-integer structural condition is removed."
+  },
+  "weakest_evidence_point": "The byte-level claim that winner seeds decode specifically to a negative decimal integer is inferred from the parser-routing prefix and W-only coverage of lines 738-741/788 rather than from a directly observed negative argument value.",
+  "confidence": "medium"
+}

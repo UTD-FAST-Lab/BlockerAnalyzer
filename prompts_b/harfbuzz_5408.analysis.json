@@ -1,0 +1,82 @@
+{
+  "branch_id": 5408,
+  "target": "harfbuzz",
+  "summary_one_line": "A well-formed cmap subtable whose format field equals a non-zero supported value (4/13/14), routing the switch away from case 0.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A structurally valid OpenType cmap table (sfnt header + 'cmap' tag + EncodingRecord) whose selected subtable format field holds a non-zero supported value (4, 13, or 14) so the switch on u.format dispatches to a case other than 0, taking the blocked false side of case 0.",
+      "why_winner_satisfies": "Winner seeds carry the intact sfnt/'cmap' header (offset 0x0c bytes 63 6d 61 70 = 'cmap') and a structured subtable whose format selector resolves to format 4/13 (W hits OT::CmapSubtableFormat4 and Format13 get_glyph paths that L never reaches); the per-role overlay shows W hitting case 4/13/14 arms while case 0 is the false branch.",
+      "why_loser_doesnt": "Loser seeds are short, unstructured byte blobs (13-62 bytes) lacking the 'cmap' header at offset 0x0c; their parse falls into format 0 (the True side of case 0 with T=10 F=0), so they never satisfy the non-zero-format condition and stay blocked.",
+      "mechanism_attribution": "value_profile_cmplog's I2SRandReplace substitutes intercepted CMP operands (the format-discriminator constant and the 'cmap'/sfnt magic bytes) directly into the input, letting it construct the exact header/format bytes needed to pass the format-equality dispatch; plain value_profile has only CMP_MAP distance feedback and no I2S substitution mutator, so it cannot synthesize the multi-byte structured header.",
+      "verified": true
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false branch of a switch on u.format, case 0 of CmapSubtable::collect_unicodes.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L1365-L1366",
+      "exact_quote": "switch (u.format) {\n[L]  1366      case  0: u.format0 .collect_unicodes (out); return; <-- BLOCKER"
+    },
+    {
+      "claim": "The winner takes case 4/13/14 arms while the loser stays on case 0.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1366-L1372",
+      "exact_quote": "[L]  1366      case  0: u.format0 .collect_unicodes (out); return; <-- BLOCKER\n[W]  1367      case  4: u.format4 .collect_unicodes (out); return;"
+    },
+    {
+      "claim": "Per-role branch counts confirm the winner takes case 0 false (F=5) and the loser takes case 0 true (T=10 F=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1366",
+      "exact_quote": "d=1   L1366  T=0 F=5  T=10 F=0  case  0: u.format0 .collect_unicodes (out); return;  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner seeds contain the intact 'cmap' header at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 2cd766ba50495565 offset 0x0c",
+      "exact_quote": "0000: 00 01 00 00 00 0c 02 ff 00 30 00 1f 63 6d 61 70   .........0..cmap"
+    },
+    {
+      "claim": "Loser seeds are short unstructured blobs lacking the cmap header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0003cbd2b6f5fff8 size=13",
+      "exact_quote": "Seed 2 (id=0003cbd2b6f5fff8, size=13 bytes, fuzzer=value_profile, trial=1, discovered_at=102s, mutation_op=BitFlipMutator,BytesDeleteMutator,WordAddMutator):"
+    },
+    {
+      "claim": "The winner reaches Format13 get_glyph paths the loser never executes.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "Format13 group_get_glyph 77 vs 0",
+      "exact_quote": "77         0  OT::CmapSubtableFormat13::group_get_glyph(OT::CmapSubtableLongGroup const&, unsigned int)"
+    },
+    {
+      "claim": "value_profile_cmplog carries the I2SRandReplace mutator while value_profile does not.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators line",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace on top of the havoc/token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators line",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "The decisive pair delta is I2S between vpc (winner) and vp (loser).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5408 --role W --fuzzer value_profile_cmplog --trial 1 --seed 2cd766ba50495565` and observed an I2S-floor row (mutation_op = -) at depth 43 of the 44-level ancestor chain; the tool reports '1 ancestor dash row(s) at depth 43', the dash-row floor signal characteristic of an unwrapped I2SRandReplace find in vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile alone resolves the non-zero-format dispatch at parity with value_profile_cmplog, showing CMP_MAP distance feedback suffices to construct the format selector without I2S substitution."
+  },
+  "weakest_evidence_point": "The exact byte offset of the format-selector field is inferred from the structured-vs-unstructured seed contrast rather than pinned to a single concentrated BYTE DIFF offset carrying the format value.",
+  "confidence": "high"
+}

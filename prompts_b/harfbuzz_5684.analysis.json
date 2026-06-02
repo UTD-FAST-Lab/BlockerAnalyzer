@@ -1,0 +1,100 @@
+{
+  "branch_id": 5684,
+  "target": "harfbuzz",
+  "summary_one_line": "Needs a valid sfnt/cmap font that maps U+0020 to a glyph while feeding a unicode-space codepoint with a non-NOT_SPACE fallback type.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed sfnt header (00 01 00 00) plus a table directory containing cmap/GSUB so the font parses and get_nominal_glyph(0x0020) resolves; the magic 4-byte table tags ('cmap','GSUB') must appear verbatim.",
+      "why_winner_satisfies": "Winner-resolving seeds carry the literal sfnt magic and table tags ('cmap', 'GSUB'/'GSUC') at fixed offsets, so the font directory parses and the U+0020 nominal-glyph lookup succeeds, taking the true side.",
+      "why_loser_doesnt": "value_profile loser seeds are short/garbled (17-79 bytes) without the intact sfnt header and table tags, so the font never exposes a glyph for 0x0020 and the branch stays false (resolved=0/10).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer from the font-table-tag CMPs and substitutes the exact tag/magic bytes (e.g. 'cmap', sfnt version) into the input, satisfying the structural gate that pure value_profile (no I2SRandReplace) cannot place exactly."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Beyond the parseable font, the byte stream must drive a unicode-space codepoint whose space_fallback_type != NOT_SPACE while the cmap actually maps 0x0020, so line 196 reaches its true side.",
+      "why_winner_satisfies": "The winner adds CMP_MAP gradient feedback: it preserves intermediate inputs that bring CMP operands progressively closer, so it climbs the multi-condition gate (space_type check at L195 plus the 0x0020 lookup at L196) that cmplog's discrete I2S substitution alone stalls on.",
+      "why_loser_doesnt": "cmplog (no value_profile) gets no Hamming/prefix gradient, so it cannot incrementally tune the codepoint/table bytes toward the space-fallback condition and resolves only 1/10 with hitcount 0 on the branch.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient buckets reward inputs whose operands are closer to matching, giving a smooth path to the conjoined space_type and 0x0020-glyph conditions that cmplog's edge-only feedback lacks."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The branch is the conjunction guarding the unicode-space fallback path requiring a glyph for U+0020.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L196",
+      "exact_quote": "(c->font->get_nominal_glyph (0x0020, &space_glyph) || (space_glyph = buffer->invisible)))"
+    },
+    {
+      "claim": "Reaching the blocker first requires the space_type != NOT_SPACE guard on the preceding line.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L195",
+      "exact_quote": "if (space_type != hb_unicode_funcs_t::NOT_SPACE &&"
+    },
+    {
+      "claim": "Two decisive pairs differ by distinct techniques: I2S for vpc>vp and value_profile for vpc>cmplog.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "The second decisive pair attributes the divergence to the value_profile technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "Winner-resolving seeds carry literal sfnt magic and font table tags.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id c80ef2fb2e74fed4 offset 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 02 20 20 e0 3f 21 20 63 6d 61 70   ......  .?! cmap"
+    },
+    {
+      "claim": "Winner seeds also contain a GSUB/GSUC table tag in the directory.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id ba976cfb96009e64 offset 0x10-0x1f",
+      "exact_quote": "20 00 00 06 00 00 00 21 20 6b 20 47 53 55 42 20    ......! k GSUB "
+    },
+    {
+      "claim": "Loser-blocking seeds are short and lack the intact font header/tags.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 050b9cb96487367d size 17 bytes",
+      "exact_quote": "Seed 1 (id=050b9cb96487367d, size=17 bytes, fuzzer=cmplog, trial=1"
+    },
+    {
+      "claim": "Winner resolves 8/10 with branch hitcount 9 while value_profile loser resolves 0/10 with hitcount 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 counts",
+      "exact_quote": "avg hitcount on branch: winner=9  loser=0"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes matched CMP operands into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile feedback preserves inputs that bring CMP operands closer to matching via CMP_MAP distance buckets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "cmplog has no value_profile CMP_MAP gradient feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators / cmplog Feedback",
+      "exact_quote": "**Feedback**: same edge-bucket signal as naive. The CMP buffer is\nconsumed by the mutator, not by feedback."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5684 --role W --fuzzer value_profile_cmplog --trial 2 --seed c80ef2fb2e74fed4` and observed exactly 1 I2S-floor dash row (mutation_op = -) at depth 45 of the 46-level ancestor chain, the lower-bound signal of an I2SRandReplace find under the current build"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose space-fallback gate is reached by value_profile alone at the same rate as value_profile_cmplog, showing I2S substitution of the font tag bytes is not required for the win."
+  },
+  "weakest_evidence_point": "The value_profile-axis attribution (Pair 2) rests on mechanism reasoning rather than a per-offset gradient trace, since the loser seeds for that pair are not byte-aligned to a single converging CMP operand.",
+  "confidence": "medium"
+}

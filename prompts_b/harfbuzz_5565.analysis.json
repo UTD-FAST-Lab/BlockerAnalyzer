@@ -1,0 +1,93 @@
+{
+  "branch_id": 5565,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry a 4-byte FOURCC table tag (e.g. GSUB/GPOS) so the LangSys feature list is non-empty and the loop iterates.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed OpenType sfnt header whose table directory contains a 4-byte FOURCC tag matching a layout table the harness looks up (GSUB / GPOS), so get_gsubgpos_table resolves a real table, get_lang_sys yields a LangSys with num_features > 0, and the for-loop at line 1001 takes its true branch.",
+      "why_winner_satisfies": "Every winner-resolving seed embeds an exact ASCII FOURCC table tag at the table-directory offset: seeds 1-2 and 5 contain 'GSUB', seeds 3-4 contain 'GPOS', sitting at offset 0x0c onward where the W byte set is concentrated on 47(G)/50(P)/53(S)/4f(O)/55(U)/42(B). These literal 4-byte tags drive get_feature_count() positive and the loop iterates 76930 (cmplog) / 11528 (vpc) times.",
+      "why_loser_doesnt": "Loser-blocking seeds carry no GSUB/GPOS FOURCC at those offsets — at 0x0c-0x0f the L byte sets are scattered (00, 20, 18, 6a, 6f, fa, etc.) with no concentrated tag literal, so get_gsubgpos_table returns the empty default, num_features is 0, the loop body never runs (hitcount 0), and line 1001 stays on its false side.",
+      "mechanism_attribution": "cmplog/vpc intercept the 4-byte tag comparison inside get_feature_tag / table-tag lookup and record (input-operand, expected-tag) into the CmpLogObserver buffer; I2SRandReplace then substitutes the magic FOURCC ('GSUB'/'GPOS') directly into the input at the matched offset, synthesizing the exact-literal tag that random havoc byte mutation in naive/value_profile is astronomically unlikely to land on a 4-byte literal. Both decisive pairs differ from their loser by exactly the I2SRandReplace stage."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs differ by the I2S technique and both winners fully resolve while losers fully block.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair isolates the same I2S technique delta (vpc over vp).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The blocker is the feature-iteration loop, and its body is reached only on the winner role, gated by a feature_tag equality compare.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "hb-ot-layout.cc:1001-1004",
+      "exact_quote": "if (feature_tag == g.get_feature_tag (f_index)) {"
+    },
+    {
+      "claim": "The loop body / feature-index read is hit only by winner-resolving seeds.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1002 marker [W]",
+      "exact_quote": "[W]  1002      unsigned int f_index = l.get_feature_index (i);"
+    },
+    {
+      "claim": "Winner seeds embed the literal ASCII table tag GSUB at the table-directory offset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 id=3209219fbc11cc7c offset 0x0c",
+      "exact_quote": "0000: 00 01 00 00 00 01 2f 1d 21 20 20 20 47 53 55 42   ....../.!   GSUB"
+    },
+    {
+      "claim": "Other winner seeds carry GPOS instead of GSUB, both valid layout-table FOURCC tags.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 3 id=32f381bd655a37b8 offset 0x0c",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 47 50 4f 53   ......      GPOS"
+    },
+    {
+      "claim": "At the tag offsets the winner byte set concentrates on the FOURCC letters while the loser set is scattered with no tag literal.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0f",
+      "exact_quote": "0x000f  53(S)x3 42(B)x2 7f(.)x1                     00(.)x5 6a(j)x1 6f(o)x1 fa(.)x1 +10u  DIFFER"
+    },
+    {
+      "claim": "On the loser role the blocker loop never enters its body (true side count zero), confirming an empty feature list.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1001 BLOCKER row",
+      "exact_quote": "d=1   L1001  T=7300 F=674  T=0 F=2180  for (unsigned int i = 0; i < num_features; i++) {  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner spends far more time in the loop body (high hitcount) than the loser which never hits it.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 hitcount line",
+      "exact_quote": "avg hitcount on branch: winner=76930  loser=0"
+    },
+    {
+      "claim": "I2SRandReplace reads the CmpLogObserver buffer and substitutes the other CMP operand at matching offsets, the technique exclusive to cmplog/vpc.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile lacks the I2S substitution mutator, isolating the technique delta against vpc.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5565 --role W --fuzzer value_profile_cmplog --trial 1 --seed 3209219fbc11cc7c` and observed an I2S-floor dash row (mutation_op = -) at depth 23 of the chain; also ran it for cmplog seed 04fa76806a500a81 trial 1 and observed a dash row at depth 48. Both winner chains carry the cmplog/vpc-exclusive ParentInfo-only floor signal."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where cmplog still fails to resolve (no faster than naive) when the gating compare is the 4-byte table-tag/feature-tag equality, OR naive resolving as fast as cmplog despite needing the exact FOURCC literal."
+  },
+  "weakest_evidence_point": "The byte diff aligns the FOURCC at offset 0x0c but does not prove the exact compare I2S solves is the table-tag lookup versus the inner feature_tag==get_feature_tag compare; either way the operand is a 4-byte tag literal.",
+  "confidence": "high"
+}

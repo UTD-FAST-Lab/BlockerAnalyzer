@@ -1,0 +1,81 @@
+{
+  "branch_id": 5567,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must contain a structurally valid GPOS table (literal 'GPOS' FOURCC tag) so num_features>0 and the feature loop is entered.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must carry the 4-byte ASCII table tag 'GPOS' (0x47 0x50 0x4f 0x53) at the sfnt table-directory entry so the GPOS table is located and gpos.get_feature_count() returns num_features>0; the loop at L1680 then takes its true side.",
+      "why_winner_satisfies": "Every winner-resolving seed places the literal bytes 'GPOS' at offsets 0x0c-0x0f, giving a valid GPOS table directory entry; the branch true-side fires (W shows T=129) and the body at L1681/L1682 is reached only in W.",
+      "why_loser_doesnt": "Loser-blocking seeds have no 'GPOS' tag at 0x0c-0x0f (they hold values like 47/01/00/2c, 50/20/00, etc.), so no GPOS table is located, num_features stays 0, and the loop true side is never taken (L shows T=0 F=20).",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the intercepted tag comparison (the HB_TAG sfnt-table-tag compare) from the CmpLogObserver buffer and substitutes the 'GPOS' operand into the input at the matching offset, planting the exact 4-byte tag that naive/value_profile must find by blind havoc."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the feature loop gated on num_features, derived from gpos.get_feature_count().",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1679-L1680",
+      "exact_quote": "unsigned int num_features = gpos.get_feature_count ();"
+    },
+    {
+      "claim": "A HB_TAG sfnt table tag drives table lookup in this function.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1676-L1677",
+      "exact_quote": "const hb_tag_t tag = HB_TAG ('s','i','z','e');"
+    },
+    {
+      "claim": "Winner seeds carry the literal ASCII 'GPOS' tag at offsets 0x0c-0x0f.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "At 0x0f winner is uniformly 'S' (0x53) while loser is not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0f",
+      "exact_quote": "0x000f  53(S)x20                            00(.)x5 6a(j)x1 6f(o)x1 fa(.)x1  +10u  DIFFER"
+    },
+    {
+      "claim": "Winner-resolving seed bytes show 'GPOS' at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0119dc42c7db21ec offset 0x0000",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 47 50 4f 53   ......      GPOS"
+    },
+    {
+      "claim": "The blocker loop true side fires only in winner seeds (T=129 in W, T=0 in L).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1680",
+      "exact_quote": "d=1   L1680  T=129 F=20  T=0 F=20  for (unsigned int i = 0; i < num_features; i++)  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser-blocking seeds lack a GPOS tag and are short/unstructured.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed_id 003817559785f774",
+      "exact_quote": "0000: 87 0e 0d 0e 22 0e                                 ....\"."
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a recorded CMP operand into matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "picks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the I2S delta separates the vp pair.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5567 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0119dc42c7db21ec` and observed one I2S-floor row (mutation_op = -, ParentInfo-only) at depth 17 of the 18-level ancestor chain; the tool's trailing 'I2S-floor signal' line reports '1 ancestor dash row(s) at depth 17', direct lower-bound evidence of an I2SRandReplace find in the winning seed's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose GPOS-table-tag compare is removed (table located by index, not by an intercepted 4-byte tag CMP) showing cmplog/vpc NOT outpacing naive/value_profile at entering the feature loop."
+  },
+  "weakest_evidence_point": "The byte-diff shows 'GPOS' at a fixed offset 0x0c-0x0f in all sampled winners, but I infer (rather than directly observe) that the sfnt table-directory tag CMP is the specific comparison I2SRandReplace solves.",
+  "confidence": "high"
+}

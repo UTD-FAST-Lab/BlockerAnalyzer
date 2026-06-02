@@ -1,0 +1,81 @@
+{
+  "branch_id": 68,
+  "target": "curl",
+  "summary_one_line": "Input must encode a valid protocol/URL structure that drives curl deep enough to invoke Curl_fopen on a save path so the stat/S_ISREG guard is exercised on the T side.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A structurally valid protocol request (e.g. a pop3://host:port URL plus mail-style headers) that survives curl's URL/protocol parsing and reaches the cookie/HSTS save code path, which then calls Curl_fopen and takes the T side of the stat()==-1 || !S_ISREG guard.",
+      "why_winner_satisfies": "Winner seeds contain a parseable scheme+authority (pop3://127.0.0.1:9001/850) and RFC822-style From:/To: headers, giving the well-formed protocol structure needed to reach Curl_fopen and resolve the T side (the cov overlay marks line 64 'goto fail' [W] and the T-side branch at line 59 fires only for W).",
+      "why_loser_doesnt": "Loser seeds are short/degenerate byte runs (e.g. a 10-byte zero-padded blob, or repetitive +./-/% noise) that do not parse into a valid scheme+authority, so curl never drives the save path to the resolving outcome; on the loser side line 59 is hit 51 times on F only and the F-side return CURLE_OK (line 63 [L]) dominates.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes one CMP operand for the other at matching input offsets, letting it plant the literal scheme/authority and field bytes that curl's parser compares against; naive only has havoc/token mutators with no CMP introspection, so it rarely synthesizes the structured prefix needed to reach the guard's T side."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked T side is the stat/S_ISREG guard inside Curl_fopen.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "fopen.c:59",
+      "exact_quote": "if(stat(filename, &sb) == -1 || !S_ISREG(sb.st_mode)) {"
+    },
+    {
+      "claim": "cmplog beats naive at this branch with the delta attributed to I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "Winner seeds carry a parseable protocol URL and mail headers.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id ac73bec58f30a882",
+      "exact_quote": "70 6f 70 33 3a 2f 2f 31 32 37   .3....pop3://127"
+    },
+    {
+      "claim": "Winner seeds include RFC822-style header structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id ac73bec58f30a882 offset 0x24",
+      "exact_quote": "47 46 72 6f 6d 3a 20 6d 65 40 73 6f   ....GFrom: me@so"
+    },
+    {
+      "claim": "Loser seeds are short degenerate byte runs lacking valid structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00194f589998cedc",
+      "exact_quote": "00 0d 00 00 00 00 00 00 00 00                     .........."
+    },
+    {
+      "claim": "On the winner the function reaches goto fail (the T-side outcome) while the loser returns CURLE_OK on the F-side.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "fopen.c:63-64",
+      "exact_quote": "[L]    63        return CURLE_OK;\n[W]    64      goto fail;"
+    },
+    {
+      "claim": "The loser hits line 59 on the F side 51 times while the winner takes the T side; the T side resolves only for W.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L59",
+      "exact_quote": "T=2 F=0  T=0 F=51  if(stat(filename, &sb) == -1 || !S_ISREG(sb.st_mode)) {  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes one CMP operand for the other at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S, only havoc and token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 68 --role W --fuzzer cmplog --trial 1 --seed ac73bec58f30a882` and observed an I2S-floor row (mutation_op = -) at depth 1 of the 2-level chain; tool reports '1 ancestor dash row(s) at depth 1', the lower-bound I2S signal under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a synthetic harness gates only on a non-comparison structural property (e.g. input length, with no scheme/authority literal that curl byte-compares), cmplog would show no advantage over naive at the stat-guard T side, refuting the I2S-substitution attribution."
+  },
+  "weakest_evidence_point": "The link from the protocol-prefix bytes to specifically the stat()==-1 T outcome is inferred from the deep call chain; the seeds do not directly show which filename argument reaches Curl_fopen or why stat fails on it.",
+  "confidence": "medium"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 62,
+  "target": "curl",
+  "summary_one_line": "Input must parse into at least one stored cookie (c->numcookies != 0), which requires a well-formed Set-Cookie header reaching Curl_cookie_add.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must drive curl through the cookie-parsing path so that at least one cookie is successfully added (c->numcookies > 0 at cookie_output time). This requires structured magic-byte prefix bytes plus a literal 'HTTP/' response token and a literal 'Set-Cookie' header with a parseable name=value and domain, so the false branch (numcookies==0) is escaped.",
+      "why_winner_satisfies": "Winner-resolving seeds carry a stable structured prefix (00 01 00 00 00 19) followed by 'pop' scheme, a host:port like '9001', the literal 'HTTP/' at offset 0x24, and a 'Set-Cookie' header — Curl_cookie_add fires 20 times (W=20 L=0) so c->numcookies becomes non-zero and line 1690 takes the true branch.",
+      "why_loser_doesnt": "Loser-blocking seeds at the same offsets carry scattered, unconcentrated bytes (mostly '%','A','+','.' filler) instead of the 'HTTP/' / 'Set-Cookie' literals; Curl_cookie_add and get_netscape_format never execute (L hits = 0), so no cookie is stored and line 1690 stays on the false branch in all 10 trials.",
+      "mechanism_attribution": "cmplog and value_profile_cmplog carry I2SRandReplace, which reads the post-execution CmpLogObserver buffer and substitutes the exact compared operand (e.g. the 'HTTP/' / cookie-header literals) into the input at matching offsets, solving the literal-byte gates that gate cookie parsing. naive and value_profile lack I2SRandReplace; value_profile's Hamming-closeness feedback only rewards approaching operands and cannot synthesize the exact multi-byte literals needed, so both losers stall."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true branch of if(c->numcookies) in cookie_output.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cookie.c:1690",
+      "exact_quote": "Source line:   if(c->numcookies) {"
+    },
+    {
+      "claim": "Both decisive pairs differ by exactly the I2S technique and both winners resolve 10/10 while losers block 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner inputs execute Curl_cookie_add and get_netscape_format 20 times each while losers never execute them.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "Curl_cookie_add / get_netscape_format rows",
+      "exact_quote": "20         0  Curl_cookie_add  (/src/curl/lib/cookie.c:494-1207)"
+    },
+    {
+      "claim": "On the blocker line the winner takes the true side and the loser takes the false side, confirming c->numcookies divergence.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1690",
+      "exact_quote": "d=1   L1690  T=20 F=0  T=0 F=20  if(c->numcookies) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner seeds carry the literal 'HTTP/' token whereas loser seeds carry scattered filler bytes at the same offsets.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x24",
+      "exact_quote": "0x0024  47(G)x20                            50(P)x2 42(B)x1 9e(.)x1 2f(/)x1 +7u  DIFFER"
+    },
+    {
+      "claim": "Winner seeds end in the literal Set-Cookie header bytes (53 65 74 2d 43 6f 6f = 'Set-Coo').",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 2b428b2993f47feb offset 0x39",
+      "exact_quote": "65 63 8e 65 74 72 65 0d 0a 53 65 74 2d 43 6f 6f   ec.etre..Set-Coo"
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace which substitutes the exact CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so its loser cannot synthesize the required literals.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 62 --role W --fuzzer cmplog --trial 1 --seed 2b428b2993f47feb` and observed 2 I2S-floor rows (mutation_op = -) at depth 14 and depth 15 of the ancestor chain; the tool's trailing 'I2S-floor signal' line confirmed dash rows characteristic of unwrapped I2SRandReplace finds in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating c->numcookies on a multi-byte literal where naive/value_profile resolve the true branch as fast as cmplog/vpc — showing the literal-byte gate is not what separates the I2S-equipped winners from the losers."
+  },
+  "weakest_evidence_point": "The exact set of literal CMP operands I2S must substitute (HTTP/ vs Set-Cookie vs scheme/port) is inferred from byte-diff concentration, not from a CMP-operand dump, so the precise gating comparison inside Curl_cookie_add is uncertain.",
+  "confidence": "high"
+}

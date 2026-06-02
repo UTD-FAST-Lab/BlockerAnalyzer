@@ -1,0 +1,87 @@
+{
+  "branch_id": 6114,
+  "target": "harfbuzz",
+  "summary_one_line": "A KHUDAWADI codepoint 0x112B0 followed by one of the 5 specific vowel-sign codepoints (0x112E0/E5/E6/E7/E8) at the next glyph.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["minimizer>naive (calibrated_energy)"],
+      "what_input_feature": "An input decoded to HB_SCRIPT_KHUDAWADI whose current glyph is codepoint 0x112B0u and whose NEXT glyph codepoint (buffer->cur(1)) is one of the inner-switch arm values 0x112E0u/0x112E5u/0x112E6u/0x112E7u/0x112E8u, so the false (non-default) branch of the codepoint switch at line 386 is taken and matched=true.",
+      "why_winner_satisfies": "The minimizer winning-resolving seeds carry the 4-byte little-endian KHUDAWADI codepoints in sequence: bytes `b0 12 01 00` (=0x000112B0) immediately followed by `e5 12 01 00` (=0x000112E5), repeated across the buffer; the winner reaches the inner case arms (line 388-390 marked [W]) and takes the false branch (W F=4 at line 386).",
+      "why_loser_doesnt": "The naive loser-blocking seeds repeat `b0 12 01 00` (0x112B0) but pair it with non-matching followers (e.g. `ff 00 00 00`, `40 00 00 00`), so at the line-386 switch they take only the true/default-fall-through side (L T=25 F=0) and never reach the inner arms; the winning false branch is taken 0 times.",
+      "mechanism_attribution": "Both fuzzers share naive's edge counters and the identical havoc/token mutator stack, so the only technique delta is minimizer's CalibrationStage + StdPowerMutationalStage: faster/smaller/more-stable seeds earn more havoc mutations (energy from calibration perf_score, PowerSchedule None). This higher per-seed mutation budget on the well-behaved KHUDAWADI seeds lets minimizer stumble onto the specific 4-byte follower codepoint that naive's flat StdMutationalStage budget rarely reaches within the budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is minimizer > naive with technique delta calibrated_energy, and the winning side is the false branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "Pair 1: minimizer > naive  [delta: calibrated_energy]"
+    },
+    {
+      "claim": "The globally blocked side that the winner resolves is the false branch of the line-386 switch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "The blocker is the inner switch on the next glyph's codepoint inside the KHUDAWADI case for current codepoint 0x112B0u.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L386",
+      "exact_quote": "switch (buffer->cur (1).codepoint) <-- BLOCKER"
+    },
+    {
+      "claim": "The winning false branch leads to the inner case arms 0x112E0u..0x112E8u which set matched=true.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L388-390",
+      "exact_quote": "case 0x112E0u: case 0x112E5u: case 0x112E6u: case 0x112E7u:\n[W]   389  \t      case 0x112E8u:\n[W]   390  \t\tmatched = true;"
+    },
+    {
+      "claim": "The winner takes the false branch of line 386 while the loser never does (W F=4, L F=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L386",
+      "exact_quote": "386  T=2 F=4  T=25 F=0  switch (buffer->cur (1).codepoint)  <-- BLOCKER"
+    },
+    {
+      "claim": "A minimizer winner-resolving seed contains the KHUDAWADI codepoint 0x112B0 (b0 12 01 00) immediately followed by 0x112E5 (e5 12 01 00).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id=378270c3d4fa7deb offset 0x0004-0x000b",
+      "exact_quote": "b0 12 01 00 e5 12 01 00"
+    },
+    {
+      "claim": "The naive loser-blocking seeds repeat 0x112B0 (b0 12 01 00) but follow it with non-matching bytes such as ff 00 00 00 / 40 00 00 00.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id=f1439201b12b81ec offset 0x0000-0x000f",
+      "exact_quote": "b0 12 01 00 b0 12 01 00 ff 00 00 00 40 00 00 00"
+    },
+    {
+      "claim": "minimizer's energy is derived from a calibration-based perf_score that rewards faster/smaller/more-stable seeds, with PowerSchedule None.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "minimizer block",
+      "exact_quote": "faster, smaller,\nmore-stable seeds earn more mutations. PowerSchedule is `None`, so the\nenergy uses ONLY intrinsic calibration"
+    },
+    {
+      "claim": "minimizer uses naive's edge counters only and the same havoc+token mutators, so I2S/CMP introspection is not available.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "minimizer Instrumentation",
+      "exact_quote": "**Instrumentation**: naive's edge counters only."
+    },
+    {
+      "claim": "naive runs the same havoc/token stack with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "calibrated energy",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is calibrated energy, not I2SRandReplace, so the mandatory cmplog lineage check does not apply. Mechanism is corroborated from MECHANISM CONTEXT: minimizer adds only a CalibrationStage + StdPowerMutationalStage on top of naive's edge counters and identical havoc mutators, and the winning seeds (fuzzer=minimizer) carry havoc/token mutation_op chains (BytesDeleteMutator,BytesSwapMutator) with no dash/I2S rows."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic KHUDAWADI harness where minimizer and naive resolve the 0x112B0->0x112E5 follower gate at statistically indistinguishable rates given equal total executions, showing the per-seed energy advantage is not what crosses the gate."
+  },
+  "weakest_evidence_point": "The attribution rests on minimizer's calibrated power schedule giving more havoc budget to the KHUDAWADI seeds; I have no direct seed-count-per-visit evidence that energy (rather than chance corpus ordering) is what produced the matching 4-byte follower.",
+  "confidence": "medium"
+}

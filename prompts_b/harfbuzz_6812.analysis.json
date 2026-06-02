@@ -1,0 +1,94 @@
+{
+  "branch_id": 6812,
+  "target": "harfbuzz",
+  "summary_one_line": "A valid CPAL v1 table whose paletteLabelsZ offset field is non-zero, reached via the CPAL FOURCC-tagged table directory",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must carry the literal CPAL FOURCC tag (bytes 43 50 41 4c) in the table directory so the CPAL parser is selected, then a CPALV1Tail with a non-zero paletteLabelsZ offset so the false branch at CPAL.hh:63 is taken.",
+      "why_winner_satisfies": "The vpc winning seed contains the literal 'CPAL' tag at offsets 0x0c-0x0f and reaches line 64 ([W]), the dereference past the !paletteLabelsZ guard; its ancestor chain has an I2S-floor dash row, so I2SRandReplace substituted the exact CPAL magic.",
+      "why_loser_doesnt": "value_profile lacks I2SRandReplace, so it never substitutes the exact 4-byte CPAL tag; its blocking seeds carry unrelated bytes (e.g. 47(G)/4f(O)/53(S) at 0x0c-0x0f) and stay on the true branch (T=20 F=0).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes the exact CPAL FOURCC operand into the input, which the havoc-only value_profile cannot synthesize; this is the I2S delta that distinguishes vpc from value_profile."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Beyond the CPAL tag, the CPAL v1 header offset/length fields must be tuned so paletteLabelsZ resolves to a non-zero sub-table offset; reaching this multi-field constraint benefits from incremental Hamming/prefix gradient feedback.",
+      "why_winner_satisfies": "The vpc winner's header bytes (offsets 0x17=1c, 0x19=ff, 0x1b=04, 0x1c=73) are concentrated/structured distinct from losers; vpc's CMP_MAP gradient preserves intermediate inputs whose offset comparisons edge closer to a valid non-zero paletteLabelsZ.",
+      "why_loser_doesnt": "cmplog has no CMP_MAP gradient feedback, so partially-correct header offsets that do not yet flip a branch are discarded; cmplog blocks 10/10 at the branch (resolved=0/10 blocked=10).",
+      "mechanism_attribution": "value_profile's CMP_MAP records (PC, operand-distance bucket); an input whose CPAL offset/length comparison is closer to a non-zero paletteLabelsZ adds a new bucket and is kept as corpus, giving the gradient hill-climb that pure cmplog lacks. This is the value_profile delta distinguishing vpc from cmplog."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker false side requires paletteLabelsZ to be non-zero to avoid the early return.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 source line",
+      "exact_quote": "if (!paletteLabelsZ) return HB_OT_NAME_ID_INVALID;"
+    },
+    {
+      "claim": "The winning role reaches line 64 (the dereference) only when the guard is passed; losers never do.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "CPAL.hh:64",
+      "exact_quote": "[W]    64      return (base+paletteLabelsZ).as_array (palette_count)[palette_index];"
+    },
+    {
+      "claim": "The loser blocking seeds take the true branch 20 times and never the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 63",
+      "exact_quote": "d=1   L  63  T=0 F=1  T=20 F=0  if (!paletteLabelsZ) return HB_OT_NAME_ID_INVALID;"
+    },
+    {
+      "claim": "The vpc winning seed carries the literal CPAL FOURCC tag at offsets 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 offset 0x000c",
+      "exact_quote": "1a 43 50 41 4c   ......     .CPAL"
+    },
+    {
+      "claim": "At offsets 0x0c-0x0f the winner has CPAL bytes while losers concentrate on unrelated bytes.",
+      "cited_section": "BYTE DIFF (W vs L at common offsets)",
+      "cited_locator": "offsets 0x0c, 0x0e, 0x0f",
+      "exact_quote": "0x000c  43(C)x1                             47(G)x9 00(.)x2 01(.)x1 2c(,)x1 +7u  DIFFER"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes a logged CMP operand at matching offsets in the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile's CMP_MAP preserves an input whose operand pair is closer to matching as new corpus.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "cmplog as a loser blocks all 10 trials at this branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 loser",
+      "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "vpc instrumentation is the union of cmplog (CMP buffer) and value_profile (CMP_MAP gradient).",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Instrumentation",
+      "exact_quote": "union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 6812 --role W --fuzzer value_profile_cmplog --trial 1 --seed 15629def0bf913b0` and observed an I2S-floor dash row (mutation_op = -) at depth 17 of the 18-level ancestor chain, the lower-bound signal of an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic CPAL v1 harness where injecting the exact 4-byte CPAL/paletteLabelsZ magic alone (single I2S substitution) lets cmplog resolve the branch as fast as vpc, with no measurable value_profile gradient contribution, would refute the multi-feature joint-necessity claim."
+  },
+  "weakest_evidence_point": "The value_profile (CMP_MAP gradient) hypothesis rests on inferring a multi-field offset constraint from concentrated header byte-diff offsets (0x17/0x19/0x1b/0x1c) rather than from a directly observed intermediate corpus chain.",
+  "confidence": "medium"
+}

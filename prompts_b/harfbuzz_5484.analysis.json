@@ -1,0 +1,87 @@
+{
+  "branch_id": 5484,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must encode a GDEF table whose ClassDef header carries a recognized format (1-4) so get_class dispatches a real arm, not default:return 0.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed GDEF font table: the four-byte tag 'GDEF' at the table directory and a ClassDef subtable whose format field equals one of the recognized values (1,2,3,4), reached after the GDEF magic and offset fields validate. Only then does the switch on u.format take a real case arm instead of the default arm; the blocker is the false (non-default) side of the format dispatch and requires u.format to be a recognized format.",
+      "why_winner_satisfies": "Every winner-resolving seed carries the literal ASCII tag GDEF at offset 0x0c-0x0f (47 44 45 46) plus the leading 00 01 00 00 sfnt-version header, so the parser reaches ClassDef::get_class and the format byte selects case 1/2/3/4 — the winner-coverage overlay shows format1/format2 (and format3/format4) get_class arms hit while the L set never reaches them.",
+      "why_loser_doesnt": "Loser-blocking seeds are short, random-byte inputs (e.g. 6-byte 87 0e 0d 0e 22 0e) that never assemble a valid GDEF table directory; the byte-diff shows offsets 0x0c-0x0f hold 47 44 45 46 in W but arbitrary non-GDEF bytes in L, so the loser only reaches ClassDef::get_class via a malformed/absent table and falls through to default:return 0 (the true side that is the globally blocked branch).",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes the exact GDEF magic / sfnt-version / format constants that the parser compares against, manufacturing the multi-byte literals (the 'GDEF' tag and the format-field values) that plain havoc in naive/value_profile cannot stumble on; this is the I2S input-to-state substitution that both winners (cmplog, vpc) share and both losers (naive, vp) lack."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of a switch on u.format inside ClassDef::get_class, with format cases 1-4 as the real arms.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1995-L2002",
+      "exact_quote": "switch (u.format) {"
+    },
+    {
+      "claim": "The globally blocked side is the false branch of the format dispatch at the blocker line.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 2002",
+      "exact_quote": "default:return 0;"
+    },
+    {
+      "claim": "Winner seeds reach the recognized-format case arms (format1/format2/format3/format4 get_class) that the loser set never hits.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1996-L2000",
+      "exact_quote": "[W]  1996      case 1: return u.format1.get_class (glyph_id);"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal ASCII tag GDEF at offset 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 1c44206ca833678e offset 0x0c",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 00 20 20 10 00 47 44 45 46   ...... .  ..GDEF"
+    },
+    {
+      "claim": "The byte diff shows offsets 0x0c-0x0f are fixed to 47 44 45 46 (GDEF) in W but arbitrary non-GDEF bytes in L.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  47(G)x16                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds are short random-byte inputs that do not assemble a valid GDEF table.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 003817559785f774 (6 bytes)",
+      "exact_quote": "0000: 87 0e 0d 0e 22 0e                                 ....\"."
+    },
+    {
+      "claim": "Loser seeds take the true (default:return 0) side while winner seeds take the false side, with the blocker hit-count showing L=T1020 F0 vs W=T108 F864.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L2002",
+      "exact_quote": "d=1   L2002  T=108 F=864  T=1020 F=0  default:return 0;  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for byte sequences matching one CMP operand and substitutes the other, manufacturing literals like the GDEF tag and format values.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "Both decisive pairs differ by the I2S technique only (cmplog vs naive, vpc vs vp).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the loser of the second pair cannot perform input-to-state substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5484 --role W --fuzzer cmplog --trial 1 --seed 1c44206ca833678e`; the 27-level ancestor chain contains 2 I2S-floor dash rows (mutation_op = -) at depth 25 and 26, the lower-bound signal of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the GDEF/ClassDef format constants are NOT compared as literals (e.g. format chosen by an uninstrumented computed index) yet cmplog/vpc still resolve the recognized-format arm at the same rate as naive/vp would refute the I2S-substitution attribution."
+  },
+  "weakest_evidence_point": "The seeds prove the GDEF tag and a recognized format are present in winners, but the byte diff alone does not isolate which CMP (table tag vs format field) is the decisive I2S substitution gating the branch.",
+  "confidence": "high"
+}

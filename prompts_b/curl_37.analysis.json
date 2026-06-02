@@ -1,0 +1,81 @@
+{
+  "branch_id": 37,
+  "target": "curl",
+  "summary_one_line": "Input must contain a well-formed HTTP response with a recognized content-encoding header so a writer stack is built and the cleanup loop iterates.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Bytes forming the literal HTTP status-line/header tokens (e.g. 'HTTP/' at offsets 0x24-0x29 and a 'TranSfer'-Encoding header from 0x2c on) so curl parses a response and Curl_build_unencoding_stack pushes a contenc_writer; only then is writer non-NULL and the while(writer) true side taken.",
+      "why_winner_satisfies": "Winner-resolving seeds carry the exact ASCII run 48(H)48(T)54(T)54(T)50(P)2f(/) at offsets 0x24-0x29 and a 'TranSfer'-style encoding token at 0x2c-0x3c; W coverage shows Curl_build_unencoding_stack and new_unencoding_writer executed (W hits 20/70, L hits 0), so the writer stack is non-empty and the loop body at 1017-1021 runs.",
+      "why_loser_doesnt": "Loser-blocking seeds are short (35-73 bytes) '%'-percent-noise inputs lacking the HTTP/ and Transfer-Encoding literals at those offsets, so no writer is ever pushed (Curl_build_unencoding_stack L hits=0) and writer is NULL, taking the false side every time.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads intercepted string-CMP operands (curl's header-name comparisons against 'HTTP/', 'Transfer-Encoding') from the CmpLogObserver buffer and substitutes those literals directly into the input, planting the magic tokens that build the writer stack; naive/value_profile have no I2SRandReplace and cannot synthesize the multi-byte literals by chance."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the while(writer) loop guard in Curl_unencode_cleanup whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "content_encoding.c:1016",
+      "exact_quote": "while(writer) { <-- BLOCKER"
+    },
+    {
+      "claim": "Taking the true side requires the writer stack to be built, exercised only in winner runs.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "Curl_build_unencoding_stack",
+      "exact_quote": "20         0  Curl_build_unencoding_stack  (/src/curl/lib/content_encoding.c:1046-1097)"
+    },
+    {
+      "claim": "Winner seeds contain the literal HTTP/ token at offsets 0x24-0x29.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x24-0x29",
+      "exact_quote": "0x0025  48(H)x20                            25(%)x3 2e(.)x3 41(A)x2 64(d)x1 +1u  DIFFER"
+    },
+    {
+      "claim": "Winner seeds carry a TranSfer-style header literal in the tail bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0267a6030bf6fd21",
+      "exact_quote": "ec.etr...TranSfe"
+    },
+    {
+      "claim": "Loser-blocking seeds are short percent-noise inputs without the HTTP literals.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00225bc4819174d2",
+      "exact_quote": ".....CdUC%%%%!%e"
+    },
+    {
+      "claim": "The loser side never builds a writer, hitting the loop guard false-only.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1016",
+      "exact_quote": "d=1   L1016  T=70 F=20  T=0 F=20  while(writer) {  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a matched CMP operand into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the vpc>vp pair isolates the same I2S delta.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs are labelled with the I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 / Pair 2",
+      "exact_quote": "value_profile_cmplog > value_profile  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 37 --role W --fuzzer cmplog --trial 1 --seed 0267a6030bf6fd21` and observed one I2S-floor dash row (mutation_op = -) at depth 49 of the 50-level ancestor chain, the floor signal for an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose while-loop guard depends on a multi-byte HTTP magic literal where naive/value_profile reach the true side as often and as fast as cmplog/vpc (no I2S advantage)."
+  },
+  "weakest_evidence_point": "The byte-diff shows the HTTP/ and Transfer literals are concentrated in winners, but I infer the writer stack is built from those exact tokens rather than verifying the precise header curl matched.",
+  "confidence": "high"
+}

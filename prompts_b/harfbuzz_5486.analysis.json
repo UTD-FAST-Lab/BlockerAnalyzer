@@ -1,0 +1,87 @@
+{
+  "branch_id": 5486,
+  "target": "harfbuzz",
+  "summary_one_line": "Resolving the find_index loop requires a structurally-valid OpenType table header (00 01 00 00, GPOS/GSUB tag, valid offsets) so a varRecord exists to iterate.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed OpenType GSUB/GPOS layout table: the 4-byte version magic 00 01 00 00 at offset 0x00, a script/feature tag (GPOS/GSUB) at 0x0c-0x0f, and consistent table/offset fields (ff 1e 21, 00 18, etc.) so that sanitize passes and varRecords.len > 0, making the loop at L3281 enter its body (true branch).",
+      "why_winner_satisfies": "Winner-resolving seeds carry the literal magic 00 01 00 00 at 0x00-0x03, the ASCII tags GPOS/GSUB at 0x0c-0x0f, and a stable structured tail (ff 1e 21 ... 00 18) at 0x10-0x17 across all 10 winner samples; the cov overlay shows the loop body L3283-L3289 hit only by W and ConditionSet::evaluate runs 315 times for W versus 0 for L.",
+      "why_loser_doesnt": "Loser-blocking seeds are unstructured byte soup (e0 17 00 00..., fe ff ff ff..., repeated 3d/= runs) with no magic/tag at the fixed offsets, so sanitize rejects the table and varRecords.len stays 0; the loop never enters (T=0) and the false branch is taken.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, the only mutator value_profile lacks: cmplog intercepts the integer/tag comparisons (version equality, tag cmp) and substitutes the captured operand directly into the input at the comparison's byte offset, planting the exact magic/tag bytes that value_profile's Hamming-bucket feedback alone cannot land because the equality is all-or-nothing."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the loop-condition true branch of find_index iterating varRecords.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L3281, blocked side T",
+      "exact_quote": "for (unsigned int i = 0; i < count; i++)"
+    },
+    {
+      "claim": "The only decisive pair is value_profile_cmplog beating value_profile on the I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner seeds carry the OpenType version magic and GPOS/GSUB tags at fixed offsets.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1, offset 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 47 50 4f 53   ......      GPOS"
+    },
+    {
+      "claim": "A winner seed shows the GSUB tag instead of GPOS, confirming the tag bytes are the discriminating structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 4, offset 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 47 53 55 42   ......      GSUB"
+    },
+    {
+      "claim": "The byte diff shows W is concentrated on the magic/tag bytes (00 01 00 00 at 0x00-0x03, GPOS/GSUB at 0x0c-0x0f) while L is dispersed.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x10"
+    },
+    {
+      "claim": "Loser-blocking seeds are unstructured and lack the fixed-offset header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1, offset 0x00",
+      "exact_quote": "fe ff ff ff f4 01 e0 e0 20 00 00 00 01 20 e0 6a   ........ .... .j"
+    },
+    {
+      "claim": "ConditionSet::evaluate runs 315 times for the winner and 0 for the loser, showing only W enters the loop body and reaches the conditions.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "ConditionSet::evaluate row",
+      "exact_quote": "315         0  OT::ConditionSet::evaluate(int const*, unsigned int) const"
+    },
+    {
+      "claim": "The loop true branch is taken only by W (T=315) and never by L (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L3281",
+      "exact_quote": "d=1   L3281  T=315 F=270  T=0 F=416"
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace to the mutator stack that value_profile lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, only havoc plus the CMP_MAP Hamming-distance gradient feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5486 --role W --fuzzer value_profile_cmplog --trial 1 --seed 3e57401a2eda285a` and observed an I2S-floor row (mutation_op = -, ancestor e0a5b09f80625fb6) at depth 22 of the 23-level chain; tool reports '1 ancestor dash row(s) at depth 22'."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile resolves the loop as often as value_profile_cmplog when the gate is an exact 4-byte equality on the OpenType magic/tag — showing CMP_MAP gradient alone suffices and I2S substitution is not the deciding factor."
+  },
+  "weakest_evidence_point": "The byte diff confirms W concentrates on the magic/tag offsets but does not directly prove cmplog substituted those exact bytes via I2S rather than havoc/token mutations landing them by luck; the single dash-row floor signal is a lower bound, not a precise count.",
+  "confidence": "high"
+}

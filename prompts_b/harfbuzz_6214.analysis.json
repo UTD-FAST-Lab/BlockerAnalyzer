@@ -1,0 +1,100 @@
+{
+  "branch_id": 6214,
+  "target": "harfbuzz",
+  "summary_one_line": "Reach hb_ot_old_tag_from_script with an HB_SCRIPT_INVALID (sentinel) script after navigating multi-stage tag/language parsing, hitting the switch's default-script case.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A font/tag input that drives the parsed script value to the HB_SCRIPT_INVALID sentinel (the switch operand at line 41 must equal the INVALID constant), reaching the case at line 43.",
+      "why_winner_satisfies": "value_profile_cmplog resolves 10/10; its winning seeds carry an I2S-floor (mutation_op = -) ancestor in lineage, indicating I2SRandReplace substituted the operand bytes that steer script to the INVALID/default-script comparison target.",
+      "why_loser_doesnt": "value_profile has no I2SRandReplace mutator, so it must blindly mutate the bytes feeding the script value; it resolves only 2/10 and stays blocked 8/10 with avg blocked duration 22.10h.",
+      "mechanism_attribution": "I2SRandReplace (cmplog input-to-state): the CmpLogObserver records the script-vs-constant comparison operands and the mutator substitutes the matching operand into the input, the technique value_profile lacks but value_profile_cmplog adds."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "The same INVALID-script reaching input, but arrived at by progressively closing the multi-byte distance on the chained tag/language comparisons (lang_matches, parse_private_use_subtag) that gate which script value is produced.",
+      "why_winner_satisfies": "value_profile_cmplog adds CMP_MAP gradient feedback; it preserves intermediate inputs that get the chained tag comparisons closer to matching, so it resolves 10/10 where cmplog (no CMP_MAP) resolves only 2/10.",
+      "why_loser_doesnt": "cmplog has no CMP_MAP gradient feedback, so partial-progress inputs on the lang/tag comparison chain are not retained as corpus; cmplog stays blocked 8/10 with avg blocked duration 19.90h.",
+      "mechanism_attribution": "CMP_MAP gradient (value_profile Hamming/prefix-distance feedback): new CMP_MAP buckets for closer-matching operand pairs preserve intermediate inputs, the technique cmplog lacks but value_profile_cmplog adds."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the HB_SCRIPT_INVALID case arm returning the default script tag inside a switch on the script value.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-tag.cc:43",
+      "exact_quote": "case HB_SCRIPT_INVALID:\t\treturn HB_OT_TAG_DEFAULT_SCRIPT;"
+    },
+    {
+      "claim": "The switch operand is the script value, so reaching the INVALID arm requires the parsed script to equal the INVALID sentinel.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "hb-ot-tag.cc:41",
+      "exact_quote": "switch ((hb_tag_t) script)"
+    },
+    {
+      "claim": "value_profile_cmplog resolves the branch 10/10 while value_profile resolves only 2/10 (loser, delta I2S).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile lacks the I2SRandReplace mutator entirely.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "I2SRandReplace reads the CmpLogObserver buffer, matches one operand in the input, and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile loser stays blocked with a long avg blocked duration of 22.10h.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "avg duration blocked: winner=7.60h  loser=22.10h"
+    },
+    {
+      "claim": "value_profile_cmplog resolves 10/10 while cmplog resolves only 2/10 (loser, delta value_profile).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "value_profile's CMP_MAP feedback preserves an input that produces a CMP-operand pair closer to matching than any seen before.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "The path to the blocker traverses chained tag/language comparison functions including lang_matches.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "lang_matches row",
+      "exact_quote": "hb-ot-tag.cc:lang_matches(char const*, char const*, char const*, unsigned int)"
+    },
+    {
+      "claim": "cmplog loser stays blocked with avg blocked duration 19.90h.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "avg duration blocked: winner=7.60h  loser=19.90h"
+    },
+    {
+      "claim": "The winning seeds are discovered by value_profile_cmplog.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1",
+      "exact_quote": "fuzzer=value_profile_cmplog, trial=1"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 6214 --role W --fuzzer value_profile_cmplog --trial 1 --seed 846fa0fa582cf403`; the chain has 33 ancestor levels and the tool reports an I2S-floor dash row (mutation_op = -) at depth 32, confirming an unwrapped I2SRandReplace find in the vpc winner's ancestry"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating the INVALID/default-script switch arm on a single exact-magic comparison where value_profile alone (no I2S) resolves it as fast as value_profile_cmplog, showing CMP_MAP gradient suffices and I2S is not required."
+  },
+  "weakest_evidence_point": "Whether the script value reaching the switch is governed by a single I2S-solvable magic comparison versus a multi-stage chain — the source shows the switch operand but not the dataflow that sets the INVALID sentinel.",
+  "confidence": "medium"
+}

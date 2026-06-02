@@ -1,0 +1,75 @@
+{
+  "branch_id": 5478,
+  "target": "harfbuzz",
+  "summary_one_line": "A LangSys reqFeatureIndex field whose 16-bit value is not the sentinel 0xFFFF, so the false branch (real required-feature index) is taken.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed GSUB/GPOS LangSys record whose 16-bit reqFeatureIndex field holds a value other than 0xFFFF — the input must reach a parsed LangSys and supply a non-sentinel required-feature index so that the equality test reqFeatureIndex == 0xFFFFu fails and control returns reqFeatureIndex.",
+      "why_winner_satisfies": "Winner seeds carry structured table headers with GPOS/GSUB tags and offset/index fields (e.g. tag bytes 47 50 4f 53 'GPOS' / 47 53 55 42 'GSUB' at 0x0c-0x0f, structured 18/02/1f/08 offset runs), and the cmplog/vpc CMP buffer lets I2SRandReplace substitute the captured 0xFFFF operand into a 16-bit field that is then mutated to a non-0xFFFF reqFeatureIndex, reaching the false branch (W hits the line 11 True / 15 False and return reqFeatureIndex executes only for W).",
+      "why_loser_doesnt": "Loser seeds are short and unstructured (6, 13, 27, 57 bytes) and never construct a valid LangSys record carrying a non-sentinel reqFeatureIndex; whenever they do reach the comparison the field reads as the default 0xFFFF, so they always take the true branch (L hits 72 True / 0 False) and the function returns NOT_FOUND_INDEX.",
+      "mechanism_attribution": "cmplog/vpc intercept the integer comparison reqFeatureIndex == 0xFFFFu, record both operands into the CmpLogObserver buffer, and I2SRandReplace then writes the comparison constant into the matching input offset and havoc nudges it off the sentinel; naive and value_profile lack I2SRandReplace and cannot reliably plant a non-0xFFFF value in the reqFeatureIndex slot of a structurally valid record."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the false side of an equality test against the constant 0xFFFF on reqFeatureIndex.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-layout-common.hh:983",
+      "exact_quote": "if (reqFeatureIndex == 0xFFFFu)"
+    },
+    {
+      "claim": "The globally blocked side is the false branch, which returns the real reqFeatureIndex.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L53 line 985",
+      "exact_quote": "[W]   985     return reqFeatureIndex;"
+    },
+    {
+      "claim": "Both decisive pairs differ by the I2S technique only.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26 and L34",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner seeds carry structured GPOS/GSUB table tags and offset fields.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed aa6f47881154f74f offset 0x0c",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 47 50 4f 53   ......      GPOS"
+    },
+    {
+      "claim": "Loser-blocking seeds are short and unstructured (e.g. 6 bytes).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 003817559785f774, 6 bytes",
+      "exact_quote": "Seed 1 (id=003817559785f774, size=6 bytes, fuzzer=naive, trial=1, discovered_at=0s, mutation_op=ByteDecMutator,WordAddMutator):"
+    },
+    {
+      "claim": "At the blocker line the winner takes the false branch while the loser only ever takes the true branch.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 983",
+      "exact_quote": "d=1   L 983  T=11 F=15  T=72 F=0  if (reqFeatureIndex == 0xFFFFu)  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which substitutes a captured CMP operand into matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, so it cannot perform the operand substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5478 --role W --fuzzer value_profile_cmplog --trial 1 --seed aa6f47881154f74f`; the 19-level ancestor chain contains 1 I2S-floor dash row (mutation_op = -) at depth 18 (ancestor e0a5b09f80625fb6), direct lower-bound evidence of an unwrapped I2SRandReplace find in the vpc winner lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the reqFeatureIndex==0xFFFF gate where cmplog/vpc resolve the false branch no faster than naive/value_profile (no I2S advantage), showing the divergence is not driven by I2S substitution of the comparison constant."
+  },
+  "weakest_evidence_point": "The exact input offset of the reqFeatureIndex field is not pinned by the byte diff (offsets 0x06-0x1b differ but none is uniquely identified as the 16-bit reqFeatureIndex slot), so the precise substitution site is inferred from structure rather than directly located.",
+  "confidence": "high"
+}

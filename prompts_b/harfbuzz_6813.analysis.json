@@ -1,0 +1,100 @@
+{
+  "branch_id": 6813,
+  "target": "harfbuzz",
+  "summary_one_line": "A valid sfnt directory with a 'CPAL' tag whose v1 CPALV1Tail has a non-zero colorLabelsZ offset, reached only by combining I2S magic substitution with CMP_MAP gradient.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The table-directory entry must carry the exact 4-byte FOURCC 'CPAL' (43 50 41 4c) at the tag offset so the CPAL parser is dispatched; the winner seed has 'CPAL' at bytes 0x0c-0x0f.",
+      "why_winner_satisfies": "The winning vpc seed contains the literal 'CPAL' magic (43 50 41 4c) at offsets 0x0c-0x0f, satisfying the 4-byte tag CMP that selects the CPAL parse path en route to colorLabelsZ.",
+      "why_loser_doesnt": "value_profile lacks I2SRandReplace, so its blocking seeds carry mismatched tag bytes (e.g. 47 4f 53 = 'GOS' fragment at 0x0c-0x0f) and never land the exact 'CPAL' FOURCC; it stays blocked 10/10.",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the intercepted 4-byte tag CMP from the CmpLogObserver buffer and substitutes the expected 'CPAL' operand at the matching input offset; value_profile has no such mutator, so it cannot synthesize the exact FOURCC."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Beyond the CPAL tag, the CPAL v1 header fields (version, numColors/numPalettes, and the colorLabelsZ offset) must form a self-consistent multi-byte structure where colorLabelsZ resolves non-zero; this needs a gradient walk over several near-miss integer fields.",
+      "why_winner_satisfies": "The winning vpc seed reaches the false branch with hitcount 2 and structured header bytes (00 01 00 00 00 01 ... 00 00 00 1c) consistent with a parsed v1 CPAL whose offset fields resolve to a non-zero colorLabelsZ.",
+      "why_loser_doesnt": "cmplog has no CMP_MAP gradient feedback, so partial-match intermediate inputs for the multi-field offset structure are not preserved as corpus; it never accumulates the near-match progression and stays blocked 10/10 with hitcount 0.",
+      "mechanism_attribution": "value_profile/vpc's CMP_MAP records operand-distance buckets so inputs that bring the colorLabelsZ-related offset fields closer to a valid non-zero value are kept and refined; cmplog (I2S-only, no CMP_MAP) lacks this gradient and cannot ratchet the structure into validity."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker false branch requires colorLabelsZ to be non-null.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "CPAL.hh:71",
+      "exact_quote": "if (!colorLabelsZ) return HB_OT_NAME_ID_INVALID;"
+    },
+    {
+      "claim": "Only value_profile_cmplog resolves the branch; both single-technique losers stay blocked 10/10.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "fuzzer rows cmplog/value_profile/value_profile_cmplog",
+      "exact_quote": "value_profile_cmplog             9       1          0  winner (value_profile vs cmplog); winner (I2S vs value_profile)"
+    },
+    {
+      "claim": "Pair 2's technique delta is I2S (vpc beats value_profile).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Pair 1's technique delta is value_profile (vpc beats cmplog).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The winning seed carries the literal 'CPAL' FOURCC at offsets 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 15629def0bf913b0 offsets 0x0c-0x0f",
+      "exact_quote": "1a 43 50 41 4c   ......     .CPAL"
+    },
+    {
+      "claim": "At offsets 0x0c-0x0f the winner bytes are C/P/A/L while loser bytes diverge (G/O/S).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  43(C)x1                             47(G)x9 00(.)x2 01(.)x1 2c(,)x1 +7u  DIFFER"
+    },
+    {
+      "claim": "The winner reaches the false branch with hitcount 2 while losers stay at hitcount 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 hitcount line",
+      "exact_quote": "avg hitcount on branch: winner=2  loser=0"
+    },
+    {
+      "claim": "cmplog's mutators include I2SRandReplace which substitutes the other CMP operand at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile preserves inputs whose CMP operands are closer to matching via CMP_MAP buckets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog combines per-execution CMP buffer (I2S) and CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Instrumentation",
+      "exact_quote": "union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 6813 --role W --fuzzer value_profile_cmplog --trial 1 --seed 15629def0bf913b0` and observed an I2S-floor dash row (mutation_op = -) at depth 17 of the 18-level ancestor chain (ancestor e0a5b09f80625fb6), confirming an unwrapped I2SRandReplace find in the winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gated only on the exact 'CPAL' FOURCC (no multi-field offset structure) where cmplog alone resolves the branch as fast as value_profile_cmplog, showing the value_profile/CMP_MAP gradient axis was not necessary."
+  },
+  "weakest_evidence_point": "The value_profile-axis hypothesis attributes the cmplog-loss to a missing multi-field offset gradient, but the prompt offers no direct byte-level evidence that colorLabelsZ requires a near-miss progression rather than a single additional CMP that I2S could also have solved.",
+  "confidence": "medium"
+}

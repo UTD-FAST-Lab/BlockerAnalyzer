@@ -1,0 +1,81 @@
+{
+  "branch_id": 5954,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must decode to Thai codepoint exactly 0x0E1B/0x0E1D/0x0E1F (byte pair 1f 0e LE) so get_consonant_type returns AC.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A 16-bit little-endian codepoint slot whose value equals exactly one of 0x0E1B, 0x0E1D, or 0x0E1F (the Thai consonants matched at line 53), appearing in the buffer as the byte pair 1f 0e (or 1b 0e / 1d 0e) so get_consonant_type takes its first if-true branch.",
+      "why_winner_satisfies": "Multiple naive winner seeds carry the literal little-endian pair 1f 0e at codepoint slots (seed 1 offset 0x28, seed 2 offset 0x3c, seed 5 repeated at 0x0c/0x13/0x17/0x38), i.e. the exact value 0x0E1F that satisfies u == 0x0E1Fu; naive reaches True 20 times on this branch.",
+      "why_loser_doesnt": "cmplog loser seeds contain 0x0E-high codepoints but with non-matching low bytes (e.g. 4d 0e=0x0E4D, 34 0e=0x0E34, 08 0e, 10 0e, 0f 0e), which fall through to the range check at line 59 (NC) and never equal 0x0E1B/0x0E1D/0x0E1F; loser took the true branch 0 times.",
+      "mechanism_attribution": "The winner is the non-I2S fuzzer naive: plain havoc/byte mutation (ByteRandMutator, ByteInterestingMutator, BytesRandSetMutator) randomly lands the low byte on 0x1B/0x1D/0x1F while the high byte sits at 0x0E, so the enabling technique is havoc-only. cmplog gains nothing here because the equality comparison u == 0x0E1Fu in get_consonant_type is on a value decoded inside harfbuzz, not a direct memcmp/cmp of an input byte run, so cmplog's input-to-state substitution rewrites the wrong offsets and its mutation budget is diverted away from the lucky havoc that naive performs freely. This is an I2S-anti divergence (naive > cmplog)."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker's true branch requires the decoded codepoint u to equal exactly 0x0E1B, 0x0E1D, or 0x0E1F.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "hb-ot-shaper-thai.cc:53",
+      "exact_quote": "if (u == 0x0E1Bu || u == 0x0E1Du || u == 0x0E1Fu/* || u == 0x0E2Cu*/) <-- BLOCKER"
+    },
+    {
+      "claim": "naive is the decisive winner and cmplog the loser for the I2S delta at this branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "naive resolved the branch in all 10 trials while cmplog blocked in all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 counts",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "A naive winner seed carries the little-endian byte pair 1f 0e (= 0x0E1F) in a codepoint slot.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 offset 0x28",
+      "exact_quote": "d3 cb 97 97 00 00 97 00 1f 0e 00 00 48 61 0c 18"
+    },
+    {
+      "claim": "Another naive winner seed repeats the 1f 0e pair across multiple codepoint slots.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 5 offset 0x10",
+      "exact_quote": "4e 06 00 1f 31 0e 00 00 4e 06 00 1f 31 0e 00 00"
+    },
+    {
+      "claim": "cmplog loser seeds carry 0x0E-high codepoints with non-matching low bytes (e.g. 4d 0e = 0x0E4D) so they fall through the equality checks.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 4 offset 0x30",
+      "exact_quote": "34 0e 4d 0e 00 00 34 20 01 04 4d 0e 4d 0e 00 20"
+    },
+    {
+      "claim": "On the blocker line the loser reaches the true side 0 times while the winner reaches it 20 times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 53",
+      "exact_quote": "d=1   L  53  T=20 F=108  T=0 F=148"
+    },
+    {
+      "claim": "naive's mutator stack is havoc/token only, with no I2S, so the winner relies on lucky byte mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes operands at offsets where an input byte run matches a logged CMP operand, which does not target the harfbuzz-internal decoded codepoint comparison.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Winner is naive (non-I2S), so lineage I2S-floor verification is not applicable; this is an I2S-anti case where claimed_mechanism is havoc-only. naive winner seeds (id=34de298072a6ad88 etc.) carry mutation_op chains like ByteRandMutator/ByteInterestingMutator/BytesRandSetMutator and the literal 1f 0e codepoint bytes, consistent with lucky havoc landing the low byte on 0x1F at a 0x0E-high slot without any CMP introspection."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a synthetic harness gating on u == 0x0E1F (decoded codepoint equality) showed cmplog resolving as fast as or faster than naive, the claim that I2S substitution cannot target this internally-decoded comparison would be refuted."
+  },
+  "weakest_evidence_point": "Whether cmplog's per-execution CMP-buffer cost and misdirected substitution genuinely slow it down versus naive, rather than the gap being statistical noise across trials, is the least directly evidenced claim.",
+  "confidence": "medium"
+}

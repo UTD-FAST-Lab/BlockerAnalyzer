@@ -1,0 +1,87 @@
+{
+  "branch_id": 301,
+  "target": "curl",
+  "summary_one_line": "A well-formed URL (valid scheme + host:port) that drives the easy handle into a non-COMPLETED connect/protocol state before removal.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "Input bytes forming a parseable URL: a recognized scheme literal (e.g. 'pop3') at offset 0x06 followed by host and a numeric port (e.g. '9001'/'900') so the state machine advances data->mstate past MSTATE_INIT into a CONNECT/PROTOCONNECT state (< MSTATE_COMPLETED) when curl_multi_remove_handle is reached, making premature TRUE.",
+      "why_winner_satisfies": "Winner seeds carry a structured 'pop3' scheme followed by a host string and ':900'/'9001' port and HTTP-like headers; the per-role overlay shows W taking the true side at L790 (T=4 F=0) and entering premature/num_alive--/multi_done at 794/797/814, confirming a connected non-COMPLETED state at removal.",
+      "why_loser_doesnt": "Loser seeds are short (32-36 bytes) runs of '+'/'%'/'.' noise with no valid scheme byte at 0x06 and no host:port, so the handle never leaves the early INIT/CONNECT failure path; the overlay shows L only ever taking the false side at L790 (T=0 F=20), never setting premature TRUE.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver buffer for the scheme- and port-comparison operands curl performs during URL parsing and substitutes the matching literals into the input at the compared offsets, letting the parser accept the scheme/host/port and advance the multi state machine; naive and value_profile lack I2SRandReplace and must hit the exact scheme/port bytes by chance."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side requires data->mstate to be less than MSTATE_COMPLETED at removal time.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "multi.c:790",
+      "exact_quote": "premature = (data->mstate < MSTATE_COMPLETED) ? TRUE : FALSE;"
+    },
+    {
+      "claim": "Both decisive pairs are I2S-delta pairs (cmplog>naive and value_profile_cmplog>value_profile).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner seeds carry a 'pop3' scheme literal and a numeric port near offset 0x10.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id faf6b58d07527f1a, offsets 0x06-0x1a",
+      "exact_quote": "70 6f 70 33 26 2f 2f 70 4d 37"
+    },
+    {
+      "claim": "A winner seed contains a '9001' port string after the host.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id faf6b58d07527f1a, offset 0x16-0x1a",
+      "exact_quote": "30 2e 31 3a 39 30 30 31 3f 38 35 30 00"
+    },
+    {
+      "claim": "Loser seeds are short noise runs without a valid scheme or host:port.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00182ecc311b5f0b, size=32 bytes",
+      "exact_quote": "70 6b 2b 2b 2b 2b 2b 2a 2b 2b"
+    },
+    {
+      "claim": "In the winner run the blocker line 790 takes the true side while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L790",
+      "exact_quote": "premature = (data->mstate < MSTATE_COMPLETED) ? TRUE : FA...  <-- BLOCKER"
+    },
+    {
+      "claim": "Only the winner enters the premature/num_alive-- block at 794-797.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "multi.c:794-797",
+      "exact_quote": "[W]   797    multi->num_alive--;"
+    },
+    {
+      "claim": "cmplog and vpc add the I2SRandReplace mutator that substitutes intercepted CMP operands into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 301 --role W --fuzzer cmplog --trial 2 --seed faf6b58d07527f1a` and observed 1 I2S-floor dash row (mutation_op = -) at depth 22 of the 23-level ancestor chain — direct lower-bound evidence of an I2SRandReplace find in this cmplog-discovered winner."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the URL scheme/host/port comparison present but where cmplog/vpc resolve the premature true branch no faster than naive/value_profile (no I2S advantage on the scheme/port literals)."
+  },
+  "weakest_evidence_point": "The exact CMP operands I2S substitutes (scheme token vs port string) are inferred from byte patterns and curl's URL parser, not directly observed in the CmpLogObserver buffer.",
+  "confidence": "medium"
+}

@@ -1,0 +1,87 @@
+{
+  "branch_id": 5562,
+  "target": "harfbuzz",
+  "summary_one_line": "A valid GSUB/GPOS table whose ScriptList contains the 'dflt' script tag (HB_OT_TAG_DEFAULT_LANGUAGE) so find_script_index matches it",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed sfnt font blob (header 00 01 00 00) with a GPOS or GSUB table (FOURCC 'GPOS'/'GSUB') whose ScriptList carries the 'dflt' script tag, so that g.find_script_index(HB_OT_TAG_DEFAULT_LANGUAGE,...) returns true at line 573 after the earlier script_tags[i], DFLT and latn lookups all miss.",
+      "why_winner_satisfies": "Winner-resolving seeds carry the sfnt version 00 01 00 00 at offset 0, a GPOS/GSUB FOURCC at offset 0x0c (47 50 4f 53 'GPOS' / 47 53 55 42 'GSUB'), and structured ScriptList bytes (runs of 53 'S'), so the table parses and a script lookup reaches and satisfies line 573 (W shows T=5 at branch 573 and resolves the [W]-tagged true-side lines 574-577).",
+      "why_loser_doesnt": "Loser-blocking seeds are short, near-random buffers (6-64 bytes, no sfnt header, no GPOS/GSUB FOURCC) so the table never parses into a populated ScriptList; the loser never reaches the true side of 573 (L shows T=0 F=74 at branch 573) and falls through to the NO_SCRIPT_INDEX return.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads intercepted CMP operands (the sfnt table-tag and script-tag comparisons) from the CmpLogObserver buffer and substitutes the expected literal ('GPOS'/'GSUB' FOURCC, 'dflt' tag) into the input at matching offsets, building the structured table that naive's blind havoc cannot assemble."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is the 'dflt' script-tag lookup at line 573.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6, L7",
+      "exact_quote": "if (g.find_script_index (HB_OT_TAG_DEFAULT_LANGUAGE, script_index)) {"
+    },
+    {
+      "claim": "Line 573 is the true-branch blocker, reached only after the earlier 'dflt'-comment path.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 572-573",
+      "exact_quote": "/* try with 'dflt'; MS site has had typos and many fonts use it now :( */"
+    },
+    {
+      "claim": "Winner seeds resolve the true-side lines 574-577 that the loser never reaches.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 574-577",
+      "exact_quote": "[W]   574      if (chosen_script)"
+    },
+    {
+      "claim": "At branch 573 the winner takes the true side (T=5) while the loser never does (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 573",
+      "exact_quote": "d=1   L 573  T=5 F=5  T=0 F=74  if (g.find_script_index (HB_OT_TAG_DEFAULT_LANGUAGE, scri...  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner seed carries the sfnt header and a GPOS FOURCC table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 8566af241913059b offset 0x0c",
+      "exact_quote": "0000: 00 01 00 00 00 08 00 00 00 18 df 20 47 50 4f 53   ........... GPOS"
+    },
+    {
+      "claim": "A second winner seed carries the GSUB FOURCC table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 3bde8534ed42652a offset 0x0c",
+      "exact_quote": "0000: 00 01 00 00 00 08 00 00 00 18 df 20 47 53 55 42   ........... GSUB"
+    },
+    {
+      "claim": "Loser-blocking seeds are tiny near-random buffers with no font structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 003817559785f774 size 6",
+      "exact_quote": "0000: 87 0e 0d 0e 22 0e                                 ....\"."
+    },
+    {
+      "claim": "The W/L byte diff concentrates the GPOS/GSUB FOURCC bytes at offsets 0x0c-0x0f in winners.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x3                             ff(.)x2 00(.)x2 0f(.)x2 20( )x1 +12u  DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which substitutes one CMP operand at offsets matching the other.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has only havoc + token mutators and no I2S introspection.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5562 --role W --fuzzer cmplog --trial 2 --seed 8566af241913059b` and observed an I2S-floor row (mutation_op = -) at depth 44 of the 45-level chain; involved pair is cmplog vs naive (no mopt/grimoire), so the dash signal is I2S-exclusive under the current build"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where naive resolves the line-573 'dflt' lookup as often as cmplog once the GSUB/GPOS table tag and 'dflt' script tag are NOT gated behind CMP comparisons (e.g. derived rather than literally compared), showing the substitution of literal tags was not the enabling factor."
+  },
+  "weakest_evidence_point": "The seeds prove winners carry GPOS/GSUB FOURCC structure but do not directly show the 'dflt'=0x64666C74 tag bytes in the resolving seed, so the final script-tag match at 573 is inferred from source plus the branch true-side count rather than a literal byte.",
+  "confidence": "medium"
+}

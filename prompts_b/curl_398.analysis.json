@@ -1,0 +1,87 @@
+{
+  "branch_id": 398,
+  "target": "curl",
+  "summary_one_line": "An option-selector value matching NONE of the ~250 enumerated CURLOPT_* switch cases, so the default (unknown-option) arm is taken.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "The early option-selector bytes (the `option` value switched on at setopt.c:197) must decode to a CURLOPT value that matches NO enumerated case, so control falls through every `case` to the `default:` arm at line 3110.",
+      "why_winner_satisfies": "naive (winner) seeds carry varied selector bytes at offset 0x0001 (2f, 01, 06, 05) and hit the default arm 6 times with the W set reaching `default:` exclusively (line 3110 marked [W]); plain havoc byte mutation lands on arbitrary, non-enumerated option values with no force pulling them onto a valid case.",
+      "why_loser_doesnt": "cmplog (loser) seeds are pinned to selector byte 0x01 at offset 0x0001 (all 19 instances), keeping `option` on an enumerated case so they never reach default; I2SRandReplace substitutes the very CURLOPT case-constants the switch compares against back into the input, steering the option toward a matching case and away from the unknown-option default.",
+      "mechanism_attribution": "The decisive I2S technique HANDICAPS the loser: cmplog's CMP-buffer-driven input-to-state substitution keeps copying enumerated case-constants into the selector, so the option keeps matching a known case. The winner naive has no comparison logging and wins by plain havoc byte mutation that drifts the selector onto an arbitrary, non-enumerated value, taking default. The winner-enabling mechanism is havoc-only."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the default arm of the CURLOPT option switch in Curl_vsetopt.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "setopt.c:3110:3",
+      "exact_quote": "Source line:   default:"
+    },
+    {
+      "claim": "The switch is dispatched on the option value, so the default arm requires a value matching no enumerated case.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L197",
+      "exact_quote": "switch(option) {"
+    },
+    {
+      "claim": "Only the winner-resolving seed set reaches the default arm.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L3110-3113",
+      "exact_quote": "[W]  3110    default: <-- BLOCKER"
+    },
+    {
+      "claim": "naive is the winner and cmplog the loser, with the technique delta being I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "naive resolved the branch in 8/10 trials while cmplog blocked in all 10.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive/cmplog rows",
+      "exact_quote": "naive                            8        2          0  winner (I2S vs cmplog)"
+    },
+    {
+      "claim": "All loser-blocking seeds share selector byte 0x01 at offset 0x0001, while the winner seeds vary there.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0001",
+      "exact_quote": "0x0001  2f(/)x1 01(.)x1 06(.)x1 05(.)x1     01(.)x19"
+    },
+    {
+      "claim": "A winner-resolving seed carries a non-0x01 selector byte (0x2f) at offset 0x0001.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id d118b0c85c3a7f4f",
+      "exact_quote": "0000: 00 2f 00 00 00 19 70 6f 70 33 35 c9 2f cf 32 80"
+    },
+    {
+      "claim": "A loser-blocking seed is pinned to the 0x01 selector byte.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00319f73612c7096",
+      "exact_quote": "0000: 00 01 00 00 00 19 70 6f 70 33 3a 2f 2f 31 32 37"
+    },
+    {
+      "claim": "I2SRandReplace substitutes a CMP operand back into the input at matching offsets, which steers the option selector onto enumerated case-constants.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S and uses only havoc/token byte mutation, so nothing pulls the selector toward a valid case.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only (the WINNER is naive, which has no I2S), so the mandatory I2S lineage check does not apply. The decisive I2S technique is what disables the LOSER (cmplog): its I2SRandReplace copies enumerated CURLOPT case-constants into the option selector, keeping it on a matched case and away from default. naive wins by plain havoc byte mutation drifting the selector onto an arbitrary non-enumerated value; no CMP introspection is needed or available to the winner."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the option selector is read from an early input field would refute this if cmplog reaches the unknown-option default arm at least as often as naive, i.e. if I2S substitution does not bias the selector toward enumerated case-constants."
+  },
+  "weakest_evidence_point": "The claim that cmplog's I2S specifically substitutes enumerated CURLOPT case-constants into the selector is inferred from switch structure and the uniform 0x01 loser byte, not directly observed in cmplog CMP-buffer logs.",
+  "confidence": "medium"
+}

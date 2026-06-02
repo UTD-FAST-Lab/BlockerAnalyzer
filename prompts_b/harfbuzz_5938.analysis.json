@@ -1,0 +1,112 @@
+{
+  "branch_id": 5938,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must shape to a Myanmar consonant syllable containing a glyph categorized VPre (left matra), reachable by structured repeated 0x10-period records.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A multi-record buffer whose bytes decode to a Myanmar consonant syllable with at least one glyph carrying myanmar_category VPre, built from the repeated 4-byte little-endian record pattern (e.g. 84 10 00 00 / 1a 10 00 00) seen in winner seeds.",
+      "why_winner_satisfies": "naive's plain havoc/token stack iterates freely over the periodic record layout (size grows 20->57 bytes, mutation_op chains like BytesExpandMutator/CrossoverInsertMutator), accumulating enough VPre-categorized glyphs that the true side fires 46 times (W T=46) and naive resolves 10/10.",
+      "why_loser_doesnt": "cmplog spends its execution budget on CMP-buffer processing and I2SRandReplace substitutions that do not help reach a category-table classification (no literal CMP operand maps to the VPre category), so it blocks 8/10 with the true side never taken (L T=0 F=20) and only hitcount 1.",
+      "mechanism_attribution": "naive wins because it lacks I2S overhead/misdirection: with no CmpLogObserver to drive substitutions, its havoc budget is spent purely on byte/length mutation of the periodic record array, which is what actually produces a VPre glyph; the I2S technique present in cmplog provides no traction on a category-table lookup and is net-negative here."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "The same VPre-bearing Myanmar consonant syllable, but reached under value-profile gradient feedback that rewards partial progress toward the categorized record bytes (the 0x10 second-byte / d7 run structure).",
+      "why_winner_satisfies": "value_profile_cmplog adds CMP_MAP gradient buckets on top of cmplog; the winner seeds (all fuzzer=value_profile_cmplog) reach the branch with hitcount 6 and resolve 9/10, showing the gradient feedback retains intermediate inputs approaching the VPre-producing record layout.",
+      "why_loser_doesnt": "cmplog has the same I2S mutator but NO CMP_MAP gradient feedback, so intermediate inputs that are byte-wise closer to a VPre record earn no new-coverage reward and are discarded; it blocks 8/10 with avg duration 17.80h and hitcount 1.",
+      "mechanism_attribution": "value_profile_cmplog's CMP_MAP Hamming/prefix-distance gradient gives credit for partial matches on the comparison values that gate category classification, letting the corpus climb toward a VPre-categorized glyph; cmplog without that gradient gets no such intermediate reward."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is a Myanmar category equality check for VPre (left matra) inside consonant-syllable reordering.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6",
+      "exact_quote": "if (info[i].myanmar_category() == M_Cat(VPre)) /* Left matra */"
+    },
+    {
+      "claim": "naive beats cmplog with an I2S technique delta and cmplog is the loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "naive resolves all 10 trials while cmplog blocks 8 and resolves only 2.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 counts",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=2/10  blocked=8  unreached=0"
+    },
+    {
+      "claim": "cmplog's hitcount on the branch is 1 versus winner 148, showing it essentially never exercises the true side.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 hit_div",
+      "exact_quote": "avg hitcount on branch: winner=148  loser=1"
+    },
+    {
+      "claim": "In the loser-blocking run the VPre branch true side is never taken (T=0) while the winner takes it 46 times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L234",
+      "exact_quote": "T=46 F=7  T=0 F=20  if (info[i].myanmar_category() == M_Cat(VPre)) /* Left ma..."
+    },
+    {
+      "claim": "cmplog's distinctive mutator is I2SRandReplace driven by the CmpLogObserver buffer.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer"
+    },
+    {
+      "claim": "naive uses only the havoc + token mutation stack with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators",
+      "exact_quote": "**Mutators**: havoc + token stack"
+    },
+    {
+      "claim": "Winner seeds are value_profile_cmplog inputs built from repeated 4-byte 0x10-period records and d7 runs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 3 W",
+      "exact_quote": "3b 10 00 00 84 10 00 00 31 10 00 00 84 10 00 00"
+    },
+    {
+      "claim": "value_profile_cmplog beats cmplog with a value_profile technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "vpc resolves 9/10 with branch hitcount 6 while cmplog resolves 2/10 with hitcount 1.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 counts",
+      "exact_quote": "avg hitcount on branch: winner=6  loser=1"
+    },
+    {
+      "claim": "value_profile_cmplog adds CMP_MAP gradient buckets to cmplog's instrumentation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "vpc Instrumentation",
+      "exact_quote": "union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    },
+    {
+      "claim": "value_profile_cmplog feedback combines edge-bucket and CMP_MAP-bucket signals, unlike cmplog whose feedback is the same edge-bucket signal as naive.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "vpc Feedback",
+      "exact_quote": "edge-bucket + CMP_MAP-bucket signals."
+    },
+    {
+      "claim": "cmplog's feedback is only the naive edge-bucket signal; its CMP buffer feeds the mutator, not feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Feedback",
+      "exact_quote": "same edge-bucket signal as naive. The CMP buffer is\nconsumed by the mutator, not by feedback."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Neither decisive pair's winner relies on I2SRandReplace (cmplog, the only I2S-bearing loser-side fuzzer, is the LOSER in both pairs), so no lineage call is mandated. Pair 1 winner is naive (havoc-only, no I2S) and pair 2 winner is value_profile_cmplog whose enabling delta over cmplog is the CMP_MAP gradient feedback, not I2S. The claimed_mechanism is CMP_MAP gradient for the multi_feature primary; lineage dash-row verification applies only to I2SRandReplace claims and is therefore not invoked here."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the VPre category gate where cmplog resolves the branch as fast as or faster than naive and value_profile_cmplog, showing the I2S/CMP_MAP distinction does not control reachability of a category-table lookup."
+  },
+  "weakest_evidence_point": "The seed bytes (4-byte 0x10-period records) are inferred to decode into VPre-categorized Myanmar glyphs from structure alone; no source mapping in the prompt confirms which byte values produce the VPre category.",
+  "confidence": "medium"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 5887,
+  "target": "harfbuzz",
+  "summary_one_line": "A multi-syllable Indic buffer whose pre-base matra search lands new_pos+1 on a ZWJ glyph following a halant, deep inside per-syllable reordering.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "Bytes decoding to an Indic syllable where the pre-base matra back-scan (L1152-1154) lands on a halant whose immediately following glyph at new_pos+1 has indic_category ZWJ, so info[new_pos + 1].indic_category() == I_Cat(ZWJ) is true. This requires a halant+ZWJ sequence positioned correctly within a non-Malayalam/Tamil syllable, reached only after the deep reordering prologue (base-finding, matra-reorder guard) succeeds.",
+      "why_winner_satisfies": "naive_ctx resolves the branch in 10/10 trials with avg hitcount 14 on the branch; its per-role coverage drives the true-side block at L1171-1177 ([W] new_pos--; goto search). The CtxHook folds the call context into the edge map, so each foreach_syllable invocation of final_reordering_syllable_indic is recorded as a distinct (call-context, edge) bucket, rewarding inputs that exercise the reordering path under varied syllable contexts and so reaching the ZWJ-after-halant arm.",
+      "why_loser_doesnt": "naive resolves only 2/10 (blocked 8/10) with avg hitcount 1; at L1170 it records W(T/F) 21/1 vs L(T/F) 0/21 — naive never takes the true side. Naive's bare per-edge MaxMapFeedback treats the blocker edge as already-covered once any syllable reaches L1170 false, so it gets no new-coverage reward for steering toward the rare halant+ZWJ configuration and stalls (avg duration blocked 21.40h vs winner 4.80h).",
+      "mechanism_attribution": "naive_ctx's CtxHook context-sensitive coverage: the same L1170 edge is logged at different map slots per call context (per syllable / call path), so distinct syllable arrangements count as new coverage and the corpus accumulates inputs that probe the deep reordering arm until one satisfies the ZWJ category test. Naive lacks this granularity (identical havoc/token mutators, no I2S, no CMP_MAP), so the divergence is attributable to the single technique delta: context-sensitive coverage."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of a ZWJ category test deep inside per-syllable Indic reordering.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L1170",
+      "exact_quote": "if (info[new_pos + 1].indic_category() == I_Cat(ZWJ))"
+    },
+    {
+      "claim": "The branch is reached once per syllable via a foreach_syllable loop in the 1-hop caller.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1486-1487",
+      "exact_quote": "foreach_syllable (buffer, start, end)"
+    },
+    {
+      "claim": "The winning true-side block (keep searching) is hit only by the winner-resolving role.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1175-1176",
+      "exact_quote": "new_pos--;\n[W]  1176  \t      goto search;"
+    },
+    {
+      "claim": "naive_ctx resolves the branch in all 10 trials while naive blocks in 8.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 winner/loser counts",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "The loser (naive) never takes the true side at L1170; the winner does 21 times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1170",
+      "exact_quote": "L1170  T=21 F=1  T=0 F=21"
+    },
+    {
+      "claim": "naive_ctx differs from naive only by the CtxHook that folds call context into the edge-map index, making (call-context, edge) the coverage unit.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Feedback",
+      "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge"
+    },
+    {
+      "claim": "naive_ctx uses the same havoc/token mutators as naive with no I2S or CMP_MAP, so the only delta is the coverage granularity.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+    },
+    {
+      "claim": "The decisive pair's technique delta is ctx_coverage and the involved fuzzers are naive and naive_ctx.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "context-sensitive coverage",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is context-sensitive coverage (naive_ctx CtxHook), not I2SRandReplace, so the mandatory lineage/dash-row check does not apply. The MECHANISM CONTEXT section explicitly states naive_ctx logs 'havoc/token names only; no ParentInfo-only / dash rows', confirming no I2S floor is expected in the winner's lineage; the divergence is a feedback-granularity effect, not a comparison-solving one."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the same halant+ZWJ reordering branch reached via a single (non-looped, context-invariant) call site shows no naive_ctx-over-naive advantage — i.e. removing the per-syllable call-context multiplicity eliminates the divergence, proving the win came from something other than context-sensitive coverage granularity."
+  },
+  "weakest_evidence_point": "No seed-byte chain proves a specific input field decodes to the halant+ZWJ glyph sequence at new_pos+1; the byte-diff offsets are PARTIAL and the link from input bytes to the ZWJ category is inferred from source structure, not demonstrated.",
+  "confidence": "medium"
+}

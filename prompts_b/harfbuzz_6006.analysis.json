@@ -1,0 +1,75 @@
+{
+  "branch_id": 6006,
+  "target": "harfbuzz",
+  "summary_one_line": "A Devanagari glyph 0x0905 immediately followed by a second glyph whose codepoint equals one of the listed vowel case constants (0x093A/0x093B/0x093E/0x0945...).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "A glyph sequence where the current glyph codepoint is 0x0905 and the next glyph codepoint (buffer->cur(1)) equals one of the 16-bit case constants 0x093Au/0x093Bu/0x093Eu/0x0945u (and the following lines 0x0946..0x0957), reached only after the buffer script is decoded as HB_SCRIPT_DEVANAGARI.",
+      "why_winner_satisfies": "The winner-resolving seed begins with 05 09 00 00 3b 09, i.e. little-endian codepoint 0x0905 followed by 0x093B, exactly the (0x0905, 0x093Bu) pair that drives the inner switch into the blocker true side; value_profile took the branch in 9/10 trials.",
+      "why_loser_doesnt": "The loser seeds reach the 0x0905 outer case but their second codepoint never lands on a listed vowel: e.g. seed 2 is 05 09 00 00 05 09 (next codepoint 0x0905, not a vowel) and seed 3 stacks 0x093A bytes loosely (40 09 3a 3a...) without forming a clean 0x0905-then-vowel adjacency, so the inner switch falls through (F=6) and naive resolved in only 1/10.",
+      "mechanism_attribution": "value_profile intercepts the integer CMP that compares buffer->cur(1).codepoint against each 16-bit case constant and writes a Hamming-distance bucket into CMP_MAP; an input whose second codepoint is closer to a target vowel adds a new CMP_MAP bucket and is preserved, giving a gradient that walks the 16-bit value onto an exact case constant. naive lacks CMP interception so must hit the exact 16-bit value by blind havoc."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the inner switch case matching buffer->cur(1).codepoint against the vowel constants under the 0x0905 outer case, in the Devanagari arm.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L67 blocker",
+      "exact_quote": "case 0x093Au: case 0x093Bu: case 0x093Eu: case 0x0945u: <-- BLOCKER"
+    },
+    {
+      "claim": "Reaching the blocker requires the buffer script to be HB_SCRIPT_DEVANAGARI.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L56-L58",
+      "exact_quote": "switch ((unsigned) buffer->props.script)"
+    },
+    {
+      "claim": "The winner-resolving seed starts with little-endian 0x0905 then 0x093B, the exact pair feeding the blocker true side.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed e064052b51cec676 offsets 0x00-0x05",
+      "exact_quote": "0000: 05 09 00 00 3b 09 00 00 ff 00 01 f1 f4 fc 01 5a"
+    },
+    {
+      "claim": "value_profile resolved the branch in 9/10 trials while naive resolved in only 1/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 winner/loser counts",
+      "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+    },
+    {
+      "claim": "A loser seed reaches the 0x0905 region but its second codepoint is 0x0905, not a listed vowel.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 09f7ba78ff908139",
+      "exact_quote": "0000: 05 09 00 00 05 09 00 00 0e ff 00 00 04            ............."
+    },
+    {
+      "claim": "Loser executions fall through the inner vowel switch (false side counted 6 times) at the blocker line.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L67 blocker",
+      "exact_quote": "d=1   L  67  T=0 F=1  T=0 F=6  case 0x093Au: case 0x093Bu: case 0x093Eu: case 0x0945u:  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile intercepts integer CMPs and writes a Hamming-distance bucket into CMP_MAP, preserving inputs that get operands closer to matching.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "naive has no CMP interception and only edge-counter feedback plus havoc mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Feedback / mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile winner, not cmplog/I2SRandReplace), so a lineage I2S-floor query is not applicable; the winner is value_profile per DECISIVE PAIRS and value_profile carries no I2SRandReplace per MECHANISM CONTEXT, so no dash-row check is required."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the second-glyph codepoint is compared to the vowel constants via a CMP that value_profile cannot improve (e.g. exact-equality on a value with no Hamming gradient toward the target) yet value_profile still resolves it far more than naive — showing the CMP_MAP gradient is not what carries the winner."
+  },
+  "weakest_evidence_point": "Only one winner-resolving seed is shown, so the claimed CMP_MAP gradient toward a 16-bit vowel constant is inferred from source + a single byte pattern rather than from multiple converging seeds or explicit operand-distance metadata.",
+  "confidence": "medium"
+}

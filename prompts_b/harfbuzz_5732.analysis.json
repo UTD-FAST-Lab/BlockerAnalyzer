@@ -1,0 +1,112 @@
+{
+  "branch_id": 5732,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must drive the shaper to set HB_BUFFER_SCRATCH_FLAG_HAS_SPACE_FALLBACK via a well-formed font table layout exercising space-fallback shaping.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A font blob whose table directory carries valid 4-byte FOURCC table tags (e.g. 'cmap', 'GSUB') at the directory offsets, so the shaper parses real tables and reaches the buffer state that sets the HAS_SPACE_FALLBACK scratch flag.",
+      "why_winner_satisfies": "The value_profile_cmplog winner-resolving seeds contain literal ASCII table tags 'cmap' (offset 0x0c-0x0f: 63 6d 61 70) and 'GSUC'/'GSUB' (offset 0x1c-0x1f: 53 55 43/42) in the table directory, i.e. exact 4-byte tag operands I2SRandReplace can place by reading intercepted FOURCC comparisons.",
+      "why_loser_doesnt": "value_profile loser-blocking seeds are short and lack the well-formed tag directory at these offsets (e.g. offset 0x0c is 47(G)x9 / mixed and offset 0x1c is 00(.)x5/mixed), so they never reach the shaping state that sets the space-fallback flag and the true branch stays blocked (0/10 resolved).",
+      "mechanism_attribution": "value_profile_cmplog has I2SRandReplace (cmplog stage) which value_profile lacks; I2S reads the post-execution CmpLogObserver buffer, matches the input against an intercepted FOURCC operand, and substitutes the exact 4-byte table tag, letting the parser accept the table directory and drive the shaper to set the space-fallback flag."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Multi-byte structural fields (table offsets / lengths / counts in the font directory) whose values must be progressively nudged toward valid magnitudes for the parser to accept the table and reach the space-fallback state.",
+      "why_winner_satisfies": "value_profile_cmplog also has the CMP_MAP gradient feedback, so partially-correct structural-field bytes (closer-matching operand pairs) are preserved as corpus and refined; the winner reaches the branch (avg hitcount on branch winner=7) where plain cmplog does not.",
+      "why_loser_doesnt": "cmplog lacks the CMP_MAP distance-bucket feedback, so near-miss structural values give no coverage credit and are discarded; the cmplog loser resolves only 1/10 trials and shows avg hitcount on branch loser=0, never sustaining the partial progress needed to reach the flag.",
+      "mechanism_attribution": "value_profile_cmplog has the CMP_MAP gradient (value_profile stage) which cmplog lacks; the Hamming/prefix-distance bucket rewards inputs whose CMP operands get closer to matching, preserving intermediate font-structure states as corpus so the parser eventually accepts the layout and the space-fallback flag is set."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is the HAS_SPACE_FALLBACK scratch-flag test in hb_ot_position_default.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-shape.cc:1016:7",
+      "exact_quote": "if (c->buffer->scratch_flags & HB_BUFFER_SCRATCH_FLAG_HAS_SPACE_FALLBACK)"
+    },
+    {
+      "claim": "Two decisive pairs with different technique deltas make this multi-feature.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "Pair 2 isolates the value_profile technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the literal 'cmap' table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed c80ef2fb2e74fed4 offset 0x0c-0x0f",
+      "exact_quote": "00 01 00 00 00 02 20 20 e0 3f 21 20 63 6d 61 70   ......  .?! cmap"
+    },
+    {
+      "claim": "Winner-resolving seeds also carry a GSUB/GSUC table tag in the directory.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed ba976cfb96009e64 offset 0x18-0x1f",
+      "exact_quote": "20 00 00 06 00 00 00 21 20 6b 20 47 53 55 42 20    ......! k GSUB "
+    },
+    {
+      "claim": "At tag offset 0x0c the winner bytes are concentrated 'c' while loser bytes diverge.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  63(c)x2                             47(G)x9 00(.)x2 01(.)x1 2c(,)x1 +7u  DIFFER"
+    },
+    {
+      "claim": "At tag offset 0x1c the winner is 'S' while loser bytes are mostly zero/scattered.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x001c",
+      "exact_quote": "0x001c  53(S)x2                             00(.)x5 01(.)x2 02(.)x2 3d(=)x1 +7u  DIFFER"
+    },
+    {
+      "claim": "value_profile loser does not resolve the branch in any trial.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 loser",
+      "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "cmplog (Pair 2 loser) lacks the I2S stage's complement but the deciding gap is value_profile; winner reaches the branch where cmplog does not.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 hitcount",
+      "exact_quote": "avg hitcount on branch: winner=7  loser=0"
+    },
+    {
+      "claim": "value_profile_cmplog has the I2SRandReplace mutator that value_profile lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "I2SRandReplace substitutes an intercepted CMP operand into matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile_cmplog adds the CMP_MAP gradient feedback that cmplog lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "cmplog uses the same edge-bucket feedback as naive (no CMP_MAP gradient).",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Feedback",
+      "exact_quote": "**Feedback**: same edge-bucket signal as naive. The CMP buffer is\nconsumed by the mutator, not by feedback."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5732 --role W --fuzzer value_profile_cmplog --trial 2 --seed c80ef2fb2e74fed4`; the chain has 46 ancestor levels and the trailing I2S-floor signal reports 1 dash row (mutation_op = -) at depth 45, the cmplog/vpc-exclusive ParentInfo-only signature of an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where placing the exact 4-byte table tags ('cmap'/'GSUB') in the directory still leaves the HAS_SPACE_FALLBACK true branch unreached, showing the tag operands are not the gating feature."
+  },
+  "weakest_evidence_point": "The CMP_MAP-gradient attribution for Pair 2 is inferred from feedback semantics rather than a byte-level near-miss trace, since the multi-byte structural fields driving the parser are not pinpointed to specific offsets in the byte diff.",
+  "confidence": "medium"
+}

@@ -1,0 +1,81 @@
+{
+  "branch_id": 7170,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry the exact 'CFF ' table tag inside a well-formed sfnt header so the blob resolves to a non-Null OT::cff1 table.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A valid sfnt/OpenType container whose table directory names a 'CFF ' table (bytes 43 46 46 20 at the tag position) with a correctly-formed sfnt version and table offset, so this->blob->as<OT::cff1>() returns a real CFF table rather than the shared Null sentinel.",
+      "why_winner_satisfies": "All four winner-resolving seeds (value_profile_cmplog, trial 1) carry the literal 'CFF ' (43 46 46 20) at offsets 0x0c-0x0f plus the sfnt magic 00 01 00 00 at 0x00-0x03 and a 00 00 00 18 table offset, exactly the byte set that lets the blob resolve to a non-Null OT::cff1 so line 1051 takes its false (winning) branch.",
+      "why_loser_doesnt": "The loser-blocking seeds (value_profile, trial 1) lack the 'CFF ' tag at that offset (W shows 43(C)x4/46(F)x4 there while L shows 47(G)/4f(O)/53(S) and scattered bytes), so the blob never resolves to a CFF table and line 1051 always takes its true branch into { fini (); return; }.",
+      "mechanism_attribution": "value_profile_cmplog wins because its I2SRandReplace stage reads the table-tag comparison from the CmpLogObserver buffer and substitutes the exact 'CFF ' operand into the input at the tag offset; value_profile alone lacks I2SRandReplace and cannot place the exact 4-byte tag, while cmplog alone fails to bank the partially-correct sfnt header progress, so only the combined fuzzer reaches the false branch."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a pointer-equality gate against the Null OT::cff1 sentinel; the false branch (proceeding into CFF parsing) is the globally blocked side.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L1051",
+      "exact_quote": "if (cff == &Null (OT::cff1))"
+    },
+    {
+      "claim": "Resolving the false branch requires the blob to be interpreted as a real OT::cff1 table.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1049",
+      "exact_quote": "const OT::cff1 *cff = this->blob->template as<OT::cff1> ();"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal 'CFF ' tag and sfnt magic in their header bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 2c9af73dd0cf5b3a offsets 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 43 46 46 20   ......      CFF "
+    },
+    {
+      "claim": "At the tag offsets 0x0c-0x0f the winner bytes are concentrated on C/F/F/space while the loser bytes differ.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0e",
+      "exact_quote": "0x000c  43(C)x4                             47(G)x9 00(.)x2 01(.)x1 2c(,)x1 +7u  DIFFER"
+    },
+    {
+      "claim": "The loser inputs take the true (blocking) branch at line 1051 in every counted trial while the winner takes the false branch.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1051",
+      "exact_quote": "d=1   L1051  T=0 F=4  T=20 F=0  if (cff == &Null (OT::cff1))  <-- BLOCKER"
+    },
+    {
+      "claim": "Pair 1 is decided by the value_profile delta (vpc beats cmplog).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "Pair 2 is decided by the I2S delta (vpc beats value_profile), so resolving requires both techniques jointly.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "I2SRandReplace substitutes a CMP operand into the input at matching offsets, which can place the exact 'CFF ' tag.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile contributes a CMP_MAP gradient that rewards inputs producing closer-to-matching CMP operand pairs, banking partial header progress.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 7170 --role W --fuzzer value_profile_cmplog --trial 1 --seed 2c9af73dd0cf5b3a` and observed exactly one I2S-floor dash row (mutation_op = -) at depth 19 (ancestor e0a5b09f80625fb6), the floor signal for an unwrapped I2SRandReplace find under the current vpc build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gated on the exact 'CFF ' tag where cmplog-alone or value_profile-alone resolves the false branch as fast as value_profile_cmplog, showing neither I2S substitution nor the CMP_MAP gradient is necessary."
+  },
+  "weakest_evidence_point": "Whether the single depth-19 dash row genuinely placed the 'CFF ' tag versus some other CMP operand cannot be confirmed from lineage alone, since the floor signal only proves an I2S find occurred somewhere in the chain.",
+  "confidence": "medium"
+}

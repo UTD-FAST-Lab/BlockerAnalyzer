@@ -1,0 +1,87 @@
+{
+  "branch_id": 5550,
+  "target": "harfbuzz",
+  "summary_one_line": "Input needs a valid GSUB/GPOS table-directory entry whose magic 4CC tag and version-1 lookupList drive get_lookup_count past the default:return 0 arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed sfnt table directory carrying the literal 4-byte tag 'GPOS' or 'GSUB' at the record's tag field (winner bytes show 'GPOS'/'GSUB' at offsets 0x0c-0x0f) plus a version field of 0x0001 so that get_lookup_count's switch on u.version.major hits 'case 1' and returns (this+u.version1.lookupList).len instead of falling through to 'default: return 0;'.",
+      "why_winner_satisfies": "Winner seeds carry the exact ASCII magic tags 'GPOS'/'GSUB' concentrated at offsets 0x0c-0x0f and a 00 01 version prefix at offsets 0x00-0x05, so the version major resolves to 1 and the case-1 arm executes; the branch is taken 13370/10074 times and resolved in 10/10 trials.",
+      "why_loser_doesnt": "Loser seeds have no concentrated 'GPOS'/'GSUB' tag at 0x0c-0x0f (scattered low bytes / non-tag values) and no valid version structure, so the version major is neither 1 nor 2 and execution lands on 'default: return 0;' (true side), keeping the false branch blocked in all 10 trials with hitcount 0.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver operands from the 4-byte tag comparison and the version compare, then substitutes the exact 'GPOS'/'GSUB' / version-1 literals into the input at the matching offsets; naive and value_profile lack I2SRandReplace and must hit these multi-byte magic literals by chance, which they never do in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of a switch on the table version major in get_lookup_count, and the false side (non-default) is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7",
+      "exact_quote": "Source line:     default: return 0;"
+    },
+    {
+      "claim": "Taking the winning side requires the case-1 arm dispatched by the version switch, returning the version1 lookupList length.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L4258-L4259",
+      "exact_quote": "switch (u.version.major) {"
+    },
+    {
+      "claim": "The case-1 arm is the winner-resolving path while the default arm is the blocker.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L4259/L4263",
+      "exact_quote": "case 1: return (this+u.version1.lookupList).len;"
+    },
+    {
+      "claim": "Winner seeds concentrate the literal GPOS/GSUB magic tags at offsets 0x0c-0x0f whereas loser seeds do not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0c",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "The fourth tag byte differs between winners (S/B for GPOS/GSUB) and losers, confirming the tag-literal requirement.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0f",
+      "exact_quote": "0x000f  53(S)x16 42(B)x4                    00(.)x5 6a(j)x1 6f(o)x1 fa(.)x1 +10u  DIFFER"
+    },
+    {
+      "claim": "A winner seed literally contains the GPOS table tag at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 002c9ad92acce91b",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+    },
+    {
+      "claim": "A loser seed is a 6-byte fragment with no table tag, structurally incapable of presenting a GPOS/GSUB version-1 directory.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 003817559785f774",
+      "exact_quote": "0000: 87 0e 0d 0e 22 0e                                 ....\"."
+    },
+    {
+      "claim": "The winner reaches the branch thousands of times while the loser never does.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 hit_div",
+      "exact_quote": "avg hitcount on branch: winner=13370  loser=0"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes one intercepted CMP operand for the other at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, explaining why the vpc>vp pair is also an I2S delta.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5550 --role W --fuzzer cmplog --trial 1 --seed 002c9ad92acce91b`; the 31-level ancestor chain contains 2 I2S-floor dash rows (mutation_op = -) at depths 29 and 30, the lower-bound signal of an I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating get_lookup_count on a version-1 GPOS/GSUB directory where naive/value_profile resolve the false branch as often as cmplog/vpc within the budget, showing the multi-byte tag+version literal is not what I2S substitution uniquely supplies."
+  },
+  "weakest_evidence_point": "The version-1 (case 1) dependency is inferred from the switch source and the 00 01 prefix in winner seeds; the byte diff does not isolate the version field as a concentrated DIFFER offset the way the 0x0c-0x0f tag does.",
+  "confidence": "high"
+}

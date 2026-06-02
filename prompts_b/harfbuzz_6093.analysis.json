@@ -1,0 +1,93 @@
+{
+  "branch_id": 6093,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must select Sinhala script and place a glyph with codepoint 0x0D85 (bytes 85 0d) so the per-script switch hits case 0x0D85u.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "A buffer whose script resolves to HB_SCRIPT_SINHALA and that contains a glyph whose codepoint == 0x0D85 (little-endian bytes 85 0d) at a position where buffer->idx + 1 < count, so the inner per-glyph switch reaches the true side of case 0x0D85u at line 295.",
+      "why_winner_satisfies": "All five winner-resolving seeds carry the repeated 4-byte pattern 85 0d 00 00 (codepoint 0x0D85), and the per-role overlay marks line 295 case 0x0D85u as [W] winner-resolving only; the winner takes the true side 15 times (W T=15) at the blocker line.",
+      "why_loser_doesnt": "Loser-blocking seeds carry sibling Sinhala codepoints (91 0d = 0x0D91, ca 0d) but never 0x0D85, so the inner switch lands on case 0x0D91u (marked [B], both hit) and the blocker case 0x0D85u stays at T=0; the byte diff shows offset 0x0000 W=85 vs L=91/ca.",
+      "mechanism_attribution": "naive_ctx installs a CtxHook that folds the call-context hash into the edge-map index, so reaching the deeply nested per-glyph switch arm via the Sinhala for-loop registers as fresh (call-context, edge) coverage that bare naive's flat edge map already considers seen; this extra granularity rewards the corpus growth that drives the buffer toward a 0x0D85 glyph, resolving the branch in 10/10 trials vs 1/10 for naive."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of case 0x0D85u inside the HB_SCRIPT_SINHALA per-glyph switch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Branch ID 6093, line 295",
+      "exact_quote": "case 0x0D85u:"
+    },
+    {
+      "claim": "The blocker case 0x0D85u sits inside the SINHALA script arm reached via the outer script switch.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 289",
+      "exact_quote": "case HB_SCRIPT_SINHALA:"
+    },
+    {
+      "claim": "The per-role overlay marks line 295 case 0x0D85u as winner-resolving only.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 295, [W] tag",
+      "exact_quote": "[W]   295  \t  case 0x0D85u: <-- BLOCKER"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the codepoint 0x0D85 as little-endian bytes 85 0d 00 00.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 4 id=c89b5b8ffae50040, offset 0x0008",
+      "exact_quote": "0000: 76 76 76 76 76 01 76 76 85 0d 00 00 8d 0d b4 00"
+    },
+    {
+      "claim": "Loser-blocking seeds carry sibling Sinhala codepoint 0x0D91 (bytes 91 0d) rather than 0x0D85.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1 id=18a2e9b355fed482, offset 0x0000",
+      "exact_quote": "0000: 91 0d                                             .."
+    },
+    {
+      "claim": "At offset 0x0000 the winner bytes are dominated by 85 while losers carry 91/ca/4c/0c.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0000",
+      "exact_quote": "0x0000  85(.)x4 00(.)x1 76(v)x1 ca(.)x1     91(.)x1 ca(.)x1 4c(L)x1 0c(.)x1 +2u  PARTIAL"
+    },
+    {
+      "claim": "The winner takes the true side of the blocker 15 times while the loser never does (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 295",
+      "exact_quote": "d=1   L 295  T=15 F=90  T=0 F=90  case 0x0D85u:  <-- BLOCKER"
+    },
+    {
+      "claim": "The loser instead lands on the sibling Sinhala arm case 0x0D91u, which both roles hit.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 309, [B] tag",
+      "exact_quote": "[B]   309  \t  case 0x0D91u:"
+    },
+    {
+      "claim": "naive_ctx folds a call-context hash into the edge-map index so the same edge is recorded at different map slots per call path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Instrumentation",
+      "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "naive_ctx feedback treats a new (call-context, edge) pair as new coverage, distinguishing it from bare naive.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Feedback",
+      "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+    },
+    {
+      "claim": "naive_ctx wins the decisive pair 10/10 resolved vs naive 1/10, delta ctx_coverage.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 naive_ctx > naive",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "context-sensitive coverage",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is context-sensitive coverage (naive_ctx CtxHook), not I2SRandReplace, so the mandatory lineage/dash-row check does not apply; the naive_ctx mechanism block states there are no ParentInfo-only / dash rows for this fuzzer and the winning seeds' mutation_op chains are pure havoc/token (e.g. WordInterestingMutator, BytesSwapMutator, TokenReplace), consistent with a coverage-granularity divergence rather than I2S substitution."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic Sinhala-script harness with a deeply nested per-glyph switch where naive and naive_ctx reach the 0x0D85 case-arm equally fast (no resolved-trial advantage for naive_ctx), showing the context-indexed coverage gave no exploration benefit."
+  },
+  "weakest_evidence_point": "The causal link between context-sensitive coverage granularity and the corpus actually producing a 0x0D85 glyph is inferred; the prompt shows the byte/coverage correlation but not a direct trace of CtxHook-driven corpus adds leading to that codepoint.",
+  "confidence": "high"
+}

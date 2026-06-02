@@ -1,0 +1,75 @@
+{
+  "branch_id": 14589,
+  "target": "sqlite3",
+  "summary_one_line": "A SELECT body with a chained relational/arithmetic operator expression (e.g. comparison operators) reaching this sqlite3ExprCodeTarget op-codegen arm; bare SELECT 1 never does.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)", "value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "A SELECT statement whose result expression is a chain of relational/arithmetic operators (the winning seed is `SELECT \\t22&22%22>>22...`), so sqlite3ExprCodeTarget is invoked on an operator-node Expr that drives the codegen path through line 103568 on its TRUE side, rather than a trivial integer literal.",
+      "why_winner_satisfies": "The winning seed (value_profile_cmplog, 51 bytes) is `SELECT` followed by `22&22%22>>22222...` — a long expression with `&`, `%`, `>` operators feeding the expression-codegen walk, and the branch is hit (avg hitcount on branch winner=8, loser=0).",
+      "why_loser_doesnt": "The loser-blocking seeds are bare/short queries (`SELECT 1;`, `SELECT 1:C:...`) with no operator-expression chain, so sqlite3ExprCodeTarget's operator arm at 103568 never takes its TRUE side (loser hitcount=0).",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient feedback: each integer/relational CMP inside the expression evaluation writes a (PC, operand-distance bucket) entry; an input whose operand pair is closer to matching adds a new CMP_MAP bucket and is preserved as corpus, letting value_profile incrementally build the operator-laden expression that reaches the codegen arm. naive and plain cmplog lack the CMP_MAP distance feedback and never get the gradient reward, so they stall on trivial SELECTs."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs differ by the value_profile technique and both are won by the value-profile-carrying fuzzer.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "Pair 1: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "The second decisive pair is value_profile_cmplog > cmplog, also delta value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The winning seed is a SELECT containing a chain of arithmetic/relational operators.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed id=089bac7f93f8e92a offsets 0x00-0x0f",
+      "exact_quote": "53 45 4c 45 43 54 20 09 32 32 26 32 32 25 32 3e   SELECT .22&22%2>"
+    },
+    {
+      "claim": "The loser-blocking seeds are trivial SELECT statements with no operator-expression chain.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed id=56c5e17287f92940",
+      "exact_quote": "53 45 4c 45 43 54 20 31 3b                        SELECT 1;"
+    },
+    {
+      "claim": "The winner reaches the branch while the loser never does (hitcount divergence on the branch).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 avg hitcount on branch",
+      "exact_quote": "avg hitcount on branch: winner=8  loser=0"
+    },
+    {
+      "claim": "The blocker's TRUE side is taken only in the winner-resolving role and is the globally blocked side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L103568 BLOCKER row",
+      "exact_quote": "d=1   L103568  T=1 F=6  T=0 F=794    <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile feedback rewards inputs whose CMP operand pair is closer to matching by adding a new CMP_MAP bucket and preserving the corpus member.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback paragraph",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the divergence is attributable to the CMP_MAP gradient feedback rather than I2S substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators paragraph",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile delta), not I2SRandReplace, so the mandatory I2S-floor lineage check does not apply; both decisive pairs are won by the value-profile-carrying fuzzer over its non-value-profile counterpart, and the winner-side fuzzer value_profile explicitly carries no I2SRandReplace per MECHANISM CONTEXT, so the attributable technique is the CMP_MAP distance-bucket feedback."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating this op-codegen arm behind an operator-expression SELECT shows naive resolving as often as value_profile (no value-profile advantage), indicating CMP_MAP gradient feedback is not what drives reaching the branch."
+  },
+  "weakest_evidence_point": "Only one winner-resolving seed is available, so the inference that the operator-chain expression (not merely a longer/non-trivial SELECT) is the required feature rests on a single example contrasted against trivial losers.",
+  "confidence": "medium"
+}

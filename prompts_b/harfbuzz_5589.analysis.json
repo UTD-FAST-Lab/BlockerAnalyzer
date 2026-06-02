@@ -1,0 +1,81 @@
+{
+  "branch_id": 5589,
+  "target": "harfbuzz",
+  "summary_one_line": "A valid sfnt header plus a GSUB/GPOS table whose language defines a required-feature index, so required_feature_index != NO_FEATURE_INDEX.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed sfnt font: the magic header 00 01 00 00 followed by a four-byte table tag 'GSUB'/'GPOS' and the structured offset/index fields (e.g. 00 00 00 18 00 02 1f 08) that let HarfBuzz parse a layout table whose language record carries a required-feature index, so required_feature_index[table_index] != HB_OT_LAYOUT_NO_FEATURE_INDEX takes the true branch.",
+      "why_winner_satisfies": "Winner-resolving seeds begin with the TrueType magic 00 01 00 00 and embed the literal table tags 'GPOS'/'GSUB' (47 50 4f 53 / 47 53 55 42) at offset 0x0c plus the recurring offset/structure bytes 00 00 00 18 00 02 1f 08, exactly the byte pattern a layout-table parse needs to populate a required-feature index.",
+      "why_loser_doesnt": "Loser-blocking seeds are short or garbage (6-byte 87 0e 0d 0e 22 0e, 13-byte e0 17 ..., or e0/ff-filled buffers) lacking both the 00 01 00 00 sfnt magic and any 'GSUB'/'GPOS' tag, so no layout table is parsed and required_feature_index stays NO_FEATURE_INDEX (false branch), as the per-role overlay shows the true-side call to add_lookups never executes for L.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the post-execution CmpLogObserver buffer of the table-tag and header comparisons (HB_TAG('G','S','U','B') etc.) and substitutes the exact comparison operand into the input at the matching offset, manufacturing the 'GSUB'/'GPOS' tag and sfnt magic that naive/value_profile cannot synthesize by blind havoc; both decisive pairs differ from their loser only by the presence of I2SRandReplace."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side at L331 tests required_feature_index against HB_OT_LAYOUT_NO_FEATURE_INDEX, and the true side calls add_lookups with required_feature_index.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L331-L335",
+      "exact_quote": "if (required_feature_index[table_index] != HB_OT_LAYOUT_NO_FEATURE_INDEX && <-- BLOCKER"
+    },
+    {
+      "claim": "Only winner-resolving seeds reach the true-branch add_lookups call.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L333 marked [W]",
+      "exact_quote": "[W]   333  \tadd_lookups (m, table_index,"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the sfnt magic and the GPOS/GSUB table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id aa6f47881154f74f offset 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 47 50 4f 53   ......      GPOS"
+    },
+    {
+      "claim": "A winner seed embeds the GSUB tag and the recurring layout-structure offset bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 3209219fbc11cc7c offset 0x00-0x1f",
+      "exact_quote": "00 01 00 00 00 01 2f 1d 21 20 20 20 47 53 55 42   ....../.!   GSUB"
+    },
+    {
+      "claim": "Loser-blocking seeds are tiny garbage buffers without sfnt magic or a table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 003817559785f774 (6 bytes)",
+      "exact_quote": "87 0e 0d 0e 22 0e                                 ...."
+    },
+    {
+      "claim": "The byte diff shows W concentrates the GPOS/GSUB tag bytes at offsets 0x0c-0x0f while L does not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0c",
+      "exact_quote": "0x000c  47(G)x6 00(.)x1"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a CMP operand into the input at matching offsets, on top of naive's mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the vpc>vp pair isolates the same I2S technique.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs are I2S deltas (vpc>vp and cmplog>naive).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta",
+      "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5589 --role W --fuzzer value_profile_cmplog --trial 1 --seed aa6f47881154f74f` and observed an I2S-floor dash row (mutation_op = -) at depth 18 of the 19-level ancestor chain (ancestor e0a5b09f80625fb6), the lower-bound signal of an I2SRandReplace find in the vpc winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the sfnt-magic + GSUB/GPOS-tag gate removed (tag compared via a non-instrumented path) in which cmplog still resolves the branch significantly faster than naive would refute the I2S-substitution mechanism."
+  },
+  "weakest_evidence_point": "Whether the decisive comparison I2S substitutes is the table-tag/sfnt-magic CMP specifically, versus some downstream language-record field that produces required_feature_index, is inferred from byte layout, not directly traced.",
+  "confidence": "medium"
+}

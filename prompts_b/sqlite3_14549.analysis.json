@@ -1,0 +1,75 @@
+{
+  "branch_id": 14549,
+  "target": "sqlite3",
+  "summary_one_line": "A SQL expression whose exprDup copy path hits the line-100843 true branch, reached only by token-rich operator expressions not plain digit lists.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A SELECT input parsing into an expression tree whose exprDup duplication exercises the structural sub-case gated at sqlite3.c:100843 — produced by short token-dense operator expressions (e.g. 'SELECT' followed by runs of '+'/'-' and an '@'-prefixed token) rather than long monotone comma-separated digit lists.",
+      "why_winner_satisfies": "Winner-resolving seeds begin with 'SELECT' and contain dense runs of operator bytes (e.g. '-+++++++' and '@d') and reach the true side of the blocker (W T=2 F=66 at L100843), where cmplog's CMP-buffer-driven substitution let it land the operator/token bytes that build the gating expression structure.",
+      "why_loser_doesnt": "Loser-blocking naive seeds are long comma-separated digit runs ('SELECT   111111,111111111,111,...') and never take the true side (L T=0 F=285 at L100843); their bytes are concentrated on '1'(0x31)/','(0x2c) digit-list dataflow, not the operator/token bytes the winning side needs.",
+      "mechanism_attribution": "cmplog adds I2SRandReplace on top of naive's havoc/token stack: it reads the post-execution CmpLogObserver buffer and substitutes a logged CMP operand into the input, letting it place the exact token bytes that drive exprDup down the line-100843 true path. naive lacks any CMP introspection so it only stumbles on digit-list mutations and never constructs the gating expression."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of sqlite3.c:100843 inside exprDup, globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "/src/sqlite3/bld/sqlite3.c:100843:11",
+      "exact_quote": "Location: /src/sqlite3/bld/sqlite3.c:100843:11"
+    },
+    {
+      "claim": "cmplog beats naive decisively: 8/10 resolve vs 0/10, the only decisive pair, attributed to I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The loser never takes the true side of the blocker while the winner sometimes does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L100843",
+      "exact_quote": "d=1   L100843  T=2 F=66  T=0 F=285    <-- BLOCKER"
+    },
+    {
+      "claim": "Winner-resolving seeds are SELECT inputs with dense operator/token runs including '+' and '@d'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed f9361da7631b2ce7 offsets 0x00-0x14",
+      "exact_quote": "53 45 4c 45 43 54 20 0a 2d 2b 2b 2b 2b 2b 2b 2b   SELECT .-+++++++"
+    },
+    {
+      "claim": "Loser-blocking naive seeds are long monotone comma-separated digit lists.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 252f6963d0f031d1 offsets 0x00-0x0f",
+      "exact_quote": "53 45 4c 45 43 54 20 20 20 31 31 31 31 31 31 2c   SELECT   111111,"
+    },
+    {
+      "claim": "At the divergent offsets the winner carries operator/token bytes while the loser is concentrated on '1' and ',' digit-list bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0009",
+      "exact_quote": "0x0009  2b(+)x2                             31(1)x9 7e(~)x1                     DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which substitutes a logged CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S — only the havoc/token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 14549 --role W --fuzzer cmplog --trial 1 --seed f9361da7631b2ce7`; the chain has 19 ancestor levels and the tool reported 'I2S-floor signal: 2 ancestor dash row(s) at depth 17, 18' (mutation_op = -, ParentInfo-only), the lower-bound I2S signal exclusive to cmplog/vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic SELECT harness where naive (no CMP introspection) takes the line-100843 true side at the same rate as cmplog within budget, showing the operator/token expression structure is reachable by plain havoc/digit mutation without I2S substitution."
+  },
+  "weakest_evidence_point": "Without on-disk source for line 100843 the precise expression sub-case the true branch gates is inferred from the W/L byte structure and exprDup context rather than read directly.",
+  "confidence": "medium"
+}

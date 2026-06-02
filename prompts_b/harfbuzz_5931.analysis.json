@@ -1,0 +1,87 @@
+{
+  "branch_id": 5931,
+  "target": "harfbuzz",
+  "summary_one_line": "A short input of small low-valued myanmar_category bytes that drives the syllable state machine into the broken-cluster transition (case 8).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A short byte buffer (~24-44 bytes) of mostly small low-valued bytes (0x00, 0x0c, 0x20, 0xfe) repeated in a structured pattern so info[p].myanmar_category() walks the Ragel myanmar syllable machine into the trans_action == 8 broken-cluster transition at line 502.",
+      "why_winner_satisfies": "Naive's plain havoc byte mutators (BytesCopy/BytesInsert/ByteInc/ByteAdd) produce the small structured low-byte buffers (e.g. '10 10 00 00 0c 0c 0c 00' repeated 0c/20/fe units) that map onto the myanmar_category ranges; all 10 naive trials resolve and the winner hits case 8 with hitcount 38 (W: case 8 T=21).",
+      "why_loser_doesnt": "Cmplog's inputs are dominated by repeated CMP-derived literals (runs of f9, magic ASCII like 'hasc', 'csah', 'SHOT'/'OTS' fragments) that satisfy table-header comparisons elsewhere but never form the small-category state-machine sequence; the loser never reaches case 8 (L: case 8 T=0, blocked 8/10).",
+      "mechanism_attribution": "The winner is enabled by naive's undirected havoc byte mutation (BytesCopy/BytesInsert/ByteInc/ByteAdd), which freely explores the small low-byte structured space that drives the myanmar_category state machine. Cmplog's input-to-state CMP-operand substitution actively rewrites bytes toward intercepted comparison operands (table magic / ASCII tokens), pulling inputs AWAY from the small-category pattern, so the comparison-substitution technique is a net liability here and the pure-havoc naive arm wins. The winning mechanism is therefore havoc-only byte mutation."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is naive>cmplog with delta I2S; naive resolves 10/10 and cmplog blocks 8/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "The winner naive resolves all trials while the loser cmplog mostly blocks.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive / cmplog rows",
+      "exact_quote": "naive                           10        0          0  winner (I2S vs cmplog)"
+    },
+    {
+      "claim": "The blocker is the broken-cluster transition case 8 in the Ragel myanmar syllable machine.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L502-505",
+      "exact_quote": "found_syllable (myanmar_broken_cluster); buffer->scratch_flags |= HB_BUFFER_SCRATCH_FLAG_HAS_BROKEN_SYLLABLE;"
+    },
+    {
+      "claim": "The state-machine transition is selected by info[p].myanmar_category(), i.e. the per-byte category drives which case fires.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L483-485",
+      "exact_quote": "_trans = _inds[ _slen > 0 && _keys[0] <=( info[p].myanmar_category()) &&"
+    },
+    {
+      "claim": "Winner seeds are short buffers of small low-valued repeated bytes produced by plain havoc mutators.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 id=a1568bfee9e19ce4",
+      "exact_quote": "0000: 10 10 00 00 0c 0c 0c 00 00 fe 00 00 0c 20 00 00"
+    },
+    {
+      "claim": "Winner seeds were discovered by naive's havoc byte mutators, not by any I2S mutator.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 mutation_op",
+      "exact_quote": "fuzzer=naive, trial=1, discovered_at=475s, mutation_op=BytesCopyMutator"
+    },
+    {
+      "claim": "Loser cmplog seeds carry CMP-derived literal/token runs (f9 runs, ASCII fragments) and TokenReplace, not the small-category pattern.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 id=04d8571de170df2e",
+      "exact_quote": "00 01 02 00 01 00 f9 f9 f9 00 01 00 f9 f9 f9 f9"
+    },
+    {
+      "claim": "The winner reaches case 8 (T=21) while the loser never does (T=0), confirming the divergence is at the broken-cluster transition.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L502",
+      "exact_quote": "d=1   L 502  T=21 F=107  T=0 F=157  case 8:  <-- BLOCKER"
+    },
+    {
+      "claim": "Cmplog's distinguishing technique is I2SRandReplace, which substitutes intercepted CMP operands into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "picks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "Naive's mutators are pure havoc/token byte mutators with no I2S, matching the winner-seed provenance.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Claimed mechanism is havoc-only (winner is naive, which has no I2S), so lineage I2S-floor verification does not apply. The decisive pair is naive>cmplog: cmplog OWNS I2SRandReplace yet LOSES, so I2S cannot be the winning mechanism; the winner's resolving seeds (Seed 1 id=a1568bfee9e19ce4 mutation_op=BytesCopyMutator, Seed 2 BytesInsert/BytesExpand, Seeds 4-5 ByteInc/ByteAdd/ByteNeg) are all plain naive havoc byte mutations with no dash rows and no CMP substitution."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the same small-category state-machine gate where cmplog reaches case 8 at >= the naive rate, showing I2S substitution does not actually hinder reaching the broken-cluster transition."
+  },
+  "weakest_evidence_point": "The claim that cmplog's I2S substitution actively pulls inputs away from the small-category pattern is inferred from the seed-byte contrast (f9/ASCII runs vs small low bytes) rather than directly observed in cmplog lineage.",
+  "confidence": "medium"
+}

@@ -1,0 +1,69 @@
+{
+  "branch_id": 5225,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry a valid GDEF table header with version.major == 1 or 2 so the switch dispatches off the default Null case.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed sfnt/GDEF font header: the leading bytes must encode a recognized table version (u.version.major == 1, i.e. bytes 00 01 at the GDEF table start) and the input must contain the 'GDEF' (47 44 45 46) table tag so the GDEF table sanitizes and get_glyph_class_def reaches case 1 / case 2 of switch (u.version.major) instead of the default Null(ClassDef) blocker.",
+      "why_winner_satisfies": "Every winner-resolving seed begins with 00 01 00 00 00 01 and contains the literal 'GDEF' tag (47 44 45 46) at offset 0x0c-0x0f; the W byte set at those offsets is fully concentrated (47(G)x20, 44(D)x20, 45(E)x20, 46(F)x20), and at runtime line 690 case 1 is taken (T side reached) so the false default branch at line 694 is exercised.",
+      "why_loser_doesnt": "Loser-blocking seeds lack the GDEF tag at 0x0c-0x0f (L bytes there are scattered: 00, 20, junk) and lack the 00 01 version header, so the GDEF table never sanitizes (all GDEF sanitize functions show L hits = 0) and get_glyph_class_def is never reached; the blocker false branch stays at F=0 for losers.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver buffer recording the table-tag and version comparisons inside the GDEF sanitize path, then substitutes the exact required operand ('GDEF' tag bytes and the 00 01 version) into the input at the matched offsets, manufacturing a valid header that naive/value_profile cannot synthesize by blind havoc; this is confirmed by the dash-row I2S-floor ancestors in the winning cmplog seed's lineage."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of a switch on u.version.major; the winning false branch is taken only when case 1 or case 2 is hit.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "GDEF.hh:689-694",
+      "exact_quote": "switch (u.version.major) {"
+    },
+    {
+      "claim": "Winners take case 1 (version major == 1) which is the resolving path.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "GDEF.hh:690",
+      "exact_quote": "case 1: return this+u.version1.glyphClassDef;"
+    },
+    {
+      "claim": "Every winner-resolving seed begins with the 00 01 00 00 00 01 version header and contains the GDEF tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 2 id=13b375b9eff5c760",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 47 44 45 46   ......      GDEF"
+    },
+    {
+      "claim": "At offsets 0x0c-0x0f the winner bytes are fully concentrated on the GDEF tag while loser bytes differ.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "All GDEF sanitize functions execute under the winner but show zero invocations under the loser, so losers never reach the GDEF table path.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "OT::GDEF::sanitize line 654-664",
+      "exact_quote": "60         0  OT::GDEF::sanitize(hb_sanitize_context_t*) const"
+    },
+    {
+      "claim": "For losers the blocker line 694 default branch is never taken on the false side (F=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L 694",
+      "exact_quote": "d=1   L 694  T=0 F=1060  T=1020 F=0  default: return Null(ClassDef);  <-- BLOCKER"
+    },
+    {
+      "claim": "Both decisive pairs are I2S deltas with cmplog/vpc as winners, enabled by I2SRandReplace operand substitution from the CmpLogObserver buffer.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5225 --role W --fuzzer cmplog --trial 1 --seed 13b375b9eff5c760` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 10 and 11 of the 12-level ancestor chain, the lower-bound signal of an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the GDEF version/tag gate is exposed as a CMP but naive/value_profile resolve the false branch as fast as cmplog/vpc would show I2S substitution is not the deciding factor."
+  },
+  "weakest_evidence_point": "The exact CMP whose operands I2S substitutes (table-tag match vs version-major compare) is inferred from source structure and seed bytes, not directly read from the CmpLogObserver buffer contents.",
+  "confidence": "high"
+}

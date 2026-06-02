@@ -1,0 +1,69 @@
+{
+  "branch_id": 5439,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must contain the literal FOURCC tag bytes 'COLR' at the table-directory offset so the COLR table parses and get_extents returns true.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The 4 literal bytes 0x43 0x4f 0x4c 0x52 ('COLR') must appear at the SFNT table-directory tag slot (offset 0x0c-0x0f in the winning seeds), so harfbuzz recognizes a COLR table and ot_face->COLR->get_extents resolves the glyph extents, taking the true branch at line 388.",
+      "why_winner_satisfies": "All five winner-resolving seeds carry the exact ASCII tag 'COLR' (43 4f 4c 52) at offset 0x0c-0x0f, and the BYTE DIFF shows offsets 0x0c-0x0f are concentrated to a single value 43/4f/4c/52 x10 across all winners; the blocker line 388 is hit T=38 in W vs T=0 in L.",
+      "why_loser_doesnt": "The loser-blocking seeds have scattered, non-'COLR' bytes at offsets 0x0c-0x0f (e.g. 00/01/2c/2b at 0x0c, 20/18/08/fb at 0x0d), so no COLR table is recognized; the loser hits line 388 only on the false side (T=0 F=21) and blocks for the full 24h.",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator that value_profile lacks; the COLR-tag comparison inside harfbuzz's table-directory scan is intercepted by the CmpLog buffer, and I2SRandReplace copies the constant 'COLR' operand directly into the input at the compared offset, instantly satisfying the 4-byte equality gate that value_profile (lacking I2SRandReplace) could only approach by slow Hamming-distance hill-climbing."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the COLR table get_extents call at hb-ot-font.cc:388, true branch globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 388",
+      "exact_quote": "if (ot_face->COLR->get_extents (font, glyph, extents)) return true;"
+    },
+    {
+      "claim": "value_profile_cmplog resolves the branch in all 10 trials while value_profile blocks in all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "The winning seeds contain the literal ASCII 'COLR' tag bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 offset 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 43 4f 4c 52   ......      COLR"
+    },
+    {
+      "claim": "Offsets 0x0c-0x0f are concentrated to the single value C/O/L/R across all ten winners while losers are scattered.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  43(C)x10                            00(.)x2 01(.)x1 2c(,)x1 2b(+)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "The blocker line 388 is taken on the true side in W (T=38) but never in L (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L 388",
+      "exact_quote": "d=1   L 388  T=38 F=8  T=0 F=21  if (ot_face->COLR->get_extents (font, glyph, extents)) re...  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile lacks the I2SRandReplace mutator and relies on the CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace on top of the havoc/token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5439 --role W --fuzzer value_profile_cmplog --trial 1 --seed 4b5aee4031d745d5` and observed exactly one I2S-floor row (mutation_op = -, ParentInfo-only) at depth 24 of the 25-level ancestor chain (ancestor e0a5b09f80625fb6); the dash row is exclusive to cmplog/vpc and is the I2S-floor signal under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the same 4-byte 'COLR' equality gate where value_profile resolves the true branch as often as value_profile_cmplog (no I2S advantage), which would show the gate is reachable by gradient/havoc alone."
+  },
+  "weakest_evidence_point": "The exact table-directory offset of the COLR tag is inferred from the winner seed layout at 0x0c-0x0f rather than confirmed from harfbuzz's SFNT directory parsing source, so the precise compared offset could shift.",
+  "confidence": "high"
+}

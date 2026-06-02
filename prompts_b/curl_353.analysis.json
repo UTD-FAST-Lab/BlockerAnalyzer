@@ -1,0 +1,75 @@
+{
+  "branch_id": 353,
+  "target": "curl",
+  "summary_one_line": "Winner must drive a well-formed HTTP response carrying a parseable Content-Length so k->size != -1 reaches Curl_pgrsSetDownloadSize with size >= 0.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Input bytes that constitute a valid HTTP request/response framing (e.g. an HTTP/ method line and Content-Length-bearing headers) so that the response-size variable k->size parses to a non-negative value (!= -1), letting Curl_http_size call Curl_pgrsSetDownloadSize(data, k->size) with size >= 0 and take the true branch.",
+      "why_winner_satisfies": "The winning seed contains literal HTTP structure ('HTTP/' at offset 0x24, a URL '3://127./.0.1:9001', and a 'Content' header start at 0x30), so the request elicits a response whose size field parses non-negative; the caller block (lines 3857-3865, all [W]) shows the k->size != -1 path and the Curl_pgrsSetDownloadSize call only fire under the winner.",
+      "why_loser_doesnt": "The loser seeds are degenerate repeated '%' fill ('%%%%%%%%%%%%') and '...' runs with no HTTP/ token or header framing, so the size variable never parses to a non-negative value; the loser only ever takes the false branch (T=0 F=10 at line 354).",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile's CMP_MAP feedback; I2S substitution copies the intercepted comparison operand (the HTTP magic / size literal) directly into the input at the compared offset, synthesizing the structural HTTP framing that value_profile's havoc-plus-distance-bucket feedback could not assemble byte-by-byte."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of size >= 0 in Curl_pgrsSetDownloadSize, globally blocked on the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "progress.c:354",
+      "exact_quote": "if(size >= 0) {"
+    },
+    {
+      "claim": "value_profile_cmplog is the winner and value_profile the loser, separated by the I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The caller passes k->size to Curl_pgrsSetDownloadSize only when k->size != -1, and that path is exercised solely by the winner.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "http.c:3857-3863",
+      "exact_quote": "[W]  3863      Curl_pgrsSetDownloadSize(data, k->size); <-- CALL"
+    },
+    {
+      "claim": "The winning seed contains an HTTP/ token and Content header framing.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id c2dff1c31a6fa435 offsets 0x20-0x33",
+      "exact_quote": "....GHTTP/ me@eo"
+    },
+    {
+      "claim": "The loser seeds are degenerate percent-fill bytes with no HTTP framing.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00225bc4819174d2 offset 0x30",
+      "exact_quote": "%%%%%%%%%%%%&%@."
+    },
+    {
+      "claim": "The loser fuzzer takes the false branch in all trials while the winner takes the true side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 354",
+      "exact_quote": "T=1 F=1  T=0 F=10  if(size >= 0) {"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace; its mutators are havoc plus token only.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace on top of the havoc and token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 353 --role W --fuzzer value_profile_cmplog --trial 2 --seed c2dff1c31a6fa435`; the ancestor chain (8 levels) contains two I2S-floor dash rows (mutation_op = -) at depth 6 and depth 7, the unwrapped-I2SRandReplace floor signal under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating size >= 0 behind a parseable HTTP/Content-Length literal where value_profile resolves the true branch at the same rate as value_profile_cmplog (no I2S advantage)."
+  },
+  "weakest_evidence_point": "The causal link from the winner's HTTP/Content framing bytes to a non-negative k->size is inferred from the caller source path, not observed directly as a runtime size value.",
+  "confidence": "medium"
+}

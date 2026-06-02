@@ -1,0 +1,94 @@
+{
+  "branch_id": 5614,
+  "target": "harfbuzz",
+  "summary_one_line": "The post sub-table version field at offset 0x18 must equal the 32-bit constant 0x00020000 to take the true branch.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A 4-byte field at offset 0x18 holding the big-endian value 00 02 00 00 (0x00020000), the post-table version 2.0, matched exactly by the gate at line 223.",
+      "why_winner_satisfies": "All five winner-resolving seeds carry the bytes 00 02 00 00 at offsets 0x18-0x1b; the byte-diff shows offset 0x18 W=00x5, 0x19 W=02x5, 0x1a W=00x5, 0x1b W=00x5, exactly the 0x00020000 the version==0x00020000 gate requires.",
+      "why_loser_doesnt": "value_profile lacks I2SRandReplace, so it cannot copy the intercepted 0x00020000 CMP operand into the input; its loser-blocking seeds carry arbitrary bytes at offset 0x18 (e.g. 0x1b loser=47(G)x8) and never satisfy the version-2.0 gate, blocking on the false side.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the per-execution CmpLogObserver buffer for the version==0x00020000 comparison and substitutes the recorded constant 0x00020000 at the matching input offset, which value_profile (no I2SRandReplace) cannot do."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "The same 4-byte version field at offset 0x18 must reach the 32-bit constant 0x00020000 checked by the line-223 gate.",
+      "why_winner_satisfies": "value_profile_cmplog's CMP_MAP gradient preserves intermediate inputs whose version field is progressively closer (smaller Hamming distance) to 0x00020000, and the winner resolves 10/10 with hitcount 39 on the branch versus cmplog's 2/10 and hitcount 3.",
+      "why_loser_doesnt": "cmplog alone has no CMP_MAP gradient feedback, so partial-match version values are not retained as corpus and the search lacks the distance-bucket hill-climb; cmplog blocks 8/10 with avg duration 19.80h on this branch.",
+      "mechanism_attribution": "value_profile's CMP_MAP records a (PC, operand-distance bucket) for the version==0x00020000 comparison; an input closer to 0x00020000 adds a new bucket and is preserved as corpus, giving the vpc winner a gradient toward the constant that bare cmplog lacks."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is a 32-bit exact-equality test against the constant 0x00020000.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L223 hb-ot-post-table.hh:223:11",
+      "exact_quote": "if (version == 0x00020000)"
+    },
+    {
+      "claim": "The winner-resolving seeds carry 00 02 00 00 at offset 0x18.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 7253f27adf424cfd offset 0x18",
+      "exact_quote": "0010: a0 20 20 20 00 00 00 18 00 02 00 00 00 0a 03 00"
+    },
+    {
+      "claim": "At offset 0x19 the winner concentrates on 02 while it differs from the loser distribution.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0019",
+      "exact_quote": "0x0019  02(.)x5"
+    },
+    {
+      "claim": "At offset 0x1b the winner is 00 while the loser concentrates on 0x47.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x001b",
+      "exact_quote": "0x001b  00(.)x5                             47(G)x8"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "I2SRandReplace substitutes a recorded CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "The vpc>vp pair resolves the winner 10/10 versus the loser 0/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 subject 14",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "value_profile's CMP_MAP preserves inputs producing a closer-matching CMP operand pair as corpus.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "Bare cmplog buffers operands per execution and is consumed by the mutator, not by feedback (no CMP_MAP gradient).",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Feedback",
+      "exact_quote": "The CMP buffer is\nconsumed by the mutator, not by feedback."
+    },
+    {
+      "claim": "The vpc>cmplog pair resolves the winner 10/10 versus the cmplog loser 2/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 subject 13",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=2/10  blocked=8  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5614 --role W --fuzzer value_profile_cmplog --trial 1 --seed 7253f27adf424cfd` and observed 1 I2S-floor dash row (mutation_op = -, ancestor e0a5b09f80625fb6) at depth 21 of the ancestor chain, confirming I2S contribution under the current build"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on version==0x00020000 in which value_profile (no I2SRandReplace) reaches the true branch as often as value_profile_cmplog, showing the 32-bit constant match does not require I2S substitution."
+  },
+  "weakest_evidence_point": "Pair 2's value_profile attribution rests on the CMP_MAP gradient narrative; the byte diff alone cannot distinguish a gradient hill-climb from a lucky single-step match, since both pairs converge on the same 0x00020000 bytes.",
+  "confidence": "high"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 5494,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry a well-formed MATH table with a Device record whose format field equals 1, 2, or 3 to take the true switch arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A font binary that parses far enough to reach OT::Device::get_y_delta with the Device sub-table's u.b.format field holding one of the small magic values 1, 2, or 3, requiring valid table tags (e.g. 'MATH') and structural offsets so the deep MATH/BASE call chain reaches the device record.",
+      "why_winner_satisfies": "Both winner-resolving seeds contain the literal ASCII tag 'MATH' at offset 0x0c and well-formed leading sfnt header bytes (00 01 00 00 ...), so the parser descends the MathValueRecord -> Device::get_y_delta chain and the format byte lands in {1,2,3}, taking the true arm (W hits the branch with T-side counts e.g. T=6 F=88).",
+      "why_loser_doesnt": "Loser-blocking seeds are short, malformed fragments (6-64 bytes, e.g. '87 0e 0d 0e 22 0e') lacking a coherent table directory and the 'MATH' tag, so they never reach get_y_delta with a 1/2/3 format value; at the blocker the loser shows T=0 F=470 (true side never taken).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads CMP operands captured at the format switch comparison and substitutes the constant 1/2/3 (and intermediate tag/offset comparisons such as the 'MATH' fourcc) directly into the input, letting it satisfy the magic-value gate; naive has no CMP introspection and must hit the exact bytes by blind havoc, which it never achieves in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is the format switch arm case 1: case 2: case 3 in OT::Device::get_y_delta.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L3577-L3579",
+      "exact_quote": "Source line:     case 1: case 2: case 3:"
+    },
+    {
+      "claim": "The dispatch is a switch on u.b.format whose true arm requires the format value to be 1, 2, or 3.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L3577-L3579",
+      "exact_quote": "switch (u.b.format)"
+    },
+    {
+      "claim": "cmplog resolved the branch in all 10 trials while naive blocked in all 10, a perfect divergence attributable to the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the ASCII tag MATH near the start of the input.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 offset 0x0c",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 4d 41 54 48   ......      MATH"
+    },
+    {
+      "claim": "Loser-blocking seeds are tiny malformed fragments that lack table structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1 (6 bytes)",
+      "exact_quote": "0000: 87 0e 0d 0e 22 0e                                 ....\"."
+    },
+    {
+      "claim": "At the blocker the winner takes the true side while the loser never does (T=0 F=470).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L3579",
+      "exact_quote": "d=1   L3579  T=6 F=88  T=0 F=470  case 1: case 2: case 3:  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds the I2SRandReplace mutator that substitutes a captured CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mutator and relies solely on havoc/token mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5494 --role W --fuzzer cmplog --trial 1 --seed 108c82e4ea676143`; the 31-level ancestor chain contains two I2S-floor dash rows (mutation_op = -) at depth 29 and 30, the lower-bound signal of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the same 1/2/3 format-value switch gate where cmplog and naive resolve at statistically indistinguishable rates, showing the magic-value gate is not what I2S substitution overcomes."
+  },
+  "weakest_evidence_point": "The exact CMP comparison whose operand I2S substitutes (the literal format value 1/2/3 vs an intermediate tag/offset compare upstream) is inferred from source + seed structure, not directly observed in the CmpLog buffer.",
+  "confidence": "high"
+}

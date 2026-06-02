@@ -1,0 +1,75 @@
+{
+  "branch_id": 13349,
+  "target": "openthread",
+  "summary_one_line": "Input must carry the ICMP6 next-header byte 0x3a so GetIpProto() selects case kProtoIcmp6.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "The parsed IPv6 next-header / protocol field must equal kProtoIcmp6 (0x3a = 58); winner seeds carry a run of 0x3a bytes around offsets 0x07-0x0e so GetIpProto() returns ICMP6 and the switch enters case kProtoIcmp6.",
+      "why_winner_satisfies": "Winner (naive) seeds hold concentrated 0x3a (ASCII ':') bytes at offsets 0x07 and 0x08 (W bytes '3a(:)x3') and a 0x3a run through 0x0b-0x0d, the literal ICMP6 protocol value, so the true side at L1761 is taken (W: T=3 F=0).",
+      "why_loser_doesnt": "Loser (cmplog) seeds carry 0x00 / 0x29 at offset 0x07 (L bytes '00(.)x7 29())x3') and never plant 0x3a, so GetIpProto() yields a non-ICMP6 value and the switch falls to default (L: T=0 F=32 at L1761, T=32 F=0 at default L1765).",
+      "mechanism_attribution": "The winner is the I2S-free baseline (naive): its havoc/interesting-value stack lands the 0x3a protocol byte by plain byte mutation, and the I2S-free arm WINS here. cmplog's input-to-state operand substitution, anchored on CMP operands captured upstream, keeps planting non-ICMP6 protocol values and steers the queue toward the UDP/default arms, so the comparison-solving technique is the harmful delta and the surviving feature is reached by plain havoc-only byte mutation."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the ICMP6 arm of the GetIpProto() switch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "ip6.cpp:1761",
+      "exact_quote": "Source line:     case kProtoIcmp6:"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the 0x3a protocol byte at offsets 0x07 and 0x08; loser seeds do not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0007",
+      "exact_quote": "0x0007  3a(:)x3                             00(.)x7 29())x3"
+    },
+    {
+      "claim": "Offset 0x08 is also concentrated to 0x3a in the winner and absent in the loser.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0008",
+      "exact_quote": "0x0008  3a(:)x3                             7f(.)x4 40(@)x3 ff(.)x2 01(.)x1"
+    },
+    {
+      "claim": "A winner-resolving seed contains the 0x3a run in its bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id d3396de23a76ce4b",
+      "exact_quote": "0000: cb 62 5c 02 ff 00 10 3a 3a 33 31 3a 3a 3a 30 00"
+    },
+    {
+      "claim": "On the call chain the blocker's ICMP6 case is taken only by the winner; the loser falls to default.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1761 / L1765",
+      "exact_quote": "d=1   L1761  T=3 F=0  T=0 F=32  case kProtoIcmp6:  <-- BLOCKER"
+    },
+    {
+      "claim": "The decisive pair has naive as winner and cmplog as loser with delta I2S, so the I2S-free arm wins.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "The winner naive fuzzer has no I2S mutator, only the havoc/token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes CMP operands captured per-execution, which is the technique that differs from naive.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "picks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only (winner = naive, the I2S-free baseline), so lineage I2S-floor verification is not applicable; this is an anti-I2S pair (naive > cmplog) where the I2S technique is the harmful delta, and the winning side is reached by naive havoc/interesting-value byte mutation planting the 0x3a protocol byte, corroborated by winner Seed 2 mutation_op TokenReplace,DwordInterestingMutator."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where placing the 0x3a (kProtoIcmp6) protocol byte is the ONLY gate to the winning branch but cmplog still resolves it as fast as or faster than naive — that would show I2S is not the harmful delta and the win is not havoc-driven."
+  },
+  "weakest_evidence_point": "The causal claim that cmplog's I2SRandReplace actively steers the queue away from 0x3a (rather than cmplog merely being neutral/slower) is inferred from the divergence, not directly observed in operand logs.",
+  "confidence": "medium"
+}

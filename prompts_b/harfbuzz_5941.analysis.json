@@ -1,0 +1,75 @@
+{
+  "branch_id": 5941,
+  "target": "harfbuzz",
+  "summary_one_line": "A Myanmar consonant syllable whose glyph sequence yields a below-base vowel (VBlw) after the main consonant, reachable by raw byte/token exploration not CMP substitution.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A sfnt/font byte stream that parses into a Myanmar consonant (or broken-cluster) syllable in which a below-base vowel glyph (myanmar_category M_Cat(VBlw)) follows the base consonant once pos has advanced to POS_AFTER_MAIN, so line 245's true branch fires. The discriminating condition is a derived glyph-classification state, not a literal operand present in the input bytes.",
+      "why_winner_satisfies": "naive resolves the branch in all 10 trials (avg hitcount 59) using its havoc + token stack: winning seeds carry mutation ops like TokenReplace and TokenInsert,TokenReplace,ByteRandMutator,QwordAddMutator and show repeated 0x59 0x10 0x00 0x00 (Y...) byte runs that drive the consonant-loop into the VBlw arm. Free byte/token exploration explores the glyph-sequence space that produces the POS_AFTER_MAIN + VBlw state.",
+      "why_loser_doesnt": "cmplog blocks 9/10 trials (avg 20.80h, hitcount 0) because its extra I2SRandReplace stage spends mutation budget substituting CMP operands captured from __sanitizer_cov_trace_cmp* callbacks, but the gating comparison at line 245 is info[i].myanmar_category() == M_Cat(VBlw) — a comparison against a compile-time category constant on a value DERIVED from parsing, with no matching literal in the raw input. I2S substitution cannot place bytes that influence that derived category, so cmplog's budget is wasted relative to naive's structural exploration.",
+      "mechanism_attribution": "The winner is naive, whose technique relative to cmplog is the ABSENCE of input-to-state substitution: plain havoc + token mutation explores the font byte space that builds a VBlw-after-main glyph sequence. cmplog's extra substitution stage targets input-resident CMP operands, but this gate keys on a parser-derived category constant, so the extra stage diverts effort and the comparison-equipped fuzzer loses (I2S-anti). claimed_mechanism = havoc-only."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair has naive as winner and cmplog as loser, delta = I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "naive resolves the branch in all 10 trials while cmplog blocks 9/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 winner/loser lines",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "The gating comparison is against the VBlw glyph category, a parser-derived classification, not a raw input literal.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6",
+      "exact_quote": "if (pos == POS_AFTER_MAIN && info[i].myanmar_category() == M_Cat(VBlw))"
+    },
+    {
+      "claim": "The winning naive seeds were produced by token-replacement mutation, not CMP-driven substitution.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving Seed 1",
+      "exact_quote": "fuzzer=naive, trial=1, discovered_at=2694s, mutation_op=TokenReplace"
+    },
+    {
+      "claim": "Winning seeds contain repeated structured glyph-record byte runs that drive the consonant reordering loop.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving Seed 3 offsets 0x20-0x3f",
+      "exact_quote": "00 a0 00 80 00 59 10 00 00 59 10 00 00 a0 00 00"
+    },
+    {
+      "claim": "cmplog spends its extra budget on I2SRandReplace substitution of CMP operands captured per-PC.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "picks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive's technique is its havoc + token stack with no I2S stage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op line",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog never hit the blocker true side (hitcount 0) whereas naive hit it 59 times on average.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "avg hitcount line",
+      "exact_quote": "avg hitcount on branch: winner=59  loser=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only (the WINNER is naive, an I2S-ANTI case), so lineage verification is not the I2SRandReplace path. I nonetheless ran `python3 tools/db_query.py lineage --branch 5941 --role W --fuzzer naive --trial 1 --seed 104285767d17e96a`: the leaf and most ancestors carry concrete havoc/token op names (TokenReplace, DwordAddMutator, BytesDeleteMutator, CrossoverInsertMutator, etc.), consistent with havoc-only discovery. A single dash row appears at depth 19, but per the MECHANISM CONTEXT caveat dash rows are an I2S signal ONLY for cmplog/vpc; in a naive chain it reflects an early seed with no logged mutator list, not I2S, and naive carries no I2SRandReplace mutator. The winner is therefore not I2S-driven."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose line-245-equivalent gate compares against a literal value that DOES appear verbatim in the input bytes (an input-resident operand) where cmplog then resolves the branch faster than naive — that would show the gate is CMP-solvable and the naive>cmplog divergence is not driven by I2S being misdirected onto a parser-derived constant."
+  },
+  "weakest_evidence_point": "The claim that cmplog's loss is specifically caused by I2S budget misdirection (rather than incidental scheduling/seed-pool variance) is inferred from the gate keying on a derived category constant; I do not have direct evidence of cmplog's wasted substitution attempts.",
+  "confidence": "medium"
+}

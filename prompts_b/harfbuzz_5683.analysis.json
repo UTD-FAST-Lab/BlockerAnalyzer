@@ -1,0 +1,99 @@
+{
+  "branch_id": 5683,
+  "target": "harfbuzz",
+  "summary_one_line": "Reaching the unicode-space guard with a non-space codepoint there, so space_type==NOT_SPACE takes the false branch; CMP_MAP gradient finds it, I2S substitution diverts vpc into the space-fallback path.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A font/buffer input whose current codepoint passes the _hb_glyph_info_is_unicode_space guard at line 191 yet has space_fallback_type == NOT_SPACE at line 194, so the line-195 comparison `space_type != NOT_SPACE` evaluates false. This requires bytes that drive a real glyph-decomposition path (kern/GPOS/GSUB table structure) rather than degenerate ASCII-space runs that resolve to a true space type.",
+      "why_winner_satisfies": "value_profile winner-resolving seeds carry structured table tags (kern at offset 0x0c, the 0x00 0x01 0x00 0x00 sfnt-version header) and diverse non-space codepoints; the per-role overlay shows the winner set taking the line-195 false side (W F=16) and the line-196 short-circuit chain, exercising the branch 38 times on average.",
+      "why_loser_doesnt": "value_profile_cmplog blocking seeds are dominated by 0x20 (ASCII space) and 0x18 byte runs that resolve to an actual space type, so at line 195 space_type != NOT_SPACE is true (L T=12 F=0) and control diverts into the space-fallback block at 196-202; the loser never lands on the false side, blocking 10/10 trials for 23.9h.",
+      "mechanism_attribution": "The winner is value_profile, whose CMP_MAP gradient (Hamming/prefix distance buckets) rewards inputs that incrementally approach valid table-structure CMPs, steering the corpus toward well-formed non-space glyph inputs that reach line 195 with a non-space codepoint. The loser value_profile_cmplog adds input-to-state substitution, which copies intercepted comparison operands (e.g. the 0x0020 space codepoint compared at line 196 and unicode-space class constants) directly into the input, biasing vpc's corpus toward space-classified codepoints that satisfy line 195's != NOT_SPACE TRUE side and thus block the false branch. So the divergence is attributable to the I2S delta but the technique that *helps* is CMP_MAP gradient on the value_profile arm."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The globally blocked side is the false branch of the line-195 comparison space_type != NOT_SPACE.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7, line 195",
+      "exact_quote": "if (space_type != hb_unicode_funcs_t::NOT_SPACE &&"
+    },
+    {
+      "claim": "The false branch is the globally blocked side.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Reaching line 195 requires passing the unicode-space guard at line 191, and the space type is computed at line 194.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 191-194",
+      "exact_quote": "if (_hb_glyph_info_is_unicode_space (&buffer->cur()))"
+    },
+    {
+      "claim": "The space type fed into line 195 is space_fallback_type of the current codepoint.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 194",
+      "exact_quote": "hb_unicode_funcs_t::space_t space_type = buffer->unicode->space_fallback_type (u);"
+    },
+    {
+      "claim": "The winner value_profile takes the line-195 false side while the loser value_profile_cmplog takes only the true side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 195 BLOCKER row",
+      "exact_quote": "T=1 F=16  T=12 F=0  if (space_type != hb_unicode_funcs_t::NOT_SPACE &&"
+    },
+    {
+      "claim": "value_profile resolves 10/10 with average hitcount 38 on the branch; value_profile_cmplog blocks 10/10 for 23.9h.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "avg hitcount on branch: winner=38  loser=0"
+    },
+    {
+      "claim": "The decisive pair is value_profile beating value_profile_cmplog with delta I2S, prob_div=1.00.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "--- Pair 1: value_profile > value_profile_cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "Winner-resolving value_profile seeds carry structured sfnt-version header and kern table tag bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 id=631d87a766522a94",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 21 20 20 17 17 6b 65 72 6e   ...... !  ..kern"
+    },
+    {
+      "claim": "Loser-blocking value_profile_cmplog seeds are dominated by 0x20 ASCII-space byte runs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1 id=044f6bc4804646ac",
+      "exact_quote": "0010: 20 00 01 20 20 20 20 20 20 20 20 20 6b e8 20 20    ..         k.  "
+    },
+    {
+      "claim": "value_profile uses CMP_MAP gradient feedback that preserves inputs producing operand pairs closer to matching.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator; value_profile_cmplog adds I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "The line-196 short-circuit compares the codepoint against the literal 0x0020 space.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 196",
+      "exact_quote": "(c->font->get_nominal_glyph (0x0020, &space_glyph) || (space_glyph = buffer->invisible)))"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile arm), not I2SRandReplace, so lineage dash-row verification is not mandated. The winner is the non-I2S fuzzer value_profile; the I2S-equipped value_profile_cmplog is the LOSER, so this is an anti-I2S divergence where I2S substitution diverts vpc toward space-classified codepoints and the CMP_MAP gradient on value_profile is the helping technique."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose only gate is space_type != NOT_SPACE on a parsed codepoint where value_profile_cmplog resolves the false branch as fast as or faster than value_profile across trials would refute the claim that I2S operand substitution diverts vpc into the space-fallback path."
+  },
+  "weakest_evidence_point": "The causal link that I2SRandReplace copies the 0x0020/space-class constants into vpc inputs (rather than vpc merely lagging by chance) is inferred from the loser seeds' 0x20 dominance plus the mutator delta, not directly observed in lineage.",
+  "confidence": "medium"
+}

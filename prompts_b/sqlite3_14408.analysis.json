@@ -1,0 +1,87 @@
+{
+  "branch_id": 14408,
+  "target": "sqlite3",
+  "summary_one_line": "Input must parse as valid SQL containing a '||' string-concatenation expression so the VDBE compiles and executes OP_Concat.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "A well-formed SQL statement whose expression tree contains a string concatenation, i.e. the literal '||' operator (bytes 7c 7c) between two text operands inside a SELECT, so the parser emits an OP_Concat opcode that the VDBE reaches at /src/sqlite3/bld/sqlite3.c:86705.",
+      "why_winner_satisfies": "All three winner-resolving seeds are syntactically valid SELECT statements containing '||': seed 1 has 'SELECT 11-0133=1...3=1||3=13' with 7c 7c at offset 0x32, and seeds 2 and 3 carry 'SELECT'''L''''''' followed by '||' (7c 7c) at offsets 0x11-0x12; the BYTE DIFF confirms W concentrates on 7c(|)x2 at offsets 0x11 and 0x12 and on the SELECT keyword bytes 53(S)/45(E)/4c(L)/45(E)/43(C)/54(T) at offsets 0x00-0x05.",
+      "why_loser_doesnt": "The naive loser-blocking seeds are non-parsing byte garbage (e.g. 'T 1; c BINARY' or '``g..;......y' or high-byte blobs) with no SELECT keyword and no '||' operator at any offset, so they never compile to a program containing OP_Concat and OP_Concat stays at T=0 in the loser column.",
+      "mechanism_attribution": "value_profile adds a CMP_MAP keyed by (PC, operand-distance bucket) over intercepted CMPs in the SQL tokenizer/parser; inputs that match more of the 'SELECT' keyword prefix or get a closer byte match on the '||' token produce a new closer CMP_MAP bucket and are kept as corpus, letting value_profile climb the gradient toward syntactically valid concatenation SQL that naive's plain edge feedback cannot assemble by luck."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is the OP_Concat VDBE case, the opcode for SQL string concatenation '||'.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L86705",
+      "exact_quote": "case OP_Concat: {           /* same as TK_CONCAT, in1, in2, out3 */"
+    },
+    {
+      "claim": "value_profile is the decisive winner over naive at this branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "value_profile resolves the branch in 9/10 trials while naive stays blocked in all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 counts",
+      "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+    },
+    {
+      "claim": "Winner seed 2/3 contains a SELECT statement with the '||' concatenation operator.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 6ab275d1763957e1, offset 0x10",
+      "exact_quote": "27 7c 7c 27 27 27 27 27 27 27 27 27 27 27 27 27   '||'''''''''''''"
+    },
+    {
+      "claim": "Winner seed 1 contains a valid SELECT with '||' at offset 0x32.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id ab0801c4f20147f8, offset 0x30",
+      "exact_quote": "3d 31 7c 7c 33 3d 31 33 2d 33 2d 30 33 3d 31 33   =1||3=13-3-03=13"
+    },
+    {
+      "claim": "Loser naive seeds are non-SQL byte garbage with no SELECT keyword or '||' operator.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00415129895a1bd5",
+      "exact_quote": "54 20 31 3b 20 63 20 42 49 4e 41 52 59 00 21 21   T 1; c BINARY.!!"
+    },
+    {
+      "claim": "At the SQL-keyword offsets the winner concentrates on the SELECT bytes while the loser is dispersed across non-keyword bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0000",
+      "exact_quote": "0x0000  53(S)x3                             3b(;)x2 20( )x2 54(T)x1 60(`)x1 +4u  DIFFER"
+    },
+    {
+      "claim": "At offsets 0x11-0x12 the winner concentrates on the '||' operator bytes that the loser never produces.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0011-0x0012",
+      "exact_quote": "0x0011  7c(|)x2 3d(=)x1                     0a(.)x3 3b(;)x2 45(E)x2 54(T)x1 +1u  DIFFER"
+    },
+    {
+      "claim": "value_profile rewards inputs whose intercepted-CMP operands are closer to matching by adding a new CMP_MAP bucket and preserving them.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "The value_profile CMP_MAP bucket is keyed on operand-distance, a coarse encoding of byte/prefix closeness.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation",
+      "exact_quote": "each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket)"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (decisive delta is value_profile, not I2S), so db_query.py lineage is not required; the prompt's MECHANISM CONTEXT states value_profile uses no I2SRandReplace and emits no dash rows, so an I2S-floor lineage check is inapplicable here."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile resolves OP_Concat no faster than naive even though the only path to OP_Concat requires emitting a valid SELECT...||... query, indicating CMP_MAP keyword/operator gradient is not what drives the divergence."
+  },
+  "weakest_evidence_point": "The CMP_MAP gradient story assumes the SQL tokenizer's keyword/operator matching goes through intercepted integer/string CMPs that feed value_profile's distance buckets, which is inferred from mechanism text rather than observed in the parser's CMP instrumentation.",
+  "confidence": "medium"
+}

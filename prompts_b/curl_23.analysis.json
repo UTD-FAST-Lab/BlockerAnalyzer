@@ -1,0 +1,105 @@
+{
+  "branch_id": 23,
+  "target": "curl",
+  "summary_one_line": "Input must carry a valid URL/scheme so a connection is cached, making the while(conn) loop non-empty at cleanup.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A structurally well-formed URL with a recognizable scheme/host:port (e.g. literal bytes like '://1','HTTP/' and a port '9001') so curl actually opens and caches a connection; only then is conncache_find_first_connection non-NULL and the while(conn) true-side taken during close-all.",
+      "why_winner_satisfies": "Winner-resolving seeds carry concentrated structural tokens at fixed offsets: '://' and '9001' (0x0a..0x1e) and the 'HTTP/2' / 'GHTTP/27.0' magic at 0x24+, which the cmplog/vpc I2S stage planted by substituting CMP operands; the branch's true side is hit 332 (vpc) / 45 (cmplog) times.",
+      "why_loser_doesnt": "Loser-blocking seeds are short, scheme-corrupted byte runs (e.g. '%' / '+' / 'A' fill) lacking the '://' + port + HTTP-version structure at the same offsets, so no connection is cached and the loop body never runs (hitcount 13 / 1).",
+      "mechanism_attribution": "cmplog and value_profile_cmplog add I2SRandReplace, which reads CMP operands from the CmpLogObserver buffer and substitutes the matching operand bytes (scheme/port/HTTP-version literals) into the input; naive and value_profile lack I2SRandReplace and cannot place these multi-byte literals to make a connection get cached."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs differ by the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta labels",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The cmplog>naive pair is also an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The blocked branch is the while(conn) loop guard whose body removes/closes cached connections.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "conncache.c:539",
+      "exact_quote": "while(conn) { <-- BLOCKER"
+    },
+    {
+      "claim": "Loop entry depends on conncache_find_first_connection returning a connection.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "conncache.c:538",
+      "exact_quote": "conn = conncache_find_first_connection(connc);"
+    },
+    {
+      "claim": "The winner takes the loop body and the true side; loser never enters it.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L539",
+      "exact_quote": "L 539  T=17 F=17  T=0 F=20  while(conn) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner-resolving seeds carry structural URL tokens '://', port '9001' and HTTP-version literals.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 (id=32d10b449c4075ee)",
+      "exact_quote": "2f 2f 31 32 25"
+    },
+    {
+      "claim": "Winner seed embeds an HTTP-version magic 'GHTTP/27.0'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 offset 0x24",
+      "exact_quote": "47 48 54 54 50 2f 32 37 2e 30"
+    },
+    {
+      "claim": "Winner takes the true branch far more often than the loser (332 vs 13).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 hitcount",
+      "exact_quote": "avg hitcount on branch: winner=332  loser=13"
+    },
+    {
+      "claim": "Loser-blocking seeds are short, scheme-corrupted byte runs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1 (id=00182ecc311b5f0b, 32 bytes)",
+      "exact_quote": "70 6b 2b 2b 2b 2b 2b 2a 2b 2b"
+    },
+    {
+      "claim": "At the discriminating offsets the winner holds the URL structure ('/' at 0x0c, '9' at 0x17) while the loser holds filler bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c, 0x17",
+      "exact_quote": "0x000c  2f(/)x14 39(9)x2 4a(J)x1            25(%)x5 2b(+)x3 2e(.)x3 45(E)x2 +7u  DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes CMP operands into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "naive has no I2S stage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 23 --role W --fuzzer cmplog --trial 1 --seed 32d10b449c4075ee`; the tool reported 'I2S-floor signal: 2 ancestor dash row(s) at depth 23, 24', i.e. two ParentInfo-only (mutation_op = -) ancestors in the winning seed's chain, the floor signature of an unwrapped I2SRandReplace find under the current cmplog build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness in which the while(conn) true side is reachable without any cached connection (loop entry independent of a parsed scheme/host:port literal) so naive resolves it as often as cmplog/vpc, eliminating the I2S advantage."
+  },
+  "weakest_evidence_point": "The exact CMP operands I2S substitutes (scheme vs port vs HTTP-version) are inferred from seed byte runs rather than from per-comparison CMP logs, so which literal is the gating one is uncertain.",
+  "confidence": "medium"
+}

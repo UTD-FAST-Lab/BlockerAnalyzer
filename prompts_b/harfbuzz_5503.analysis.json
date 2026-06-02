@@ -1,0 +1,132 @@
+{
+  "branch_id": 5503,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry a valid GPOS table (table_index==1) so init() sets ignore_zwnj, reaching deep GSUB/GPOS layout-matching code.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed font with a recognizable 4-byte table tag (e.g. 'GPOS' / 'GPO' / 'kern') at the table-directory offsets ~0x0c-0x0f, so a layout table is parsed and skipping_iterator_t::init runs with c->table_index==1 (GPOS), taking the true side.",
+      "why_winner_satisfies": "cmplog winner seeds carry the literal tag bytes 'GPOS' at offset 0x0c (47 50 4f 53) and 'GPO' fragments, matching the table-tag CMP that selects the GPOS path; the branch then resolves in 10/10 trials.",
+      "why_loser_doesnt": "naive loser seeds are short and tagless (e.g. a 6-byte 0x87 0e 0d 0e 22 0e blob) and never place a valid table tag at the directory offsets, so table_index stays !=1 and the true side is blocked in 8/10 trials.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver operand buffer for the table-tag comparison, locates the input bytes matching one operand, and substitutes the expected tag ('GPOS') at the directory offset, manufacturing the magic 4CC that naive can only hit by lucky havoc."
+    },
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "Same GPOS-tag table-directory requirement, but reachable incrementally: input bytes at the tag offsets need only progressively approach the 'GPOS' 4CC for the comparison to register as closer-to-matching.",
+      "why_winner_satisfies": "value_profile resolves 9/10 with avg hitcount 21383 vs loser 2810; its CMP_MAP rewards inputs whose tag bytes are Hamming-closer to the expected table tag, ratcheting toward the valid 4CC at offsets 0x0c-0x0f where winners show k/G, e/P, r/O, n/S.",
+      "why_loser_doesnt": "naive's loser seeds keep arbitrary low-entropy bytes at the tag offsets (0x0c L bytes include 20( ), 80, 70(p), 01) with no feedback rewarding partial-match progress, so they never converge on the tag and block 8/10.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient buckets the operand-distance of the table-tag comparison; each input that brings the tag bytes Hamming-closer to 'GPOS' adds a new bucket and is preserved, giving a smooth path to the magic 4CC that naive's binary edge feedback cannot follow."
+    },
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "Same structural requirement (a table whose parse drives init with table_index==1), but the winner benefits because reaching init() through distinct call contexts (iter_input vs iter_context, CFF dict paths) counts as new coverage.",
+      "why_winner_satisfies": "naive_ctx resolves 9/10 with avg hitcount 30402 vs loser 2810; init() is invoked from multiple callers (iter_input.init(this,false) and iter_context.init(this,true) at lines 735-736, plus CFF cff2 dict paths), so the context-indexed map rewards each (call-context, edge) pair and retains the seeds that drive deeper into layout matching.",
+      "why_loser_doesnt": "naive collapses all calls to init() into one bare edge bucket, so once that edge is hit it earns no further corpus credit for reaching it via the GPOS-resolving context, and stays blocked 8/10.",
+      "mechanism_attribution": "naive_ctx's CtxHook folds the caller chain into the edge-map index, so the same init() edge reached through the GPOS-table call path is a NEW (call-context, edge) bucket; MaxMapFeedback preserves those inputs, building a corpus that explores the table-driven contexts naive's bare-edge feedback ignores."
+    },
+    {
+      "covers_pairs": ["minimizer>naive (calibrated_energy)"],
+      "what_input_feature": "Same GPOS-table structural requirement; the winner reaches it because the small, fast, structured table-bearing seeds earn extra mutation energy that compounds the structured byte content.",
+      "why_winner_satisfies": "minimizer resolves 9/10 with avg hitcount 41433 vs loser 2810; its calibration-derived power schedule grants faster/smaller/more-stable seeds more havoc mutations, and three of the winner-resolving seeds (e.g. the 141-byte and 152-byte seeds bearing 'kern'/font-table bytes) are minimizer finds.",
+      "why_loser_doesnt": "naive runs the same havoc/token stack inside a plain StdMutationalStage with a fixed mutation budget per seed visit, so it cannot concentrate effort on the promising small structured seeds and blocks 8/10.",
+      "mechanism_attribution": "minimizer's CalibrationStage + StdPowerMutationalStage derive per-seed energy from intrinsic perf_score (speed/size/stability, PowerSchedule None); the structured table-bearing seeds, being small and fast, earn extra havoc iterations that more often complete the valid table directory, unlike naive's flat budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the ignore_zwnj assignment whose true side requires c->table_index==1 (the GPOS table).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L75 (line 486)",
+      "exact_quote": "matcher.set_ignore_zwnj (c->table_index == 1 || (context_match && c->auto_zwnj)); <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog winner seeds carry the literal 'GPOS' tag bytes at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 002c9ad92acce91b, offset 0x0c",
+      "exact_quote": "00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+    },
+    {
+      "claim": "naive loser seeds are tiny and tagless, e.g. a 6-byte blob.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 003817559785f774",
+      "exact_quote": "87 0e 0d 0e 22 0e                                 ....\"."
+    },
+    {
+      "claim": "cmplog wins the pair, resolving 10/10 versus naive's 2/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile wins via CMP_MAP distance bucketing, with hitcount 21383 vs loser 2810.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "avg hitcount on branch: winner=21383  loser=2810"
+    },
+    {
+      "claim": "value_profile's CMP_MAP encodes how close the two operands were and preserves inputs closer to matching.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "The tag offsets 0x0c-0x0f differ between W and L with winners concentrating on G/P/O/S and k/e/r/n.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  6b(k)x30 47(G)x10                   20( )x1 80(.)x1 70(p)x1 01(.)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "naive_ctx wins via context-indexed coverage with hitcount 30402 vs loser 2810.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 3",
+      "exact_quote": "avg hitcount on branch: winner=30402  loser=2810"
+    },
+    {
+      "claim": "naive_ctx folds the call context into the edge-map index so the same edge is recorded at different slots per call path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Instrumentation",
+      "exact_quote": "the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "init() is called from two distinct contexts iter_input(false) and iter_context(true).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 735-736",
+      "exact_quote": "iter_input.init (this, false); <-- CALL"
+    },
+    {
+      "claim": "minimizer wins via calibrated energy with hitcount 41433 vs loser 2810.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 4",
+      "exact_quote": "avg hitcount on branch: winner=41433  loser=2810"
+    },
+    {
+      "claim": "minimizer derives per-seed energy from calibration so faster, smaller, more-stable seeds earn more mutations.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "minimizer Mutators/stages",
+      "exact_quote": "faster, smaller,\nmore-stable seeds earn more mutations."
+    },
+    {
+      "claim": "Several winner-resolving seeds bearing font-table content are minimizer finds.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0130d32717d6abb0",
+      "exact_quote": "fuzzer=minimizer, trial=1, discovered_at=2656s"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5503 --role W --fuzzer cmplog --trial 1 --seed 002c9ad92acce91b`; the trailing I2S-floor signal reports 2 ancestor dash rows (mutation_op = -) at depths 29 and 30, the lower-bound signal of an unwrapped I2SRandReplace find in this cmplog winner's ancestor chain."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the GPOS table tag is placed at a fixed known offset (so naive can hit it with no comparison-solving) showing cmplog NOT outperforming naive at the table_index==1 branch."
+  },
+  "weakest_evidence_point": "The four mechanisms all gate on the same GPOS-table structural feature, so the per-axis attributions (especially calibrated_energy vs ctx_coverage) are inferred from mechanism descriptions plus aggregate hitcounts rather than from technique-specific byte evidence.",
+  "confidence": "medium"
+}

@@ -1,0 +1,87 @@
+{
+  "branch_id": 5295,
+  "target": "harfbuzz",
+  "summary_one_line": "Input needs a valid sfnt font header with multiple distinct major-codepoint table tags so bfind probes a populated page_map.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed OpenType/sfnt container: 4-byte sfnt version 00 01 00 00 at offset 0, a non-trivial numTables, and recognizable 4-byte table tags (e.g. 'cmap', 'GSU.', tag bytes at 0x1b-0x1e = 53 55 4e = 'SUN') that drive glyph-set population across several distinct majors, so that page_map is non-empty and bfind (the binary-search lookup at line 912) returns false (no match yet) on a fresh major, forcing the insert/store-closest path.",
+      "why_winner_satisfies": "Every winner-resolving seed carries the constant prefix 00 01 00 00 00 07 ff 80 ... 63 6d 61 70 ('cmap') and 47 53 55 4e ('GSUN') tags; these are font tables that get parsed and add glyph ranges across many majors, so page_for is invoked 3520 times (W) and page_map_t::cmp runs 18400 times (W) — a populated, repeatedly-searched page_map.",
+      "why_loser_doesnt": "Loser-blocking seeds are short (13-57 bytes) and lack the sfnt prefix and table-tag structure; page_for fires only 20 times (L) and page_map_t::cmp 0 times (L), so the bit-set is essentially empty/never bfind-searched and the false (store-closest) side at line 912 is never taken.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which copies intercepted comparison operands (sfnt version word, the 4-byte table tags compared during table-directory parsing) directly into the input at the offsets being compared. This lets vpc reconstruct the exact magic/tag bytes that build a multi-major page_map; plain value_profile has only the CMP_MAP Hamming-distance gradient and no operand-substitution mutator, so it cannot place the exact tag bytes and stays blocked."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of a binary-search lookup with store-closest into page_map.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7, line 912",
+      "exact_quote": "if (!page_map.bfind (map, &i, HB_NOT_FOUND_STORE_CLOSEST))"
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog > value_profile with delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner resolves 9/10 while loser blocks 10/10, with the branch hit 2860 times by the winner and 0 by the loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 stats",
+      "exact_quote": "avg hitcount on branch: winner=2860  loser=0"
+    },
+    {
+      "claim": "Winner-resolving seeds carry a constant sfnt/font-table prefix including the 'cmap' tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1, offset 0x00",
+      "exact_quote": "00 01 00 00 00 07 ff 80 20 3f 21 20 63 6d 61 70   ........ ?! cmap"
+    },
+    {
+      "claim": "Winner seeds also contain a 'GSUN' table tag region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1, offset 0x10",
+      "exact_quote": "20 00 00 01 00 00 00 21 11 fb 20 47 53 55 4e 20    ......!.. GSUN "
+    },
+    {
+      "claim": "Loser-blocking seeds are short and unstructured, e.g. 13 bytes with no font header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 3, size=13",
+      "exact_quote": "e0 17 00 00 1a 20 00 00 29 2b 29 29 2c            ..... ..)+)),"
+    },
+    {
+      "claim": "page_for and page_map_t::cmp run thousands of times for the winner but never (cmp) or only 20 times (page_for) for the loser.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "cmp and page_for rows",
+      "exact_quote": "18400         0  hb_bit_set_t::page_map_t::cmp(hb_bit_set_t::page_map_t const&) const"
+    },
+    {
+      "claim": "The bfind branch at line 912 is exercised on both sides for the winner but L only reaches the true side, never the false (store-closest) side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 912",
+      "exact_quote": "d=1   L 912  T=3070 F=375  T=20 F=0  if (!page_map.bfind (map, &i, HB_NOT_FOUND_STORE_CLOSEST))  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog has I2SRandReplace in its mutator stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, relying only on the CMP_MAP distance bucket feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5295 --role W --fuzzer value_profile_cmplog --trial 2 --seed 515ca4c019d4d739` and observed exactly one I2S-floor row (mutation_op = -, ParentInfo-only) at depth 38 of the 39-level ancestor chain; dash rows are exclusive to cmplog/vpc under the current build, confirming an I2S find seeded this winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A value_profile (no-I2S) trial that resolves the false side of line 912 at comparable rate to vpc, or vpc resolving it on inputs that contain no recognizable sfnt version word / table tags (i.e. with the tag-substitution mutator disabled)."
+  },
+  "weakest_evidence_point": "The exact comparison whose operands I2S substitutes (sfnt version word vs each 4-byte table tag) is inferred from seed structure, not directly traced to a specific CMP callsite in the prompt's source window.",
+  "confidence": "high"
+}

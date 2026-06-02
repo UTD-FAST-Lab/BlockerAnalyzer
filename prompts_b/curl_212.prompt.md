@@ -1,0 +1,1103 @@
+==== BLOCKER ====
+Target: curl
+Branch ID: 212
+Location: /src/curl/lib/http.c:3971:8
+Enclosing function: Curl_http_readwrite_headers
+Source line:     if(!k->headerline) {
+Globally blocked side: F  (false branch)
+
+==== TRIAL VECTOR (per fuzzer, n=10 trials) ====
+fuzzer                    resolved  blocked  unreached  role
+naive                            0       10          0  loser (I2S vs cmplog)
+cmplog                          10        0          0  winner (I2S vs naive)
+value_profile                    0       10          0  loser (I2S vs value_profile_cmplog)
+value_profile_cmplog            10        0          0  winner (I2S vs value_profile)
+naive_ctx                        ?        ?          ?  REFERENCE
+naive_ngram4                     ?        ?          ?  REFERENCE
+mopt                             ?        ?          ?  REFERENCE
+minimizer                        0       10          0  REFERENCE
+fast                             3        7          0  REFERENCE
+grimoire                         ?        ?          ?  REFERENCE
+
+INVOLVED fuzzers (synthetic-verification scope): ['cmplog', 'naive', 'value_profile', 'value_profile_cmplog']
+REFERENCE fuzzers (auxiliary context only):     ['naive_ctx', 'naive_ngram4', 'mopt', 'minimizer', 'fast', 'grimoire']
+
+==== DECISIVE PAIRS (2) ====
+--- Pair 1: cmplog > naive  [delta: I2S] ---
+  subject 1  (cmplog vs naive, admissible)
+  winner: resolved=10/10  blocked=0  unreached=0
+  loser:  resolved=0/10  blocked=10  unreached=0
+  avg duration blocked: winner=0.10h  loser=23.40h
+  avg hitcount on branch: winner=4739  loser=0
+  prob_div=1.00  dur_div=23.30h  hit_div=4739
+  subject-level: delta_AUC=100639080.0  p_AUC=0.0002  delta_Final=1286.6  p_final=0.0002
+--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---
+  subject 4  (value_profile_cmplog vs value_profile, admissible)
+  winner: resolved=10/10  blocked=0  unreached=0
+  loser:  resolved=0/10  blocked=10  unreached=0
+  avg duration blocked: winner=0.00h  loser=23.20h
+  avg hitcount on branch: winner=4903  loser=0
+  prob_div=1.00  dur_div=23.20h  hit_div=4903
+  subject-level: delta_AUC=118940940.0  p_AUC=0.0002  delta_Final=1804.8  p_final=0.0002
+
+==== SOURCE CONTEXT (per-role coverage overlay) ====
+Legend: [W] winner-resolving only  [L] loser-blocking only  [B] both  [ ] not hit
+Source: db/per_role_coverage/curl/212/{W,L}/branch_coverage_show.txt
+
+--- Enclosing function: Curl_http_readwrite_headers (/src/curl/lib/http.c:3904-4466) ---
+[ ]  3902                                       ssize_t *nread,
+[ ]  3903                                       bool *stop_reading)
+[B]  3904  {
+[B]  3905    CURLcode result;
+[B]  3906    struct SingleRequest *k = &data->req;
+[B]  3907    ssize_t onread = *nread;
+[B]  3908    char *ostr = k->str;
+[B]  3909    char *headp;
+[B]  3910    char *str_start;
+[B]  3911    char *end_ptr;
+[ ]  3912  
+[ ]  3913    /* header line within buffer loop */
+[B]  3914    do {
+[B]  3915      size_t rest_length;
+[B]  3916      size_t full_length;
+[B]  3917      int writetype;
+[ ]  3918  
+[ ]  3919      /* str_start is start of line within buf */
+[B]  3920      str_start = k->str;
+[ ]  3921  
+[ ]  3922      /* data is in network encoding so use 0x0a instead of '\n' */
+[B]  3923      end_ptr = memchr(str_start, 0x0a, *nread);
+[ ]  3924  
+[B]  3925      if(!end_ptr) {
+[ ]  3926        /* Not a complete header line within buffer, append the data to
+[ ]  3927           the end of the headerbuff. */
+[W]  3928        result = Curl_dyn_addn(&data->state.headerb, str_start, *nread);
+[W]  3929        if(result)
+[ ]  3930          return result;
+[ ]  3931  
+[W]  3932        if(!k->headerline) {
+[ ]  3933          /* check if this looks like a protocol header */
+[ ]  3934          statusline st =
+[ ]  3935            checkprotoprefix(data, conn,
+[ ]  3936                             Curl_dyn_ptr(&data->state.headerb),
+[ ]  3937                             Curl_dyn_len(&data->state.headerb));
+[ ]  3938  
+[ ]  3939          if(st == STATUS_BAD) {
+[ ]  3940            /* this is not the beginning of a protocol first header line */
+[ ]  3941            k->header = FALSE;
+[ ]  3942            k->badheader = HEADER_ALLBAD;
+[ ]  3943            streamclose(conn, "bad HTTP: No end-of-message indicator");
+[ ]  3944            if(!data->set.http09_allowed) {
+[ ]  3945              failf(data, "Received HTTP/0.9 when not allowed");
+[ ]  3946              return CURLE_UNSUPPORTED_PROTOCOL;
+[ ]  3947            }
+[ ]  3948            break;
+[ ]  3949          }
+[ ]  3950        }
+[ ]  3951  
+[W]  3952        break; /* read more and try again */
+[W]  3953      }
+[ ]  3954  
+[ ]  3955      /* decrease the size of the remaining (supposed) header line */
+[B]  3956      rest_length = (end_ptr - k->str) + 1;
+[B]  3957      *nread -= (ssize_t)rest_length;
+[ ]  3958  
+[B]  3959      k->str = end_ptr + 1; /* move past new line */
+[ ]  3960  
+[B]  3961      full_length = k->str - str_start;
+[ ]  3962  
+[B]  3963      result = Curl_dyn_addn(&data->state.headerb, str_start, full_length);
+[B]  3964      if(result)
+[ ]  3965        return result;
+[ ]  3966  
+[ ]  3967      /****
+[ ]  3968       * We now have a FULL header line in 'headerb'.
+[ ]  3969       *****/
+[ ]  3970  
+[B]  3971      if(!k->headerline) { <-- BLOCKER
+[ ]  3972        /* the first read header */
+[B]  3973        statusline st = checkprotoprefix(data, conn,
+[B]  3974                                         Curl_dyn_ptr(&data->state.headerb),
+[B]  3975                                         Curl_dyn_len(&data->state.headerb));
+[B]  3976        if(st == STATUS_BAD) {
+[L]  3977          streamclose(conn, "bad HTTP: No end-of-message indicator");
+[ ]  3978          /* this is not the beginning of a protocol first header line */
+[L]  3979          if(!data->set.http09_allowed) {
+[L]  3980            failf(data, "Received HTTP/0.9 when not allowed");
+[L]  3981            return CURLE_UNSUPPORTED_PROTOCOL;
+[L]  3982          }
+[ ]  3983          k->header = FALSE;
+[ ]  3984          if(*nread)
+[ ]  3985            /* since there's more, this is a partial bad header */
+[ ]  3986            k->badheader = HEADER_PARTHEADER;
+[ ]  3987          else {
+[ ]  3988            /* this was all we read so it's all a bad header */
+[ ]  3989            k->badheader = HEADER_ALLBAD;
+[ ]  3990            *nread = onread;
+[ ]  3991            k->str = ostr;
+[ ]  3992            return CURLE_OK;
+[ ]  3993          }
+[ ]  3994          break;
+[ ]  3995        }
+[B]  3996      }
+[ ]  3997  
+[ ]  3998      /* headers are in network encoding so use 0x0a and 0x0d instead of '\n'
+[ ]  3999         and '\r' */
+[W]  4000      headp = Curl_dyn_ptr(&data->state.headerb);
+[W]  4001      if((0x0a == *headp) || (0x0d == *headp)) {
+[W]  4002        size_t headerlen;
+[ ]  4003        /* Zero-length header line means end of headers! */
+[ ]  4004  
+[W]  4005        if('\r' == *headp)
+[W]  4006          headp++; /* pass the \r byte */
+[W]  4007        if('\n' == *headp)
+[W]  4008          headp++; /* pass the \n byte */
+[ ]  4009  
+[W]  4010        if(100 <= k->httpcode && 199 >= k->httpcode) {
+[ ]  4011          /* "A user agent MAY ignore unexpected 1xx status responses." */
+[ ]  4012          switch(k->httpcode) {
+[ ]  4013          case 100:
+[ ]  4014            /*
+[ ]  4015             * We have made a HTTP PUT or POST and this is 1.1-lingo
+[ ]  4016             * that tells us that the server is OK with this and ready
+[ ]  4017             * to receive the data.
+[ ]  4018             * However, we'll get more headers now so we must get
+[ ]  4019             * back into the header-parsing state!
+[ ]  4020             */
+[ ]  4021            k->header = TRUE;
+[ ]  4022            k->headerline = 0; /* restart the header line counter */
+[ ]  4023  
+[ ]  4024            /* if we did wait for this do enable write now! */
+[ ]  4025            if(k->exp100 > EXP100_SEND_DATA) {
+[ ]  4026              k->exp100 = EXP100_SEND_DATA;
+[ ]  4027              k->keepon |= KEEP_SEND;
+[ ]  4028              Curl_expire_done(data, EXPIRE_100_TIMEOUT);
+[ ]  4029            }
+[ ]  4030            break;
+[ ]  4031          case 101:
+[ ]  4032            /* Switching Protocols */
+[ ]  4033            if(k->upgr101 == UPGR101_H2) {
+[ ]  4034              /* Switching to HTTP/2 */
+[ ]  4035              infof(data, "Received 101, Switching to HTTP/2");
+[ ]  4036              k->upgr101 = UPGR101_RECEIVED;
+[ ]  4037  
+[ ]  4038              /* we'll get more headers (HTTP/2 response) */
+[ ]  4039              k->header = TRUE;
+[ ]  4040              k->headerline = 0; /* restart the header line counter */
+[ ]  4041  
+[ ]  4042              /* switch to http2 now. The bytes after response headers
+[ ]  4043                 are also processed here, otherwise they are lost. */
+[ ]  4044              result = Curl_http2_switched(data, k->str, *nread);
+[ ]  4045              if(result)
+[ ]  4046                return result;
+[ ]  4047              *nread = 0;
+[ ]  4048            }
+[ ]  4049  #ifdef USE_WEBSOCKETS
+[ ]  4050            else if(k->upgr101 == UPGR101_WS) {
+[ ]  4051              /* verify the response */
+[ ]  4052              result = Curl_ws_accept(data);
+[ ]  4053              if(result)
+[ ]  4054                return result;
+[ ]  4055              k->header = FALSE; /* no more header to parse! */
+[ ]  4056              if(data->set.connect_only) {
+[ ]  4057                k->keepon &= ~KEEP_RECV; /* read no more content */
+[ ]  4058                *nread = 0;
+[ ]  4059              }
+[ ]  4060            }
+[ ]  4061  #endif
+[ ]  4062            else {
+[ ]  4063              /* Not switching to another protocol */
+[ ]  4064              k->header = FALSE; /* no more header to parse! */
+[ ]  4065            }
+[ ]  4066            break;
+[ ]  4067          default:
+[ ]  4068            /* the status code 1xx indicates a provisional response, so
+[ ]  4069               we'll get another set of headers */
+[ ]  4070            k->header = TRUE;
+[ ]  4071            k->headerline = 0; /* restart the header line counter */
+[ ]  4072            break;
+[ ]  4073          }
+[ ]  4074        }
+[W]  4075        else {
+[W]  4076          k->header = FALSE; /* no more header to parse! */
+[ ]  4077  
+[W]  4078          if((k->size == -1) && !k->chunk && !conn->bits.close &&
+[W]  4079             (conn->httpversion == 11) &&
+[W]  4080             !(conn->handler->protocol & CURLPROTO_RTSP) &&
+[W]  4081             data->state.httpreq != HTTPREQ_HEAD) {
+[ ]  4082            /* On HTTP 1.1, when connection is not to get closed, but no
+[ ]  4083               Content-Length nor Transfer-Encoding chunked have been
+[ ]  4084               received, according to RFC2616 section 4.4 point 5, we
+[ ]  4085               assume that the server will close the connection to
+[ ]  4086               signal the end of the document. */
+[ ]  4087            infof(data, "no chunk, no close, no size. Assume close to "
+[ ]  4088                  "signal end");
+[ ]  4089            streamclose(conn, "HTTP: No end-of-message indicator");
+[ ]  4090          }
+[W]  4091        }
+[ ]  4092  
+[W]  4093        if(!k->header) {
+[W]  4094          result = Curl_http_size(data);
+[W]  4095          if(result)
+[ ]  4096            return result;
+[W]  4097        }
+[ ]  4098  
+[ ]  4099        /* At this point we have some idea about the fate of the connection.
+[ ]  4100           If we are closing the connection it may result auth failure. */
+[W]  4101  #if defined(USE_NTLM)
+[W]  4102        if(conn->bits.close &&
+[W]  4103           (((data->req.httpcode == 401) &&
+[W]  4104             (conn->http_ntlm_state == NTLMSTATE_TYPE2)) ||
+[W]  4105            ((data->req.httpcode == 407) &&
+[W]  4106             (conn->proxy_ntlm_state == NTLMSTATE_TYPE2)))) {
+[ ]  4107          infof(data, "Connection closure while negotiating auth (HTTP 1.0?)");
+[ ]  4108          data->state.authproblem = TRUE;
+[ ]  4109        }
+[W]  4110  #endif
+[ ]  4111  #if defined(USE_SPNEGO)
+[ ]  4112        if(conn->bits.close &&
+[ ]  4113          (((data->req.httpcode == 401) &&
+[ ]  4114            (conn->http_negotiate_state == GSS_AUTHRECV)) ||
+[ ]  4115           ((data->req.httpcode == 407) &&
+[ ]  4116            (conn->proxy_negotiate_state == GSS_AUTHRECV)))) {
+[ ]  4117          infof(data, "Connection closure while negotiating auth (HTTP 1.0?)");
+[ ]  4118          data->state.authproblem = TRUE;
+[ ]  4119        }
+[ ]  4120        if((conn->http_negotiate_state == GSS_AUTHDONE) &&
+[ ]  4121           (data->req.httpcode != 401)) {
+[ ]  4122          conn->http_negotiate_state = GSS_AUTHSUCC;
+[ ]  4123        }
+[ ]  4124        if((conn->proxy_negotiate_state == GSS_AUTHDONE) &&
+[ ]  4125           (data->req.httpcode != 407)) {
+[ ]  4126          conn->proxy_negotiate_state = GSS_AUTHSUCC;
+[ ]  4127        }
+[ ]  4128  #endif
+[ ]  4129  
+[ ]  4130        /* now, only output this if the header AND body are requested:
+[ ]  4131         */
+[W]  4132        writetype = CLIENTWRITE_HEADER |
+[W]  4133          (data->set.include_header ? CLIENTWRITE_BODY : 0) |
+[W]  4134          ((k->httpcode/100 == 1) ? CLIENTWRITE_1XX : 0);
+[ ]  4135  
+[W]  4136        headerlen = Curl_dyn_len(&data->state.headerb);
+[W]  4137        result = Curl_client_write(data, writetype,
+[W]  4138                                   Curl_dyn_ptr(&data->state.headerb),
+[W]  4139                                   headerlen);
+[W]  4140        if(result)
+[ ]  4141          return result;
+[ ]  4142  
+[W]  4143        data->info.header_size += (long)headerlen;
+[W]  4144        data->req.headerbytecount += (long)headerlen;
+[ ]  4145  
+[ ]  4146        /*
+[ ]  4147         * When all the headers have been parsed, see if we should give
+[ ]  4148         * up and return an error.
+[ ]  4149         */
+[W]  4150        if(http_should_fail(data)) {
+[ ]  4151          failf(data, "The requested URL returned error: %d",
+[ ]  4152                k->httpcode);
+[ ]  4153          return CURLE_HTTP_RETURNED_ERROR;
+[ ]  4154        }
+[ ]  4155  
+[W]  4156  #ifdef USE_WEBSOCKETS
+[ ]  4157        /* All non-101 HTTP status codes are bad when wanting to upgrade to
+[ ]  4158           websockets */
+[W]  4159        if(data->req.upgr101 == UPGR101_WS) {
+[ ]  4160          failf(data, "Refused WebSockets upgrade: %d", k->httpcode);
+[ ]  4161          return CURLE_HTTP_RETURNED_ERROR;
+[ ]  4162        }
+[W]  4163  #endif
+[ ]  4164  
+[ ]  4165  
+[W]  4166        data->req.deductheadercount =
+[W]  4167          (100 <= k->httpcode && 199 >= k->httpcode)?data->req.headerbytecount:0;
+[ ]  4168  
+[ ]  4169        /* Curl_http_auth_act() checks what authentication methods
+[ ]  4170         * that are available and decides which one (if any) to
+[ ]  4171         * use. It will set 'newurl' if an auth method was picked. */
+[W]  4172        result = Curl_http_auth_act(data);
+[ ]  4173  
+[W]  4174        if(result)
+[ ]  4175          return result;
+[ ]  4176  
+[W]  4177        if(k->httpcode >= 300) {
+[ ]  4178          if((!conn->bits.authneg) && !conn->bits.close &&
+[ ]  4179             !conn->bits.rewindaftersend) {
+[ ]  4180            /*
+[ ]  4181             * General treatment of errors when about to send data. Including :
+[ ]  4182             * "417 Expectation Failed", while waiting for 100-continue.
+[ ]  4183             *
+[ ]  4184             * The check for close above is done simply because of something
+[ ]  4185             * else has already deemed the connection to get closed then
+[ ]  4186             * something else should've considered the big picture and we
+[ ]  4187             * avoid this check.
+[ ]  4188             *
+[ ]  4189             * rewindaftersend indicates that something has told libcurl to
+[ ]  4190             * continue sending even if it gets discarded
+[ ]  4191             */
+[ ]  4192  
+[ ]  4193            switch(data->state.httpreq) {
+[ ]  4194            case HTTPREQ_PUT:
+[ ]  4195            case HTTPREQ_POST:
+[ ]  4196            case HTTPREQ_POST_FORM:
+[ ]  4197            case HTTPREQ_POST_MIME:
+[ ]  4198              /* We got an error response. If this happened before the whole
+[ ]  4199               * request body has been sent we stop sending and mark the
+[ ]  4200               * connection for closure after we've read the entire response.
+[ ]  4201               */
+[ ]  4202              Curl_expire_done(data, EXPIRE_100_TIMEOUT);
+[ ]  4203              if(!k->upload_done) {
+[ ]  4204                if((k->httpcode == 417) && data->state.expect100header) {
+[ ]  4205                  /* 417 Expectation Failed - try again without the Expect
+[ ]  4206                     header */
+[ ]  4207                  infof(data, "Got 417 while waiting for a 100");
+[ ]  4208                  data->state.disableexpect = TRUE;
+[ ]  4209                  DEBUGASSERT(!data->req.newurl);
+[ ]  4210                  data->req.newurl = strdup(data->state.url);
+[ ]  4211                  Curl_done_sending(data, k);
+[ ]  4212                }
+[ ]  4213                else if(data->set.http_keep_sending_on_error) {
+[ ]  4214                  infof(data, "HTTP error before end of send, keep sending");
+[ ]  4215                  if(k->exp100 > EXP100_SEND_DATA) {
+[ ]  4216                    k->exp100 = EXP100_SEND_DATA;
+[ ]  4217                    k->keepon |= KEEP_SEND;
+[ ]  4218                  }
+[ ]  4219                }
+[ ]  4220                else {
+[ ]  4221                  infof(data, "HTTP error before end of send, stop sending");
+[ ]  4222                  streamclose(conn, "Stop sending data before everything sent");
+[ ]  4223                  result = Curl_done_sending(data, k);
+[ ]  4224                  if(result)
+[ ]  4225                    return result;
+[ ]  4226                  k->upload_done = TRUE;
+[ ]  4227                  if(data->state.expect100header)
+[ ]  4228                    k->exp100 = EXP100_FAILED;
+[ ]  4229                }
+[ ]  4230              }
+[ ]  4231              break;
+[ ]  4232  
+[ ]  4233            default: /* default label present to avoid compiler warnings */
+[ ]  4234              break;
+[ ]  4235            }
+[ ]  4236          }
+[ ]  4237  
+[ ]  4238          if(conn->bits.rewindaftersend) {
+[ ]  4239            /* We rewind after a complete send, so thus we continue
+[ ]  4240               sending now */
+[ ]  4241            infof(data, "Keep sending data to get tossed away");
+[ ]  4242            k->keepon |= KEEP_SEND;
+[ ]  4243          }
+[ ]  4244        }
+[ ]  4245  
+[W]  4246        if(!k->header) {
+[ ]  4247          /*
+[ ]  4248           * really end-of-headers.
+[ ]  4249           *
+[ ]  4250           * If we requested a "no body", this is a good time to get
+[ ]  4251           * out and return home.
+[ ]  4252           */
+[W]  4253          if(data->set.opt_no_body)
+[ ]  4254            *stop_reading = TRUE;
+[W]  4255  #ifndef CURL_DISABLE_RTSP
+[W]  4256          else if((conn->handler->protocol & CURLPROTO_RTSP) &&
+[W]  4257                  (data->set.rtspreq == RTSPREQ_DESCRIBE) &&
+[W]  4258                  (k->size <= -1))
+[ ]  4259            /* Respect section 4.4 of rfc2326: If the Content-Length header is
+[ ]  4260               absent, a length 0 must be assumed.  It will prevent libcurl from
+[ ]  4261               hanging on DESCRIBE request that got refused for whatever
+[ ]  4262               reason */
+[ ]  4263            *stop_reading = TRUE;
+[W]  4264  #endif
+[ ]  4265  
+[ ]  4266          /* If max download size is *zero* (nothing) we already have
+[ ]  4267             nothing and can safely return ok now!  But for HTTP/2, we'd
+[ ]  4268             like to call http2_handle_stream_close to properly close a
+[ ]  4269             stream.  In order to do this, we keep reading until we
+[ ]  4270             close the stream. */
+[W]  4271          if(0 == k->maxdownload
+[W]  4272  #if defined(USE_NGHTTP2)
+[W]  4273             && !((conn->handler->protocol & PROTO_FAMILY_HTTP) &&
+[ ]  4274                  conn->httpversion == 20)
+[W]  4275  #endif
+[W]  4276             )
+[ ]  4277            *stop_reading = TRUE;
+[ ]  4278  
+[W]  4279          if(*stop_reading) {
+[ ]  4280            /* we make sure that this socket isn't read more now */
+[ ]  4281            k->keepon &= ~KEEP_RECV;
+[ ]  4282          }
+[ ]  4283  
+[W]  4284          Curl_debug(data, CURLINFO_HEADER_IN, str_start, headerlen);
+[W]  4285          break; /* exit header line loop */
+[W]  4286        }
+[ ]  4287  
+[ ]  4288        /* We continue reading headers, reset the line-based header */
+[ ]  4289        Curl_dyn_reset(&data->state.headerb);
+[ ]  4290        continue;
+[W]  4291      }
+[ ]  4292  
+[ ]  4293      /*
+[ ]  4294       * Checks for special headers coming up.
+[ ]  4295       */
+[ ]  4296  
+[W]  4297      writetype = CLIENTWRITE_HEADER;
+[W]  4298      if(!k->headerline++) {
+[ ]  4299        /* This is the first header, it MUST be the error code line
+[ ]  4300           or else we consider this to be the body right away! */
+[W]  4301        int httpversion_major;
+[W]  4302        int rtspversion_major;
+[W]  4303        int nc = 0;
+[W]  4304  #define HEADER1 headp /* no conversion needed, just use headp */
+[ ]  4305  
+[W]  4306        if(conn->handler->protocol & PROTO_FAMILY_HTTP) {
+[ ]  4307          /*
+[ ]  4308           * https://datatracker.ietf.org/doc/html/rfc7230#section-3.1.2
+[ ]  4309           *
+[ ]  4310           * The response code is always a three-digit number in HTTP as the spec
+[ ]  4311           * says. We allow any three-digit number here, but we cannot make
+[ ]  4312           * guarantees on future behaviors since it isn't within the protocol.
+[ ]  4313           */
+[W]  4314          char separator;
+[W]  4315          char twoorthree[2];
+[W]  4316          int httpversion = 0;
+[W]  4317          char digit4 = 0;
+[W]  4318          nc = sscanf(HEADER1,
+[W]  4319                      " HTTP/%1d.%1d%c%3d%c",
+[W]  4320                      &httpversion_major,
+[W]  4321                      &httpversion,
+[W]  4322                      &separator,
+[W]  4323                      &k->httpcode,
+[W]  4324                      &digit4);
+[ ]  4325  
+[W]  4326          if(nc == 1 && httpversion_major >= 2 &&
+[W]  4327             2 == sscanf(HEADER1, " HTTP/%1[23] %d", twoorthree, &k->httpcode)) {
+[ ]  4328            conn->httpversion = 0;
+[ ]  4329            nc = 4;
+[ ]  4330            separator = ' ';
+[ ]  4331          }
+[ ]  4332  
+[ ]  4333          /* There can only be a 4th response code digit stored in 'digit4' if
+[ ]  4334             all the other fields were parsed and stored first, so nc is 5 when
+[ ]  4335             digit4 a digit.
+[ ]  4336  
+[ ]  4337             The sscanf() line above will also allow zero-prefixed and negative
+[ ]  4338             numbers, so we check for that too here.
+[ ]  4339          */
+[W]  4340          else if(ISDIGIT(digit4) || (nc >= 4 && k->httpcode < 100)) {
+[ ]  4341            failf(data, "Unsupported response code in HTTP response");
+[ ]  4342            return CURLE_UNSUPPORTED_PROTOCOL;
+[ ]  4343          }
+[ ]  4344  
+[W]  4345          if((nc >= 4) && (' ' == separator)) {
+[ ]  4346            httpversion += 10 * httpversion_major;
+[ ]  4347            switch(httpversion) {
+[ ]  4348            case 10:
+[ ]  4349            case 11:
+[ ]  4350  #ifdef USE_HTTP2
+[ ]  4351            case 20:
+[ ]  4352  #endif
+[ ]  4353  #ifdef ENABLE_QUIC
+[ ]  4354            case 30:
+[ ]  4355  #endif
+[ ]  4356              conn->httpversion = (unsigned char)httpversion;
+[ ]  4357              break;
+[ ]  4358            default:
+[ ]  4359              failf(data, "Unsupported HTTP version (%u.%d) in response",
+[ ]  4360                    httpversion/10, httpversion%10);
+[ ]  4361              return CURLE_UNSUPPORTED_PROTOCOL;
+[ ]  4362            }
+[ ]  4363  
+[ ]  4364            if(k->upgr101 == UPGR101_RECEIVED) {
+[ ]  4365              /* supposedly upgraded to http2 now */
+[ ]  4366              if(conn->httpversion != 20)
+[ ]  4367                infof(data, "Lying server, not serving HTTP/2");
+[ ]  4368            }
+[ ]  4369            if(conn->httpversion < 20) {
+[ ]  4370              conn->bundle->multiuse = BUNDLE_NO_MULTIUSE;
+[ ]  4371              infof(data, "Mark bundle as not supporting multiuse");
+[ ]  4372            }
+[ ]  4373          }
+[W]  4374          else if(!nc) {
+[ ]  4375            /* this is the real world, not a Nirvana
+[ ]  4376               NCSA 1.5.x returns this crap when asked for HTTP/1.1
+[ ]  4377            */
+[W]  4378            nc = sscanf(HEADER1, " HTTP %3d", &k->httpcode);
+[W]  4379            conn->httpversion = 10;
+[ ]  4380  
+[ ]  4381            /* If user has set option HTTP200ALIASES,
+[ ]  4382               compare header line against list of aliases
+[ ]  4383            */
+[W]  4384            if(!nc) {
+[W]  4385              statusline check =
+[W]  4386                checkhttpprefix(data,
+[W]  4387                                Curl_dyn_ptr(&data->state.headerb),
+[W]  4388                                Curl_dyn_len(&data->state.headerb));
+[W]  4389              if(check == STATUS_DONE) {
+[W]  4390                nc = 1;
+[W]  4391                k->httpcode = 200;
+[W]  4392                conn->httpversion = 10;
+[W]  4393              }
+[W]  4394            }
+[W]  4395          }
+[ ]  4396          else {
+[ ]  4397            failf(data, "Unsupported HTTP version in response");
+[ ]  4398            return CURLE_UNSUPPORTED_PROTOCOL;
+[ ]  4399          }
+[W]  4400        }
+[ ]  4401        else if(conn->handler->protocol & CURLPROTO_RTSP) {
+[ ]  4402          char separator;
+[ ]  4403          int rtspversion;
+[ ]  4404          nc = sscanf(HEADER1,
+[ ]  4405                      " RTSP/%1d.%1d%c%3d",
+[ ]  4406                      &rtspversion_major,
+[ ]  4407                      &rtspversion,
+[ ]  4408                      &separator,
+[ ]  4409                      &k->httpcode);
+[ ]  4410          if((nc == 4) && (' ' == separator)) {
+[ ]  4411            conn->httpversion = 11; /* For us, RTSP acts like HTTP 1.1 */
+[ ]  4412          }
+[ ]  4413          else {
+[ ]  4414            nc = 0;
+[ ]  4415          }
+[ ]  4416        }
+[ ]  4417  
+[W]  4418        if(nc) {
+[W]  4419          result = Curl_http_statusline(data, conn);
+[W]  4420          if(result)
+[ ]  4421            return result;
+[W]  4422          writetype |= CLIENTWRITE_STATUS;
+[W]  4423        }
+[ ]  4424        else {
+[ ]  4425          k->header = FALSE;   /* this is not a header line */
+[ ]  4426          break;
+[ ]  4427        }
+[W]  4428      }
+[ ]  4429  
+[W]  4430      result = verify_header(data);
+[W]  4431      if(result)
+[W]  4432        return result;
+[ ]  4433  
+[W]  4434      result = Curl_http_header(data, conn, headp);
+[W]  4435      if(result)
+[W]  4436        return result;
+[ ]  4437  
+[ ]  4438      /*
+[ ]  4439       * End of header-checks. Write them to the client.
+[ ]  4440       */
+[W]  4441      if(data->set.include_header)
+[ ]  4442        writetype |= CLIENTWRITE_BODY;
+[W]  4443      if(k->httpcode/100 == 1)
+[ ]  4444        writetype |= CLIENTWRITE_1XX;
+[ ]  4445  
+[W]  4446      Curl_debug(data, CURLINFO_HEADER_IN, headp,
+[W]  4447                 Curl_dyn_len(&data->state.headerb));
+[ ]  4448  
+[W]  4449      result = Curl_client_write(data, writetype, headp,
+[W]  4450                                 Curl_dyn_len(&data->state.headerb));
+[W]  4451      if(result)
+[ ]  4452        return result;
+[ ]  4453  
+[W]  4454      data->info.header_size += Curl_dyn_len(&data->state.headerb);
+[W]  4455      data->req.headerbytecount += Curl_dyn_len(&data->state.headerb);
+[ ]  4456  
+[W]  4457      Curl_dyn_reset(&data->state.headerb);
+[W]  4458    }
+[B]  4459    while(*k->str); /* header line within buffer */
+[ ]  4460  
+[ ]  4461    /* We might have reached the end of the header part here, but
+[ ]  4462       there might be a non-header part left in the end of the read
+[ ]  4463       buffer. */
+[ ]  4464  
+[W]  4465    return CURLE_OK;
+[B]  4466  }
+
+--- Caller (1 hop): transfer.c:readwrite_data (/src/curl/lib/transfer.c:520-878, calls Curl_http_readwrite_headers at line 633) (±10 around call site) ---
+[ ]   623        if(readmore)
+[ ]   624          break;
+[ ]   625      }
+[ ]   626  
+[B]   627  #ifndef CURL_DISABLE_HTTP
+[ ]   628      /* Since this is a two-state thing, we check if we are parsing
+[ ]   629         headers at the moment or not. */
+[B]   630      if(k->header) {
+[ ]   631        /* we are in parse-the-header-mode */
+[B]   632        bool stop_reading = FALSE;
+[B]   633        result = Curl_http_readwrite_headers(data, conn, &nread, &stop_reading); <-- CALL
+[B]   634        if(result)
+[B]   635          return result;
+[ ]   636  
+[W]   637        if(conn->handler->readwrite &&
+[W]   638           (k->maxdownload <= 0 && nread > 0)) {
+[ ]   639          result = conn->handler->readwrite(data, conn, &nread, &readmore);
+[ ]   640          if(result)
+[ ]   641            return result;
+[ ]   642          if(readmore)
+[ ]   643            break;
+
+--- Call chain (depth 2..8, signatures only; depth 1 detailed above) ---
+hop 2  transfer.c:readwrite_data  (/src/curl/lib/transfer.c:520-878, calls Curl_http_readwrite_headers at line 633)
+hop 3  Curl_readwrite  (/src/curl/lib/transfer.c:1167-1340, calls transfer.c:readwrite_data at line 1219)
+hop 4  multi.c:multi_runsingle  (/src/curl/lib/multi.c:1811-2661, calls Curl_readwrite at line 2405)
+hop 5  curl_multi_perform  (/src/curl/lib/multi.c:2665-2716, calls multi.c:multi_runsingle at line 2683)
+hop 5  multi.c:multi_socket  (/src/curl/lib/multi.c:3101-3208, calls multi.c:multi_runsingle at line 3158)
+hop 6  curl_multi_socket  (/src/curl/lib/multi.c:3288-3296, calls multi.c:multi_socket at line 3292)
+hop 6  curl_multi_socket_action  (/src/curl/lib/multi.c:3300-3308, calls multi.c:multi_socket at line 3304)
+hop 6  curl_multi_strerror  (/src/curl/lib/strerror.c:364-420, calls curl_multi_perform at line 368)
+hop 7  easy.c:wait_or_timeout  (/src/curl/lib/easy.c:541-628, calls curl_multi_socket_action at line 582)
+hop 7  curl_multi_add_handle  (/src/curl/lib/multi.c:464-590, calls curl_multi_socket at line 509)
+hop 8  easy.c:easy_events  (/src/curl/lib/easy.c:636-645, calls easy.c:wait_or_timeout at line 644)
+hop 8  easy.c:easy_perform  (/src/curl/lib/easy.c:706-763, calls curl_multi_add_handle at line 741)
+hop 8  Curl_multi_add_perform  (/src/curl/lib/multi.c:1574-1594, calls curl_multi_add_handle at line 1580)
+
+==== HIT-COUNT DIVERGENCE (per function in cov dump) ====
+Functions where W and L invocation counts differ by >=3.0x or one is zero. 'Entry-line count' = first executable line in the function body — a proxy for invocation count.
+
+  W hits    L hits  function  (file:start-end)
+     104         0  Curl_compareheader  (/src/curl/lib/http.c:1490-1534)
+      57         0  http.c:verify_header  (/src/curl/lib/http.c:3870-3895)
+      53         0  Curl_http_header  (/src/curl/lib/http.c:3451-3765)
+      28         0  transfer.c:data_pending  (/src/curl/lib/transfer.c:448-473)
+      20         0  Curl_http_statusline  (/src/curl/lib/http.c:3774-3844)
+      17         0  Curl_single_getsock  (/src/curl/lib/transfer.c:1352-1387)
+       2        16  http.c:output_auth_headers  (/src/curl/lib/http.c:736-846)
+      14         0  Curl_retry_request  (/src/curl/lib/transfer.c:1855-1925)
+       2        15  http.c:http_output_basic  (/src/curl/lib/http.c:369-421)
+       4         0  http.c:http_should_fail  (/src/curl/lib/http.c:1155-1221)
+       2         0  Curl_http_auth_act  (/src/curl/lib/http.c:643-722)
+       2         0  Curl_http_firstwrite  (/src/curl/lib/http.c:2988-3046)
+       2         0  Curl_http_size  (/src/curl/lib/http.c:3852-3867)
+       2         0  Curl_get_upload_buffer  (/src/curl/lib/transfer.c:118-125)
+       1         0  Curl_fillreadbuffer  (/src/curl/lib/transfer.c:163-363)
+... (2 more divergent functions)
+
+==== DIVERGENT BRANCHES (on call chain, rough order) ====
+Branches with W/L divergence in functions on the call chain (enclosing + 1-hop + chain). Rough execution order: outermost caller → blocker. Caveats: this assumes no recursion; loops/gotos break source-line order locally; off-chain divergent branches (L explored code W didn't, or vice versa) are summarized below the chain section — see HIT-COUNT DIVERGENCE for the function-level view.
+
+depth     src  W(T/F)  L(T/F)  source
+--- d=3  Curl_readwrite  (/src/curl/lib/transfer.c:1167-1340) ---
+  d=3   L1186  T=1 F=36  T=0 F=20  if((k->keepon & KEEP_SENDBITS) == KEEP_SEND)
+  d=3   L1218  T=35 F=2  T=20 F=0  if((k->keepon & KEEP_RECV) && (select_res & CURL_CSELECT_...
+  d=3   L1220  T=0 F=30  T=0 F=0  if(result || *done)
+  d=3   L1220  T=5 F=30  T=20 F=0  if(result || *done)
+  d=3   L1225  T=1 F=0  T=0 F=0  if((k->keepon & KEEP_SEND) && (select_res & CURL_CSELECT_...
+  d=3   L1225  T=1 F=31  T=0 F=0  if((k->keepon & KEEP_SEND) && (select_res & CURL_CSELECT_...
+  d=3   L1229  T=0 F=1  T=0 F=0  if(result)
+  d=3   L1237  T=2 F=30  T=0 F=0  if(!didwhat) {
+  d=3   L1239  T=0 F=2  T=0 F=0  if(k->exp100 == EXP100_AWAITING_CONTINUE) {
+  d=3   L1272  T=0 F=32  T=0 F=0  if(Curl_pgrsUpdate(data))
+  d=3   L1276  T=0 F=32  T=0 F=0  if(result)
+  d=3   L1279  T=17 F=15  T=0 F=0  if(k->keepon) {
+  d=3   L1280  T=0 F=17  T=0 F=0  if(0 > Curl_timeleft(data, &k->now, FALSE)) {
+  d=3   L1303  T=15 F=0  T=0 F=0  if(!(data->set.opt_no_body) && (k->size != -1) &&
+  d=3   L1303  T=0 F=15  T=0 F=0  if(!(data->set.opt_no_body) && (k->size != -1) &&
+  d=3   L1317  T=1 F=14  T=0 F=0  if(!(data->set.opt_no_body) && k->chunk &&
+  d=3   L1317  T=15 F=0  T=0 F=0  if(!(data->set.opt_no_body) && k->chunk &&
+  d=3   L1318  T=1 F=0  T=0 F=0  (conn->chunk.state != CHUNK_STOP)) {
+  d=3   L1331  T=0 F=14  T=0 F=0  if(Curl_pgrsUpdate(data))
+  d=3   L1336  T=14 F=17  T=0 F=0  *done = (0 == (k->keepon&(KEEP_RECV|KEEP_SEND|
+--- d=2  transfer.c:readwrite_data  (/src/curl/lib/transfer.c:520-878) ---
+  d=2   L 585  T=33 F=2  T=20 F=0  if(!k->bytecount) {
+  d=2   L 594  T=15 F=20  T=0 F=20  is_empty_data = ((nread == 0) && (k->bodywrites == 0)) ? ...
+  d=2   L 594  T=13 F=2  T=0 F=0  is_empty_data = ((nread == 0) && (k->bodywrites == 0)) ? ...
+  d=2   L 596  T=13 F=2  T=0 F=0  if(0 < nread || is_empty_data) {
+  d=2   L 596  T=20 F=15  T=20 F=0  if(0 < nread || is_empty_data) {
+  d=2   L 603  T=0 F=2  T=0 F=0  if(is_http2 && !nread)
+  d=2   L 607  T=0 F=2  T=0 F=0  if(is_http3 && !nread)
+  d=2   L 634  T=5 F=28  T=20 F=0  if(result)
+  d=2   L 637  T=0 F=28  T=0 F=0  if(conn->handler->readwrite &&
+  d=2   L 646  T=0 F=28  T=0 F=0  if(stop_reading) {
+  d=2   L 666  T=2 F=0  T=0 F=0  if(!k->header && (nread > 0 || is_empty_data)) {
+  d=2   L 666  T=2 F=26  T=0 F=0  if(!k->header && (nread > 0 || is_empty_data)) {
+  d=2   L 668  T=0 F=2  T=0 F=0  if(data->set.opt_no_body) {
+  d=2   L 676  T=2 F=0  T=0 F=0  if(0 == k->bodywrites && !is_empty_data) {
+  d=2   L 676  T=2 F=0  T=0 F=0  if(0 == k->bodywrites && !is_empty_data) {
+  d=2   L 679  T=2 F=0  T=0 F=0  if(conn->handler->protocol&(PROTO_FAMILY_HTTP|CURLPROTO_R...
+  d=2   L 682  T=0 F=2  T=0 F=0  if(result || *done)
+  d=2   L 682  T=0 F=2  T=0 F=0  if(result || *done)
+  d=2   L 691  T=0 F=2  T=0 F=0  if(data->set.verbose) {
+  d=2   L 706  T=0 F=2  T=0 F=0  if(k->chunk) {
+  d=2   L 742  T=0 F=2  T=0 F=0  if((k->badheader == HEADER_PARTHEADER) && !k->ignorebody) {
+  d=2   L 748  T=0 F=2  T=0 F=0  if((-1 != k->maxdownload) &&
+  d=2   L 780  T=2 F=0  T=0 F=0  if(!k->chunk && (nread || k->badheader || is_empty_data)) {
+  d=2   L 780  T=2 F=0  T=0 F=0  if(!k->chunk && (nread || k->badheader || is_empty_data)) {
+  d=2   L 783  T=0 F=2  T=0 F=0  if(k->badheader && !k->ignorebody) {
+  d=2   L 801  T=2 F=0  T=0 F=0  if(k->badheader < HEADER_ALLBAD) {
+  d=2   L 807  T=2 F=0  T=0 F=0  if(data->set.http_ce_skip || !k->writer_stack) {
+  d=2   L 807  T=0 F=2  T=0 F=0  if(data->set.http_ce_skip || !k->writer_stack) {
+  d=2   L 808  T=2 F=0  T=0 F=0  if(!k->ignorebody && nread) {
+  d=2   L 808  T=2 F=0  T=0 F=0  if(!k->ignorebody && nread) {
+  d=2   L 810  T=0 F=2  T=0 F=0  if(conn->handler->protocol & PROTO_FAMILY_POP3)
+  d=2   L 823  T=0 F=2  T=0 F=0  if(result)
+  d=2   L 829  T=0 F=28  T=0 F=0  if(conn->handler->readwrite && excess) {
+  d=2   L 849  T=13 F=15  T=0 F=0  if(is_empty_data) {
+  d=2   L 855  T=0 F=28  T=0 F=0  if(k->keepon & KEEP_RECV_PAUSE) {
+  d=2   L 860  T=0 F=28  T=0 F=0  } while(data_pending(data) && maxloops--);
+  d=2   L 862  T=0 F=30  T=0 F=0  if(maxloops <= 0) {
+  d=2   L 868  T=0 F=30  T=0 F=0  if(((k->keepon & (KEEP_RECV|KEEP_SEND)) == KEEP_SEND) &&
+--- d=1  Curl_http_readwrite_headers  (/src/curl/lib/http.c:3904-4466) ---
+  d=1   L3925  T=18 F=59  T=0 F=20  if(!end_ptr) {
+  d=1   L3929  T=0 F=18  T=0 F=0  if(result)
+  d=1   L3932  T=0 F=18  T=0 F=0  if(!k->headerline) {
+  d=1   L3964  T=0 F=59  T=0 F=20  if(result)
+  d=1   L3971  T=20 F=39  T=20 F=0  if(!k->headerline) {  <-- BLOCKER
+  d=1   L3976  T=0 F=20  T=20 F=0  if(st == STATUS_BAD) {
+  d=1   L3979  T=0 F=0  T=20 F=0  if(!data->set.http09_allowed) {
+  d=1   L4001  T=1 F=58  T=0 F=0  if((0x0a == *headp) || (0x0d == *headp)) {
+  d=1   L4001  T=1 F=57  T=0 F=0  if((0x0a == *headp) || (0x0d == *headp)) {
+  d=1   L4005  T=1 F=1  T=0 F=0  if('\r' == *headp)
+  d=1   L4007  T=2 F=0  T=0 F=0  if('\n' == *headp)
+  d=1   L4010  T=0 F=2  T=0 F=0  if(100 <= k->httpcode && 199 >= k->httpcode) {
+  d=1   L4010  T=2 F=0  T=0 F=0  if(100 <= k->httpcode && 199 >= k->httpcode) {
+  d=1   L4078  T=2 F=0  T=0 F=0  if((k->size == -1) && !k->chunk && !conn->bits.close &&
+  d=1   L4078  T=2 F=0  T=0 F=0  if((k->size == -1) && !k->chunk && !conn->bits.close &&
+  d=1   L4078  T=0 F=2  T=0 F=0  if((k->size == -1) && !k->chunk && !conn->bits.close &&
+  d=1   L4093  T=2 F=0  T=0 F=0  if(!k->header) {
+  d=1   L4095  T=0 F=2  T=0 F=0  if(result)
+  d=1   L4102  T=2 F=0  T=0 F=0  if(conn->bits.close &&
+  d=1   L4103  T=0 F=2  T=0 F=0  (((data->req.httpcode == 401) &&
+  d=1   L4105  T=0 F=2  T=0 F=0  ((data->req.httpcode == 407) &&
+  d=1   L4133  T=0 F=2  T=0 F=0  (data->set.include_header ? CLIENTWRITE_BODY : 0) |
+  d=1   L4134  T=0 F=2  T=0 F=0  ((k->httpcode/100 == 1) ? CLIENTWRITE_1XX : 0);
+  d=1   L4140  T=0 F=2  T=0 F=0  if(result)
+  d=1   L4150  T=0 F=2  T=0 F=0  if(http_should_fail(data)) {
+  d=1   L4159  T=0 F=2  T=0 F=0  if(data->req.upgr101 == UPGR101_WS) {
+  d=1   L4167  T=2 F=0  T=0 F=0  (100 <= k->httpcode && 199 >= k->httpcode)?data->req.head...
+  d=1   L4167  T=0 F=2  T=0 F=0  (100 <= k->httpcode && 199 >= k->httpcode)?data->req.head...
+  d=1   L4174  T=0 F=2  T=0 F=0  if(result)
+  d=1   L4177  T=0 F=2  T=0 F=0  if(k->httpcode >= 300) {
+  d=1   L4246  T=2 F=0  T=0 F=0  if(!k->header) {
+  d=1   L4253  T=0 F=2  T=0 F=0  if(data->set.opt_no_body)
+  d=1   L4256  T=0 F=2  T=0 F=0  else if((conn->handler->protocol & CURLPROTO_RTSP) &&
+  d=1   L4271  T=0 F=2  T=0 F=0  if(0 == k->maxdownload
+  d=1   L4279  T=0 F=2  T=0 F=0  if(*stop_reading) {
+  d=1   L4298  T=20 F=37  T=0 F=0  if(!k->headerline++) {
+  d=1   L4306  T=20 F=0  T=0 F=0  if(conn->handler->protocol & PROTO_FAMILY_HTTP) {
+  d=1   L4326  T=0 F=20  T=0 F=0  if(nc == 1 && httpversion_major >= 2 &&
+  d=1   L4340  T=0 F=20  T=0 F=0  else if(ISDIGIT(digit4) || (nc >= 4 && k->httpcode < 100)) {
+  d=1   L4345  T=0 F=20  T=0 F=0  if((nc >= 4) && (' ' == separator)) {
+  d=1   L4374  T=20 F=0  T=0 F=0  else if(!nc) {
+  d=1   L4384  T=20 F=0  T=0 F=0  if(!nc) {
+  d=1   L4389  T=20 F=0  T=0 F=0  if(check == STATUS_DONE) {
+  d=1   L4418  T=20 F=0  T=0 F=0  if(nc) {
+  d=1   L4420  T=0 F=20  T=0 F=0  if(result)
+  d=1   L4431  T=4 F=53  T=0 F=0  if(result)
+  d=1   L4435  T=1 F=52  T=0 F=0  if(result)
+  d=1   L4441  T=0 F=52  T=0 F=0  if(data->set.include_header)
+  d=1   L4443  T=0 F=52  T=0 F=0  if(k->httpcode/100 == 1)
+  d=1   L4451  T=0 F=52  T=0 F=0  if(result)
+  d=1   L4459  T=44 F=8  T=0 F=0  while(*k->str); /* header line within buffer */
+
+[off-chain: 262 additional divergent branches across 33 functions (see HIT-COUNT DIVERGENCE for which functions)]
+
+==== BRANCH SEEDS (shared across decisive pairs) ====
+Note: seed_bisect picks one (fuzzer, trial) per direction by lex-min, so the storing fuzzer may differ from a pair's decisive winner/loser. Each seed below carries its actual (fuzzer, trial); the bytes exercise the named branch side regardless of provenance.
+
+==== Winner-resolving seeds (take false branch) ====
+Seed 1 (id=0057778b67d14b3b, size=130 bytes, fuzzer=value_profile_cmplog, trial=1, discovered_at=888s, mutation_op=BytesDeleteMutator,ByteDecMutator,BytesInsertCopyMutator):
+  0000: 00 01 00 00 00 19 70 6f 70 71 4b 2f 3a 3a 3a 3a   ......popqK/::::
+  0010: 3a 3a 3a 3a 3a 3a 3a 39 30 30 31 ad 38 35 30 00   :::::::9001.850.
+  0020: 02 00 00 00 47 48 54 54 50 2f 20 6d 65 40 6c 6f   ....GHTTP/ me@lo
+  0030: 6d 65 77 68 65 23 65 0d 0a 53 65 74 2d 43 6f 6f   mewhe#e..Set-Coo
+Seed 2 (id=00a044736f809ce4, size=112 bytes, fuzzer=cmplog, trial=1, discovered_at=7995s, mutation_op=BytesDeleteMutator,BytesDeleteMutator):
+  0000: 00 01 00 00 00 19 70 6f 70 00 3a 2f 2f 31 32 00   ......pop.://12.
+  0010: 00 30 28 28 2e f6 f6 f6 f6 30 31 72 38 35 30 00   .0((.....01r850.
+  0020: 02 00 00 00 47 48 54 54 50 2f 25 6d 65 61 06 24   ....GHTTP/%mea.$
+  0030: 65 63 8e 65 74 72 65 0d 0a 43 25 6e 6e 65 63 74   ec.etre..C%nnect
+Seed 3 (id=0010e77090932bd1, size=112 bytes, fuzzer=cmplog, trial=1, discovered_at=8116s, mutation_op=DwordInterestingMutator,BytesExpandMutator):
+  0000: 00 01 00 00 00 19 70 6f 70 00 3a 2f 2f 31 32 00   ......pop.://12.
+  0010: 00 30 28 28 2e 00 3a 39 9c 30 31 72 38 35 30 00   .0((..:9.01r850.
+  0020: 02 00 00 00 48 48 54 54 50 2f 25 6d 65 61 06 24   ....HHTTP/%mea.$
+  0030: 65 63 8e 65 74 72 65 0d 0a 43 6f 6e 6e 65 63 74   ec.etre..Connect
+Seed 4 (id=007ebe990120e121, size=112 bytes, fuzzer=cmplog, trial=1, discovered_at=8141s, mutation_op=ByteAddMutator):
+  0000: 00 01 00 00 00 19 70 6f 65 00 00 00 00 00 32 0b   ......poe.....2.
+  0010: 0b 0b 0b 0b 0b 0b f4 39 9c 30 31 72 38 35 30 00   .......9.01r850.
+  0020: 02 00 00 00 47 68 74 74 70 2f 09 6d 65 61 06 24   ....Ghttp/.mea.$
+  0030: 65 63 8e 65 74 72 65 0d 0a 43 6f 6e 6e 65 63 74   ec.etre..Connect
+Seed 5 (id=0099d542294c4ea0, size=112 bytes, fuzzer=cmplog, trial=1, discovered_at=12361s, mutation_op=BytesDeleteMutator,ByteIncMutator,BytesRandSetMutator):
+  0000: 00 01 00 00 00 19 70 6f 70 00 3a 25 00 31 32 00   ......pop.:%.12.
+  0010: 00 30 28 28 2e 31 3a 39 9c 30 31 72 38 35 30 00   .0((.1:9.01r850.
+  0020: 02 00 00 00 47 48 54 54 50 2f 6d 65 61 06 24 65   ....GHTTP/mea.$e
+  0030: 63 8e 65 74 72 65 0d 0a 43 6f 6e 6e 65 63 74 69   c.etre..Connecti
+
+==== Loser-blocking seeds (take true branch) ====
+Seed 1 (id=264496a249b676b5, size=109 bytes, fuzzer=value_profile, trial=1, discovered_at=0s, mutation_op=BitFlipMutator,ByteRandMutator):
+  0000: 00 01 00 00 00 19 70 6e 70 33 3a 30 2f 31 32 37   ......pnp3:0/127
+  0010: 2e 30 2e 30 00 00 00 ff 30 38 31 2f 38 35 30 00   .0.0....081/850.
+  0020: 02 00 00 00 47 46 72 6f 6d 3a 20 6d 65 40 73 6f   ....GFrom: me@so
+  0030: 6d 65 77 68 65 72 65 0a 62 00 04 00 00 00 06 73   mewhere.b......s
+Seed 2 (id=109859f55c67eb23, size=130 bytes, fuzzer=value_profile, trial=1, discovered_at=1s, mutation_op=BitFlipMutator):
+  0000: 00 01 00 00 00 19 70 6f 70 33 3a 30 2f 31 cd 37   ......pop3:0/1.7
+  0010: 2e 30 2e 30 2e 31 3a 8a 30 30 00 04 38 35 30 00   .0.0.1:.00..850.
+  0020: 02 00 00 00 47 46 72 6f 6d 3a 20 6d 65 3f 73 6f   ....GFrom: me?so
+  0030: 6d 65 77 6f 6e 6c 79 41 41 00 6f 3a 20 66 61 6b   mewonlyAA.o: fak
+Seed 3 (id=23e0b8c1f1edada2, size=122 bytes, fuzzer=value_profile, trial=1, discovered_at=190s, mutation_op=ByteRandMutator,ByteNegMutator,ByteInterestingMutator,BytesDeleteMutator,BytesCopyMutator,DwordInterestingMutator):
+  0000: 00 01 00 00 00 19 70 6f 90 33 3a 30 2f 31 32 37   ......po.3:0/127
+  0010: 2e 30 2f 30 2e 00 00 02 00 30 31 2f 38 35 30 00   .0/0.....01/850.
+  0020: 02 00 00 00 47 46 72 6f 6d 3a 20 6d 65 40 73 6f   ....GFrom: me@so
+  0030: 6d 65 73 68 65 72 65 0d 0a 54 6f 3a 6d 61 73 74   meshere..To:mast
+Seed 4 (id=11610618d02da5a6, size=130 bytes, fuzzer=naive, trial=1, discovered_at=1395s, mutation_op=ByteRandMutator,ByteIncMutator):
+  0000: 00 01 00 00 00 19 70 6f 70 33 4b 2f 2f 31 32 37   ......pop3K//127
+  0010: 2e 30 2e 30 b2 e9 48 5c 30 30 31 2f 38 35 30 00   .0.0..H\001/850.
+  0020: 02 00 00 00 47 46 72 6f 6d 3a 20 6d 65 40 73 6f   ....GFrom: me@so
+  0030: 6d 65 77 68 65 72 65 0d 0a 54 6f 3b 20 66 61 6b   mewhere..To; fak
+Seed 5 (id=007ddb8f4eee028a, size=130 bytes, fuzzer=value_profile, trial=1, discovered_at=4152s, mutation_op=QwordAddMutator,ByteDecMutator,BitFlipMutator):
+  0000: 00 01 00 00 00 19 70 6f 70 33 3a 30 23 31 cd 37   ......pop3:0#1.7
+  0010: 2e 30 2e 30 2e 31 3a 8a 30 30 00 04 38 35 30 00   .0.0.1:.00..850.
+  0020: 02 00 00 00 47 46 72 81 6d 3a 20 6d 65 3f 73 6f   ....GFr.m: me?so
+  0030: 6d 65 77 68 65 72 65 0d 0a 54 6f 3a 20 66 61 6b   mewhere..To: fak
+
+
+==== BYTE DIFF (W vs L at common offsets) ====
+Per-offset byte sets. Format: hex(ascii)xCOUNT. Shows offsets where W and L bytes differ AND at least one side is concentrated (≤4 distinct values) — likely-informative dataflow signal.
+
+ Offset  W bytes                             L bytes                             tag
+   0x0006  70(p)x11 9a(.)x7 8e(.)x1 49(I)x1    70(p)x17 80(.)x1 64(d)x1 91(.)x1    PARTIAL
+   0x0007  6f(o)x12 9a(.)x7 4d(M)x1            6f(o)x12 68(h)x5 6e(n)x1 00(.)x1 +1u  PARTIAL
+   0x0008  70(p)x17 65(e)x1 00(.)x1 b9(.)x1    70(p)x8 db(.)x5 90(.)x2 00(.)x1 +4u  PARTIAL
+   0x0009  00(.)x10 33(3)x4 cd(.)x4 71(q)x1 +1u  33(3)x13 db(.)x5 00(.)x1 45(E)x1    PARTIAL
+   0x000a  3a(:)x9 cb(.)x7 4b(K)x2 00(.)x2     3a(:)x10 db(.)x5 4b(K)x2 36(6)x1 +2u  PARTIAL
+   0x0017  39(9)x18 f6(.)x1 38(8)x1            8a(.)x5 db(.)x5 39(9)x3 5c(\)x2 +5u  PARTIAL
+   0x0019  30(0)x17 38(8)x1 14(.)x1 cf(.)x1    30(0)x15 38(8)x1 6c(l)x1 9d(.)x1 +2u  PARTIAL
+   0x001a  31(1)x12 00(.)x4 ad(.)x1 38(8)x1 +2u  31(1)x13 00(.)x5 2f(/)x1 ff(.)x1    PARTIAL
+   0x001b  72(r)x7 ad(.)x4 00(.)x4 30(0)x2 +2u  2f(/)x14 04(.)x4 38(8)x1 ff(.)x1    PARTIAL
+   0x001c  38(8)x10 e8(.)x7 3d(=)x1 21(!)x1 +1u  38(8)x18 31(1)x1 00(.)x1            PARTIAL
+   0x001d  35(5)x12 03(.)x7 00(.)x1            35(5)x18 00(.)x1 96(.)x1            PARTIAL
+   0x0020  02(.)x18 11(.)x2                    02(.)x20                            PARTIAL
+   0x0024  47(G)x18 48(H)x2                    47(G)x20                            PARTIAL
+   0x0025  48(H)x19 68(h)x1                    46(F)x16 69(i)x1 47(G)x1 30(0)x1 +1u  PARTIAL
+   0x0026  54(T)x19 74(t)x1                    72(r)x17 00(.)x2 64(d)x1            DIFFER
+   0x0027  54(T)x19 74(t)x1                    6f(o)x15 81(.)x1 00(.)x1 01(.)x1 +2u  DIFFER
+   0x0028  50(P)x19 70(p)x1                    6d(m)x16 65(e)x1 53(S)x1 03(.)x1 +1u  DIFFER
+   0x0029  2f(/)x20                            3a(:)x17 72(r)x1 03(.)x1 e6(.)x1    DIFFER
+   0x002a  20( )x11 25(%)x2 48(H)x2 09(.)x1 +4u  20( )x17 65(e)x1 03(.)x1 e6(.)x1    PARTIAL
+   0x002b  6d(m)x17 65(e)x1 29())x1 92(.)x1    6d(m)x18 03(.)x1 e6(.)x1            PARTIAL
+   0x002c  65(e)x11 98(.)x6 61(a)x1 29())x1 +1u  65(e)x18 03(.)x1 e6(.)x1            PARTIAL
+   0x002e  06(.)x6 33(3)x4 6c(l)x3 4c(L)x2 +4u  73(s)x17 03(.)x1 37(7)x1 da(.)x1    DIFFER
+   0x002f  25(%)x8 24($)x6 6f(o)x4 65(e)x1 +1u  6f(o)x18 03(.)x1 e6(.)x1            PARTIAL
+   0x0030  6d(m)x12 65(e)x6 63(c)x1 29())x1    6d(m)x18 03(.)x1 e6(.)x1            PARTIAL
+   0x0031  63(c)x6 65(e)x5 3f(?)x4 3a(:)x2 +3u  65(e)x18 03(.)x1 e6(.)x1            PARTIAL
+   0x0032  54(T)x7 8e(.)x5 77(w)x4 65(e)x1 +3u  77(w)x17 73(s)x1 03(.)x1 e6(.)x1    PARTIAL
+   0x0033  68(h)x11 65(e)x6 74(t)x1 29())x1 +1u  68(h)x16 6f(o)x2 03(.)x1 e6(.)x1    PARTIAL
+   0x0034  65(e)x12 74(t)x6 72(r)x1 29())x1    65(e)x16 6e(n)x2 03(.)x1 e6(.)x1    PARTIAL
+   0x0035  72(r)x16 23(#)x1 65(e)x1 29())x1 +1u  72(r)x17 6c(l)x2 e6(.)x1            PARTIAL
+   0x0036  65(e)x15 0d(.)x1 47(G)x1 4e(N)x1 +2u  65(e)x17 79(y)x2 e6(.)x1            PARTIAL
+   0x0038  0a(.)x14 13(.)x4 43(C)x1 25(%)x1    0a(.)x16 41(A)x2 62(b)x1 46(F)x1    PARTIAL
+   0x003b  61(a)x8 6e(n)x6 74(t)x4 3a(:)x2     3a(:)x13 3b(;)x2 00(.)x1 65(e)x1 +3u  PARTIAL
+==== MECHANISM CONTEXT (involved fuzzers only) ====
+--- cmplog ---
+**Instrumentation**: naive's edge counters **plus** integer-CMP
+interception (`__sanitizer_cov_trace_cmp1/2/4/8`) and
+string/memory-CMP interception (`__sanitizer_weak_hook_strcmp`,
+`__sanitizer_weak_hook_memcmp`, etc.). Each CMP callback records
+both operands into a per-execution `CmpLogObserver` buffer keyed by
+PC.
+
+**Feedback**: same edge-bucket signal as naive. The CMP buffer is
+consumed by the mutator, not by feedback.
+
+**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`.
+`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,
+picks a CMP entry, scans the input for byte sequences matching one
+operand, and substitutes the other operand at those offsets.
+
+**Observed `mutation_op` in seed metadata**:
+<!-- TODO(i2s-logging-bug): the current LibAFL fuzzbench build does NOT
+     wrap I2SRandReplace in LogMutationMetadata, so the string
+     "I2SRandReplace" never appears in `.metadata`. Instead, I2S finds
+     surface as seeds whose metadata has ParentInfo but NO mutator-name
+     list — these render as `mutation_op = -` in `db_query.py lineage`
+     output and `resolving_seeds.mutation_op IS NULL` in SQL.
+     Confirmed 2026-05-17: naive/vp produce ZERO such seeds in 6000
+     samples; cmplog/vpc produce them at ~0.1–0.3%. This is a LOWER
+     BOUND ("floor") — some I2S finds leak into the havoc bucket
+     because other stages wrap I2S as a sub-mutator and tag the result
+     with their own havoc/token list. When the logging fix lands,
+     revert this caveat and require the literal `I2SRandReplace`
+     string instead. -->
+havoc/token names; **plus** silent ParentInfo-only entries
+(`mutation_op = -` in lineage output) that — in cmplog/vpc only —
+indicate an I2SRandReplace find under the current build. The dash
+rows are exclusive to cmplog and value_profile_cmplog **within the
+original 4-fuzzer canonical set**; there their presence in a winning
+seed's ancestor chain is direct (lower-bound) evidence of I2S
+contribution.
+<!-- CAVEAT(10-fuzzer set, 2026-05-27): dash-row = I2S only holds when
+     comparing against naive / value_profile. `mopt` and `grimoire`
+     wrap their mutators in LineageMutatorWrap with an EMPTY names list,
+     so they ALSO emit nameless (`mutation_op = -`) rows for non-I2S
+     finds — see the mopt / grimoire sections. Against those two the
+     dash signal is NOT I2S-exclusive. fast / minimizer / naive_ctx /
+     naive_ngram4 use plain LineageMutator (names captured), so they do
+     NOT emit dash rows and the signal stays clean against them. -->
+
+**Per-execution cost**: edge increment + one callback per intercepted
+CMP per execution + post-execution CMP-buffer processing.
+
+--- naive ---
+**Instrumentation**: SanitizerCoverage edge counters
+(`__sanitizer_cov_trace_pc_guard*` callbacks compiled in via clang
+`-fsanitize-coverage=...`).
+
+**Feedback**: per-edge hit-count bucket; a new bucket triggers a
+corpus-add (LibAFL `MaxMapFeedback` over the edge map).
+
+**Mutators**: havoc + token stack — `ByteFlipMutator`, `ByteRandMutator`,
+`ByteIncMutator`, `ByteDecMutator`, `ByteAddMutator`, `WordAddMutator`,
+`DwordAddMutator`, `QwordAddMutator`, `BytesDeleteMutator`,
+`BytesInsertMutator`, `BytesInsertCopyMutator`, `BytesExpandMutator`,
+`BytesRandInsertMutator`, `BytesRandSetMutator`, `BytesCopyMutator`,
+`BytesSwapMutator`, `WordInterestingMutator`, `DwordInterestingMutator`,
+`ByteInterestingMutator`, `CrossoverInsertMutator`,
+`CrossoverReplaceMutator`, `TokenInsert`, `TokenReplace`.
+
+**Observed `mutation_op` in seed metadata**: any of the above. No I2S.
+
+**Per-execution cost**: one edge-counter increment per executed BB edge.
+
+--- value_profile ---
+**Instrumentation**: naive's edge counters **plus** integer-CMP
+interception, but instead of buffering operands per execution (cmplog),
+each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance
+bucket). The distance bucket is a coarse encoding of how close the two
+operands were (Hamming distance bucket for `trace_cmp*`; matching-prefix
+length for string/memory CMPs).
+
+**Feedback**: edge-bucket signal **plus** new-CMP_MAP-bucket signal
+(both via `MaxMapFeedback`-style coverage). An input that produces a
+CMP-operand pair closer to matching than any previously-seen pair
+adds a new CMP_MAP bucket and is preserved as corpus.
+
+**Mutators**: naive's havoc + token stack. No `I2SRandReplace`.
+
+**Observed `mutation_op` in seed metadata**: havoc/token names only —
+no ParentInfo-only entries (no `mutation_op = -` rows). Absence of
+the dash signal is direct evidence the seed was found by naive or
+value_profile, not by an I2S stage.
+<!-- TODO(i2s-logging-bug): when the I2SRandReplace logging fix lands,
+     this section becomes "Absence of `I2SRandReplace` is direct
+     evidence ..." again. See the cmplog section above for the floor
+     caveat. -->
+
+
+**Per-execution cost**: edge increment + CMP_MAP update per intercepted
+CMP per execution.
+
+--- value_profile_cmplog ---
+**Instrumentation**: union of cmplog and value_profile — edge counters,
+per-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets.
+
+**Feedback**: edge-bucket + CMP_MAP-bucket signals.
+
+**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`.
+
+**Observed `mutation_op` in seed metadata**: havoc/token names; **plus**
+silent ParentInfo-only entries (`mutation_op = -` in lineage) — same
+floor signal as cmplog. See the cmplog section's
+`TODO(i2s-logging-bug)` note.
+
+**Per-execution cost**: edge increment + CMP-buffer record + CMP_MAP
+update per intercepted CMP per execution.
+
+==== TASK ====
+ANALYZE THIS BRANCH IN ISOLATION. Do NOT compare against templates/. Naming an existing template here anchors the later cross-branch classification pass.
+
+WRITE EXACTLY ONE FILE:
+  prompts_b/curl_212.analysis.json
+
+Do NOT produce template.c or params.json — those are the deferred verification phase.
+
+SCHEMA (every field is mandatory; missing or empty fields = analysis failure). The example below uses `//` comments for guidance — REMOVE all `//` lines and inline `//` comments from your emitted JSON (standard JSON does not allow comments).
+
+{
+  "branch_id": 212,
+  "target": "curl",
+  "summary_one_line": "string, <=25 words, the input feature required to take the winning side",
+  "pair_decision": "single_feature",
+    // pick EXACTLY ONE of: "single_feature" | "multi_feature"
+    // decisive pairs at this branch: [cmplog>naive (I2S), value_profile_cmplog>value_profile (I2S)]
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+        // labels MUST match exactly as in DECISIVE PAIRS (e.g. "cmplog>naive (I2S)")
+      "what_input_feature": "concrete description of the bytes/structure required",
+      "why_winner_satisfies": "what about the winner inputs meets the requirement",
+      "why_loser_doesnt": "what is missing in the loser inputs",
+      "mechanism_attribution": "free text — explain which fuzzer technique enables the winner; must agree with claimed_mechanism below"
+    }
+    // pair_decision="single_feature" => exactly 1 hypothesis whose covers_pairs lists ALL decisive pairs
+    // pair_decision="multi_feature"  => 2+ hypotheses, each covers_pairs listing its subset
+  ],
+  "evidence_trail": [
+    {
+      "claim": "atomic factual claim (1 sentence)",
+      "cited_section": "BLOCKER",
+        // pick the canonical short name of the cited section, one of:
+        //   BLOCKER | TRIAL VECTOR | DECISIVE PAIRS | SOURCE CONTEXT |
+        //   HIT-COUNT DIVERGENCE | DIVERGENT BRANCHES | BRANCH SEEDS |
+        //   BYTE DIFF | MECHANISM CONTEXT
+        // validator accepts the full section header too (e.g. "BYTE DIFF (W vs L at common offsets)")
+      "cited_locator": "offsets 0x06-0x0f | L1701 | seed_id ab12... | etc.",
+      "exact_quote": "verbatim substring of the prompt — COPY-PASTE, do not paraphrase"
+    }
+    // at least ONE entry per hypothesis sub-field (what / why_winner / why_loser / mechanism)
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+      // pick EXACTLY ONE — the technique that enables the WINNER:
+      //   comparison-solving (roadblock dimension):
+      //     "I2SRandReplace"     (cmplog / vpc input-to-state substitution)
+      //     "CMP_MAP gradient"   (vp / vpc Hamming/prefix-distance feedback)
+      //   coverage-granularity (feedback dimension):
+      //     "context-sensitive coverage" (naive_ctx CtxHook: (call-context, edge) pairs are new coverage)
+      //     "ngram coverage"            (naive_ngram4: N-gram edge tuples are new coverage)
+      //   mutation/scheduling (mutation dimension):
+      //     "grimoire structural"  (grimoire GeneralizationStage + structural/grammar recombination)
+      //     "mopt mutation"        (mopt: MOpt-scheduled mutation-operator probabilities)
+      //     "calibrated energy"    (minimizer/fast: corpus-minimization / calibrated power schedule)
+      //     "aflfast rarity"       (fast: AFLFast rare-edge power schedule)
+      //   baseline / fallback:
+      //     "havoc-only"         (lucky havoc byte mutation, no CMP introspection)
+      //     "token-replace"      (TokenInsert/TokenReplace dictionary mutations)
+      //     "other"              (genuinely cannot classify — NOT a substitute for a known technique above)
+    "verified_in_lineage": true,
+      // pick true or false
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 212 --role W --fuzzer cmplog --trial 1 --seed <ID>` and observed an I2S-floor row (mutation_op = -) at depth 19 of the chain"
+    // TODO(i2s-logging-bug): the LibAFL cmplog harness does NOT log
+    //   the literal "I2SRandReplace" string into seed metadata. Until
+    //   that is fixed, the verification signal is the dash-row floor
+    //   (ParentInfo-only entries; SQL NULL mutation_op). Confirmed
+    //   2026-05-17: dash rows are exclusive to cmplog/vpc in the
+    //   current data (zero occurrences in 6000 naive/vp samples).
+    //   When the logging fix lands, revert this rule to require the
+    //   literal "I2SRandReplace" name and treat the dash signal as
+    //   secondary corroboration.
+    // MANDATORY when claimed_mechanism="I2SRandReplace": invoke db_query.py lineage on >=1 winning seed
+    //   - if you find at least one I2S-floor row in the ancestor chain (mutation_op = -
+    //     for ancestors of a cmplog/vpc-discovered seed): verified_in_lineage=true,
+    //     and cite the depth(s) in verification_method.
+    //   - if the chain is all-havoc (no dash rows): verified_in_lineage=false; note that
+    //     I2S contribution may still exist in the leaked havoc bucket, explain (>=20 chars).
+    //   - if you could not run db_query (data missing, etc.): verified_in_lineage=false; explain what blocked you
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "ONE concrete observation that, if true, would kill this hypothesis (something a synthetic experiment could observe, not a story)"
+  },
+  "weakest_evidence_point": "one sentence naming your single most uncertain claim",
+  "confidence": "medium"
+    // pick EXACTLY ONE of: "high" | "medium" | "low"
+}
+
+RULES:
+ - No reference to templates/ anywhere in your output. Classification is a separate later pass.
+ - Every hypothesis sub-claim must be supported by >=1 evidence_trail entry.
+ - exact_quote must be a LITERAL substring of this prompt — COPY-PASTE, do NOT paraphrase, abbreviate, or summarize. A script (tools/check_analysis.py) will reject quotes that do not appear verbatim (whitespace-tolerant).
+ - cited_section: the validator accepts either the canonical short name (BLOCKER, BYTE DIFF, etc.) or the full section header from the prompt.
+ - claimed_mechanism and mechanism_attribution must agree on the same technique.
+ - When claimed_mechanism = "I2SRandReplace": you MUST invoke `python3 tools/db_query.py lineage` on >=1 winning seed BEFORE finalizing the analysis. Record what you observed in verification_method.
+
+
+DEEP-DIVE QUERIES:
+  python3 tools/db_query.py lineage --branch 212 --role W|L --fuzzer <F> --trial <T> --seed <id>
+    MANDATORY when claimed_mechanism="I2SRandReplace" (see RULES). Optional otherwise. Returns the ancestor chain (mutation ops walked back from the leaf up to 50 levels). The trailing 'I2S-floor signal' line summarizes dash rows (mutation_op = -); see fuzzer_mechanism_library.md cmplog section for the floor interpretation under the current build.
+  python3 tools/db_query.py more-seeds --branch 212 --role W|L [--fuzzer <F>] [--limit 20] [--show-bytes 64]
+    Optional. Additional seeds beyond the 5 shown above (capped by seed_bisect's max_seeds; default 10 per branch x direction).

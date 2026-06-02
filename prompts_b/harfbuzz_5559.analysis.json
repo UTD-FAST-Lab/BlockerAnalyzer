@@ -1,0 +1,81 @@
+{
+  "branch_id": 5559,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry a well-formed GPOS table (FOURCC 'GPOS' at offset 0x0c plus a valid header) so lookup_count > 0 drives the destructor loop true side.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The 4-byte table tag 'GPOS' (47 50 4f 53) must appear at offset 0x0c so the sfnt table directory routes to GPOS parsing, and the GPOS header must parse with at least one lookup so accelerator_t::lookup_count is non-zero, making the destructor loop 'i < this->lookup_count' iterate (true branch).",
+      "why_winner_satisfies": "Every winning-resolving seed places the literal FOURCC tag at offset 0x0c-0x0f: seeds 1/3/5 show 'GPOS' (47 50 4f 53) and seed 2 shows 'GSUB' (47 53 55 42); the BYTE DIFF confirms W is fully concentrated to 47('G') at 0x0c and 50('P')/53('S') at 0x0d-0x0f, indicating the tag is the dataflow-relevant operand the winner reproduces.",
+      "why_loser_doesnt": "Loser-blocking seeds carry no table tag at offset 0x0c (bytes there are 00/01/20/2c), so the sfnt directory never resolves a GPOS table, lookup_count stays 0, and the loop guard is false; their hitcount on the branch is 0 across all 10 trials.",
+      "mechanism_attribution": "cmplog/vpc intercept the 4-byte tag comparison via __sanitizer_cov_trace_cmp, log the expected operand 'GPOS' into the CmpLogObserver buffer, and I2SRandReplace substitutes that literal into the input at the matching offset; naive and value_profile have no I2SRandReplace mutator and cannot synthesize the exact FOURCC magic, so they stall."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the destructor loop guarded by this->lookup_count, true side blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7",
+      "exact_quote": "for (unsigned int i = 0; i < this->lookup_count; i++)"
+    },
+    {
+      "claim": "The true (loop-entering) side is the globally blocked side.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "Winning seeds contain the literal 'GPOS' FOURCC tag at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 002c9ad92acce91b offset 0x0c-0x0f",
+      "exact_quote": "00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+    },
+    {
+      "claim": "Another winning seed carries the related 'GSUB' table tag at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 001eeb5a047b00d0 offset 0x0c-0x0f",
+      "exact_quote": "00 01 00 00 00 04 00 ff 00 30 00 20 47 53 55 42   .........0. GSUB"
+    },
+    {
+      "claim": "At offset 0x0c the winner bytes are fully concentrated on 47('G') while the loser bytes diverge to 00/01/20/2c.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "At offset 0x0d the winner is concentrated on 50('P')/53('S'), the tag's second byte.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000d",
+      "exact_quote": "0x000d  50(P)x16 53(S)x4                    20( )x4 00(.)x4 18(.)x1 17(.)x1  +8u  DIFFER"
+    },
+    {
+      "claim": "The winner resolves the branch in all 10 trials while the loser is blocked in all 10 with zero hitcount.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "avg hitcount on branch: winner=77280  loser=0"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at matching offsets in the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, so it cannot perform the operand substitution that the vpc winner uses.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5559 --role W --fuzzer cmplog --trial 1 --seed 002c9ad92acce91b`; the ancestor chain has 31 levels and the I2S-floor signal reports 2 dash rows (mutation_op = -) at depth 29 and depth 30, the lower-bound I2S contribution signal exclusive to cmplog/vpc in the canonical 4-fuzzer set."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on a 4-byte magic-tag equality where cmplog/vpc fail to resolve the true side while naive/value_profile resolve it, showing I2S substitution is not what drives the divergence."
+  },
+  "weakest_evidence_point": "The two dash rows sit at depths 29-30, far back in a 31-level chain dominated by havoc ops, so the I2S contribution to this specific leaf is an inference rather than a directly-tagged step.",
+  "confidence": "high"
+}

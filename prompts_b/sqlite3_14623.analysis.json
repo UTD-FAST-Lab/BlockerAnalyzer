@@ -1,0 +1,93 @@
+{
+  "branch_id": 14623,
+  "target": "sqlite3",
+  "summary_one_line": "Input must parse as a SQL statement reaching sqlite3TwoPartName with a two-part/qualified name token, gradually approached via CMP_MAP distance feedback.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)", "value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "An input that the SQL parser accepts deeply enough to call sqlite3TwoPartName and take its true branch at line 111036 — i.e. byte sequences forming valid SQL keyword/identifier tokens (e.g. a statement beginning 'vacuum'/SELECT-like text and ';'-delimited clauses) that satisfy the chained integer/string comparisons in the lexer and parser CMPs leading to the blocker.",
+      "why_winner_satisfies": "Both winning-resolving seeds begin with recognizable SQL token bytes ('vacuum') and ';'-delimited clause structure, and the blocker line is hit only by W (W=T=2 F=2 vs L=T=0 F=20). The fuzzers that resolve it are exactly the two carrying value_profile feedback; value_profile preserves intermediate inputs whose lexer/parser CMP operands are progressively closer to matching, building a gradient toward the full token sequence the parser requires.",
+      "why_loser_doesnt": "The loser-blocking seeds are short, malformed fragments ('SELEEC .`', '\"\"/\"\"', random byte runs) that fail early lexer/parser comparisons and never reach the blocker's true side (L hits L111036 only T=0 F=20). naive and cmplog lack the CMP_MAP distance bucket, so they receive no smooth 'getting closer' reward and cannot ratchet toward the multi-comparison parser path.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient: each intercepted integer/string comparison in the SQLite lexer/parser writes an operand-distance (Hamming / matching-prefix) bucket; an input whose CMP operands are closer to matching adds a new bucket and is kept as corpus, letting the fuzzer climb the chain of comparisons gating sqlite3TwoPartName. naive (no CMP_MAP) and cmplog (CMP buffer feeds I2S substitution, not distance feedback) lack this gradient, so adding value_profile is the decisive delta in both pairs."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs have technique delta value_profile, isolating CMP_MAP-gradient feedback as the winning technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "Pair 1: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "The second decisive pair adds value_profile on top of cmplog (vpc vs cmplog), confirming the delta is value_profile not I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The blocker sits in sqlite3TwoPartName, reached through the SQLite parser call chain.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "lines 4-5",
+      "exact_quote": "Enclosing function: sqlite3.c:sqlite3TwoPartName"
+    },
+    {
+      "claim": "The blocker is reached via the SQL parser chain (sqlite3RunParser -> sqlite3Parser -> yy_reduce).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "call chain hop 4-5",
+      "exact_quote": "sqlite3.c:sqlite3Parser  (/src/sqlite3/bld/sqlite3.c:158501-158664, calls sqlite3.c:yy_reduce at line 158536)"
+    },
+    {
+      "claim": "Winner-resolving seeds contain recognizable SQL token text beginning with 'vacuum'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 id=aa08bf5050d49a18",
+      "exact_quote": "3b 76 61 63 75 75 6d 0a 0a 45 4c ac 3b c5 0a 0a   ;vacuum..EL.;..."
+    },
+    {
+      "claim": "A second winning seed also begins with the 'vacuum' SQL keyword.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 2 id=8cb368bd2cb2d84d",
+      "exact_quote": "76 61 63 75 75 6d 27 6d 27 64 27 27 27 27 27 27   vacuum'm'd''''''"
+    },
+    {
+      "claim": "Only the winner takes the blocker's true side; the loser only ever takes the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L111036 BLOCKER row",
+      "exact_quote": "d=1   L111036  T=2 F=2  T=0 F=20    <-- BLOCKER"
+    },
+    {
+      "claim": "Loser-blocking seeds are short malformed fragments that fail early parsing.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 id=00150fd27837b85b",
+      "exact_quote": "53 45 4c 45 45 43 20 02 60                        SELEEC .`"
+    },
+    {
+      "claim": "value_profile's feedback rewards inputs whose CMP operand pair is closer to matching, preserving them as corpus to build a gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback paragraph",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "naive has no CMP_MAP and thus no distance-gradient feedback toward the parser comparisons.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Feedback paragraph",
+      "exact_quote": "**Feedback**: per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+    },
+    {
+      "claim": "value_profile encodes how close two CMP operands were as a distance bucket, the gradient signal.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation paragraph",
+      "exact_quote": "The distance bucket is a coarse encoding of how close the two\noperands were (Hamming distance bucket for `trace_cmp*`; matching-prefix\nlength for string/memory CMPs)."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile feedback), not I2SRandReplace, so lineage dash-row verification is not mandatory. The technique delta of both decisive pairs is value_profile (Pair 1 vp>naive, Pair 2 vpc>cmplog), confirming the winning technique is value_profile's CMP_MAP distance feedback rather than I2S substitution; the value_profile fuzzer carries no I2SRandReplace mutator so no dash-row chain would be attributable to it."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the parser path to sqlite3TwoPartName is gated only by a single exact-match magic comparison (no chain of progressively-satisfiable comparisons) would show cmplog/I2S resolving it as fast as value_profile, refuting the CMP_MAP-gradient attribution."
+  },
+  "weakest_evidence_point": "The specific comparisons inside the lexer/parser that value_profile climbs are inferred from the call chain and SQL token bytes, not directly shown as CMP operand-distance traces in the prompt.",
+  "confidence": "medium"
+}

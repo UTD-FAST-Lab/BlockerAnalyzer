@@ -1,0 +1,93 @@
+{
+  "branch_id": 6210,
+  "target": "harfbuzz",
+  "summary_one_line": "Script tag must equal a Unicode-14/15 USE-shaper value (Old Uyghur/Tangsa/Toto/Vithkuqi/Kawi/Nag Mundari) to take the switch case at line 380.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "The 4-byte script tag dispatched by the switch on (hb_tag_t) planner->props.script must hold one of the Unicode-14.0/15.0 values whose case-arm falls through to line 380 (HB_SCRIPT_OLD_UYGHUR and siblings). The winner inputs supply a short header whose leading bytes (e.g. 75 0f 01 / 88 0f 01 / 80 0f 01 at offsets 0x00-0x02) drive props.script into that USE-shaper case group rather than the default/DFLT/latn arms.",
+      "why_winner_satisfies": "value_profile winner seeds carry a concentrated low-byte head pattern at offsets 0x00-0x02 (75/88/80 then 0f then 01) and are short (10-73 bytes); the CMP_MAP distance-bucket feedback rewards each input whose script-tag CMP operand gets closer to a target case constant, ratcheting props.script into the Old Uyghur case so the true branch is hit 26 times.",
+      "why_loser_doesnt": "value_profile_cmplog loser seeds are large (56-323 bytes) well-formed-looking sfnt tables beginning 00 01 00 00 with GSUB/GPOS directory tags; they resolve a chosen_script of DFLT/latn or an earlier (lower-Unicode) script case, never reaching the line-380 case group, and stay blocked for 22.10h.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix distance-bucket feedback on the switch-dispatch CMP) incrementally rewards inputs whose script-tag operand approaches a line-380 case constant. The loser adds an input-to-state substitution stage on top, but that extra substitution diverts the mutation budget toward solving the GSUB/GPOS table-tag comparisons (the only literals it can lift from the corpus), pulling it away from the script-tag dispatch; the winning technique here is the CMP_MAP gradient, not the substitution stage."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a switch-case dispatch on the script tag, with the blocked true side at the Old Uyghur Unicode-14.0 case group.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L43, L242-244",
+      "exact_quote": "switch ((hb_tag_t) planner->props.script)"
+    },
+    {
+      "claim": "Line 380 case HB_SCRIPT_OLD_UYGHUR is the winner-only blocking branch side.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L244",
+      "exact_quote": "case HB_SCRIPT_OLD_UYGHUR: <-- BLOCKER"
+    },
+    {
+      "claim": "The line-380 case group is the Unicode-14.0/15.0 script set routed to the USE shaper, hit only by winner seeds.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L242-245,250-251,262",
+      "exact_quote": "[W]   381      case HB_SCRIPT_TANGSA:"
+    },
+    {
+      "claim": "Winner seeds carry a concentrated low-byte head pattern at offsets 0x00-0x02.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0001-0x0002",
+      "exact_quote": "0x0001  0f(.)x7 e6(.)x1 e0(.)x1 0c(.)x1     01(.)x9 00(.)x1                     DIFFER"
+    },
+    {
+      "claim": "A winner seed begins 75 0f 01 and is short (19 bytes), found by value_profile.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 id=1390ee63592e3e2f",
+      "exact_quote": "0000: 75 0f 01 00 00 00 00 01 20 20 e0 ed 5a 1a 20 39"
+    },
+    {
+      "claim": "Loser seeds are large well-formed-looking sfnt fonts beginning 00 01 00 00 with GSUB table tags.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 2 id=00347ed302ef3460",
+      "exact_quote": "0000: 00 01 00 00 00 01 ee ff 00 30 00 20 47 53 55 42   .........0. GSUB"
+    },
+    {
+      "claim": "At offset 0x0c winners hold low bytes while losers concentrate on 0x47 (the 'G' of GSUB/GPOS table tags).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  00(.)x5 76(v)x2 5a(Z)x1 11(.)x1     47(G)x10                            DIFFER"
+    },
+    {
+      "claim": "The winner resolves the true branch 26 times while the loser hitcount is 0 and stays blocked 22.10h.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 avg hitcount / avg duration blocked",
+      "exact_quote": "avg duration blocked: winner=0.70h  loser=22.10h"
+    },
+    {
+      "claim": "value_profile uses a CMP_MAP keyed by operand-distance bucket and rewards inputs whose CMP operands move closer to matching.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation/Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile_cmplog is the only involved fuzzer that adds I2SRandReplace on top of the CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "The decisive pair delta is I2S, value_profile winning over value_profile_cmplog.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Lineage verification is mandatory only for claimed_mechanism=I2SRandReplace. Here the winner is value_profile and the loser is value_profile_cmplog (I2S is the EXTRA technique the loser carries), so the winning technique is value_profile's CMP_MAP gradient, not I2S. The MECHANISM CONTEXT for value_profile states 'No `I2SRandReplace`' and that its CMP_MAP distance-bucket feedback preserves inputs whose CMP-operand pair is closer to matching; no dash-row lineage check applies to a non-I2S winner."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the same switch-on-tag dispatch where value_profile_cmplog resolves the line-380 case as fast as or faster than value_profile across trials, showing the added I2S substitution does not impede (or actively accelerates) reaching the script-tag case group."
+  },
+  "weakest_evidence_point": "The claim that I2S substitution actively diverts value_profile_cmplog's budget toward GSUB/GPOS tag comparisons is inferred from seed structure, not directly observed in lineage; the slowdown could instead be ordinary run-to-run variance amplified by the larger loser inputs.",
+  "confidence": "medium"
+}

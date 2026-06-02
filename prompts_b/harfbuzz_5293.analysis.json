@@ -1,0 +1,99 @@
+{
+  "branch_id": 5293,
+  "target": "harfbuzz",
+  "summary_one_line": "A multi-table sfnt font (>=2 page-map entries so pages.length!=0) must drive resize past the small-set fast path to reach the false branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A structurally valid sfnt/font header whose parsed table directory yields a multi-page bit-set: pages.length must be non-zero (or count!=1) so that the small-set guard at line 92 fails and the false branch is taken. This requires byte-exact sfnt magic (00 01 00 00), a plausible numTables/offset record, and recognizable table tags (cmap, GSUN/GSUB-like) at fixed offsets that survive harfbuzz's structural sanity checks deep enough to build a second bit-set page.",
+      "why_winner_satisfies": "All five winner-resolving seeds begin with the canonical TrueType header 00 01 00 00 followed by a table-directory region containing ASCII tags 'cmap', 'GSUN' and dense non-zero structural bytes at fixed offsets (e.g. 0x06 ff, 0x07 80, 0x17 21, 0x1b-0x1e 'GSUN'). These pinned multi-byte literals let parsing proceed far enough that the bit-set acquires more than one page, so resize is called with pages.length!=0 and the false branch (resolved 17134 hits) is taken.",
+      "why_loser_doesnt": "The value_profile loser seeds are short (13-57 bytes) and lack the byte-exact header/tag structure: offset 0x00 holds e0/fe/92 rather than 00, and offsets 0x05-0x20 hold scattered 00/garbage instead of the concentrated 'cmap'/'GSUN' tag bytes. These inputs never build a second page, so resize sees pages.length==0 && count==1, takes the true branch, and the false side stays blocked (loser hitcount 0).",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which copies the operands of intercepted comparisons (the sfnt magic compare, the 4-byte table-tag fourcc compares) directly into the input at the offset the operand was loaded from, byte-exactly placing 00 01 00 00 / 'cmap' / 'GSUN'. value_profile has only the CMP_MAP Hamming-distance gradient and havoc/token mutators (no I2SRandReplace), so it cannot place the exact multi-byte tags and stalls before a second page is built."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of a small-set fast-path guard combining pages.length and count.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 / L92",
+      "exact_quote": "if (pages.length == 0 && count == 1)"
+    },
+    {
+      "claim": "The globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "The only decisive pair is value_profile_cmplog beating value_profile with an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The winner resolves the false branch with high hitcount while the loser never hits it.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "avg hitcount on branch",
+      "exact_quote": "avg hitcount on branch: winner=17134  loser=0"
+    },
+    {
+      "claim": "Winner seeds carry the canonical sfnt header and recognizable table tags including cmap and GSUN.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1, offset 0x00",
+      "exact_quote": "00 01 00 00 00 07 ff 80 20 3f 21 20 63 6d 61 70   ........ ?! cmap"
+    },
+    {
+      "claim": "Winner seeds contain a GSUN table tag in the directory region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1, offset 0x10",
+      "exact_quote": "20 00 00 01 00 00 00 21 11 fb 20 47 53 55 4e 20    ......!.. GSUN "
+    },
+    {
+      "claim": "Loser-blocking seeds are short and lack the structured header bytes, starting with garbage like fe ff.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1, size 57, offset 0x00",
+      "exact_quote": "fe ff ff ff f4 01 e0 e0 20 00 00 00 01 20 e0 6a   ........ .... .j"
+    },
+    {
+      "claim": "At least one loser-blocking seed is only 13 bytes long, far too short to build a multi-page table directory.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 3",
+      "exact_quote": "size=13 bytes"
+    },
+    {
+      "claim": "At the fixed sfnt magic/tag offsets the winner bytes are tightly concentrated while loser bytes are scattered, a dataflow signal of pinned literals.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x06-0x07",
+      "exact_quote": "0x0006  ff(.)x10                            00(.)x11 e0(.)x1 68(h)x1 73(s)x1 +6u  DIFFER"
+    },
+    {
+      "claim": "Winner pins the GSUN tag bytes at offsets 0x1b-0x1e while the loser does not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x1b",
+      "exact_quote": "0x001b  47(G)x10                            00(.)x8 20( )x2 3d(=)x1 74(t)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator on top of havoc/token.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace entirely.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5293 --role W --fuzzer value_profile_cmplog --trial 2 --seed 515ca4c019d4d739`; the 39-level ancestor chain contains one I2S-floor dash row (mutation_op = -) at depth 38 (ancestor e0a5b09f80625fb6), the ParentInfo-only signal characteristic of an unwrapped I2SRandReplace find in vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile reaches the false branch as often as value_profile_cmplog when the small-set guard is gated only by a Hamming-near table tag (i.e. CMP_MAP gradient alone solves it without needing byte-exact I2S substitution)."
+  },
+  "weakest_evidence_point": "The causal link from byte-exact tag placement to pages.length becoming non-zero is inferred from source plus seed structure; the prompt does not directly show the parse step that creates the second bit-set page.",
+  "confidence": "high"
+}

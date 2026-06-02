@@ -1,0 +1,75 @@
+{
+  "branch_id": 14503,
+  "target": "sqlite3",
+  "summary_one_line": "A dotted column reference (ID.ID, the '.' operator) in the SQL input is needed so resolveExprStep dispatches pExpr->op to the TK_DOT case arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "The SQL input must contain a dotted column/table reference (an ID '.' ID token sequence such as M.L), so the parser emits a TK_DOT expression node; the switch in resolveExprStep then takes the TK_DOT case arm at line 98355 and descends into the pExpr->op!=TK_ID else-block (lines 98366-98386).",
+      "why_winner_satisfies": "The value_profile winner seed begins 'SELECT M.L. .L.4' with literal '.' (0x2e) bytes separating identifier characters (M, L), forming the ID.ID dotted-reference structure that parses to a TK_DOT node; value_profile resolved 9/10 trials and was the only seed to take the true side (W=1 true at L98355).",
+      "why_loser_doesnt": "The naive loser seeds contain no dotted-reference structure: they are runs of '+' (0x2b), digits/commas ('SELECT ( 111111,'), or '~'/'<' fillers, so the parser never builds a TK_DOT node and the switch falls through to TK_ID / TK_VARIABLE / TK_LT arms instead; naive blocked 9/10 with 0 hits on the true side.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs whose intercepted token/character comparisons (e.g. the byte comparison that classifies an expression operator as the '.' / TK_DOT token) move closer to matching, preserving partial-progress seeds that naive's pure edge-coverage discards; this Hamming/prefix-distance bucketing lets value_profile incrementally assemble the rare ID.ID dotted syntax that naive cannot stumble onto with havoc bytes alone."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the TK_DOT case arm of the switch in resolveExprStep, and the true side is the globally blocked side.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L98355",
+      "exact_quote": "Source line:     case TK_DOT: {"
+    },
+    {
+      "claim": "Taking the TK_DOT case requires pExpr->op to not be TK_ID, descending into the dotted-reference else-block exercised only by the winner.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L98365-98386",
+      "exact_quote": "[B] 98365      }else{\n[W] 98366          Expr *pLeft = pExpr->pLeft;"
+    },
+    {
+      "claim": "The value_profile winner seed contains a dotted identifier reference with literal '.' separators.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id b6b3c8f861d310d6 offset 0x00",
+      "exact_quote": "53 45 4c 45 43 54 20 4d 2e 4c ad 20 2e 4c ad 34   SELECT M.L. .L.4"
+    },
+    {
+      "claim": "The naive loser seeds lack dotted-reference structure, being filled with '+' / digit / comma runs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 1f93d9ae7cf70c89 / 0309346abe9d1764",
+      "exact_quote": "53 45 4c 45 43 54 2b 53 45 2b ac 53 ac ac ac ac   SELECT+SE+.S...."
+    },
+    {
+      "claim": "value_profile resolved the branch in 9/10 trials while naive blocked it in 9/10, the decisive divergence.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "Only the winner ever drove the TK_DOT true side; the loser took it zero times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L98355",
+      "exact_quote": "L98355  T=1 F=9  T=0 F=593  case TK_DOT: {  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile's distinguishing technique is CMP_MAP distance-bucket feedback that preserves inputs whose compared operands move closer to matching.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "Neither involved fuzzer uses I2S substitution, so the divergence is not attributable to I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile distance-bucket feedback), not I2SRandReplace, so the mandatory lineage dash-row check does not apply; the prompt's MECHANISM CONTEXT confirms value_profile uses no I2SRandReplace mutator, so no I2S-floor signal is expected or claimed."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on the TK_DOT '.' token where value_profile fails to resolve faster than naive, or where naive resolves at parity, would refute the CMP_MAP-gradient attribution for this dotted-reference feature."
+  },
+  "weakest_evidence_point": "Only one winner-resolving seed is shown, so the inference that the '.' (TK_DOT) token specifically — rather than some other co-occurring structure in that single seed — is the CMP_MAP-rewarded feature rests on a small sample.",
+  "confidence": "medium"
+}

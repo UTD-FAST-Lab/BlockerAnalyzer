@@ -1,0 +1,75 @@
+{
+  "branch_id": 5436,
+  "target": "harfbuzz",
+  "summary_one_line": "Take false branch by supplying a well-formed cmap table header so bsearch on (platformID,encodingID) returns a non-zero subtable offset.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed sfnt/cmap structure: the leading TrueType header (00 01 00 00) with a 'cmap' table record whose EncodingRecord entries carry a (platformID, encodingID) key matched by bsearch AND a non-zero subtable offset, so result.subtable != 0 and the false branch at line 2027 is taken.",
+      "why_winner_satisfies": "All five winner-resolving seeds begin with the literal font magic 00 01 00 00 00 0c ... followed by the ASCII tag 'cmap' at offset 0x0c and a 'ttlf' tag, i.e. a structurally valid table directory. This drives encodingRecord.bsearch(key) to a record with a non-zero subtable, so the dereference at line 2030 (return &(this+result.subtable)) executes — marked [W] in the overlay.",
+      "why_loser_doesnt": "Loser-blocking seeds are tiny (13-68 bytes) and lack the cmap magic/tag bytes (e.g. e0 17 00 00 1a 20 ...), so no valid EncodingRecord with a subtable offset exists; bsearch returns a record whose subtable is zero and line 2028 (return nullptr) is taken every time (L true:false = 100:0 at L2027).",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace: the per-execution CMP buffer captures the comparisons against the magic constant and the EncodingRecord key fields, and I2SRandReplace substitutes those captured operands directly into the input, synthesizing the exact 4-byte magic/tag and matching key bytes. value_profile (loser) lacks I2SRandReplace and only gets CMP_MAP distance buckets, which cannot place the exact multi-byte literals to construct a valid cmap header."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false branch of `if (!result.subtable)`, requiring a non-zero subtable to resolve.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 2027",
+      "exact_quote": "if (!result.subtable)"
+    },
+    {
+      "claim": "The winner takes the false side resolving to the subtable dereference, marked W-only in the overlay.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 2030",
+      "exact_quote": "[W]  2030      return &(this+result.subtable);"
+    },
+    {
+      "claim": "Winner seeds carry the font magic 00 01 00 00 and the ASCII 'cmap' tag, a valid table directory.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 2cd766ba50495565 offset 0x00-0x0f",
+      "exact_quote": "0000: 00 01 00 00 00 0c 02 ff 00 30 00 1f 63 6d 61 70   .........0..cmap"
+    },
+    {
+      "claim": "Loser-blocking seeds are tiny and lack the cmap header bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0003cbd2b6f5fff8 (13 bytes)",
+      "exact_quote": "0000: e0 17 00 00 1a 20 00 00 29 2b 29 29 2c            ..... ..)+)),"
+    },
+    {
+      "claim": "At the blocker line the winner takes the false side while the loser is 100% true (always returns nullptr).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L2027",
+      "exact_quote": "d=1   L2027  T=24 F=6  T=100 F=0  if (!result.subtable)  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner fuzzer value_profile_cmplog adds I2SRandReplace to its mutator stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "The loser fuzzer value_profile has no I2SRandReplace, only CMP_MAP distance buckets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "The decisive pair is vpc>vp with an I2S delta and full prob_div separation.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5436 --role W --fuzzer value_profile_cmplog --trial 1 --seed 2cd766ba50495565` over a 44-level chain; observed an I2S-floor dash row (mutation_op = -, ParentInfo-only) at depth 43, the unwrapped-I2S signal exclusive to cmplog/vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on `if (!result.subtable)` after a bsearch over a magic/tag-validated cmap header shows value_profile resolving the false branch as often as value_profile_cmplog (no I2S advantage), refuting the I2SRandReplace attribution."
+  },
+  "weakest_evidence_point": "Whether the exact byte that flips result.subtable to non-zero is the cmap magic literal or instead the EncodingRecord key/subtable-offset field — the byte diff shows both header-magic and later structural offsets differing, so the precise gated operand is not pinned.",
+  "confidence": "high"
+}

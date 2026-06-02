@@ -1,0 +1,81 @@
+{
+  "branch_id": 5362,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must form a valid sfnt font (TrueType magic + recognized table tags) so shaping completes on a font with no custom destroy callback.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed sfnt header: the 4-byte sfnt version magic 00 01 00 00 at offset 0x00 plus recognized 4-byte table tags (e.g. 'GPOS') so the blob parses into a real hb_font_t whose font->destroy callback is null, taking the false branch at hb-font.cc:1973.",
+      "why_winner_satisfies": "The winning vpc seed begins with 00 01 00 00 (TrueType sfnt version) and carries the ASCII table tag 'GPOS' at offsets 0x0c-0x0f, so it parses as a valid sfnt font built through the default funcs path (W reaches hb_font_get_nominal_glyph_nil/_default, never sets custom destroy), and uniquely takes the false side (W T=0 F=1 at L1973).",
+      "why_loser_doesnt": "The loser vp seeds carry mangled/short blobs (e.g. 'kern' tag with truncated tables, 31-71 byte inputs) that drive the loser-only glyph-extraction path (L reaches glyf_accelerator_t, has_func, hb_font_set_funcs) and never resolve the false branch (L T=48 F=0 at L1973 across 10/10 blocked trials).",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace over value_profile; I2S substitution can plant the multi-byte sfnt magic 00 01 00 00 and table tags directly from intercepted CMP operands, constructing a parseable font that value_profile's CMP_MAP-distance feedback plus havoc struggles to assemble byte-by-byte."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the false branch of if (font->destroy) in hb_font_destroy.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-font.cc:1973:7",
+      "exact_quote": "Source line:   if (font->destroy)\nGlobally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "The winning seed begins with the TrueType sfnt version magic 00 01 00 00 and carries the GPOS table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 1cb3b750bf156a0a offsets 0x00-0x0f",
+      "exact_quote": "0000: 00 01 00 00 00 02 ee ff 00 30 00 20 47 50 4f 53   .........0. GPOS"
+    },
+    {
+      "claim": "Only the winner reaches the false side; the loser takes the true side 48 times and never the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1973 d=1",
+      "exact_quote": "d=1   L1973  T=0 F=1  T=48 F=0  if (font->destroy)  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner exercises the nil/default glyph-funcs path while the loser exercises actual glyph extraction.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "hb_font_get_nominal_glyph_nil / glyf_accelerator_t",
+      "exact_quote": "      77         0  hb-font.cc:hb_font_get_nominal_glyph_nil(hb_font_t*, void*, unsigned int, unsigned int*, void*)  (/src/harfbuzz/src/hb-font.cc:125-128)"
+    },
+    {
+      "claim": "The loser-only path runs glyf accelerator construction and glyph extents that the winner never touches.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "glyf_accelerator_t::get_extents",
+      "exact_quote": "       0      143  OT::glyf_accelerator_t::get_extents(hb_font_t*, unsigned int, hb_glyph_extents_t*) const  (/src/harfbuzz/src/OT/glyf/glyf.hh:333-341)"
+    },
+    {
+      "claim": "The loser value_profile seeds are short and carry mangled tags such as 'kern'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 000f552b447e20c9 offset 0x14",
+      "exact_quote": "0010: 20 20 20 20 6b 65 72 6e 20 19 20 1f 00 00 c6 c6       kern . ....."
+    },
+    {
+      "claim": "value_profile_cmplog's only added mutator over value_profile is I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, only havoc plus token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "The decisive pair's technique delta is I2S, winner vpc resolves 8/10 and loser vp blocks 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": false,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5362 --role W --fuzzer value_profile_cmplog --trial 1 --seed 1cb3b750bf156a0a`; the chain has 50 ancestor levels and every ancestor carries a havoc/token mutator list (the tool reported 'No I2S-floor rows in this chain'). No dash-row I2S floor signal found, so I2S substitution is not directly confirmed in the recorded lineage; I2S contribution may still exist in the leaked havoc bucket since the floor is only a lower bound and the literal I2SRandReplace name is not logged in the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness that gates the false branch only on a valid sfnt magic 00 01 00 00 plus table tag would refute this if value_profile resolves it at the same rate as value_profile_cmplog, showing the I2S substitution confers no advantage in planting the multi-byte font header."
+  },
+  "weakest_evidence_point": "The I2S attribution is not confirmed by the lineage floor (all-havoc chain), so the assignment rests on the pair's technique delta and the multi-byte magic/tag structure rather than direct dash-row evidence.",
+  "confidence": "medium"
+}

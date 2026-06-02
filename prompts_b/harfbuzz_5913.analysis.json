@@ -1,0 +1,93 @@
+{
+  "branch_id": 5913,
+  "target": "harfbuzz",
+  "summary_one_line": "A long homogeneous run of one Khmer-category byte drives the syllable machine into the case-3 broken-cluster transition action.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "An input whose bytes map (after cmap) to a sustained run of a single khmer_category, long enough to drive the Ragel khmer state machine to a transition whose action is case 3 (te=p; p--; found_syllable(khmer_broken_cluster)). No specific magic constant or comparison operand is needed; the gate is a multi-glyph structural repetition, not a value match.",
+      "why_winner_satisfies": "Naive havoc/token seeds contain long contiguous identical-byte runs (e.g. a block of 0x7c '|' bytes spanning offsets ~0x1c-0x2d in winning seeds 1/2, and 0x99/0x61 runs in seed 5), exactly the homogeneous category stream that walks the state machine into the case-3 broken-cluster action; the winner takes case 3 True=12 times.",
+      "why_loser_doesnt": "Cmplog seeds are short (40-76 bytes) and lack the long homogeneous category runs; their bytes are scattered/punctuated (e.g. 0xe2 17 00 00 patterns, mixed spaces and OTTO/kern tokens), so the loser never reaches the case-3 transition (case 3 True=0).",
+      "mechanism_attribution": "Naive's plain havoc/token mutation stack stumbles onto and extends long uniform byte runs (BytesRandSetMutator, BytesRandInsertMutator copy/repeat operators), which is what this structural gate needs. Cmplog's distinguishing input-to-state operand-substitution stage targets value-equality CMP operands; the case-3 gate is a Ragel key-span range check over repeated categories, not a discrete constant, so operand substitution has no equality to solve and instead spends mutation energy rewriting CMP operands that break the homogeneous run — the comparison-solving technique is the differentiator that HURTS cmplog, so the winning technique is naive havoc-only mutation."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is naive winning over cmplog with the I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "The blocked side is the case-3 transition action that emits a broken-cluster syllable.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L369-L371",
+      "exact_quote": "case 3: <-- BLOCKER"
+    },
+    {
+      "claim": "Case 3's body sets te/p and calls found_syllable for a broken cluster, so reaching it requires the state machine to walk into that transition.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L371",
+      "exact_quote": "{{p = ((te))-1;}{ found_syllable (khmer_broken_cluster); buffer->scratch_flags |= HB_BUFFER_SCRATCH_FLAG_HAS_BROKEN_SYLLABLE; }}"
+    },
+    {
+      "claim": "The transition is selected by a key-span range check over the per-glyph khmer_category, i.e. a structural range gate not a discrete constant comparison.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L334-L336",
+      "exact_quote": "_trans = _inds[ _slen > 0 && _keys[0] <=( info[p].khmer_category()) &&"
+    },
+    {
+      "claim": "The winner takes case 3 True=12 while the loser takes it True=0.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L369",
+      "exact_quote": "d=1   L 369  T=12 F=169  T=0 F=177  case 3:  <-- BLOCKER"
+    },
+    {
+      "claim": "Winning naive seeds contain a long contiguous run of the 0x7c byte.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 5b7de4009fc79bde, offsets 0x1c-0x2d",
+      "exact_quote": "7c 8b 7c 7c 7c 7c 7c 7c 7c 7c 7c 9b 7c 68 00 00"
+    },
+    {
+      "claim": "Another winning naive seed contains a long contiguous run of repeated bytes (0x99 and 0x61).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 7e8aa711252f145b, offset 0x24-0x3f",
+      "exact_quote": "f5 e0 20 00 bf 72 00 e7 99 99 99 99 99 61 61 61"
+    },
+    {
+      "claim": "Losing cmplog seeds are short and punctuated rather than long homogeneous runs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0509f37188b3277c, size=45",
+      "exact_quote": "Seed 1 (id=0509f37188b3277c, size=45 bytes, fuzzer=cmplog, trial=1"
+    },
+    {
+      "claim": "The winning seeds were produced by naive havoc mutators including byte-set and byte-insert operators.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 7e8aa711252f145b mutation_op",
+      "exact_quote": "mutation_op=ByteDecMutator,BytesRandInsertMutator,BytesRandInsertMutator,BytesSwapMutator,ByteDecMutator"
+    },
+    {
+      "claim": "Cmplog's distinguishing mutator is I2SRandReplace, which substitutes CMP operands found in the CmpLog buffer.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "Naive uses only the havoc + token mutator stack with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "This is an I2S-ANTI branch: the winner is naive, which has no I2SRandReplace, so the winning mechanism is havoc-only and no I2S lineage check is mandated. The case-3 gate is a Ragel key-span range check over repeated khmer_category values (SOURCE CONTEXT L334-336), not a discrete-constant CMP, so I2SRandReplace has no equality operand to solve; cmplog spending energy on operand substitution disrupts the long homogeneous category runs that naive's byte-set/insert operators build, which is why cmplog loses (case 3 True=0 vs winner True=12)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the case-3 transition is reached only by injecting a specific discrete magic constant (a single equality compare) and cmplog then resolves it faster than naive — that would show the gate is an I2S-solvable comparison, contradicting the structural-run hypothesis."
+  },
+  "weakest_evidence_point": "I infer the long byte runs map to a sustained single khmer_category from the source range-check shape, but the cmap-to-category mapping is not shown in the prompt, so the exact category of the 0x7c/0x99/0x61 runs is unverified.",
+  "confidence": "medium"
+}

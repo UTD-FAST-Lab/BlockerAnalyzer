@@ -1,0 +1,99 @@
+{
+  "branch_id": 442,
+  "target": "curl",
+  "summary_one_line": "Input must encode a well-formed URL/port plus a literal 'HTTP/2' version token so the parser reads body data and the read-loop re-iterates.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A structured request fixture containing a parseable scheme/host/port ('://' + ':9001/850') and a literal 'HTTP/2' version string in the response region, so curl proceeds through Curl_read, parses headers, and writes body bytes — making data_pending(data) true on at least one loop iteration so the do-while at line 860 takes its TRUE (continue) side.",
+      "why_winner_satisfies": "Every winner-resolving seed carries the intact ASCII run '://' followed by '1:9001/850' and a 'HTTP/2' token at offset 0x24 (e.g. 'GHTTP/27.0'); on the W role the loop body runs many times (W hits on data_pending = 1010 vs L = 20) and the blocker takes T=1010/1000 — i.e. the loop continues.",
+      "why_loser_doesnt": "Loser-blocking seeds are short (35-73 bytes) high-entropy '%'-heavy garbage lacking the contiguous '://...:9001/850' URL and a recognizable HTTP version token; on the L role data_pending is essentially never satisfied (blocker line shows L T=0 F=20), so the loop exits on its first/only iteration.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads intercepted CMP operands (the parser's comparisons against the literal 'HTTP/' scheme and ':' / '/' URL delimiters) from the CmpLogObserver buffer and substitutes the expected operand bytes directly into the input at matching offsets, synthesizing the exact magic/delimiter bytes the URL+version parse demands. naive and value_profile lack I2SRandReplace and must hit these multi-byte literals by chance, which they fail to do across all 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the do-while loop continuation at transfer.c:860, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "transfer.c:860",
+      "exact_quote": "} while(data_pending(data) && maxloops--);"
+    },
+    {
+      "claim": "Both decisive pairs are I2S-delta pairs (cmplog>naive and vpc>vp).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair is value_profile_cmplog > value_profile with the same I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner seeds carry an intact '://' URL run with a port and path '1:9001/850'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving Seed 1, offsets 0x0a-0x1f",
+      "exact_quote": "://12%"
+    },
+    {
+      "claim": "Winner seeds contain the '9001/850' port/path run.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving Seed 1, offset 0x16",
+      "exact_quote": "9001/850"
+    },
+    {
+      "claim": "Winner seeds embed a literal 'HTTP/2' version token in the response region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving Seed 1, offset 0x24",
+      "exact_quote": "GHTTP/27.0"
+    },
+    {
+      "claim": "On the winner role the loop body and data_pending run far more often than on the loser role.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "transfer.c:data_pending",
+      "exact_quote": "1010        20  transfer.c:data_pending"
+    },
+    {
+      "claim": "The blocker line takes its TRUE (continue) side on the winner role but never on the loser role.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L860",
+      "exact_quote": "L 860  T=1010 F=0  T=0 F=20"
+    },
+    {
+      "claim": "Loser-blocking seeds are short high-entropy '%'-heavy garbage without the structured URL/version run.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser-blocking Seed 3, size 73 bytes",
+      "exact_quote": "%%%%%%%%%%%%&%@"
+    },
+    {
+      "claim": "cmplog adds the I2SRandReplace mutator that substitutes one intercepted CMP operand for the other at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S mutator and must reach literals by chance.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile also lacks I2SRandReplace, so the vpc>vp delta is the same I2S substitution capability.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 442 --role W --fuzzer cmplog --trial 1 --seed 32d10b449c4075ee`; the ancestor chain (25 levels) contains I2S-floor dash rows (mutation_op = -) at depth 23 (id 33f314f66adaa80d) and depth 24 (id 1ce58f232eec81f2), the ParentInfo-only signature of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose URL/version literals are reachable by naive havoc within the same budget (naive resolving at parity with cmplog), or cmplog failing to resolve when the parser's CMP operands against 'HTTP/' and ':' '/' delimiters are removed/obfuscated, would refute the I2S-substitution attribution."
+  },
+  "weakest_evidence_point": "The chain of inference from the literal URL/'HTTP/2' bytes to data_pending becoming true is source-reasoned, not directly proven; the parser may keep data_pending true via a path other than the version-token comparison.",
+  "confidence": "high"
+}

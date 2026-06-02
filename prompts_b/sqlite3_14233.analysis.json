@@ -1,0 +1,87 @@
+{
+  "branch_id": 14233,
+  "target": "sqlite3",
+  "summary_one_line": "Input must contain a '0x'/'0X' hex-integer prefix (a leading '0' immediately followed by 'x'/'X') to take the true branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "A numeric token shaped like 0x<hexdigit>: byte '0' (0x30) at the number start immediately followed by 'x' (0x78) or 'X' (0x58), then a hex digit. The gate requires zNum[1] to equal 'x'/'X' after zNum[0]=='0'.",
+      "why_winner_satisfies": "value_profile_cmplog winning seeds carry literal 0x prefixes inside SELECT expressions, e.g. seed 06e09a37e739e806 'SELECT-0x85E' and seed 239da0d3632856b0 'SELECT -0x11CCC1...'; the byte diff shows W concentrates 0x30('0') at offset 0x08 and 0x78('x') at offset 0x09 exactly where L does not.",
+      "why_loser_doesnt": "cmplog loser seeds are all-decimal numeric expressions like 'SELECT.5-5/55555' (seed 0c1d027799a90a48) and 'SELECT.5E1-55' (seed 05b666d01ebcac10); they hold 0x35('5') runs at the relevant offsets and never place 'x'/'X' after a '0', so zNum[1]=='x' is always false.",
+      "mechanism_attribution": "Both fuzzers in this pair already have the cmplog input-to-state substitution mutator, so that technique is held constant; the only added technique in the winner is value_profile's CMP_MAP gradient. The 'x'/'X' single-byte comparison and the surrounding hex-token compares produce Hamming/prefix-distance buckets that reward seeds whose number byte is creeping toward the 0x form, giving the winner intermediate credit that pure edge feedback (cmplog) cannot see, so it climbs to the literal 0x token."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side requires zNum[1] to be 'x' or 'X', i.e. a 0x hex prefix.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "/src/sqlite3/bld/sqlite3.c:31954:13",
+      "exact_quote": "&& (zNum[1]=='x' || zNum[1]=='X')"
+    },
+    {
+      "claim": "The gate is reached only after zNum[0]=='0', confirming the feature is a leading-zero hex prefix.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L31953-31954",
+      "exact_quote": "else if( zNum[0]=='0'\n[B] 31954          && (zNum[1]=='x' || zNum[1]=='X') <-- BLOCKER"
+    },
+    {
+      "claim": "A winning seed contains a literal 0x hex token.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 06e09a37e739e806",
+      "exact_quote": "53 45 4c 45 43 54 2d 30 78 38 35 45 3b 2d ff 7f   SELECT-0x85E"
+    },
+    {
+      "claim": "A second winning seed also carries a 0x prefix.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 239da0d3632856b0",
+      "exact_quote": "53 45 4c 45 43 54 20 2d 30 78 31 31 43 43 43 31   SELECT -0x11CCC1"
+    },
+    {
+      "claim": "The byte diff shows the winner concentrates '0' then 'x' at the offsets where the loser does not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x08-0x09",
+      "exact_quote": "0x0009  78(x)x8 38(8)x1 2d(-)x1             31(1)x7 35(5)x3                     DIFFER"
+    },
+    {
+      "claim": "Loser seeds are all-decimal numeric expressions with no 0x prefix.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0c1d027799a90a48",
+      "exact_quote": "53 45 4c 45 43 54 0d 35 2d 35 2f 35 35 35 35 35   SELECT.5-5/55555"
+    },
+    {
+      "claim": "Another loser seed uses a decimal/scientific form, never a 0x token.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 05b666d01ebcac10",
+      "exact_quote": "53 45 4c 45 43 54 09 35 45 31 2d 35 35 0a 2c 35   SELECT.5E1-55.,5"
+    },
+    {
+      "claim": "The decisive delta separating winner from loser is value_profile, and the winner adds the CMP_MAP gradient feedback.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 delta",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "value_profile_cmplog feedback includes CMP_MAP gradient buckets that cmplog lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Feedback",
+      "exact_quote": "**Feedback**: edge-bucket + CMP_MAP-bucket signals."
+    },
+    {
+      "claim": "cmplog's feedback is only edge buckets, with no value-profile gradient signal.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Feedback",
+      "exact_quote": "**Feedback**: same edge-bucket signal as naive. The CMP buffer is\nconsumed by the mutator, not by feedback."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Not required: claimed_mechanism is CMP_MAP gradient, not I2SRandReplace. Both fuzzers in the decisive pair (cmplog and value_profile_cmplog) already carry I2SRandReplace, so the dash-row I2S floor would not discriminate winner from loser here; the discriminating technique is value_profile's CMP_MAP-bucket feedback, which lineage mutation_op metadata does not record. Lineage check therefore intentionally skipped."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on '0x'+hexdigit where value_profile_cmplog resolves no faster than cmplog (no separation between CMP_MAP-feedback and pure-edge-feedback arms), which would show the gradient feedback is not what crosses this gate."
+  },
+  "weakest_evidence_point": "Attributing the win to CMP_MAP gradient feedback rather than a confounding seed-scheduling/energy effect is inferential, since both arms share I2S and the feedback contribution cannot be read directly from seed metadata.",
+  "confidence": "medium"
+}

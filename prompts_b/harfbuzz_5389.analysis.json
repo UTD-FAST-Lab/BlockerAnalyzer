@@ -1,0 +1,75 @@
+{
+  "branch_id": 5389,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must begin with a recognized 4-byte SFNT tag (e.g. \"typ1\") at offset 0 so u.tag matches a non-collection case.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "The first 4 bytes (offset 0x00-0x03) must equal a recognized non-collection SFNT signature tag such as Typ1Tag ('typ1' = 74 79 70 31), so that the switch on u.tag in get_face takes the case Typ1Tag/TrueTypeTag arm instead of falling to default.",
+      "why_winner_satisfies": "Every winner-resolving seed begins with the literal bytes 74 79 70 31 ('typ1'); the byte-diff shows W is fully concentrated on t/y/p/1 at offsets 0x00-0x03 (each 20/20), matching the Typ1Tag case.",
+      "why_loser_doesnt": "Loser-blocking seeds carry arbitrary leading bytes (00/e0/ff/87...) at offsets 0x00-0x03 that match no tag case, so the switch falls to default and returns Null, blocking the true side (L hits 491 default, never 487).",
+      "mechanism_attribution": "cmplog/vpc intercept the tag comparison and record both operands in the CmpLogObserver buffer; I2SRandReplace then substitutes the expected tag literal (Typ1Tag/etc.) into the input at the matching offset, planting the 4-byte magic that naive/value_profile must hit by blind havoc."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the case Typ1Tag arm of a switch on u.tag inside get_face, whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-open-file.hh:487",
+      "exact_quote": "Source line:     case Typ1Tag:"
+    },
+    {
+      "claim": "The branch dispatches on the 4-byte tag value u.tag with sibling tag cases and a default fallthrough.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "hb-open-file.hh:481-491",
+      "exact_quote": "switch (u.tag) {"
+    },
+    {
+      "claim": "All five winner-resolving seeds start with the literal bytes 74 79 70 31 spelling 'typ1'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving seed 1, offset 0x0000",
+      "exact_quote": "0000: 74 79 70 31 00 01 20 20 20 20 20 20 20 d7 01 00   typ1.."
+    },
+    {
+      "claim": "At offsets 0x00-0x03 the winner bytes are fully concentrated on t/y/p/1 (20 of 20) while loser bytes are a scattered set of other values.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0000-0x0003",
+      "exact_quote": "0x0000  74(t)x20                            00(.)x4 e0(.)x2 05(.)x2 87(.)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds carry arbitrary leading bytes that do not spell a tag, e.g. a seed beginning 87 0e 0d 0e 22 0e.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser-blocking seed 1, offset 0x0000",
+      "exact_quote": "0000: 87 0e 0d 0e 22 0e                                 ....\"."
+    },
+    {
+      "claim": "In the loser the switch falls to the default arm (line 491 returns Null) rather than the Typ1Tag arm.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 491",
+      "exact_quote": "d=1   L 491  T=0 F=755  T=768 F=0  default:\t\treturn Null (OpenTypeFontFace);"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which reads the CmpLogObserver buffer and substitutes the other operand at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "Both decisive pairs differ from their loser by exactly the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta",
+      "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5389 --role W --fuzzer cmplog --trial 1 --seed 15af638beaf4cc6d` and observed 1 I2S-floor dash row (mutation_op = -) at depth 3 of the ancestor chain, the lower-bound signal of an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where naive/value_profile resolve the Typ1Tag case at the same rate as cmplog/vpc despite the gate requiring a 4-byte exact tag match, showing I2S substitution is not what plants the magic bytes."
+  },
+  "weakest_evidence_point": "The cmplog winner's lineage shows only one dash row (depth 3) and the leaf op-list is havoc/token, so the I2S contribution is a lower bound and could partly be lucky havoc.",
+  "confidence": "high"
+}

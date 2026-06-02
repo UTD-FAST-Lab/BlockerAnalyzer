@@ -1,0 +1,106 @@
+{
+  "branch_id": 5399,
+  "target": "harfbuzz",
+  "summary_one_line": "Face must carry a valid sfnt table directory whose 'CFF2' tag points to a non-null CFF2 table so cff2 != Null.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A 4-byte 'CFF2' table tag (0x43 0x46 0x46 0x32) present at the table-directory entry (offset 0x0c in the winning seeds) so that reference_table<cff2> resolves to a real table rather than the Null pool.",
+      "why_winner_satisfies": "Winner-resolving seeds carry the literal ASCII tag 'CFF2' at offsets 0x0c-0x0f (43 46 46 32) which the directory parser matches to find the table; the false branch (cff2 != Null) and downstream top-dict parsing are then exercised.",
+      "why_loser_doesnt": "value_profile-blocking seeds carry different bytes at 0x0c-0x0f (e.g. 47 50 4f 53 = 'GPOS' / other tags) so reference_table<cff2> returns the Null sentinel, the true branch is taken, and execution jumps to fail.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver tag-equality compare and substitutes the required 'CFF2' literal into the seed at the matching offset; value_profile lacks I2SRandReplace and only buckets Hamming distance, so it cannot synthesize the exact 4-byte tag — hence vpc beats vp."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "A table-directory and CFF2 header byte layout (offset/length fields around 0x00-0x1f) progressively shaped toward a sanitizable structure, where partial-match progress on multi-byte offset/length compares earns corpus retention.",
+      "why_winner_satisfies": "Winner-resolving seeds show structured header fields (e.g. 00 01 00 00 00 01 sfnt version and offset bytes 00 00 00 18 / 02) that the value_profile CMP_MAP gradient rewards as it approaches a valid directory, letting the winner cross to the false branch within 7.10h.",
+      "why_loser_doesnt": "cmplog-blocking seeds remain blocked (9/10) for 22.20h because cmplog has no CMP_MAP gradient feedback; without distance-bucket coverage credit it cannot incrementally retain near-valid header layouts, so the directory/offset structure is never assembled even when the tag is solvable.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient grants new-coverage credit for inputs whose offset/length operands are Hamming-closer to a sanitizable layout, steering the corpus toward the valid structure; cmplog lacks this feedback, so vpc (which has both) beats cmplog."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the equality test cff2 == Null whose false branch (valid table) is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7",
+      "exact_quote": "if (cff2 == &Null (OT::cff2))"
+    },
+    {
+      "claim": "There are two decisive pairs with different technique deltas: I2S and value_profile, both won by value_profile_cmplog.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26 and L34",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "Pair 2's delta is value_profile (vpc beats cmplog).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L34",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the ASCII 'CFF2' tag at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 876939f8cc518c07 offset 0x0c",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 10 20 43 46 46 32   ......    . CFF2"
+    },
+    {
+      "claim": "The winner-vs-loser byte sets diverge concentratedly at the tag offsets 0x0c-0x0f, with W='CFF2' and L tending to 'GPOS'-like bytes.",
+      "cited_section": "BYTE DIFF (W vs L at common offsets)",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  43(C)x5                             47(G)x9 00(.)x2 01(.)x1 2c(,)x1 +7u  DIFFER"
+    },
+    {
+      "claim": "The source resolves a cff2 table via reference_table<cff2> and as<OT::cff2>() before the Null check.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L403,L409",
+      "exact_quote": "const OT::cff2 *cff2 = this->blob->template as<OT::cff2> ();"
+    },
+    {
+      "claim": "The loser takes the true branch and jumps to fail; the winner enters the top-dict parse block.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L411",
+      "exact_quote": "d=1   L 411  T=0 F=5  T=19 F=0  if (cff2 == &Null (OT::cff2))  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog provides I2SRandReplace which scans the input for a matching operand and substitutes the other operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace, so it cannot perform input-to-state substitution of the tag.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile rewards inputs whose CMP operands are closer to matching via a new CMP_MAP bucket preserved as corpus.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "cmplog lacks the CMP_MAP gradient feedback that value_profile adds.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Feedback",
+      "exact_quote": "**Feedback**: same edge-bucket signal as naive. The CMP buffer is\nconsumed by the mutator, not by feedback."
+    },
+    {
+      "claim": "value_profile_cmplog blocked for 7.10h vs value_profile's 24.00h, resolving 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L30 Pair 1",
+      "exact_quote": "avg duration blocked: winner=7.10h  loser=24.00h"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5399 --role W --fuzzer value_profile_cmplog --trial 1 --seed 876939f8cc518c07` and observed one I2S-floor row (mutation_op = -) at depth 38 of the 39-level ancestor chain (ancestor e0a5b09f80625fb6), confirming an unwrapped I2SRandReplace find in this vpc seed's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on a 4-byte tag-equality compare where value_profile resolves the false branch as fast as value_profile_cmplog (no I2S advantage), refuting the I2S-substitution requirement of hypothesis 1."
+  },
+  "weakest_evidence_point": "Hypothesis 2's attribution of the cmplog-vs-vpc gap to CMP_MAP gradient on header offset/length fields rests on byte-layout inference at 0x00-0x1f rather than a single decisive offset, so the value_profile dose mechanism is the least pinned-down claim.",
+  "confidence": "medium"
+}

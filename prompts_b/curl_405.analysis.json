@@ -1,0 +1,81 @@
+{
+  "branch_id": 405,
+  "target": "curl",
+  "summary_one_line": "Input must contain a literal 'file://' (case-insensitive) URL scheme so curl_url_set rejects with CURLUE_BAD_FILE_URL, hitting the case arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The input must carry a literal 'file://' (or 'FILE://') scheme prefix at the URL field (seen at offset 0x06 onward) that drives curl_url_set down the file-URL handling path and produces a CURLUE_BAD_FILE_URL error code, which is the only value selecting the case CURLUE_BAD_FILE_URL arm at strerror.c:529.",
+      "why_winner_satisfies": "Every winner-resolving seed contains the exact ASCII scheme token 'file://'/'FILE://' starting at offset 0x06 (e.g. seed 1 '66 69 6c 65 3a 2f 2f' = file://, seed 2 '46 49 4c 45 3a 2f 2f' = FILE://). cmplog resolves the branch in 10/10 trials and the winner takes the true side (W 529 T=10 F=0).",
+      "why_loser_doesnt": "Loser-blocking seeds carry no scheme token at offsets 0x06-0x0c — they hold byte runs like '70 6b 2b 2b' (pk++), '24 25 41 25' ($%A%) and percent/punctuation noise, so curl_url_set never returns CURLUE_BAD_FILE_URL and the case arm at 529 is never taken (L 529 T=0 F=10).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer recorded when curl_url_set's scheme comparison (a strcmp/memcmp against the 'file' literal) executes, scans the input for the matched operand, and substitutes the 'file' constant at those offsets. naive lacks this CMP introspection and must land the multi-byte scheme literal by blind havoc, which it manages in only 2/10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the case arm for CURLUE_BAD_FILE_URL, whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "strerror.c:529, Globally blocked side",
+      "exact_quote": "Source line:   case CURLUE_BAD_FILE_URL:"
+    },
+    {
+      "claim": "The blocker source line and its file-URL return string are hit only by winner-resolving seeds.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "strerror.c:529-530",
+      "exact_quote": "[W]   529    case CURLUE_BAD_FILE_URL: <-- BLOCKER"
+    },
+    {
+      "claim": "Winner seeds contain the literal lowercase 'file://' scheme token starting at offset 0x06.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 279a44f7e64c80a9, offset 0x06",
+      "exact_quote": "00 01 00 00 00 19 66 69 6c 65 3a 2f 2f 31 32 00   ......file://12."
+    },
+    {
+      "claim": "A second winner seed carries the uppercase 'FILE://' scheme token in the same position.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 63ad41294b23b407, offset 0x06",
+      "exact_quote": "00 01 00 00 00 19 46 49 4c 45 3a 2f 2f 31 32 37   ......FILE://127"
+    },
+    {
+      "claim": "Across W seeds offsets 0x06-0x09 concentrate on the f/i/l/e (and F/I/L/E) bytes while L seeds spread over percent/punctuation noise.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x06-0x09",
+      "exact_quote": "0x0006  66(f)x6 46(F)x4                     25(%)x3 70(p)x1 24($)x1 2e(.)x1 +4u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds lack any scheme token, carrying punctuation/percent noise at the scheme offsets instead.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00182ecc311b5f0b, offset 0x06",
+      "exact_quote": "00 01 00 00 00 19 70 6b 2b 2b 2b 2b 2b 2a 2b 2b   ......pk+++++*++"
+    },
+    {
+      "claim": "Winner cmplog takes the true side 10/10 while loser naive takes it 0/10.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L529",
+      "exact_quote": "case CURLUE_BAD_FILE_URL:  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which substitutes a recorded CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mutator and relies on havoc/token mutations only.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 405 --role W --fuzzer cmplog --trial 1 --seed 279a44f7e64c80a9` and observed 2 I2S-floor rows (mutation_op = -) at depths 2 and 3 of the ancestor chain — the dash-row floor signal for an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating the case arm on a 'file://' literal where cmplog and naive resolve the branch at statistically indistinguishable rates would refute that I2S substitution of the scheme literal drives the divergence."
+  },
+  "weakest_evidence_point": "The exact comparison whose CMP operand I2S substitutes is inferred from source (curl_url_set scheme matching) rather than directly observed in a CmpLog buffer dump.",
+  "confidence": "high"
+}

@@ -1,0 +1,138 @@
+{
+  "branch_id": 5517,
+  "target": "harfbuzz",
+  "summary_one_line": "A structurally valid sfnt font carrying a GPOS table (table_index==1) and variation coords (font->num_coords>0) so the true branch fires.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed sfnt header (00 01 00 00 sfnt version + table count) with a recognized 4-byte table tag such as 'GPOS' at the table-directory offset, so a GPOS table is parsed and the layout-apply context is constructed at table_index==1.",
+      "why_winner_satisfies": "cmplog winner seeds contain the literal tag bytes 'GPOS' (47 50 4f 53) and 'GPO' at offsets 0x0c-0x0f, exactly the tag-comparison operands that table-tag dispatch checks; offset 0x0c-0x0f W bytes are concentrated on G/P/O/S while L bytes are diffuse.",
+      "why_loser_doesnt": "naive loser seeds are short and malformed (6-64 bytes) with diffuse, non-tag bytes at 0x0c-0x0f, so no valid GPOS table tag is matched and layout-apply for table_index==1 is never entered.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads intercepted tag-CMP operands from the CmpLogObserver buffer and substitutes the expected tag bytes (e.g. 'GPOS') into the input, planting the exact table tag that naive must hit by blind havoc."
+    },
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "Same GPOS table-tag / sfnt structure requirement, where the input progressively approaches the required tag and header field values that gate the table_index==1 layout context.",
+      "why_winner_satisfies": "value_profile beats naive (resolved 9/10 vs 2/10) by preserving intermediate inputs whose CMP operands are closer to the required tag/header constants, building a gradient toward the structurally valid font.",
+      "why_loser_doesnt": "naive has no CMP-distance feedback, so partial-match progress toward the tag/header constants is not preserved as corpus and the structure is never assembled.",
+      "mechanism_attribution": "value_profile's CMP_MAP records operand-distance buckets (Hamming / matching-prefix length) and a new closer-matching bucket is preserved as corpus, giving a gradient toward the tag and header constants naive cannot follow."
+    },
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "An input that drives the layout machinery deep enough (matcher/skipping-iterator/ChainContext dispatch) that the constructor at table_index==1 with num_coords is reached on a call path distinct from shallow parsing.",
+      "why_winner_satisfies": "naive_ctx records (call-context, edge) pairs as new coverage; the same downstream functions (matcher_t setters, skipping_iterator_t, ChainContext::dispatch) reached via the GPOS-apply call path register as fresh coverage, rewarding the deeper exploration the blocker needs.",
+      "why_loser_doesnt": "naive sees only bare edges, so revisiting matcher/iterator code via a deeper call path yields no new coverage and the seeds that would reach the table_index==1 constructor are not retained.",
+      "mechanism_attribution": "naive_ctx's CtxHook folds the caller chain into the edge-map index, so reaching the layout-apply functions through a new call context counts as new coverage and steers corpus toward the deeper GPOS-apply path."
+    },
+    {
+      "covers_pairs": ["minimizer>naive (calibrated_energy)"],
+      "what_input_feature": "Same structural GPOS/variable-font target, reached by spending more havoc mutations on the small, stable, fast seeds that are closest to a valid font header.",
+      "why_winner_satisfies": "minimizer's calibrated power stage assigns more mutations to faster/smaller/more-stable seeds; the compact valid-header seeds (e.g. the 141-179 byte font-shaped winner seeds) earn extra energy and are mutated harder toward the structural target.",
+      "why_loser_doesnt": "naive uses a plain mutational stage with uniform energy, so it does not concentrate mutation budget on the promising small font-header seeds and stalls (resolved 2/10, 21.2h blocked).",
+      "mechanism_attribution": "minimizer's CalibrationStage + StdPowerMutationalStage derive per-seed energy from intrinsic calibration (speed/size/stability), spending disproportionate mutation budget on the compact valid-header seeds that approach the structural gate."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a conjunction gate requiring table_index==1 AND font->num_coords on the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 source line",
+      "exact_quote": "table_index == 1 && font->num_coords ? var_store.create_cache () : nullptr"
+    },
+    {
+      "claim": "The true (blocked) side is the globally blocked side at this branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "cmplog resolves the branch where naive does not (10/10 vs 2/10), with delta technique I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "cmplog winner seeds carry the literal 'GPOS' table tag bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 2 offset 0x0c-0x0f",
+      "exact_quote": "00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+    },
+    {
+      "claim": "At offsets 0x0c-0x0f the winner bytes concentrate on G/P/O/S tag characters while loser bytes are diffuse.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c-0x000f",
+      "exact_quote": "0x000c  6b(k)x30 47(G)x10                   20( )x1 80(.)x1 70(p)x1 01(.)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "naive loser seeds are short and malformed (e.g. 6 bytes).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1",
+      "exact_quote": "Seed 1 (id=003817559785f774, size=6 bytes, fuzzer=naive, trial=1, discovered_at=0s, mutation_op=ByteDecMutator,WordAddMutator):"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes intercepted CMP operands into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile resolves the branch over naive with delta technique value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "value_profile preserves an input whose CMP operands are closer to matching as new corpus.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "naive_ctx resolves the branch over naive with delta technique ctx_coverage.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 3",
+      "exact_quote": "Pair 3: naive_ctx > naive  [delta: ctx_coverage]"
+    },
+    {
+      "claim": "naive_ctx folds the call context into the edge-map index so the same edge counts at different slots by call path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Instrumentation",
+      "exact_quote": "The hook\nkeeps a running hash of the current call context (caller chain) and\nfolds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "The downstream layout functions (matcher setters, skipping iterator, ChainContext dispatch) fire far more in W than L.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "ChainContext::dispatch rows",
+      "exact_quote": "OT::ChainContext::dispatch<OT::hb_ot_apply_context_t>"
+    },
+    {
+      "claim": "minimizer resolves the branch over naive with delta technique calibrated_energy.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 4",
+      "exact_quote": "Pair 4: minimizer > naive  [delta: calibrated_energy]"
+    },
+    {
+      "claim": "minimizer's power stage gives more mutations to faster/smaller/more-stable seeds via calibration-based perf_score.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "minimizer Mutators / stages",
+      "exact_quote": "faster, smaller,\nmore-stable seeds earn more mutations"
+    },
+    {
+      "claim": "minimizer winner seeds are compact and font-shaped (141-179 bytes with valid sfnt header).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1",
+      "exact_quote": "00 01 00 00 00 01 46 20 20 20 28 f6 6b 65 72 6e   ......F   (.kern"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5517 --role W --fuzzer cmplog --trial 1 --seed 002c9ad92acce91b`; the chain has 31 ancestor levels and the trailing I2S-floor signal reports 2 dash rows (mutation_op = -) at depth 29 and 30, direct lower-bound evidence of an I2SRandReplace find in this winner's cmplog ancestry. Note this verifies only the cmplog>naive (I2S) hypothesis; the other three pairs carry distinct mechanisms (CMP_MAP gradient, context-sensitive coverage, calibrated energy) per multi_feature."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on the same conjunction (table_index==1 && num_coords) in which cmplog does NOT outperform naive when the GPOS table tag is the only blind-search barrier — i.e. removing the tag-CMP barrier closes the cmplog>naive gap, showing the divergence was not I2S tag-substitution."
+  },
+  "weakest_evidence_point": "Attributing the cmplog win specifically to GPOS-tag I2S substitution rests on the tag bytes appearing in winner seeds plus a 2-row dash floor; the dash rows confirm SOME I2S find but not that it planted the table tag rather than another header constant.",
+  "confidence": "medium"
+}

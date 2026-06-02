@@ -1,0 +1,87 @@
+{
+  "branch_id": 5353,
+  "target": "harfbuzz",
+  "summary_one_line": "A degenerate input yielding an unrecognized/RUNIC script tag so the switch falls through to the HB_DIRECTION_INVALID default arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)", "value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A short/degenerate byte payload that decodes to an unrecognized script (the RUNIC fall-through arm), NOT a well-formed font with real table FOURCCs like GSUB/GPOS/MATH that route to recognized RTL/LTR script cases.",
+      "why_winner_satisfies": "Winner seeds are tiny near-random payloads (e.g. 2-byte 'f6 16' and short runs) lacking valid font-table tags, so script resolution falls through the switch to the RUNIC/INVALID arm and the true side at line 660 is taken (W: T=5 F=43 vs L: T=0 F=381).",
+      "why_loser_doesnt": "The I2S fuzzers' blocking seeds are well-formed fonts carrying literal table FOURCCs (GSUB, GPOS, MATH) which steer script resolution onto recognized cases, never reaching the RUNIC fall-through (loser blocked 8/10).",
+      "mechanism_attribution": "The winning technique is undirected havoc-only byte mutation: the winners (naive, value_profile) lack the input-to-state comparison-substitution stage the losers (cmplog, value_profile_cmplog) possess, so havoc is free to produce malformed/unrecognized table tags that decode to the RUNIC fall-through. The losers' comparison-substitution stage reads CMP operands (harfbuzz table-tag FOURCC comparisons) and rewrites input bytes to MATCH those tags, pulling cmplog/vpc onto the valid well-formed-font path and away from the degenerate input that hits the RUNIC arm."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the RUNIC case arm whose true side returns HB_DIRECTION_INVALID, a switch fall-through over unrecognized scripts.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 660-662",
+      "exact_quote": "case HB_SCRIPT_RUNIC: <-- BLOCKER"
+    },
+    {
+      "claim": "Taking the true side leads to the INVALID direction return.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 662",
+      "exact_quote": "return HB_DIRECTION_INVALID;"
+    },
+    {
+      "claim": "Winner-resolving seeds are tiny near-random payloads with no font-table tags.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1, size=2",
+      "exact_quote": "Seed 1 (id=27fa0bdb2d06495c, size=2 bytes, fuzzer=value_profile, trial=1, discovered_at=16s"
+    },
+    {
+      "claim": "The winner takes the RUNIC true side where the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L660",
+      "exact_quote": "L 660  T=5 F=43  T=0 F=381  case HB_SCRIPT_RUNIC:"
+    },
+    {
+      "claim": "Loser-blocking seeds are well-formed fonts carrying literal table FOURCCs like GSUB.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 2, offset 0x000c-0x000f",
+      "exact_quote": "00 01 00 00 00 01 ee ff 00 30 00 20 47 53 55 42   .........0. GSUB"
+    },
+    {
+      "claim": "Loser-blocking seeds also carry the MATH table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 4, offset 0x000c-0x000f",
+      "exact_quote": "00 01 00 00 00 01 20 00 20 ff 20 20 4d 41 54 48   ...... . .  MATH"
+    },
+    {
+      "claim": "The byte-diff shows loser bytes concentrate on FOURCC table-tag ASCII (G/S/U/B/P/O) at offsets 0x0c-0x0f where the winner has no such structure.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c-0x000f",
+      "exact_quote": "0x000c  e9(.)x2                             47(G)x19 4d(M)x1                    DIFFER"
+    },
+    {
+      "claim": "The losers possess the I2SRandReplace mutator that substitutes one CMP operand for the other in the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`.\n`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "The winner value_profile lacks I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "The winner naive uses only havoc + token mutators with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Winner is non-I2S (naive / value_profile), so I2SRandReplace cannot be the winning mechanism and lineage verification of an I2S floor is not required. I still ran `python3 tools/db_query.py lineage --branch 5353 --role W --fuzzer naive --trial 1 --seed 59e5a9e065e58987`: the chain is dominated by Byte/Bytes/Word/Token havoc mutators (ByteDecMutator, BytesInsertMutator, TokenReplace, QwordAddMutator, ByteAddMutator, etc.). It does show one dash row at depth 9, but per the 4-fuzzer caveat the dash=I2S interpretation applies to cmplog/vpc finds, not to a naive-discovered seed (naive has no I2S stage); that ancestor is most plausibly a crossover/early-corpus import, not an I2S find. The undirected havoc chain producing a degenerate payload is consistent with the havoc-only attribution."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where adding the I2SRandReplace stage to the winner (or removing it from the loser) leaves the RUNIC/INVALID fall-through hit-rate unchanged, showing I2S steering toward valid table FOURCCs is not what diverts the loser away from the branch."
+  },
+  "weakest_evidence_point": "The causal link that I2S substitution specifically pulls cmplog/vpc onto valid-font tags (rather than I2S merely consuming exec budget) is inferred from the FOURCC-rich loser seeds, not directly observed in the loser's lineage.",
+  "confidence": "medium"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 266,
+  "target": "curl",
+  "summary_one_line": "Input must contain the literal ASCII string \"Content-Type\" so match_header succeeds and the header-search loop exits via its false side.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A header block containing the literal ASCII bytes \"Content-Type\" (43 6f 6e 74 65 6e 74 2d 54 79 70 65) so that search_header's match_header finds a matching header, sets value non-NULL, and the loop condition !value becomes false on the next iteration — taking the blocked false side at mime.c:350.",
+      "why_winner_satisfies": "All winner-resolving seeds carry the contiguous ASCII run \"Content-Typ\" at offsets 0x24-0x2f (47 43 6f 6e 74 65 6e 74 2d 54 79 70 = G C o n t e n t - T y p), the exact case-sensitive prefix curl searches for via STRCONST(\"Content-Type\").",
+      "why_loser_doesnt": "Loser-blocking seeds carry no \"Content-Type\" run; at the offsets where winners hold the literal (0x25-0x2c) the loser bytes diverge entirely (e.g. 80, 2e, fe, eb, ff), so match_header never matches, value stays NULL, and the loop only ever takes its true side.",
+      "mechanism_attribution": "cmplog/vpc intercept the string CMP inside match_header (__sanitizer_weak_hook_strcmp/memcmp), record both operands, and I2SRandReplace substitutes the program-side constant \"Content-Type\" into the input at matching offsets. naive and value_profile lack I2SRandReplace and must hit the 12-byte case-sensitive literal by chance, which they never do across 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of the header-search loop at mime.c:350, which exits only when value becomes non-NULL.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "mime.c:350:9",
+      "exact_quote": "for(; !value && hdrlist; hdrlist = hdrlist->next)"
+    },
+    {
+      "claim": "value is set by match_header inside the loop body, so a successful header match drives the false-side exit.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "mime.c:351",
+      "exact_quote": "value = match_header(hdrlist, hdr, len);"
+    },
+    {
+      "claim": "The caller searches specifically for the literal \"Content-Type\" header name.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "mime.c:1791",
+      "exact_quote": "customct = search_header(part->userheaders, STRCONST(\"Content-Type\"));"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the contiguous ASCII \"Content-Typ\" run that loser seeds lack.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 3ada62fdafca01cd offset 0x24",
+      "exact_quote": "06 00 00 00 47 43 6f 6e 74 65 6e 74 2d 54 79 70   ....GContent-Typ"
+    },
+    {
+      "claim": "At offsets 0x25-0x2c the winner bytes are the case-sensitive Content-Type literal while loser bytes diverge entirely.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0025",
+      "exact_quote": "0x0025  43(C)x20                            80(.)x7 00(.)x3 41(A)x2 74(t)x2 +5u  DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes the recorded CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive (the loser) has no I2S mutator and must find the literal by chance.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile (the other loser) also lacks I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 266 --role W --fuzzer value_profile_cmplog --trial 1 --seed 3ada62fdafca01cd` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 18 and 19 of the 20-level ancestor chain — direct lower-bound evidence of an I2SRandReplace contribution in the winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating mime.c:350's false side on a 12-byte case-sensitive \"Content-Type\" strcmp in which naive/value_profile resolve the branch as readily as cmplog/vpc — i.e. the I2S advantage disappears, showing the literal is reachable without operand substitution."
+  },
+  "weakest_evidence_point": "The dash-row floor is a lower bound and the winning seed shown was discovered by a havoc-tagged leaf op, so I2S contribution is inferred from ancestor dash rows rather than from a directly I2S-tagged resolving mutation.",
+  "confidence": "high"
+}

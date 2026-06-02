@@ -1,0 +1,87 @@
+{
+  "branch_id": 13380,
+  "target": "openthread",
+  "summary_one_line": "Input must encode the realm/link-local-all-thread-nodes IPv6 multicast destination (the de ad 00 be ef anchored address bytes) so the equality compare matches.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The IPv6 destination field parsed from the message must equal the link-local or realm-local all-thread-nodes multicast address. In the winning seeds this surfaces as a tightly-concentrated anchor byte run at offsets 0x1a-0x28 (33 00 40 fd de ad 00 be ef 00 ... 01), the exact constant operand the equality compare at line 82 tests against.",
+      "why_winner_satisfies": "Every winning-resolving seed carries the same fixed byte run at offsets 0x1a-0x28; the BYTE DIFF shows W is perfectly concentrated there (e.g. 0x1c=40(@)x19, 0x1d=fd(.)x19, 0x1e=de(.)x19, 0x1f=ad(.)x19, 0x21=be(.)x19, 0x22=ef(.)x19), meaning all 19 winner samples share that constant, matching the compared address.",
+      "why_loser_doesnt": "Loser-blocking seeds have no such concentration at those offsets — they scatter (e.g. 0x1c shows 00/78/30/c4 +6u, 0x1e shows 5c/00/30/ef +5u tagged DIFFER), so the destination never equals the all-thread-nodes address and the equality compare stays False, blocking the True side.",
+      "mechanism_attribution": "cmplog/vpc intercept the integer/memory compare at line 82 into the CmpLogObserver buffer, then I2SRandReplace scans the input for one operand and substitutes the other, planting the exact all-thread-nodes address constant into the destination field. naive and value_profile lack I2SRandReplace and must hit the multi-byte address by blind havoc, which they never do in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is an equality comparison of the parsed IPv6 destination against the realm-local all-thread-nodes address.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "mesh_forwarder_ftd.cpp:82:21",
+      "exact_quote": "ip6Header.GetDestination() == mle.GetRealmLocalAllThreadNodesAddress())"
+    },
+    {
+      "claim": "The preceding line tests the link-local all-thread-nodes address as the alternative equality operand.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L81",
+      "exact_quote": "if (ip6Header.GetDestination() == mle.GetLinkLocalAllThreadNodesAddress() ||"
+    },
+    {
+      "claim": "Winning seeds share a fixed anchored byte run at offsets 0x1c-0x22 absent in losers.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x1c-0x22",
+      "exact_quote": "0x001c  40(@)x19                            00(.)x5 78(x)x4 30(0)x2 c4(.)x2 +6u  DIFFER"
+    },
+    {
+      "claim": "The winner anchor run continues with de ad and be ef constants concentrated across all 19 winner samples.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x1e and 0x21-0x22",
+      "exact_quote": "0x001e  de(.)x19                            5c(\\)x5 00(.)x4 30(0)x3 ef(.)x2 +5u  DIFFER"
+    },
+    {
+      "claim": "Winning seeds literally contain the address byte run 33 00 40 fd de ad 00 be ef 00 ... 01.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 8b0111a41b7191d5",
+      "exact_quote": "00 00 00 00 00 a3 78 00 00 ff 33 00 40 fd de ad   ......x...3.@..."
+    },
+    {
+      "claim": "Loser-blocking seeds lack the concentrated anchor and scatter at the destination offsets.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x1d",
+      "exact_quote": "0x001d  fd(.)x19                            30(0)x8 be(.)x2 00(.)x2 c4(.)x2 +5u  DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a compared operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive and value_profile losers lack I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs are attributed to the I2S technique delta with high prob_div.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair adds value profile on top of I2S, isolating I2S as the differentiator.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 vpc>vp",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 13380 --role W --fuzzer cmplog --trial 1 --seed 8b0111a41b7191d5` and observed exactly 1 I2S-floor dash row (mutation_op = -) at depth 7 of the 8-level ancestor chain, characteristic of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating the True side on this multi-byte address equality where naive/value_profile resolve the True branch as fast as cmplog/vpc — i.e. removing I2S yields no slowdown — would refute the I2S attribution."
+  },
+  "weakest_evidence_point": "The exact field offset of the IPv6 destination within the harness input is inferred from byte-diff concentration rather than confirmed against the message-parsing layout, so the anchored run could be partly coincidental seed-sharing.",
+  "confidence": "high"
+}

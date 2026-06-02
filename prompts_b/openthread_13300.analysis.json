@@ -1,0 +1,99 @@
+{
+  "branch_id": 13300,
+  "target": "openthread",
+  "summary_one_line": "Reach PopAfter with a non-null aPrevEntry, i.e. drive linked-list state so Find() returns a real predecessor — a deep structural/state condition, not a CMP gate.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)", "value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "Input must drive the IPv6/Netif address-management call chain (otIp6SetEnabled -> ThreadNetif::Down -> Unsubscribe/RemoveExternal... -> LinkedList::Remove -> PopAfter) so that Find() locates a matching entry and returns a NON-null predecessor, making aPrevEntry != nullptr at linked_list.hpp:218 (the false branch). This is a structural state requirement built from broad byte coverage of the harness command/address bytes, NOT a single comparison operand to solve.",
+      "why_winner_satisfies": "The winners are the fuzzers WITHOUT the I2S substitution mutator (naive beats cmplog; value_profile beats value_profile_cmplog). naive resolves 9/10 and hits the branch 712 times on average; its undiluted havoc/token mutation stack explores the deep address add/remove state space that populates the linked list, so Find() returns a non-null prev. Winning seeds carry plain havoc/token mutation_op chains (e.g. BytesSetMutator,ByteInterestingMutator and WordInterestingMutator,ByteFlipMutator,ByteAddMutator,ByteFlipMutator).",
+      "why_loser_doesnt": "cmplog and value_profile_cmplog block 8/10 with avg blocked duration 19.20h and hitcount 0 on the branch. Their per-execution CMP interception + I2SRandReplace mutation budget is spent substituting CMP operands, which buys nothing here because the false branch is gated by accumulated list state rather than by matching a logged comparison operand; the diverted budget slows the broad state-building exploration that reaches a non-null predecessor.",
+      "mechanism_attribution": "The winner is enabled by plain coverage-guided havoc/token mutation (naive's mutator stack, shared by value_profile minus the CMP-buffer mutator). No CMP introspection helps because the blocker is a pointer/state predicate, not a literal-value comparison; the I2S-equipped variants are the losers, so the enabling technique is havoc-only."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the false branch of a null-pointer predicate, a state/structural condition rather than a value comparison.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "linked_list.hpp:218:13",
+      "exact_quote": "Source line:         if (aPrevEntry == nullptr)"
+    },
+    {
+      "claim": "The globally blocked side is the false branch, reached only when aPrevEntry is non-null.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 7",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "aPrevEntry is supplied by the caller LinkedList::Remove only after Find() succeeds, so a non-null prev requires accumulated list state.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "linked_list.hpp:311-315",
+      "exact_quote": "Error error = Find(aEntry, prev);"
+    },
+    {
+      "claim": "The branch is reached through a deep address-management call chain rooted at the fuzz harness via otIp6SetEnabled and ThreadNetif::Down.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "call chain hop 4-6",
+      "exact_quote": "hop 4  ot::ThreadNetif::Down()"
+    },
+    {
+      "claim": "naive (no I2S) is the winner over cmplog with a 0.70 probability divergence under the I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile (no I2S mutator) is the winner over value_profile_cmplog under the I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile > value_profile_cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "naive hits the branch 712 times on average while cmplog hits it 0 times, showing naive builds the state to take the false branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 hitcount",
+      "exact_quote": "avg hitcount on branch: winner=712  loser=0"
+    },
+    {
+      "claim": "A winning seed carries a plain havoc mutation chain with no I2S/dash signature.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 id=00123255f0c0a666",
+      "exact_quote": "mutation_op=BytesSetMutator,ByteInterestingMutator"
+    },
+    {
+      "claim": "Another winning seed is found by a pure byte/word havoc chain, not by CMP substitution.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 4 id=0054cafd1d2ce9d3",
+      "exact_quote": "mutation_op=WordInterestingMutator,ByteFlipMutator,ByteAddMutator,ByteFlipMutator"
+    },
+    {
+      "claim": "The I2S-equipped losers stay blocked far longer, indicating their CMP/I2S budget does not help reach this state-gated branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 duration",
+      "exact_quote": "avg duration blocked: winner=2.40h  loser=19.20h"
+    },
+    {
+      "claim": "cmplog spends extra per-execution budget on CMP interception and the I2SRandReplace operand-substitution mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "naive's mutator stack is plain havoc + token with no I2S, and value_profile uses the same stack without I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only, not I2SRandReplace, so lineage dash-row verification is not applicable and was not invoked. The decisive winners (naive, value_profile) are precisely the fuzzers WITHOUT the I2SRandReplace mutator (cmplog and value_profile_cmplog are the LOSERS), and the blocker is a null-pointer/state predicate rather than a value comparison, so I2S substitution offers no leverage. The winning seeds' mutation_op chains are plain havoc/token (BytesSetMutator,ByteInterestingMutator; WordInterestingMutator,ByteFlipMutator,...) with no I2S-floor dash signature."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the false branch is gated purely by matching a fixed literal/comparison operand (no accumulated list state): if cmplog/vpc then BEAT naive/value_profile at reaching that branch, the havoc-only / state-condition hypothesis is refuted."
+  },
+  "weakest_evidence_point": "The exact program state that makes aPrevEntry non-null (a successful Find over an actually-populated list) is inferred from the call chain and source, not directly observed in any per-role divergent branch (HIT-COUNT DIVERGENCE and DIVERGENT BRANCHES sections are empty).",
+  "confidence": "medium"
+}

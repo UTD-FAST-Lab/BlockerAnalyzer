@@ -1,0 +1,87 @@
+{
+  "branch_id": 5680,
+  "target": "harfbuzz",
+  "summary_one_line": "A structurally valid sfnt/cmap table whose magic tags let get_nominal_glyph resolve the current codepoint to a real glyph index.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed sfnt font header followed by a 'cmap' table whose 4-byte tag and offset fields match what the font loader compares against, so the parsed codepoint u resolves through cmap to a non-zero glyph and get_nominal_glyph returns true at the shortest path.",
+      "why_winner_satisfies": "The winner-resolving seed carries an sfnt magic header (00 01 00 00) and a literal ASCII 'cmap' table tag at offset 0x0c-0x0f plus a 'ttlf' (loca/glyf-like) tag, i.e. the exact 4-byte FOURCC table identifiers the harfbuzz table directory compares; this lets the cmap lookup succeed and the true branch (line 173) fire, hitting it 460 times.",
+      "why_loser_doesnt": "The loser-blocking seeds are short, mostly 0x00/0x20/0xe0 filler with no 'cmap' FOURCC and no sfnt magic at the head, so the table-directory tag comparisons never match, no glyph map is loaded, get_nominal_glyph returns false, and the branch stays on the F side (W never enters the cmap, hitcount 0).",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator (absent in value_profile): cmplog intercepts the table-directory tag/offset CMPs and substitutes the observed comparison operand (the 'cmap'/sfnt-magic literal) directly into the input at the compared offset, jumping the directory check in one step. value_profile only gets a coarse Hamming/prefix distance bucket, which credits near-misses but cannot place the exact 4-byte tag, so it stalls."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a get_nominal_glyph call gating the shortest-path glyph resolution, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-7",
+      "exact_quote": "if (shortest && c->font->get_nominal_glyph (u, &glyph, c->not_found))"
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog over value_profile with an I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The winner resolves 10/10 and hits the branch 460 times while the loser blocks 10/10 with hitcount 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 stats",
+      "exact_quote": "avg hitcount on branch: winner=460  loser=0"
+    },
+    {
+      "claim": "The winner-resolving seed contains a literal 'cmap' FOURCC table tag and an sfnt magic header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 (id=fd117cd3e66df32b), offset 0x00 and 0x0c-0x0f",
+      "exact_quote": "00 01 00 00 00 0c 02 ff 00 30 00 1f 63 6d 61 70   .........0..cmap"
+    },
+    {
+      "claim": "The winner seed also carries a 'ttlf' table tag adjacent to the cmap directory.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 offset 0x18-0x1b",
+      "exact_quote": "74 74 6c 66 00 01 15 15"
+    },
+    {
+      "claim": "Loser-blocking seeds are short filler bytes (0x00/0x20/0xe0) with no cmap FOURCC.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 2 (id=0003cbd2b6f5fff8)",
+      "exact_quote": "e0 17 00 00 1a 20 00 00 29 2b 29 29 2c            ..... ..)+)),"
+    },
+    {
+      "claim": "At the cmap-bearing offsets the winner holds the ASCII tag bytes while the loser holds unrelated filler.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  63(c)x1                             00(.)x2 01(.)x1 2c(,)x1 2b(+)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator whereas value_profile does not.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace, only the havoc + token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile's CMP feedback is a coarse Hamming/prefix distance bucket, a near-miss gradient rather than an exact placement.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation",
+      "exact_quote": "Hamming distance bucket for `trace_cmp*`; matching-prefix\nlength for string/memory CMPs"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5680 --role W --fuzzer value_profile_cmplog --trial 1 --seed fd117cd3e66df32b`; the chain has 48 levels and the I2S-floor signal reports 1 ancestor dash row (mutation_op = -) at depth 47, the ParentInfo-only signature of an unwrapped I2SRandReplace find under the current vpc build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a cmap table whose directory tags are compared but where value_profile resolves the branch as often as value_profile_cmplog within the same budget, showing the exact 4-byte tag placement does not require I2S substitution."
+  },
+  "weakest_evidence_point": "Only one winner-resolving seed is shown, so the inference that the cmap FOURCC tag (not some other parsed structure) is the gating feature rests on a single example.",
+  "confidence": "medium"
+}

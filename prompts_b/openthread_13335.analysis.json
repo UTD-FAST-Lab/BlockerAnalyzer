@@ -1,0 +1,81 @@
+{
+  "branch_id": 13335,
+  "target": "openthread",
+  "summary_one_line": "Input must encode an IPv6 fragment header that drives reassembly so HandleDatagram is re-entered with aIsReassembled=true.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed IPv6 datagram whose next-header/extension-header chain encodes a Fragment header, so the harness path runs HandleFragment + UpdateReassemblyList and re-delivers the reassembled datagram into HandleDatagram with aIsReassembled=true (the blocked true side at ip6.cpp:1245).",
+      "why_winner_satisfies": "Winner cmplog seeds open with a coherent IPv6 header (offset 0x00=0x78, 0x01=0x66, 0x02=0x10) and exercise the reassembly path: HandleFragment runs 19 times and UpdateReassemblyList 10 times for W while both are 0 for L, so the winner actually constructs fragments that get reassembled and re-fed with aIsReassembled=true.",
+      "why_loser_doesnt": "Loser naive seeds open with different leading bytes (offset 0x00 is db/dc, 0x01=0x62) and never reach the reassembly functions (HandleFragment W=19 L=0, UpdateReassemblyList W=10 L=0); instead L's traffic stays on the forward/unicast path (ShouldForwardToThread W=0 L=28), so aIsReassembled is always false and the true side never fires (L1245 T=0 F=139).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer and substitutes the exact next-header / fragment-protocol magic byte values that the header-field comparisons demand, letting cmplog assemble the fragment-extension-header structure that routes through reassembly; naive has only edge-counter feedback and the havoc/token stack with no CMP introspection, so it cannot synthesize those magic field values and stalls on the forward path."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the true branch of `if (aIsReassembled)` at ip6.cpp:1245.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "ip6.cpp:1245:9",
+      "exact_quote": "Source line:     if (aIsReassembled)"
+    },
+    {
+      "claim": "cmplog resolves the branch in all 10 trials while naive blocks in 8, a decisive I2S pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The reassembly functions run only for the winner: HandleFragment 19 vs 0, UpdateReassemblyList 10 vs 0.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "HandleFragment / UpdateReassemblyList",
+      "exact_quote": "      19         0  ot::Ip6::Ip6::HandleFragment(ot::Message&, ot::Ip6::Ip6::MessageOrigin, ot::Ip6::MessageInfo&)  (/src/openthread/src/core/net/ip6.cpp:679-791)"
+    },
+    {
+      "claim": "UpdateReassemblyList is exercised 10 times by W and never by L, confirming the reassembly path is winner-only.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "UpdateReassemblyList",
+      "exact_quote": "      10         0  ot::Ip6::Ip6::UpdateReassemblyList()  (/src/openthread/src/core/net/ip6.cpp:806-819)"
+    },
+    {
+      "claim": "At the blocker line the true side fires only for W (T=10) and never for L (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1245",
+      "exact_quote": "d=1   L1245  T=10 F=102  T=0 F=139  if (aIsReassembled)  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser instead stays on the forward path: ShouldForwardToThread runs 28 times for L and 0 for W.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "ShouldForwardToThread",
+      "exact_quote": "       0        28  ot::Ip6::Ip6::ShouldForwardToThread(ot::Ip6::MessageInfo const&, ot::Ip6::Ip6::MessageOrigin) const  (/src/openthread/src/core/net/ip6.cpp:1367-1390)"
+    },
+    {
+      "claim": "Winner seeds begin with coherent IPv6 header bytes (0x00=0x78, 0x01=0x66, 0x02=0x10) distinct from loser seeds.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0000-0x0002",
+      "exact_quote": "   0x0001  66(f)x9 67(g)x1                     62(b)x10                            DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes one CMP operand at matching input offsets, unlike naive.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S capability, only the havoc/token stack with edge-counter feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 13335 --role W --fuzzer cmplog --trial 1 --seed 0131a107da449e69`; the 21-level ancestor chain contains 1 I2S-floor dash row (mutation_op = -) at depth 20, the lower-bound signal of an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose input cannot encode a fragment header (no reassembly path) where cmplog still resolves the aIsReassembled=true side significantly more than naive, showing the divergence is not gated by I2S-driven fragment-field synthesis."
+  },
+  "weakest_evidence_point": "The byte-diff shows winner/loser header bytes differ but does not directly pin a specific fragment-header next-header magic value to an I2S CMP operand, so the link from I2S substitution to the reassembly trigger is inferred from path hit-counts rather than a labeled operand.",
+  "confidence": "medium"
+}

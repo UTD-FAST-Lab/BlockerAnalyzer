@@ -1,0 +1,81 @@
+{
+  "branch_id": 166,
+  "target": "curl",
+  "summary_one_line": "Input must contain the literal host string \"127.0.0.1\" so !strcmp(host,\"127.0.0.1\") is true in the secure_context expression.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The parsed request host must equal the exact ASCII literal \"127.0.0.1\". The winning seeds carry the byte run 31 32 37 2e 30 2e 30 2e 31 (\"127.0.0.1\") in the URL/host region at offsets ~0x0d-0x15, which strcmp() compares byte-for-byte against the constant operand.",
+      "why_winner_satisfies": "Both cmplog and value_profile_cmplog winners produce seeds whose URL is HTTP://127.0.0.1:... — the byte diff shows W bytes concentrated to the exact ASCII digits of 127.0.0.1 across offsets 0x0d-0x15, matching the strcmp constant operand and driving the true side (W T=13).",
+      "why_loser_doesnt": "naive and value_profile losers never assemble the exact 9-byte literal; their bytes at the same offsets are dispersed garbage (%, ., +, digits) so strcmp returns non-zero and the false side is taken (L T=0 F=20).",
+      "mechanism_attribution": "cmplog/vpc intercept the strcmp(host,\"127.0.0.1\") call, record both operands in the CmpLogObserver buffer, and I2SRandReplace substitutes the constant operand \"127.0.0.1\" directly into the input at the offset where the current host string sits — converting a low-probability 9-byte-string match into a deterministic substitution. naive and value_profile lack I2SRandReplace and must stumble on the literal by chance, which they cannot."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a strcmp against the literal host string 127.0.0.1.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "http.c:2797",
+      "exact_quote": "!strcmp(host, \"127.0.0.1\") ||"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the ASCII literal 127.0.0.1 in the URL region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 3d12195f812303ed offsets 0x0d-0x15",
+      "exact_quote": "48 54 54 50 3a 2f 2f 31 32 37   ......HTTP://127"
+    },
+    {
+      "claim": "The 127.0.0.1 literal continues into the next 16-byte row of the winner seed.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 3d12195f812303ed offset 0x10",
+      "exact_quote": "2e 30 2e 30 2e 31 3a 39 30 30 3f 2f 38 35 30 00   .0.0.1:900?/850."
+    },
+    {
+      "claim": "At the host-string offsets the winners are concentrated on the exact 127.0.0.1 digits while losers are dispersed garbage, and the blocker true side fires only for W.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2797 d=1",
+      "exact_quote": "!strcmp(host, \"127.0.0.1\") ||  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner takes the true side 13 times while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L2797 W(T/F) vs L(T/F)",
+      "exact_quote": "d=1   L2797  T=13 F=0  T=0 F=20"
+    },
+    {
+      "claim": "Both decisive pairs differ only by the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta",
+      "exact_quote": "value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace which substitutes a recorded CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so it cannot perform operand substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Loser-blocking seeds carry no 127.0.0.1 literal, only dispersed bytes at the host offsets.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 00225bc4819174d2",
+      "exact_quote": "00 01 00 00 00 43 64 55 43 25 25 25 25 21 25 65   .....CdUC%%%%!%e"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 166 --role W --fuzzer cmplog --trial 1 --seed 3d12195f812303ed` and observed I2S-floor dash rows (mutation_op = -) at depth 3 and depth 4 of the ancestor chain; the tool reported '2 ancestor dash row(s) at depth 3, 4', direct lower-bound evidence of an I2SRandReplace find in the cmplog lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on strcmp(host,\"127.0.0.1\") where cmplog/vpc resolve the true branch no faster than naive/value_profile (no I2S advantage), which would mean the literal is not the gating feature."
+  },
+  "weakest_evidence_point": "The byte-diff offsets show concentration but the host string sits at a slightly shifted window per seed, so the exact strcmp offset is inferred from the URL layout rather than a single fixed offset.",
+  "confidence": "high"
+}

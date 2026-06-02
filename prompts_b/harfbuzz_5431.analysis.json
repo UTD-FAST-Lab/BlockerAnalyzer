@@ -1,0 +1,87 @@
+{
+  "branch_id": 5431,
+  "target": "harfbuzz",
+  "summary_one_line": "A cmap subtable whose 16-bit format field equals exactly 4 (or 12), so the switch hits an accelerated case instead of default.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed cmap subtable whose u.format field holds an exact accelerated value (case 4 or case 12), so the switch on subtable->u.format dispatches to a named case rather than falling through to the blocked default. This requires a parseable cmap table (the 'cmap' tag and a subtable offset chain) plus the format word set to the exact literal 0x0004 (or 0x000c).",
+      "why_winner_satisfies": "The winner-resolving seed contains a complete cmap structure: the ASCII 'cmap' tag at offset 0x0c-0x0f and a format-4 subtable header bytes (00 04) so the switch reaches case 4; in the per-role overlay the winner uniquely hits L1889 case 4 and the format4_accel init lines L1890-1893, and the false (default) side is resolved (W: T=0 F=1 at L1883).",
+      "why_loser_doesnt": "The loser-blocking seeds are tiny (13-68 bytes) with no recognizable cmap structure or valid format word, so subtable->u.format never matches an accelerated case and the switch falls to default; the overlay shows the loser stuck taking the default arm 10/10 (L1883 L T=10 F=0) and uniquely executing the generic get_glyph_from<CmapSubtable> path.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile's CMP_MAP. I2SRandReplace records the operands of the switch/equality comparison on subtable->u.format and copies the expected constant (4 or 12) directly into the input position that feeds the format word, solving the exact-equality gate in one step; value_profile only gets a Hamming-distance CMP_MAP bucket and must stumble onto the exact constant by havoc."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the default arm of a switch on subtable->u.format; the accelerated cases are 4 and 12.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1881-1889",
+      "exact_quote": "switch (subtable->u.format) {"
+    },
+    {
+      "claim": "The winner uniquely takes the format-4 case and initializes the format4 accelerator.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1889-1893",
+      "exact_quote": "this->format4_accel.init (&subtable->u.format4);"
+    },
+    {
+      "claim": "The default (false) side is the globally blocked side at line 1883.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 1883",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "On the call chain, the winner resolves case 4 (T=1) while the loser is stuck on default (T=10) and never reaches case 4.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1883 / L1889",
+      "exact_quote": "d=1   L1889  T=1 F=0  T=0 F=10  case  4:"
+    },
+    {
+      "claim": "The winner-resolving seed contains the ASCII 'cmap' tag, evidence of a parseable cmap table structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed f95aab45df7ef054 offset 0x0c",
+      "exact_quote": "63 6d 61 70"
+    },
+    {
+      "claim": "The winner-resolving seed contains a format-4 subtable header word (00 04).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed f95aab45df7ef054 offset 0x31",
+      "exact_quote": "00 04 00 00 00 ff ff ff ff"
+    },
+    {
+      "claim": "The loser-blocking seeds are tiny inputs lacking cmap structure (e.g. 13 bytes).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0003cbd2b6f5fff8",
+      "exact_quote": "size=13 bytes, fuzzer=value_profile"
+    },
+    {
+      "claim": "value_profile_cmplog (winner) carries I2SRandReplace; value_profile (loser) does not.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators / value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and instead relies on a coarse Hamming/prefix CMP_MAP distance bucket.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog over value_profile with delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": false,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5431 --role W --fuzzer value_profile_cmplog --trial 1 --seed f95aab45df7ef054`. The chain has 50 recorded ancestor levels and every level carries a havoc/token mutator list (BytesSwap, DwordAdd, TokenReplace, etc.); the tool reported 'No I2S-floor rows in this chain', so the dash-row floor signal is absent. more-seeds shows only this one winning seed is stored. I2S contribution may still exist in the leaked havoc bucket (I2SRandReplace is logged under the havoc names in the current build), and the technique delta of the pair is exactly I2S, but lineage did not corroborate the floor here."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a switch on a parsed 16-bit format field gated by exact equality shows value_profile resolving the accelerated case as often as value_profile_cmplog (no I2S advantage), refuting that I2S exact substitution is what closes the gap."
+  },
+  "weakest_evidence_point": "The I2S floor signal was not observed in the single winning seed's lineage (all-havoc chain), so the I2SRandReplace attribution rests on the pair's technique delta and the exact-equality switch shape rather than direct dash-row evidence.",
+  "confidence": "medium"
+}

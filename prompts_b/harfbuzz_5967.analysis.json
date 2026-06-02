@@ -1,0 +1,87 @@
+{
+  "branch_id": 5967,
+  "target": "harfbuzz",
+  "summary_one_line": "A text input whose Thai mark/consonant sequence drives the above/below state machine to emit action SDL, selecting SDL_mappings.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "Bytes decoded as a Thai cluster (mark following a consonant) whose state-machine transition yields the SDL action rather than NOP/SD/SL/RD, so the switch on `action` reaches `case SDL: pua_mappings = SDL_mappings`.",
+      "why_winner_satisfies": "All five winner-resolving seeds are naive-discovered and take the true branch; naive's broad havoc/token byte mutation explores enough Thai mark+consonant byte combinations that the action variable equals SDL, hitting line 148 (W) where the loser only reaches case SD (L 147).",
+      "why_loser_doesnt": "cmplog reaches SDL true only 2/10 trials and is blocked 8/10 for 17.40h; the SDL action is produced by internal state-machine table lookups (thai_above/below_state_machine), not by any CMP of an input byte against a constant, so cmplog's I2S substitution has no literal operand to inject here while its per-CMP callback cost slows raw byte exploration relative to naive (winner blocked only 3.90h).",
+      "mechanism_attribution": "The winner is naive, whose plain havoc + token mutators randomly walk the input bytes until the decoded Thai cluster transitions to the SDL action. No comparison introspection is involved on the winning side; cmplog's added input-to-state substitution stage targets CMP operands but the SDL dispatch is a switch on a value derived from state-machine tables, not an input-vs-constant compare, so I2S provides no aim and merely adds per-execution overhead, leaving naive's unencumbered havoc byte fuzzing to win."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is case SDL selecting SDL_mappings in thai_pua_shape.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-shaper-thai.cc:148:5",
+      "exact_quote": "case SDL: pua_mappings = SDL_mappings; break;"
+    },
+    {
+      "claim": "The decisive pair is naive winning over cmplog on the I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "naive resolves the branch in all 10 trials while cmplog is blocked in 8 of 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "subject 11",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=2/10  blocked=8  unreached=0"
+    },
+    {
+      "claim": "The loser spends far longer blocked than the winner.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "avg duration blocked",
+      "exact_quote": "avg duration blocked: winner=3.90h  loser=17.40h"
+    },
+    {
+      "claim": "All winner-resolving seeds were discovered by the naive fuzzer.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving seeds",
+      "exact_quote": "id=7ef4c9441fb609a2, size=37 bytes, fuzzer=naive, trial=1"
+    },
+    {
+      "claim": "The action that selects SDL_mappings is derived from state-machine table lookups, not an input-vs-constant CMP.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "do_thai_pua_shaping lines 247-253",
+      "exact_quote": "thai_action_t action = above_edge.action != NOP ? above_edge.action : below_edge.action;"
+    },
+    {
+      "claim": "The loser reaches case SD (L) while the winner reaches case SDL (W) in the switch.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 147-148",
+      "exact_quote": "[L]   147      case SD:  pua_mappings = SD_mappings; break;\n[W]   148      case SDL: pua_mappings = SDL_mappings; break; <-- BLOCKER"
+    },
+    {
+      "claim": "naive's mutators are plain havoc + token operators with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive section",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog's I2S stage substitutes a CMP operand it finds matching in the input, requiring a literal comparison to aim at.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "cmplog pays per-execution CMP callback and buffer-processing cost beyond naive.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Per-execution cost",
+      "exact_quote": "edge increment + one callback per intercepted\nCMP per execution + post-execution CMP-buffer processing."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Winner is naive (not cmplog/vpc), so the claimed enabling mechanism is naive havoc byte mutation, not I2SRandReplace; lineage dash-row verification is not applicable because the I2S floor signal only diagnoses cmplog/vpc I2S finds, and the loser here is cmplog. No I2S claim is made, so no lineage query was required."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness exposing the SDL action through an explicit input-byte == constant comparison where cmplog then resolves it markedly faster than naive, showing the dispatch is I2S-solvable and naive's advantage was not a havoc-vs-overhead effect."
+  },
+  "weakest_evidence_point": "The attribution that cmplog's I2S has no CMP operand to target is inferred from the state-machine source structure, not from a direct CMP-trace of the SDL dispatch.",
+  "confidence": "medium"
+}

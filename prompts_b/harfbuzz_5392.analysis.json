@@ -1,0 +1,81 @@
+{
+  "branch_id": 5392,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must begin with a valid OpenType sfnt-version FOURCC (e.g. 'OTTO' / TrueType) so the tag switch hits a non-collection case.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The first 4 input bytes must equal a recognized OpenType sfnt-version magic tag (CFFTag 'OTTO', TrueTag, Typ1Tag, or TrueTypeTag) so the switch on u.tag at line 511 reaches the case at line 512 instead of falling through to default at line 518.",
+      "why_winner_satisfies": "Every winner-resolving seed begins with the 4 bytes 4f 54 54 4f ('OTTO'); the BYTE DIFF shows offsets 0x00-0x03 are concentrated on exactly 4f/54/54/4f across all winners, matching the CFFTag literal the switch compares against.",
+      "why_loser_doesnt": "Loser-blocking seeds carry scattered, non-magic leading bytes (e.g. 87 0e 0d 0e, 00 00 00 00, e0 17 00 00); none of them equal an sfnt-version tag, so u.tag falls to default (line 518) and the true side of the switch case is never taken.",
+      "mechanism_attribution": "cmplog/vpc intercept the 32-bit tag comparison and log the constant operand (the sfnt-version magic) into CmpLogObserver; I2SRandReplace then substitutes that exact 4-byte constant into the input at the matching offset, manufacturing 'OTTO' at offset 0 directly rather than waiting for blind havoc to land 4 specific bytes. naive and value_profile lack I2SRandReplace and never resolve it."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is a switch case on the parsed tag, and the true (winning) side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-open-file.hh:512",
+      "exact_quote": "case CFFTag:\t/* All the non-collection tags */"
+    },
+    {
+      "claim": "The blocker is one arm of a switch over u.tag whose default arm is what losers take.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 511-518",
+      "exact_quote": "switch (u.tag) {"
+    },
+    {
+      "claim": "Winners take line 512 case arm; losers fall through to the default arm.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 512 and 518",
+      "exact_quote": "d=1   L 512  T=20 F=0  T=0 F=20  case CFFTag:"
+    },
+    {
+      "claim": "Winner-resolving seeds begin with the OTTO magic FOURCC.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed a83d70d6c940be88 offset 0x0000",
+      "exact_quote": "4f 54 54 4f 00 01 20 20 20 20 1c 20 47 53 55 42   OTTO"
+    },
+    {
+      "claim": "All winners are concentrated on bytes 4f 54 54 4f at offsets 0x00-0x03 while losers are not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0000-0x0003",
+      "exact_quote": "0x0000  4f(O)x20                            00(.)x4 e0(.)x2 05(.)x2 20( )x2 +10u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds carry non-magic scattered leading bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 003817559785f774 offset 0x0000",
+      "exact_quote": "87 0e 0d 0e 22 0e"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for a CMP operand and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, explaining why it loses to vpc.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs differ by the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5392 --role W --fuzzer value_profile_cmplog --trial 1 --seed a83d70d6c940be88` and observed an I2S-floor row (mutation_op = -) at depth 4 of the ancestor chain (tool reported '1 ancestor dash row(s) at depth 4')."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on a 4-byte magic tag where naive/value_profile resolve the case arm as fast as cmplog/vpc would refute the I2S-substitution attribution."
+  },
+  "weakest_evidence_point": "The seed metadata cannot show the literal I2SRandReplace mutator name (logging-bug); the dash-row floor is a lower bound, so the I2S attribution relies on a single nameless ancestor row.",
+  "confidence": "high"
+}

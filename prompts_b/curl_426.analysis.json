@@ -1,0 +1,75 @@
+{
+  "branch_id": 426,
+  "target": "curl",
+  "summary_one_line": "Input must supply a well-formed HTTP response whose status-line and headers fully parse so k->header clears to false, exiting header-parse mode.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A response payload containing the exact 'HTTP/' protocol-version literal (bytes 47 48 54 54 50 at offset 0x24) plus a syntactically complete header block terminated by CRLF, so Curl_http_readwrite_headers finishes parsing and clears k->header, letting the false branch at line 630 (and the body-write path at line 666) be taken.",
+      "why_winner_satisfies": "Winner seeds carry a stable, concentrated 'HTTP/' literal at offsets 0x24-0x28 (47(G)48(H)54(T)54(T)50(P)) followed by structured header bytes ('me@Lomewhere\\r\\n...o: fak'), and they actually hit the false side and body-write region (k->header taken-false count 20, line 666 reached, k->bytecount/Curl_client_write rows all [W]).",
+      "why_loser_doesnt": "Loser seeds replace those structured offsets with '%'-dominated noise (e.g. 0x24 is 50(P)/42(B)/9e/2e, 0x25-0x29 are %-runs), never assembling a parseable HTTP header block, so Curl_http_readwrite_headers keeps k->header set, the false side is never taken (loser taken-false = 0), and execution stays in header-parse mode.",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the CmpLogObserver buffer where curl's header parser compares input bytes against the 'HTTP/' protocol token and other header literals, then substitutes the matching operand directly into the input at the comparison offset; naive and value_profile lack I2SRandReplace and must blindly havoc-mutate the multi-byte 'HTTP/' literal and header structure, which they fail to do in 10/10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the header-mode test if(k->header) at transfer.c:630 with the false side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "transfer.c:630:8",
+      "exact_quote": "Source line:     if(k->header) {\nGlobally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Both decisive pairs are I2S-delta pairs where the I2S-equipped fuzzer resolves 10/10 and its non-I2S sibling blocks 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "The winner clears k->header and proceeds to the body-write block at line 666, which the loser never reaches.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L630 and L666",
+      "exact_quote": "if(k->header) {  <-- BLOCKER\n  d=1   L 666  T=17 F=23  T=0 F=0  if(!k->header && (nread > 0 || is_empty_data)) {"
+    },
+    {
+      "claim": "Winner seeds carry a stable HTTP/ literal at offset 0x24 that losers do not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0024",
+      "exact_quote": "0x0024  47(G)x20                            50(P)x2 42(B)x1 9e(.)x1 2e(.)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "Winner seed bytes show the GHTTP/ literal and a CRLF-terminated header line in the hex dump.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id d998cc3bf9d18a0c offset 0x20-0x3f",
+      "exact_quote": "0020: 02 00 00 00 47 48 54 54 50 2f 20 6d 65 40 4c 6f   ....GHTTP/ me@Lo"
+    },
+    {
+      "claim": "Loser seeds at the same offsets are dominated by '%' noise rather than a parseable header block.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0025",
+      "exact_quote": "0x0025  48(H)x19 68(h)x1                    25(%)x3 2e(.)x3 41(A)x2 64(d)x1 +1u  DIFFER"
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace which substitutes a CMP operand into the input at matching offsets; naive and value_profile lack it.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace, matching its loser role in pair 2.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 426 --role W --fuzzer cmplog --trial 1 --seed d998cc3bf9d18a0c`; observed 2 I2S-floor dash rows (mutation_op = -) at depths 7 and 8 in the ancestor chain, the floor signal for an unwrapped I2SRandReplace find in cmplog/vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A naive or value_profile trial resolving the false side of if(k->header) at a rate comparable to cmplog/vpc, or cmplog resolving it even when the input cannot contain the 'HTTP/' literal (e.g. that byte region forced to non-comparison data), would refute the I2S-literal-substitution mechanism."
+  },
+  "weakest_evidence_point": "I infer the substituted CMP operand is specifically the 'HTTP/' protocol token from byte stability at 0x24, but the prompt does not directly name which comparison curl's header parser performs, so the exact operand identity is inferred not proven.",
+  "confidence": "high"
+}

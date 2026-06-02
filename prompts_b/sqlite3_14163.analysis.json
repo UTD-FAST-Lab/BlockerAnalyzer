@@ -1,0 +1,75 @@
+{
+  "branch_id": 14163,
+  "target": "sqlite3",
+  "summary_one_line": "Input must contain a SQL token quoted with '[' so the dequoted first char equals '[' at sqlite3Dequote.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)", "value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A SQL string containing a bracket-quoted identifier whose opening quote char is the literal '[' (0x5b), so that after sqlite3Isquote accepts the quote, the byte tested at line 31402 equals '['. The winner must drive an executable input that reaches Dequote with z[0]=='['.",
+      "why_winner_satisfies": "The value_profile winner-resolving seed is a valid SELECT statement carrying a bracketed token '[13-3]' — byte 0x5b('[') sits at offset 0x1c and the closing 0x5d(']') at offset 0x21 — so when this token is dequoted, quote=='[' and the true branch is taken (winner hitcount=2 on the branch).",
+      "why_loser_doesnt": "The loser-blocking seeds are short, malformed fragments (e.g. ';d T 1S', 'T 1; c BINARY') with no '[' opening a quoted token; at the blocker line the losers never satisfy quote=='[' (L side L31402 shows T=0 F=20) and never even parse a valid bracketed identifier, so the equality byte is never produced.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs whose CMP operands move closer to matching: as havoc mutates bytes toward the syntactically-valid bracketed-SELECT shape, the per-CMP Hamming/prefix-distance buckets register incremental progress and preserve the partial inputs, letting value_profile climb to a parseable '[...]' token. naive lacks CMP_MAP feedback so it gets no gradient signal; in pair 2 value_profile_cmplog additionally has I2S yet still loses, showing the enabling technique is the CMP_MAP gradient (shared by both winner-pairs), not I2S."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Taking the blocked true side requires the dequote quote char to be '['.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "sqlite3.c:31402",
+      "exact_quote": "if( quote=='[' ) quote = ']';"
+    },
+    {
+      "claim": "value_profile is the winner over both naive and value_profile_cmplog at this branch.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "value_profile role",
+      "exact_quote": "winner (value_profile vs naive); winner (I2S vs value_profile_cmplog)"
+    },
+    {
+      "claim": "The winner-resolving seed is a SELECT statement containing a bracketed token, and it was found by value_profile.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id e77023f4c8c4c04a offsets 0x10-0x21",
+      "exact_quote": "33 3d 31 33 2d 33 2e 33 33 3d 31 33 5b 31 33 2d   3=13-3.33=13[13-"
+    },
+    {
+      "claim": "The winning seed carries the closing bracket ']' completing the bracketed token.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id e77023f4c8c4c04a offset 0x20",
+      "exact_quote": "33 5d 30 33 2d 33 2d 30 31 2d 30 00 00 7f ff 13   3]03-3-01-0....."
+    },
+    {
+      "claim": "The byte diff shows the winner uniquely carries '[' at offset 0x1c and ']' at 0x21 where the losers do not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x001c and 0x0021",
+      "exact_quote": "0x001c  5b([)x1"
+    },
+    {
+      "claim": "At the blocker line the loser inputs never satisfy quote=='[' (true side never taken on L).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L31402",
+      "exact_quote": "d=1   L31402  T=1 F=1  T=0 F=20  if( quote=='[' ) quote = ']';  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile has CMP_MAP gradient feedback that preserves inputs whose CMP operands approach matching.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace, so its advantage is not input-to-state substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile distance-bucket feedback), not I2SRandReplace, so the mandatory lineage I2S-floor check does not apply. Both decisive pairs have value_profile as winner; value_profile has no I2SRandReplace mutator per MECHANISM CONTEXT, and in pair 2 it beats value_profile_cmplog which DOES carry I2S, confirming the win is attributable to the shared CMP_MAP gradient and not to I2S substitution."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on quote=='[' where value_profile and naive resolve the branch at statistically indistinguishable rates (no CMP_MAP gradient advantage), which would show the bracket gate is not what value_profile's distance-bucket feedback is solving."
+  },
+  "weakest_evidence_point": "Only one value_profile winner-resolving seed is shown, so the inference that the '[' bracketed token is the necessary feature (rather than incidental to a larger valid-SQL requirement) rests on a single positive example.",
+  "confidence": "medium"
+}

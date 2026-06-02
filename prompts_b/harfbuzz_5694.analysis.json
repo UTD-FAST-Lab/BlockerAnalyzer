@@ -1,0 +1,81 @@
+{
+  "branch_id": 5694,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry a valid GDEF table (FOURCC 'GDEF' at offset 0x0c) so hb_ot_layout_has_glyph_classes returns true and the false branch is taken.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A font blob whose table directory contains the 4-byte tag 'GDEF' (47 44 45 46) at offset 0x0c, parsed into a GDEF table that defines glyph classes, so hb_ot_layout_has_glyph_classes(face) is true and the line-137 condition is false.",
+      "why_winner_satisfies": "Every winner-resolving seed places the literal bytes 47 44 45 46 ('GDEF') at offsets 0x0c-0x0f with a valid TrueType header (00 01 00 00) at the start, satisfying the table-directory lookup so the glyph-class probe succeeds and the false branch executes.",
+      "why_loser_doesnt": "Loser-blocking seeds carry arbitrary bytes at offsets 0x0c-0x0f (no 'GDEF' tag) and no valid table directory, so the face has no glyph classes; the true branch (line 138, plan.fallback_glyph_classes = true) is taken instead and hb_synthesize_glyph_classes runs.",
+      "mechanism_attribution": "cmplog/vpc intercept the 4-byte FOURCC comparison against 'GDEF' during table-directory parsing, record both operands in CmpLogObserver, and I2SRandReplace substitutes the expected 'GDEF' tag into the input at the matching offset; naive and value_profile lack I2SRandReplace and cannot synthesize the exact 4-byte magic, so they never resolve the false branch."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of a check on whether the face already has glyph classes (GDEF), gating fallback class synthesis.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-shape.cc:137",
+      "exact_quote": "if (!hb_ot_layout_has_glyph_classes (face))"
+    },
+    {
+      "claim": "Both decisive pairs differ only by the I2S technique and the winner resolves the branch in all 10 trials while the loser is blocked in all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair is value_profile_cmplog over value_profile, again an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the literal 'GDEF' FOURCC at offset 0x0c with a TrueType header at the start.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving Seed 1 (id=60bd962a3dc60d31)",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 47 44 45 46   ......      GDEF"
+    },
+    {
+      "claim": "At offsets 0x0c-0x0f the winner set is fully concentrated on the bytes spelling 'GDEF' while losers diverge entirely.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds take the true branch and have no GDEF table directory.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser-blocking seeds (take true branch)",
+      "exact_quote": "Loser-blocking seeds (take true branch)"
+    },
+    {
+      "claim": "When the loser takes the true branch the fallback class-synthesis function runs 381 times, but never in the winner set.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "hb_synthesize_glyph_classes",
+      "exact_quote": "0       381  hb-ot-shape.cc:hb_synthesize_glyph_classes(hb_buffer_t*)"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace reads the CMP buffer and substitutes the other operand at offsets where the input matches one operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the I2S delta is the only technique distinguishing the vpc winner from the vp loser.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5694 --role W --fuzzer cmplog --trial 1 --seed 60bd962a3dc60d31` and observed the I2S-floor signal: 2 ancestor dash rows (mutation_op = -) at depths 4 and 5 of the chain, characteristic of unwrapped I2SRandReplace finds in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on hb_ot_layout_has_glyph_classes where cmplog resolves the false branch as fast as naive even when the 'GDEF' FOURCC is removed from the seed corpus and table directory, showing the 4-byte tag match is not the I2S-solved gate."
+  },
+  "weakest_evidence_point": "The branch resolution depends on a full valid GDEF table parse (header + class definitions), not merely the 'GDEF' tag bytes; I2S supplies the tag but downstream structural validity may be the true determinant.",
+  "confidence": "high"
+}

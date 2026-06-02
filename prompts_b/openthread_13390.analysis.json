@@ -1,0 +1,75 @@
+{
+  "branch_id": 13390,
+  "target": "openthread",
+  "summary_one_line": "A context ID byte must NOT equal the mesh-local-prefix constant and must instead match a context ID embedded in a parsed PrefixTlv/ContextTlv.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "Input must supply an aContextId byte distinct from Mle::kMeshLocalPrefixContextId (so the line-177 equality is false) while carrying a well-formed PrefixTlv->ContextTlv whose embedded context ID equals that same byte, letting the loop at line 183/187 match and resolve the false-branch path.",
+      "why_winner_satisfies": "Winner cmplog seeds carry concentrated, structured TLV-shaped runs (e.g. the fd-de-ad-00-be-ef mesh-local-prefix-like bytes at 0x19-0x1e present in every W seed) and resolve the false branch in 10/10 trials, driving the line-183 TlvIterate loop (W T=0 F=45 at line 183) and the IsOnMesh path (45 W hits) rather than GetContextForMeshLocalPrefix.",
+      "why_loser_doesnt": "Loser naive seeds take the true branch (aContextId == magic), invoking GetContextForMeshLocalPrefix (47 L hits, 0 W hits) and never entering the TLV-iteration loop; naive blocks the false side in 8/10 trials because random havoc rarely lands the byte that makes the equality false yet still matches an embedded ContextTlv id.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver entry from the line-177/line-187 integer compares and substitutes the recorded other-operand (the context ID seen in the parsed TLV) into the aContextId offset, solving the relational equality that naive's havoc/token stack cannot target directly."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is an equality test of aContextId against the mesh-local-prefix context constant, and the globally blocked side is false.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7",
+      "exact_quote": "if (aContextId == Mle::kMeshLocalPrefixContextId)"
+    },
+    {
+      "claim": "The false-branch path leads into the PrefixTlv iteration loop that matches an embedded context ID against aContextId.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L53,L57",
+      "exact_quote": "if ((contextTlv == nullptr) || (contextTlv->GetContextId() != aContextId))"
+    },
+    {
+      "claim": "Winner cmplog seeds resolve the false branch in all 10 trials while loser naive blocks it in 8/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1, L28-L29",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "Winner seeds carry a concentrated mesh-local-prefix-like byte run absent in losers, evidencing structured TLV content.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "0x0019-0x001e",
+      "exact_quote": "0x0019  fd(.)x10                            ff(.)x10                            DIFFER"
+    },
+    {
+      "claim": "The winner drives the TLV-iteration loop while the loser takes the mesh-local-prefix path, shown by inverted line-177 branch counts.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L104 d=1 line 177",
+      "exact_quote": "T=0 F=45  T=31 F=0  if (aContextId == Mle::kMeshLocalPrefixContextId)"
+    },
+    {
+      "claim": "GetContextForMeshLocalPrefix is invoked only by the loser, confirming the true/false role split.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "L93",
+      "exact_quote": "0        47  ot::NetworkData::LeaderBase::GetContextForMeshLocalPrefix(ot::Lowpan::Context&) const"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a recorded CMP operand into matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators, L221-L224",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S capability, only havoc and token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op, L276",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 13390 --role W --fuzzer cmplog --trial 1 --seed 09d1aa462b9734c9` and observed 1 I2S-floor dash row (mutation_op = -) at depth 9 of the 10-level ancestor chain; tool printed 'I2S-floor signal: 1 ancestor dash row(s) at depth 9.'"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where aContextId is compared to a runtime-derived context ID under cmplog still shows no cmplog>naive advantage on the false branch, or naive resolves the false branch as fast as cmplog at equal budget."
+  },
+  "weakest_evidence_point": "The exact dataflow link from the concentrated 0x19-0x1e byte run to the aContextId compare operand is inferred from source structure rather than directly traced through the parser.",
+  "confidence": "medium"
+}

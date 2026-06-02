@@ -1,0 +1,81 @@
+{
+  "branch_id": 6585,
+  "target": "harfbuzz",
+  "summary_one_line": "An Oriya-script glyph sequence whose current codepoint is 0x0B0F or 0x0B13 must appear in the buffer for the switch arm to be taken.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "The decoded glyph buffer must (1) select the HB_SCRIPT_ORIYA switch arm and (2) at some loop position have a current codepoint equal to 0x0B0F or 0x0B13, i.e. the input must encode the exact little-endian glyph bytes 0F 0B or 13 0B at a 4-byte glyph slot so buffer->cur().codepoint hits that case label.",
+      "why_winner_satisfies": "Every naive_ctx winner seed is built from repeated 4-byte glyph records and several carry the literal 0f 0b / 13 0b codepoint pattern: winner seed 89dfff878e1186bc and 61a1738ca6c821b1 both begin '13 0b 00 00', placing 0x0B13 as a current glyph; the per-role overlay shows the winner takes line 199 TRUE 15 times (T=15 F=60) while the loser never does (T=0).",
+      "why_loser_doesnt": "Loser naive seeds reach the ORIYA loop but their glyph bytes never present 0x0B0F/0x0B13 as a current codepoint at line 199 (loser T=0 F=150 on the TRUE-deciding case row); their bytes are scattered high/ASCII values (e.g. cb cb cb, 72 61 66 'raf', 6f6f6f) so the codepoint match never fires and the matched flag stays false.",
+      "mechanism_attribution": "naive_ctx's CtxHook folds the caller-chain hash into the edge-map index, so reaching the deeply nested per-codepoint case inside the ORIYA loop under this specific call context registers as a NEW (call-context, edge) bucket that bare naive never distinguishes; this finer coverage granularity keeps the seeds that march the buffer index toward the 0x0B0F/0x0B13 codepoint, letting naive_ctx resolve the true side while naive sees no novelty and abandons it."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the ORIYA switch arm gated on current codepoint 0x0B0F or 0x0B13.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L199",
+      "exact_quote": "case 0x0B0Fu: case 0x0B13u:"
+    },
+    {
+      "claim": "The blocked true side is only reachable inside the HB_SCRIPT_ORIYA loop.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L190-L194",
+      "exact_quote": "case HB_SCRIPT_ORIYA:"
+    },
+    {
+      "claim": "The matched outcome additionally requires the next glyph to equal 0x0B57.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L200",
+      "exact_quote": "matched = 0x0B57u == buffer->cur (1).codepoint;"
+    },
+    {
+      "claim": "The winner takes the true side at line 199 (T=15) while the loser never does (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L199",
+      "exact_quote": "T=15 F=60  T=0 F=150  case 0x0B0Fu: case 0x0B13u:  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner naive_ctx seeds carry the literal 13 0b codepoint bytes that place 0x0B13 as a current glyph.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 89dfff878e1186bc",
+      "exact_quote": "13 0b 00 00 ff 0d 8e 12 13 0b 00 00 00 0d 00 ff"
+    },
+    {
+      "claim": "Loser naive seeds contain scattered non-Oriya bytes rather than the required codepoint pattern.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 6f30fd62dd63099f",
+      "exact_quote": "65 65 65 65 10 00 00 59 10 00 00 59 10 fe 00 00"
+    },
+    {
+      "claim": "The winner resolves all 10 trials while the loser is blocked all 10, defining the decisive ctx_coverage pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+    },
+    {
+      "claim": "naive_ctx's CtxHook folds call context into the edge-map index so a context+edge pair is treated as new coverage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx",
+      "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "naive_ctx uses only havoc/token mutators with no I2S or CMP_MAP comparison-solving.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx",
+      "exact_quote": "No `I2SRandReplace`, no\nCMP_MAP."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "context-sensitive coverage",
+    "verified_in_lineage": false,
+    "verification_method": "Mechanism is naive_ctx CtxHook (context-sensitive coverage), not I2SRandReplace, so the mandatory cmplog lineage query does not apply; the winner is naive_ctx whose MECHANISM CONTEXT explicitly states no I2SRandReplace and no CMP_MAP, and seed mutation_op fields show only havoc/token ops."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where naive_ctx fails to resolve this branch any faster than bare naive even though the only nesting difference is the per-codepoint switch depth inside a script-selected loop, indicating context-sensitive coverage granularity is not what drives the divergence."
+  },
+  "weakest_evidence_point": "The claim that the finer (call-context, edge) granularity specifically rewards marching the buffer index toward 0x0B0F/0x0B13 is inferred from mechanism description plus seed bytes, not directly observed in lineage.",
+  "confidence": "medium"
+}

@@ -1,0 +1,81 @@
+{
+  "branch_id": 5857,
+  "target": "harfbuzz",
+  "summary_one_line": "Structured glyph-record bytes that drive an Indic Ra+Halant syllable to form a Reph (POS_RA_TO_BECOME_REPH), reached by plain havoc not I2S.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "An input whose decoded glyph stream forms an Indic consonant syllable beginning with Ra+Halant in a Reph-capable script, so that has_reph becomes true and info[start] is tagged POS_RA_TO_BECOME_REPH, making the loop at line 849 take its true side. Winner seeds carry repeated 4-byte little-endian glyph-record words (e.g. bf 0c 00 00) rather than ASCII sfnt table tags.",
+      "why_winner_satisfies": "The naive winner-resolving seed is filled with structured repeated 4-byte records (bf 0c 00 00 ... bf 0c 00 00) that decode into the glyph sequence needed to set POS_RA_TO_BECOME_REPH; the W role hits line 850 (the reph-mask loop body) and line 644 (info[start].indic_position() = POS_RA_TO_BECOME_REPH), both W-only.",
+      "why_loser_doesnt": "The cmplog loser-blocking seeds are dominated by ASCII sfnt table tags surfaced by CMP interception (kern at offset 0x05, GPOS spelled by G/P/O/S at offsets 0x0c-0x0f); these steer the corpus toward valid-table-name inputs on non-reph paths, so info[start].indic_position() never equals POS_RA_TO_BECOME_REPH and line 849 stays on its false side.",
+      "mechanism_attribution": "The winner is naive, which has no input-to-state mutator and reaches the branch by plain havoc byte mutation (BytesCopyMutator/ByteAddMutator/BytesSetMutator) drifting into the structured-glyph-record byte regime. The delta is the comparison-solving technique: cmplog substitutes intercepted font-table-tag operands (kern/GPOS) back into the input, fixating the cmplog corpus on table-name strings and steering it AWAY from the glyph-record bytes needed for Reph. This is an anti-comparison-solving effect: the enabling technique for the winner is havoc-only byte mutation, and the comparison-solving substitution actively hurts the loser."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is naive>cmplog with delta I2S; naive is the winner and cmplog the loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "The blocked true side is the Reph loop gated on indic_position() == POS_RA_TO_BECOME_REPH.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 849",
+      "exact_quote": "for (unsigned int i = start; i < end && info[i].indic_position() == POS_RA_TO_BECOME_REPH; i++)"
+    },
+    {
+      "claim": "POS_RA_TO_BECOME_REPH is assigned only when has_reph is set, i.e. when a Ra-initial reph-forming syllable was detected.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 643-644",
+      "exact_quote": "info[start].indic_position() = POS_RA_TO_BECOME_REPH;"
+    },
+    {
+      "claim": "The naive winner-resolving seed is built from repeated 4-byte structured glyph-record words rather than ASCII text.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 61118ed1d1d7f65e",
+      "exact_quote": "bf 0c 00 00 bf 0c 00 00 bf 0c 00 00 bf 00 00 80"
+    },
+    {
+      "claim": "The W role hits the reph-mask loop body at line 850 that the L role does not.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 850",
+      "exact_quote": "[W]   850        info[i].mask |= indic_plan->mask_array[INDIC_RPHF];"
+    },
+    {
+      "claim": "The cmplog loser-blocking seeds contain the ASCII sfnt table tag 'kern'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0237ec581d21f6c0",
+      "exact_quote": "ff 20 20 20 20 6b 65 72 6e 20 df 10 20 0a 00 00   .    kern .. ..."
+    },
+    {
+      "claim": "Across the loser seeds the bytes at offsets 0x0c-0x0f concentrate on G/P/O/S, spelling the sfnt table tag GPOS.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  bf(.)x1                             47(G)x4 20( )x3 8a(.)x1 bf(.)x1 +1u  PARTIAL"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes intercepted CMP operands (such as table-name strings) back into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mutator, so the winner reaches the branch by plain havoc byte mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5857 --role W --fuzzer naive --trial 2 --seed 61118ed1d1d7f65e`. The winner is naive (no I2S mutator), so this is an anti-I2S divergence and I2SRandReplace is NOT the winning mechanism; lineage verification of an I2S floor is not applicable. The chain is havoc/token mutators end to end (BytesCopyMutator, ByteAddMutator, ByteInterestingMutator, etc.). It does report 1 dash row at depth 24, but the prompt's caveat states dash-row=I2S holds only for cmplog/vpc; naive uses plain LineageMutator and cannot produce an I2S find, so that lone deep dash row is a cross-pollinated/early-corpus ancestor, not evidence of I2S in the winner."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where seeding the cmplog CMP buffer with the Indic glyph-record byte values needed for POS_RA_TO_BECOME_REPH lets cmplog resolve the branch as fast as or faster than naive — showing I2S does not steer the corpus away from the reph-forming bytes."
+  },
+  "weakest_evidence_point": "The claim that I2S actively diverts cmplog toward font-table-tag strings (kern/GPOS) is inferred from loser-seed byte content plus the I2SRandReplace description, not from a direct trace of which CMP operands cmplog substituted.",
+  "confidence": "medium"
+}

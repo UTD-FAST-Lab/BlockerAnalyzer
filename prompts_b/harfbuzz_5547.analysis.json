@@ -1,0 +1,87 @@
+{
+  "branch_id": 5547,
+  "target": "harfbuzz",
+  "summary_one_line": "Reaching get_feature_list requires a parseable GSUBGPOS table whose FourCC tag bytes GSUB/GPOS sit at offsets 0x0c-0x0f.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "An sfnt header whose table-directory record carries the literal 4-byte ASCII tag 'GSUB' (0x47 0x53 0x55 0x42) or 'GPOS' (0x47 0x50 0x4f 0x53) at offsets 0x0c-0x0f, so the OpenType table-tag dispatch routes the bytes into a GSUBGPOS structure and get_feature_list() (and the false/default arm at line 4253) is exercised.",
+      "why_winner_satisfies": "Every winner-resolving seed places the exact FourCC 'GPOS' or 'GSUB' run at offsets 0x0c-0x0f; the BYTE DIFF confirms those four offsets are saturated to the ASCII tag bytes for W (47(G)x20, 50(P)x16/53(S)x4, 4f(O)x16/55(U)x4, 53(S)x16/42(B)x4) while L holds none, satisfying the magic-tag comparison that gates table parsing.",
+      "why_loser_doesnt": "Loser-blocking seeds are short and contain no GSUB/GPOS tag at 0x0c-0x0f (bytes there are 00/01/20/2c), so the table-tag comparison never matches, the GSUBGPOS structure is never parsed, and the default arm at 4253 is only ever taken on the true side (L4253 T=236 F=0) without resolving the blocked false side.",
+      "mechanism_attribution": "cmplog/vpc intercept the table-tag memcmp/integer comparison against the constant 'GSUB'/'GPOS', record both operands into the CmpLogObserver buffer, and I2SRandReplace substitutes the constant tag bytes into the input at the matching offsets; naive and value_profile lack I2SRandReplace and cannot synthesize the exact 4-byte tag by chance, so they stay blocked."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of a switch on the GSUBGPOS table version, reached only after the table is parsed.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L4253",
+      "exact_quote": "default: return Null (FeatureList);"
+    },
+    {
+      "claim": "Both decisive pairs differ by exactly the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair is value_profile_cmplog over value_profile, also an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal FourCC tag GPOS in the table directory.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 002c9ad92acce91b offset 0x0c",
+      "exact_quote": "00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+    },
+    {
+      "claim": "Another winner-resolving seed carries the literal FourCC tag GSUB.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 001eeb5a047b00d0 offset 0x0c",
+      "exact_quote": "00 01 00 00 00 04 00 ff 00 30 00 20 47 53 55 42   .........0. GSUB"
+    },
+    {
+      "claim": "Offsets 0x0c-0x0f are saturated with the ASCII GSUB/GPOS tag bytes for W but differ entirely for L.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds are short and lack the tag bytes, so they never resolve the blocked false side.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 003817559785f774 (6 bytes)",
+      "exact_quote": "87 0e 0d 0e 22 0e                                 ....\"."
+    },
+    {
+      "claim": "The loser never takes the false (default) side of the blocker while the winner does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L4253",
+      "exact_quote": "d=1   L4253  T=80 F=62  T=236 F=0  default: return Null (FeatureList);  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog records both CMP operands and I2SRandReplace substitutes one operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so it cannot perform the operand substitution that cmplog/vpc can.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5547 --role W --fuzzer cmplog --trial 1 --seed 002c9ad92acce91b`; the 31-level ancestor chain contains I2S-floor dash rows (mutation_op = -) at depth 29 and 30, the floor signal for an unwrapped I2SRandReplace find under cmplog in the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on the 4-byte GSUB/GPOS tag at offset 0x0c in which naive/value_profile resolve the branch as often as cmplog/vpc, showing the exact tag is reachable without I2S substitution."
+  },
+  "weakest_evidence_point": "The exact input offset of the tag comparison (0x0c) is inferred from seed bytes and the sfnt table-directory layout rather than from an instrumented CMP-operand record, so a different alignment could shift the relevant offsets.",
+  "confidence": "high"
+}

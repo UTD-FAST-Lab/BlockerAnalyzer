@@ -1,0 +1,87 @@
+{
+  "branch_id": 5784,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must drive compose_hebrew to found==true (or set has_gpos_mark) so line 81 takes its false branch instead of the Hebrew fallback.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)", "value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A font/buffer payload where the base Unicode composition c->unicode->compose(a,b,ab) succeeds (found==true) or has_gpos_mark is set, so the conjunction !found && !has_gpos_mark is false. Winning seeds carry BCP47-tag/structural bytes (e.g. 'zh-hant-ht', 'zh-H[nt-ht') that steer the shaper into a font path producing successful composition rather than the Hebrew presentation-form fallback.",
+      "why_winner_satisfies": "Winner-resolving seeds reach line 81 and take BOTH sides (T=14 F=12), i.e. they do reach the false branch and resolve it; avg hitcount on branch winner=8 vs loser=0. They are diverse naive/value_profile havoc/structural inputs (ASCII language-tag runs) that occasionally make found==true so the fallback is skipped.",
+      "why_loser_doesnt": "Loser-blocking seeds hit line 81 only on the true side (T=67 F=0) and never the false side; their bytes are Hebrew-combining-mark-like sequences that miss compose() and keep re-entering the switch(b) fallback. The I2S fuzzers are stuck pumping CMP-matched combining-mark codepoints into the switch arms and never escape to found==true.",
+      "mechanism_attribution": "The WINNERS are the non-I2S fuzzers (naive beats cmplog; value_profile beats value_profile_cmplog). The escape to the false branch is NOT a CMP-solving event: it needs the broad structural/havoc exploration of the input that occasionally yields a successfully-composing base+mark pair. The I2S/CMP_MAP machinery actively over-fits the loser onto the switch(b) equality arms (matching Hebrew mark literals like 0x05B7/0x05BC), which is exactly the true-branch trap, so the I2S fuzzers blocked. Winner = plain havoc/structural mutation, with no CMP-operand substitution involved (havoc-only)."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false branch of the compose_hebrew guard at line 81.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7",
+      "exact_quote": "Source line:   if (!found && !c->plan->has_gpos_mark)\nGlobally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Both decisive pairs have the non-I2S fuzzer as winner over the I2S-equipped fuzzer.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26,L34",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "The second decisive pair is value_profile beating value_profile_cmplog with the same I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L34",
+      "exact_quote": "--- Pair 2: value_profile > value_profile_cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "found is computed from the base Unicode composition before the fallback guard at line 81.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L75-L81",
+      "exact_quote": "bool found = (bool) c->unicode->compose (a, b, ab);"
+    },
+    {
+      "claim": "Winner-resolving seeds carry BCP47 language-tag ASCII bytes, signature of naive/structural inputs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 6b306d62da957568 offsets 0x07-0x0f",
+      "exact_quote": "zh-hant-h"
+    },
+    {
+      "claim": "Winner seeds reach line 81 and take its false side, while loser seeds only take the true side (blocked).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L189-L190 (line 81)",
+      "exact_quote": "d=1   L  81  T=14 F=12  T=67 F=0  if (!found && !c->plan->has_gpos_mark)  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner hits the branch (hitcount 8) while loser never does (hitcount 0).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L31 (Pair 1)",
+      "exact_quote": "avg hitcount on branch: winner=8  loser=0"
+    },
+    {
+      "claim": "The loser-blocking seeds repeatedly enter the switch(b) fallback arms keyed on Hebrew mark codepoints.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L96,L113",
+      "exact_quote": "switch (b) {"
+    },
+    {
+      "claim": "cmplog/vpc winners would be driven by I2SRandReplace substituting CMP operands into the input; here those fuzzers are the losers, so the winner's escape is not I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "L320-L323 (cmplog mutators)",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile (a winner) has no I2SRandReplace, only havoc/token mutators, confirming the winning escape is plain havoc/structural exploration.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "L392 (value_profile mutators)",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only, not I2SRandReplace, so lineage verification is not mandatory. The decisive winners are naive and value_profile, both of which lack I2SRandReplace per MECHANISM CONTEXT; the I2S-equipped fuzzers (cmplog, value_profile_cmplog) are the LOSERS. There is no winning cmplog/vpc seed whose lineage could carry an I2S-floor dash row to attribute the win to I2S. The winner's escape to the false branch (found==true) is reached by broad havoc/structural byte exploration, not CMP-operand substitution."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness in which adding I2SRandReplace (cmplog) makes the fuzzer reach line 81's false branch MORE often (or as often) than naive — i.e. the I2S fuzzers ceasing to be the losers — would refute the claim that I2S actively traps the fuzzer in the switch(b) fallback and that the escape is havoc-only."
+  },
+  "weakest_evidence_point": "The causal claim that I2S/CMP_MAP feedback actively over-fits the loser onto the switch(b) equality arms (rather than the I2S fuzzers merely being slower for unrelated reasons) is inferred from the true-only hit pattern, not directly observed in lineage.",
+  "confidence": "medium"
+}

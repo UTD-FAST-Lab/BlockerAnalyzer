@@ -1,0 +1,99 @@
+{
+  "branch_id": 13302,
+  "target": "openthread",
+  "summary_one_line": "Reaching the non-matching false side needs diverse multi-entry list content, which I2S substitution destroys by collapsing inputs onto repetitive escape-literal text.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)", "value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A SRP/DNS-update payload diverse enough to build a multi-entry router/cache linked list whose first scanned entry does NOT match the Ip6::Address indicator, so the FindMatching loop iterates and the entry->Matches() comparison takes its false side instead of matching/terminating immediately.",
+      "why_winner_satisfies": "Winner seeds (naive, value_profile) carry heterogeneous, structured byte content (e.g. naive seed 1 begins dc 62 5c 00 00 00 ff fe ff 78 30 30 ... with varied fields) and the winner hit the false branch 1140 times (naive), evidence the loop iterated over non-matching entries.",
+      "why_loser_doesnt": "Loser seeds (cmplog, value_profile_cmplog) are dominated by repetitive `5c 78 30 30` (\"\\x00\") escape runs; the loser's comparison-substitution mutator overwrites byte spans with logged CMP operands, collapsing inputs toward a single homogeneous pattern that never builds the diverse list needed to drive the loop's false side (loser hitcount on branch = 0).",
+      "mechanism_attribution": "The winner wins by LACKING the comparison-substitution stage: plain havoc/token mutation (BytesSetMutator, TokenReplace, ByteDecMutator, WordInterestingMutator) preserves input diversity, so the corpus retains varied list-building payloads. The loser's operand-substitution mutator repeatedly rewrites byte spans to matching CMP operands, homogenizing the input and starving the false-branch path — an anti-comparison-solving divergence won by pure havoc exploration."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false (non-matching) side of entry->Matches in a linked-list FindMatching loop.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7",
+      "exact_quote": "Source line:             if (entry->Matches(aIndicator))\nGlobally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "The branch sits inside a for-loop scanning list entries, so the false side requires a non-matching entry during traversal.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L55-L57 linked_list.hpp:470-472",
+      "exact_quote": "for (entry = aBegin; entry != aEnd; aPrevEntry = entry, entry = entry->GetNext())"
+    },
+    {
+      "claim": "The decisive pairs are both I2S-delta with the non-I2S fuzzer winning.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26, L34",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "Second decisive pair: value_profile beats value_profile_cmplog on the I2S axis.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L34",
+      "exact_quote": "--- Pair 2: value_profile > value_profile_cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "The winner hit the branch's false side 1140 times while the loser never did.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L31",
+      "exact_quote": "avg hitcount on branch: winner=1140  loser=0"
+    },
+    {
+      "claim": "A winning naive seed carries heterogeneous structured byte content.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00123255f0c0a666 offset 0x00",
+      "exact_quote": "0000: dc 62 5c 00 00 00 ff fe ff 78 30 30 33 62 5c 00"
+    },
+    {
+      "claim": "Winning seeds were produced by plain havoc/token mutation operators, not I2S.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00123255f0c0a666",
+      "exact_quote": "mutation_op=BytesSetMutator,ByteInterestingMutator"
+    },
+    {
+      "claim": "A winning value_profile seed was produced by TokenReplace.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00901525a2acfd44",
+      "exact_quote": "fuzzer=value_profile, trial=2, discovered_at=96s, mutation_op=TokenReplace"
+    },
+    {
+      "claim": "Loser-blocking seeds are dominated by repetitive escape-literal runs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 004413684432e458 offset 0x00",
+      "exact_quote": "0000: f5 f5 f5 38 30 5c 78 30 30 5c 78 30 30 5c 78 30"
+    },
+    {
+      "claim": "I2SRandReplace overwrites input byte spans with logged CMP operands.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators L179-L182",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "The naive winner uses plain havoc+token mutators with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive section L234",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile carries no I2S mutator either.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators L251",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only, not I2SRandReplace, so the mandatory I2S-floor lineage check does not apply. The winners are naive and value_profile, which carry NO I2SRandReplace mutator (see MECHANISM CONTEXT), and the winning seeds shown were produced by plain havoc/token ops (BytesSetMutator, TokenReplace, ByteDecMutator, WordInterestingMutator). The divergence is anti-I2S: the I2S-bearing losers (cmplog/vpc) underperform, so no winning-seed dash-row floor is expected or needed."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where enabling I2SRandReplace increases (rather than decreases) the rate of hitting the non-matching false side of the list-scan comparison, showing I2S does not homogenize inputs away from the false branch here."
+  },
+  "weakest_evidence_point": "The claim that I2S operand-substitution causes input homogenization toward repetitive escape runs is inferred from loser-seed byte patterns, not directly traced through a lineage chain.",
+  "confidence": "medium"
+}

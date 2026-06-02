@@ -1,0 +1,75 @@
+{
+  "branch_id": 6236,
+  "target": "harfbuzz",
+  "summary_one_line": "A valid sfnt header plus a recognized OpenType table tag (GSUB/GPOS) so the table directory passes check_range bounds and decrements max_ops.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must begin with a well-formed sfnt/TrueType font header (00 01 00 00 sfnt version) followed by a table directory whose entries carry recognized 4-byte ASCII table tags such as 'GSUB' or 'GPOS' at fixed offsets, so the recursive sanitize walk reaches check_range with a non-degenerate len and a base inside [start,end].",
+      "why_winner_satisfies": "Every winner-resolving seed begins with the constant sfnt header bytes 00 01 00 00 and embeds the literal ASCII tags GSUB/GPOS/GPOS at offsets 0x0c-0x0f, the exact 4-byte table tags the sanitize code memcmp's against; this drives the structure-traversal that invokes check_range ~110000 times and takes the false branch.",
+      "why_loser_doesnt": "Loser-blocking seeds are tiny (6-35 bytes), lack the sfnt header constant and any 4-byte table tag at the magic offsets (their offset 0x0c-0x0f bytes are 00/space/random), so the table directory never validates and check_range is reached only ~20 times, never on the resolving path.",
+      "mechanism_attribution": "cmplog and value_profile_cmplog add I2SRandReplace, which reads the per-execution CmpLogObserver buffer recording the operands of the tag/version comparisons, scans the input for the matching operand and substitutes the target constant (sfnt version, GSUB/GPOS tags) directly at the right offset; naive and plain value_profile lack I2SRandReplace and cannot reliably synthesize these 4-byte magic constants by blind havoc."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of the check_range bounds-and-max_ops gate in hb-sanitize.hh.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-sanitize.hh:239:9",
+      "exact_quote": "(this->max_ops -= len) > 0);"
+    },
+    {
+      "claim": "check_range is entered via a structural sanitize/check_struct walk over font tables.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "caller line 300",
+      "exact_quote": "{ return likely (this->check_range (obj, obj->min_size)); } <-- CALL"
+    },
+    {
+      "claim": "Winner inputs carry the sfnt header constant and the GSUB/GPOS table tags at the head of the input.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed id=0183ae69d883d0e1 offset 0x00 and 0x0c",
+      "exact_quote": "00 01 00 00 00 01 ee ff 00 30 00 20 47 53 55 42   .........0. GSUB"
+    },
+    {
+      "claim": "Winner inputs concentrate the ASCII table-tag bytes G/P/O/S at offsets 0x0c-0x0f whereas loser inputs do not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x4 20( )x2 2c(,)x1 2b(+)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds are tiny and lack the font header structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed id=003817559785f774 size=6 bytes",
+      "exact_quote": "Seed 1 (id=003817559785f774, size=6 bytes, fuzzer=naive, trial=1, discovered_at=0s, mutation_op=ByteDecMutator,WordAddMutator):"
+    },
+    {
+      "claim": "The winner reaches check_range orders of magnitude more often than the loser, consistent with completing the structural traversal.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "check_range W=110000 L=20",
+      "exact_quote": "110000        20  hb_sanitize_context_t::check_range(void const*, unsigned int) const"
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace which substitutes a logged CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, the technique distinguishing the loser in pair 2.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 6236 --role W --fuzzer cmplog --trial 1 --seed 02bcc5cdfb7e9955`; the chain has 45 ancestor levels and the tool reported 'I2S-floor signal: 2 ancestor dash row(s) at depth 43, 44.' (mutation_op = -, ParentInfo-only) — direct lower-bound evidence of I2SRandReplace contribution in the winning cmplog seed's ancestry."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating check_range behind a 4-byte sfnt/tag constant in which naive and value_profile resolve the false branch at the same rate as cmplog/vpc within the budget, showing the magic constant is reachable without I2S substitution."
+  },
+  "weakest_evidence_point": "The dash-row signal is only a lower bound for I2S and the exact CMP operand that I2SRandReplace substituted (sfnt version vs. a specific table tag) is inferred from byte concentration, not directly logged.",
+  "confidence": "high"
+}

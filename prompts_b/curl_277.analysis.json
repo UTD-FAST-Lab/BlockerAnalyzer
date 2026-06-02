@@ -1,0 +1,81 @@
+{
+  "branch_id": 277,
+  "target": "curl",
+  "summary_one_line": "Input must drive the Content-Disposition value to exactly equal the string \"attachment\" so curl_strequal's case-insensitive compare succeeds.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A parsed mime/header configuration whose disposition string equals the exact literal \"attachment\" (10 bytes, case-insensitive), so that curl_strequal(disposition, \"attachment\") returns true and the true branch at mime.c:1830 is taken; the winning corpus reaches it via a structured Content-Type header section that lets disposition be set and compared against the embedded literal.",
+      "why_winner_satisfies": "Winner-resolving seeds carry the structured header bytes 'Content-Typ' at offsets 0x24+ and a populated header region (e.g. 'Content-Type:where'); the blocker true side is reached 28 times by W and 0 by L, and W spends far less time blocked (cmplog 6.20h vs naive 22.50h). I2S in cmplog/vpc copies the 'attachment' operand recorded by the strcmp/strequal CMP callback directly into the disposition bytes, manufacturing the exact match havoc almost never stumbles onto.",
+      "why_loser_doesnt": "Loser-blocking seeds (naive/value_profile) are short 42/38/44-byte inputs whose header region is absent or garbage (e.g. '------d', '%A&%%c%dC', 'reee/rrr'); they never present a disposition equal to \"attachment\", so curl_strequal returns false (L hits the true side 0 times, false side 21) and the branch stays blocked for ~21-22h.",
+      "mechanism_attribution": "cmplog/value_profile_cmplog add I2SRandReplace: the curl_strequal/strcmp callback records the literal operand \"attachment\", and I2SRandReplace substitutes it into the input at the disposition offset, satisfying the exact-string equality. naive and plain value_profile lack I2SRandReplace, so they must blindly mutate the multi-byte literal and fail."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true branch requires disposition to be equal to the literal string \"attachment\" via curl_strequal.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "mime.c:1830",
+      "exact_quote": "if(disposition && curl_strequal(disposition, \"attachment\") &&"
+    },
+    {
+      "claim": "Both decisive pairs differ by exactly the I2S technique, attributing the divergence to I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "The second decisive pair value_profile_cmplog > value_profile is also an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "Winner-resolving seeds contain a structured Content-Type header region the loser seeds lack.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 3ada62fdafca01cd offsets 0x20-0x3f",
+      "exact_quote": "....GContent-Typ"
+    },
+    {
+      "claim": "Loser-blocking seeds are short garbage inputs without a coherent header section.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 18d48c8a6b6d8917 (naive, 42 bytes)",
+      "exact_quote": "......A.------d."
+    },
+    {
+      "claim": "Winner reaches the blocker true side many times while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1830 BLOCKER row",
+      "exact_quote": "if(disposition && curl_strequal(disposition, \"attachment\"...  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner is blocked far less time than loser, consistent with I2S quickly manufacturing the match.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 avg duration blocked",
+      "exact_quote": "avg duration blocked: winner=6.20h  loser=22.50h"
+    },
+    {
+      "claim": "cmplog and value_profile_cmplog add I2SRandReplace which copies a recorded CMP operand into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive and value_profile lack I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 277 --role W --fuzzer value_profile_cmplog --trial 1 --seed 3ada62fdafca01cd`; observed two I2S-floor dash rows (mutation_op = -) at depth 18 and 19 of the 20-level ancestor chain, the lower-bound signal of an unwrapped I2SRandReplace find in cmplog/vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating the true branch on curl_strequal(x, \"attachment\") in which cmplog/vpc resolve at the same rate as naive/value_profile (no I2S advantage), or in which the loser fuzzers resolve it within the campaign budget."
+  },
+  "weakest_evidence_point": "The exact input offset where the disposition string is set and compared is inferred from the Content-Type header path, not directly pinpointed by a single concentrated W-vs-L byte offset carrying the literal \"attachment\".",
+  "confidence": "medium"
+}

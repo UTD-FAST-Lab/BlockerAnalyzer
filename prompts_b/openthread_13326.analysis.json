@@ -1,0 +1,69 @@
+{
+  "branch_id": 13326,
+  "target": "openthread",
+  "summary_one_line": "Input must carry the IPv6 next-header byte equal to kProtoIcmp6 (0x3a) so the switch dispatches to the ICMP6 case.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "An IPv6 packet whose next-header / protocol field byte equals the ICMPv6 protocol constant kProtoIcmp6 = 0x3a, so that the `switch (aIpProto)` at ip6.cpp:938 matches `case kProtoIcmp6` and routes to mIcmp.HandleMessage at line 972.",
+      "why_winner_satisfies": "Winner cmplog seeds carry the literal 0x3a (ascii ':') in the parsed protocol position — seed 1 has `10 3a` at offset 0x06-0x07 and the byte-diff shows offset 0x29 concentrated on 3a(:)x8 for W versus 00 for L; these match the kProtoIcmp6 dispatch value, so the W role uniquely hits line 972 `case kProtoIcmp6` (W marked, L not).",
+      "why_loser_doesnt": "Naive loser seeds never settle the protocol field on 0x3a — at the divergent offset 0x29 the L bytes are 00(.)x7, never the 3a needed, so the loser falls through to the default arm and blocks the true side; the per-trial vector shows naive resolved only 2/10.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver entry recorded when `aIpProto` is compared against the immediate kProtoIcmp6 (0x3a) in the switch lowering, then substitutes 0x3a into the input at the offset whose old byte matched the other CMP operand — directly planting the magic protocol constant that naive's blind havoc mutators must stumble onto by chance."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the kProtoIcmp6 arm of a switch on aIpProto at ip6.cpp:938, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "ip6.cpp:938:5",
+      "exact_quote": "Source line:     case kProtoIcmp6:"
+    },
+    {
+      "claim": "Taking the case routes to mIcmp.HandleMessage at line 972, hit only by the winner role.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 972",
+      "exact_quote": "[W]   972      case kProtoIcmp6:"
+    },
+    {
+      "claim": "Winner cmplog seed 1 carries 0x3a in the parsed protocol position.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 4f1af37e9d5867a4 offset 0x06-0x07",
+      "exact_quote": "0000: 77 66 20 11 00 00 10 3a 7f 02 b0 07 ff ff ff fc"
+    },
+    {
+      "claim": "At divergent offset 0x29 the W bytes concentrate on 3a while L bytes are 00.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0029",
+      "exact_quote": "0x0029  3a(:)x8 02(.)x1 24($)x1                     00(.)x7 29())x2 30(0)x1"
+    },
+    {
+      "claim": "Naive loser resolved only 2/10 while cmplog winner resolved 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "subject 21",
+      "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a recorded CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S, only havoc + token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 13326 --role W --fuzzer cmplog --trial 1 --seed 4f1af37e9d5867a4` and observed the I2S-floor signal: 1 ancestor dash row (mutation_op = -) at depth 25 of the 26-level chain, which in cmplog/vpc indicates an unwrapped I2SRandReplace find."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on `if (proto_byte == 0x3a)` where cmplog and naive resolve at statistically equal rates — i.e. naive plants 0x3a as fast as cmplog despite no CMP introspection."
+  },
+  "weakest_evidence_point": "The exact input offset that maps to aIpProto is inferred from byte-diff concentration (0x29 / 0x07) rather than a confirmed parse offset, so the 0x3a placement could be at a different protocol field than assumed.",
+  "confidence": "high"
+}

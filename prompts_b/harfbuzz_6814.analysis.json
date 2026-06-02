@@ -1,0 +1,106 @@
+{
+  "branch_id": 6814,
+  "target": "harfbuzz",
+  "summary_one_line": "Resolving the CPAL palette-index guard needs a well-formed COLR/CPAL font table whose magic FOURCCs match exactly, requiring both I2S substitution and CMP_MAP gradient.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must carry the exact font-table magic FOURCCs at fixed offsets: '_COLR' (5f 43 4f 4c 52) at 0x1b-0x1f and the 'hcts'-style tag bytes at 0x14-0x17, so that the harfbuzz table directory parses and palette_index stays < numPalettes to reach a populated CPAL table.",
+      "why_winner_satisfies": "All five winner-resolving seeds (value_profile_cmplog) contain the literal '_COLR' run at 0x1b-0x1f and the c/t/s tag bytes at 0x15-0x17; the byte diff shows these offsets are concentrated to a single W value (e.g. 5f(_)x10, 43(C)x10, 4f(O)x10, 4c(L)x10, 52(R)x10).",
+      "why_loser_doesnt": "The value_profile loser seeds carry language-tag/text bytes ('-hant-hk', 'zh-hant', 'jban') and never place the '_COLR' FOURCC at 0x1b-0x1f; at those offsets the L byte set is dominated by 00 with no concentrated _COLR run.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer, finds the harfbuzz table-tag comparison operands, and substitutes the exact expected FOURCC (e.g. _COLR) at the matching input offsets — value_profile lacks I2SRandReplace and cannot place the literal magic bytes deterministically."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Beyond the magic tags, the input must drive the multi-field CPAL/COLR header (version, numPalettes, colorRecordIndices, offsets) close enough that palette_index < numPalettes and the table validates — a multi-byte numeric gradient the fuzzer must climb.",
+      "why_winner_satisfies": "Winner seeds show a structured header region (00 01 00 00 00 02 ... 00 09 ... 00 08) at 0x00-0x12 that the value_profile CMP_MAP gradient can incrementally tune; the branch is hit 220 times on the winner (avg hitcount=220) vs 0 on the loser.",
+      "why_loser_doesnt": "The cmplog loser, lacking CMP_MAP feedback, gets no Hamming/prefix-distance reward for partially-correct multi-byte header fields, so it never preserves the intermediate near-match corpus needed to climb to a valid palette_index; loser resolved=0/10 blocked=10.",
+      "mechanism_attribution": "value_profile's CMP_MAP records a coarse operand-distance bucket per CMP, rewarding inputs whose header fields get progressively closer to the validating values; cmplog (without CMP_MAP) sees only edge buckets and gets no gradient on the multi-field numeric checks."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "There are two decisive pairs, one with delta I2S and one with delta value_profile, both won by value_profile_cmplog.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 + Pair 2 headers",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The I2S-delta pair pits value_profile_cmplog against value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal _COLR FOURCC at offsets 0x1b-0x1f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 offset 0x10-0x1f",
+      "exact_quote": "00 08 00 20 68 cb 74 73 01 19 00 5f 43 4f 4c 52   ... h.ts..._COLR"
+    },
+    {
+      "claim": "At offsets 0x1b-0x1f the winner bytes are concentrated on the single _COLR literal while the loser bytes are not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x1b-0x1f",
+      "exact_quote": "0x001b  5f(_)x10                            00(.)x18 47(G)x8 f8(.)x6 01(.)x3 +21u  DIFFER"
+    },
+    {
+      "claim": "Winner bytes at 0x1f are uniformly R (52) and 0x1e uniformly L (4c), completing the _COLR run.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x1e-0x1f",
+      "exact_quote": "0x001f  52(R)x10                            00(.)x24 04(.)x6 01(.)x5 53(S)x4 +16u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds carry language-tag text rather than font-table magic.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 offset 0x10-0x1f",
+      "exact_quote": "79 2d 68 61 6e 74 2d 68 6b 00 20 00 00 00 ff 01   y-hant-hk. ....."
+    },
+    {
+      "claim": "cmplog provides I2SRandReplace which substitutes one CMP operand for the other at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace, so it cannot place literal CMP operands.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile's CMP_MAP rewards inputs whose CMP operands get closer to matching, giving a gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "cmplog has only edge-bucket feedback like naive, no CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Feedback",
+      "exact_quote": "**Feedback**: same edge-bucket signal as naive. The CMP buffer is\nconsumed by the mutator, not by feedback."
+    },
+    {
+      "claim": "The winner hits the branch 220 times while the loser never reaches it.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 avg hitcount line",
+      "exact_quote": "avg hitcount on branch: winner=220  loser=0"
+    },
+    {
+      "claim": "The winner header region shows structured multi-byte fields amenable to gradient climbing.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 offset 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 02 01 02 00 00 00 09 00 00 00 00   ................"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 6814 --role W --fuzzer value_profile_cmplog --trial 4 --seed 21547386f8d16a62` and observed one I2S-floor dash row (mutation_op = -) at depth 46 of the 47-level ancestor chain, which against the value_profile loser is direct lower-bound evidence of an I2SRandReplace find."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic CPAL/COLR harness gated only on the _COLR FOURCC literal where value_profile resolves the branch as fast as value_profile_cmplog, showing the magic-tag gate alone does not need I2S substitution."
+  },
+  "weakest_evidence_point": "The value_profile-axis (CMP_MAP gradient) hypothesis is inferred from the structured multi-byte header rather than from an explicit per-field distance trace, so the exact field driving the gradient is uncertain.",
+  "confidence": "medium"
+}

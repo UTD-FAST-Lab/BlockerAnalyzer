@@ -1,0 +1,81 @@
+{
+  "branch_id": 5671,
+  "target": "harfbuzz",
+  "summary_one_line": "Take the false branch by supplying a well-formed sfnt header with a COLR table tag at offset 0x0c so get_glyph_extents succeeds for the base codepoint.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A valid OpenType/sfnt structure: the 00 01 00 00 sfnt version at offset 0x00, a literal 'COLR' four-byte table tag at offset 0x0c, and consistent table-directory offset/length fields so font->get_glyph_extents returns true (non-zero) for buffer->info[base].codepoint, taking the negated false branch at line 328.",
+      "why_winner_satisfies": "Every winner-resolving seed carries the exact byte run 00 01 00 00 00 01 ... 43 4f 4c 52 ('COLR') at offsets 0x00-0x0f and stable directory bytes (e.g. 00 00 00 18, 01 ee 7f 0a), giving a parseable glyph store; the W role hits line 335 onward and runs position_mark, while line 328 shows W T=0 F=20 (always false = extents succeed).",
+      "why_loser_doesnt": "Loser-blocking seeds are unstructured garbage (e.g. runs of bf bf bf, 3d 3d '==', 37 37 '7') with no COLR tag at 0x0c, so get_glyph_extents fails, the true branch is taken (L 328 T=27 F=0), and execution falls into zero_mark_advances and returns early.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which plain value_profile lacks: the per-execution CmpLogObserver captures the magic-number / tag comparisons (sfnt version, 'COLR' tag) and I2SRandReplace substitutes the exact constant operands into the input, planting the required literals at their offsets so get_glyph_extents succeeds. Plain value_profile has only Hamming/prefix-distance bucket feedback (no operand substitution), so it can register being 'close' to the tag but cannot place the exact 4-byte literal, and stays blocked all 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the negated extents call; the false (resolved) side requires get_glyph_extents to succeed for the base codepoint.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-7",
+      "exact_quote": "if (!font->get_glyph_extents (buffer->info[base].codepoint,"
+    },
+    {
+      "claim": "Winner resolves all 10 trials while loser is blocked all 10, an I2S-delta pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner seeds contain a valid sfnt header and the literal COLR table tag at offsets 0x00-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00722b1acd0aaeac offsets 0x00-0x0f",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 43 4f 4c 52   ......      COLR"
+    },
+    {
+      "claim": "The COLR tag and header bytes are stable across winner seeds (consistent byte sets at the tag offsets).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  43(C)x10                            00(.)x4 df(.)x1 f1(.)x1 37(7)x1 +3u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds are unstructured garbage with no COLR tag, e.g. runs of bf and 3d bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 006ae19c29c5da15 / 0059bffc70552fa0",
+      "exact_quote": "0000: bf bf bf bf bf bf bf bf bf bf 00 00 00 00 00 00   ................"
+    },
+    {
+      "claim": "At the blocker line the winner role always takes false (extents succeed) while loser always takes true (extents fail).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L328",
+      "exact_quote": "d=1   L 328  T=0 F=20  T=27 F=0  if (!font->get_glyph_extents (buffer->info[base].codepoint,  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser execution falls into zero_mark_advances after extents fail, winner runs position_mark instead.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "W/L hits table",
+      "exact_quote": "0        27  hb-ot-shape-fallback.cc:zero_mark_advances(hb_buffer_t*, unsigned int, unsigned int, bool)"
+    },
+    {
+      "claim": "value_profile_cmplog has I2SRandReplace while value_profile does not, the only mechanism delta in this pair.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace plus the per-execution CMP buffer over plain value_profile.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5671 --role W --fuzzer value_profile_cmplog --trial 1 --seed 00722b1acd0aaeac` and observed an I2S-floor dash row (mutation_op = -, ParentInfo-only) at depth 34 of the 35-level ancestor chain; tool reported '1 ancestor dash row(s) at depth 34', the lower-bound floor signal for an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on get_glyph_extents success in which value_profile resolves the false branch as fast as value_profile_cmplog despite needing the exact 4-byte 'COLR' tag literal — showing the CMP_MAP gradient alone, without I2S operand substitution, suffices to plant the literal."
+  },
+  "weakest_evidence_point": "Whether the decisive comparison I2S substitutes is the 'COLR' tag specifically versus the sfnt version or another table-directory constant — the byte diff shows multiple stable literal offsets and the exact CMP that gates extents success is inferred, not directly observed.",
+  "confidence": "high"
+}

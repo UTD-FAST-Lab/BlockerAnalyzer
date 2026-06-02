@@ -1,0 +1,75 @@
+{
+  "branch_id": 527,
+  "target": "curl",
+  "summary_one_line": "Zone-id after IPv6 '%' must begin with the literal ASCII digits \"25\" followed by a non-']' byte to take the true branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Inside a bracketed IPv6 host '[...%XX...]', the two bytes immediately after the '%' zone-id marker must be the literal ASCII string \"25\" (0x32 0x35), and the following byte must be present and not ']'. This satisfies strncmp(h,\"25\",2)==0 && h[2] && h[2]!=']'.",
+      "why_winner_satisfies": "The winning vpc seed contains '5b 25 32 35' = '[%25' at offsets 0x06-0x09; the bytes after '%' are exactly 0x32 0x35 (\"25\"), and a '.' (0x2e) follows at 0x0a, so strncmp matches and h[2] is non-']'.",
+      "why_loser_doesnt": "Every loser-blocking seed has a different pair of bytes after '%' (e.g. '[%11', '[%01', '[%31'); none of them spell the literal \"25\", so strncmp(h,\"25\",2) is non-zero and the true branch is never taken.",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator, which reads the buffered strncmp(h,\"25\",2) operands from the CMP buffer and substitutes the constant \"25\" directly into the input at the comparison's input offset, instantly satisfying the literal gate. Plain value_profile has only the CMP_MAP prefix-distance bucket and havoc/token mutators (no I2SRandReplace), so it must blindly land the exact two-byte literal by chance and never does in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking true branch requires the bytes after the zone-id pointer h to begin with the literal \"25\".",
+      "cited_section": "BLOCKER",
+      "cited_locator": "urlapi.c:600",
+      "exact_quote": "if(!strncmp(h, \"25\", 2) && h[2] && (h[2] != ']'))"
+    },
+    {
+      "claim": "h points just past the '%' that follows the IPv6 host content, so the literal \"25\" must appear immediately after the percent sign.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "urlapi.c:594-598",
+      "exact_quote": "char *h = &hostname[len + 1];"
+    },
+    {
+      "claim": "The winning vpc seed contains the bytes '[%25' which place the literal \"25\" right after the '%'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id a6c98d560acaad26, offsets 0x06-0x0a",
+      "exact_quote": "00 01 00 00 00 19 5b 25 32 35 2e 2e 5d 00 2e 00   ......[%25..]..."
+    },
+    {
+      "claim": "Loser-blocking seeds have a different two-byte sequence after '%' (e.g. '[%11'), failing the strncmp.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id c4ac2ace49d41647, offsets 0x06-0x0a",
+      "exact_quote": "00 01 00 00 00 19 5b 25 31 31 5d 00 40 25 72 73   ......[%11].@%rs"
+    },
+    {
+      "claim": "At the byte-diff offsets the winner carries '2','5' where losers carry '1','0','3' etc., the exact discriminating dataflow.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x08-0x09",
+      "exact_quote": "0x0008  32(2)x1                             31(1)x4 30(0)x1 e7(.)x1 33(3)x1 +2u  DIFFER"
+    },
+    {
+      "claim": "Only the winner takes the true side of L600 (W T=1 F=0 vs L T=0), the decisive divergence.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L600",
+      "exact_quote": "if(!strncmp(h, \"25\", 2) && h[2] && (h[2] != ']'))  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog's mutator set includes I2SRandReplace, the technique distinguishing it from value_profile.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and relies on CMP_MAP distance buckets instead, so it cannot substitute the literal.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 527 --role W --fuzzer value_profile_cmplog --trial 2 --seed a6c98d560acaad26`; the 21-level ancestor chain shows two I2S-floor dash rows (mutation_op = -) at depth 19 and depth 20, the ParentInfo-only signature of an unwrapped I2SRandReplace find in vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on strncmp(h,\"25\",2) where value_profile resolves the branch as often as value_profile_cmplog, showing the literal two-byte substitution is not the I2S-specific advantage."
+  },
+  "weakest_evidence_point": "Only one winner-resolving seed is available, so the claim that the '25' literal (rather than the surrounding '[%...]' bracket structure) is the I2S-substituted token rests on a single byte-level example corroborated by the BYTE DIFF distribution.",
+  "confidence": "high"
+}

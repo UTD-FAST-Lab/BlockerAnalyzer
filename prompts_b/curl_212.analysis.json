@@ -1,0 +1,93 @@
+{
+  "branch_id": 212,
+  "target": "curl",
+  "summary_one_line": "Input must carry a recognizable 'HTTP/' status-line prefix so the first header parses, advancing k->headerline past zero.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A header payload whose first complete header line begins with the literal protocol token 'HTTP/' (bytes 0x47 0x54 0x54 0x50 0x2f) at the start of the status line, so checkprotoprefix/sscanf recognizes it as a valid first header and the false (already-counted) side of `if(!k->headerline)` is reached on the next line.",
+      "why_winner_satisfies": "All winner-resolving seeds carry the literal 'HTTP/' bytes (offsets 0x24-0x29 hold 47(G)/48(H)/54(T)/54(T)/50(P)/2f(/)), which sscanf parses as a status line so k->headerline is incremented and the false branch is taken; winners resolve 10/10 with hitcount ~4739-4903.",
+      "why_loser_doesnt": "Loser-blocking seeds carry 'From:' (offsets 0x26-0x2e show 72(r)/6f(o)/6d(m)/3a(:)/73(s)) instead of the protocol token, so checkprotoprefix returns STATUS_BAD and the function returns CURLE_UNSUPPORTED_PROTOCOL before the false branch; losers block 10/10 with hitcount 0.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver operand of the strcmp/memcmp inside checkprotoprefix (the 'HTTP/' literal) and substitutes it into the input at the matching offset, synthesizing the protocol prefix that pure havoc (naive/value_profile) cannot land on the multi-byte literal; both decisive pairs differ only by the I2S stage."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the if(!k->headerline) test at the first complete header line; the false side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "http.c:3971:8",
+      "exact_quote": "Source line:     if(!k->headerline) {"
+    },
+    {
+      "claim": "Both decisive pairs differ only by the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "The second decisive pair value_profile_cmplog>value_profile is also an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "Winner seeds contain the literal 'HTTP/' protocol token at offset 0x24.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 2, offset 0x0020",
+      "exact_quote": "02 00 00 00 47 48 54 54 50 2f 25 6d 65 61 06 24"
+    },
+    {
+      "claim": "Loser seeds carry 'From:' instead of the HTTP protocol token at the corresponding offset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1, offset 0x0020",
+      "exact_quote": "02 00 00 00 47 46 72 6f 6d 3a 20 6d 65 40 73 6f"
+    },
+    {
+      "claim": "At offsets 0x26-0x2e the W byte set is concentrated on the HTTP token while L holds 'rom...s', a genuine DIFFER region.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0026",
+      "exact_quote": "0x0026  54(T)x19 74(t)x1                    72(r)x17 00(.)x2 64(d)x1            DIFFER"
+    },
+    {
+      "claim": "On the loser path checkprotoprefix returns STATUS_BAD which leads to CURLE_UNSUPPORTED_PROTOCOL before the false branch is reached.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L3976-L3981",
+      "exact_quote": "if(st == STATUS_BAD) {"
+    },
+    {
+      "claim": "The loser-only hit at L3979 confirms the loser takes the STATUS_BAD return path.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L3979",
+      "exact_quote": "if(!data->set.http09_allowed) {"
+    },
+    {
+      "claim": "The winner resolves 10/10 while the loser blocks 10/10 with zero hitcount in pair 1.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 counts",
+      "exact_quote": "avg hitcount on branch: winner=4739  loser=0"
+    },
+    {
+      "claim": "I2SRandReplace substitutes one CMP operand into the input at offsets matching the other operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace, so it cannot perform operand substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 212 --role W --fuzzer cmplog --trial 1 --seed 00a044736f809ce4` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 27 and 28 of the 29-level ancestor chain; tool reports 'I2S-floor signal: 2 ancestor dash row(s) at depth 27, 28', direct lower-bound evidence of an I2SRandReplace contribution in the winning seed's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on the multi-byte 'HTTP/' literal in which cmplog/vpc fail to resolve the false branch any faster than naive/value_profile (no I2S advantage), or in which the loser fuzzers resolve it via plain havoc within the budget."
+  },
+  "weakest_evidence_point": "The assumption that checkprotoprefix's internal comparison against 'HTTP/' is the specific CMP whose operand I2S substitutes; the byte evidence shows the token presence but the prompt does not directly show the CmpLogObserver entry for that literal.",
+  "confidence": "high"
+}

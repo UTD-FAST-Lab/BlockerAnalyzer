@@ -1,0 +1,75 @@
+{
+  "branch_id": 13391,
+  "target": "openthread",
+  "summary_one_line": "Input must encode an ICMPv6 next-header byte (0x3a=58) so headers.IsIcmp6() is true; naive's havoc lands it while cmplog's I2S does not.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A parsed IPv6 header whose next-header / IP-proto field equals ICMPv6 (58 = 0x3a). Concretely the input must carry the byte 0x3a in the header region (offsets ~0x07-0x0e in the winner seeds) so that headers.IsIcmp6() returns true at line 131 and GetIcmpHeader().GetType() is reached.",
+      "why_winner_satisfies": "Winner (naive) seeds are dense with the byte 0x3a in offsets 0x07-0x0e (e.g. '3a 3a 33 31 3a 3a 3a 30'), giving the ICMPv6 proto marker that drives the IsIcmp6() true branch; the byte diff confirms W concentrates on 3a at those offsets while L does not.",
+      "why_loser_doesnt": "Loser (cmplog) seeds put non-ICMPv6 values in the same header region (offset 0x07 = 00 or 29, offset 0x08 = 7f/40/ff), so IsIcmp6() stays false; line 131 in L is taken false 32 times and true 0 times.",
+      "mechanism_attribution": "This is an I2S-ANTI divergence: the winner is plain naive, the loser is cmplog (the comparison-logging fuzzer). naive's undirected havoc/byte mutation stumbles onto the 0x3a ICMPv6 marker by saturating the header bytes with a single repeated value (havoc-only). cmplog adds nothing useful here: the proto check is a constant compare not surfaced as a productive CmpLog operand, so cmplog's extra comparison-substitution stage finds no operand to substitute toward 0x3a and instead spends mutation budget on substitutions that misdirect away from this branch. Plain havoc byte mutation wins; the comparison-substitution technique is a net disadvantage."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of headers.IsIcmp6() at history_tracker.cpp:131, which gates GetIcmpHeader().GetType().",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6, L131",
+      "exact_quote": "entry->mIcmp6Type            = headers.IsIcmp6() ? headers.GetIcmpHeader().GetType() : 0;"
+    },
+    {
+      "claim": "The globally blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "The decisive pair is naive > cmplog with delta I2S, i.e. naive is the winner and cmplog (the I2S fuzzer) is the loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "Winner seeds carry a dense run of 0x3a (the ICMPv6 proto byte, 58) in the header region offsets 0x07-0x0e.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 id=d3396de23a76ce4b offset 0x0000-0x000f",
+      "exact_quote": "cb 62 5c 02 ff 00 10 3a 3a 33 31 3a 3a 3a 30 00"
+    },
+    {
+      "claim": "Loser seeds place non-ICMPv6 bytes (00, 29, 7f) in the same header region, so IsIcmp6() stays false.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 id=0096c8a9856dd0ab offset 0x0000-0x000f",
+      "exact_quote": "78 66 10 01 00 00 00 29 01 00 00 00 00 00 00 00"
+    },
+    {
+      "claim": "At line 131 the winner takes the true side while the loser only ever takes the false side (32 times), confirming the IsIcmp6 condition separates W from L.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L131",
+      "exact_quote": "d=1   L 131  T=3 F=0  T=0 F=32  entry->mIcmp6Type            = headers.IsIcmp6() ? header..."
+    },
+    {
+      "claim": "The byte-diff signal shows W concentrates on the proto/header bytes that L does not, e.g. offset 0x07 is 3a in W but 00/29 in L.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0007",
+      "exact_quote": "0x0007  3a(:)x3                             00(.)x7 29())x3                     DIFFER"
+    },
+    {
+      "claim": "cmplog's only added technique over naive is I2SRandReplace operating on intercepted CMP operands; naive uses pure havoc/token mutation with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators / naive Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Winner is naive (no I2S mutator), so I2SRandReplace is not the winning mechanism and lineage is not mandatory. The winning naive seeds (e.g. Seed 1 mutation_op=ByteDecMutator,ByteAddMutator,ByteNegMutator; Seed 3 includes ByteRandMutator) reach the branch via undirected byte mutation that saturates the header region with 0x3a; no CMP-introspection step is involved. This is an I2S-anti pair where cmplog under-performs naive."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on IsIcmp6() in which cmplog reaches the true branch as fast as or faster than naive, showing I2SRandReplace is not a disadvantage here and the divergence is not driven by the 0x3a proto-byte requirement."
+  },
+  "weakest_evidence_point": "The claim that cmplog's I2SRandReplace actively misdirects away from the 0x3a marker is inferential; the seeds show naive lands 0x3a but do not directly demonstrate why cmplog fails to.",
+  "confidence": "medium"
+}

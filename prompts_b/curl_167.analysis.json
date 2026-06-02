@@ -1,0 +1,81 @@
+{
+  "branch_id": 167,
+  "target": "curl",
+  "summary_one_line": "Input must encode a structured HTTP request (method + URL + range state) so httpreq is GET/HEAD and use_range is set, taking the Range-header true branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The harness input must parse into a well-formed HTTP request whose method maps to HTTPREQ_GET or HTTPREQ_HEAD and which enables a range (data->state.use_range), so the true branch at http.c:2858 fires; this requires non-zero method/URL/header tokens at specific offsets (e.g. the 'po'/'://127.0.0'/method bytes) rather than an all-zero buffer.",
+      "why_winner_satisfies": "Winner cmplog seeds carry concentrated ASCII request structure — bytes like '70 6f' ('po'), '33 3a 2f 2f 31 32 37 2e 30 2e 30' ('3://127.0.0'), '38 35 30' ('850'), and '47 70 72 6f 6d 3a 20' ('Gprom: ') — that decode to a GET/HEAD request with range state, so use_range is true at 2852 and the GET/HEAD test at 2858 takes T, reaching free()/aprintf at 2861-2863 ([W] lines).",
+      "why_loser_doesnt": "The naive loser seed is almost entirely zero bytes (offsets 0x06,0x07,0x09-0x12,0x24-0x31 all 0x00 where the winner has ASCII), so it does not decode to a GET/HEAD method; it reaches use_range true (L2852 T=1) but fails the GET/HEAD test, taking F at 2858 into the POST/PUT else-if at 2865 ([L] lines).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer (recording the operands of the httpreq==HTTPREQ_GET/HEAD integer compares and the strcmp/memcmp of method/header tokens) and substitutes the matching constant operand into the input at the compared offset, manufacturing the exact method/token bytes that naive can only reach by blind havoc."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is gated on httpreq being GET or HEAD combined with a Range-header check.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "http.c:2858",
+      "exact_quote": "if(((httpreq == HTTPREQ_GET) || (httpreq == HTTPREQ_HEAD)) && <-- BLOCKER"
+    },
+    {
+      "claim": "Reaching the branch first requires use_range to be set, and the true side leads to building the Range header.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "http.c:2852,2862",
+      "exact_quote": "data->state.aptr.rangeline = aprintf(\"Range: bytes=%s\\r\\n\","
+    },
+    {
+      "claim": "Winner cmplog seeds contain concentrated ASCII HTTP request structure (method/URL/header tokens).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed e7b4feb262a3f0aa offsets 0x06-0x24",
+      "exact_quote": "00 01 00 00 00 19 70 6f 00 33 3a 2f 2f 31 32 37   ......po.3://127"
+    },
+    {
+      "claim": "Winner seeds carry an additional header-like token 'Gprom: ' that the loser lacks.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed e7b4feb262a3f0aa offset 0x24",
+      "exact_quote": "1f 00 00 00 47 70 72 6f 6d 3a 20 80 65 40 30 6f   ....Gprom: .e@0o"
+    },
+    {
+      "claim": "The loser naive seed is largely zero bytes at the offsets where the winner holds ASCII method/URL tokens.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x06-0x0c",
+      "exact_quote": "   0x0006  70(p)x3                             00(.)x1                             DIFFER"
+    },
+    {
+      "claim": "The loser takes the false side at 2858 and falls into the POST/PUT else-if, never reaching the Range true branch.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L2858, L2865",
+      "exact_quote": "  d=1   L2858  T=0 F=3  T=0 F=1  if(((httpreq == HTTPREQ_GET) || (httpreq == HTTPREQ_HEAD)...  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which reads CmpLogObserver operands and substitutes the matching operand into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mutator and only havoc/token operators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog resolves the branch in all 10 trials while naive blocks in all 10, with prob_div=1.00.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "prob_div=1.00  dur_div=6.50h  hit_div=2"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 167 --role W --fuzzer cmplog --trial 1 --seed e7b4feb262a3f0aa`; the ancestor chain has 19 levels and the I2S-floor signal reports 2 dash rows (mutation_op = -, ParentInfo-only) at depths 17 and 18, direct lower-bound evidence of an I2SRandReplace find in this winning seed's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the GET/HEAD method byte is gated by a compare whose operand is NOT recorded in the CmpLog buffer (e.g. a non-instrumented hashed/derived comparison) and cmplog still resolves the true branch at the same rate as naive would refute the I2S-substitution attribution."
+  },
+  "weakest_evidence_point": "The exact decode path from raw seed bytes to httpreq==HTTPREQ_GET is inferred from ASCII structure in the seeds rather than confirmed against the harness parser, so the specific gating offset is uncertain.",
+  "confidence": "high"
+}

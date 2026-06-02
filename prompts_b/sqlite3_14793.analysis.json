@@ -1,0 +1,93 @@
+{
+  "branch_id": 14793,
+  "target": "sqlite3",
+  "summary_one_line": "Winner must feed bytes that match a recognized SQL token at the tokenizer character-class CMP, gated by value_profile's prefix-distance feedback.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "Input bytes at the tokenizer cursor that satisfy the true-side character-class / keyword comparison at sqlite3GetToken line 159623, e.g. an identifier/keyword character run such as 'SELECT', 'CEXT', or a numeric-operator expression, rather than arbitrary punctuation/whitespace bytes.",
+      "why_winner_satisfies": "value_profile-stored winner seeds carry recognizable SQL token fragments ('SELECT 11-1133=13...', 'CEXT 1', long uppercase-letter runs) and drive the true side (L159623 W=T:4 vs L=T:0); the winner then reaches deep expression-resolution code (walkExpr, resolveExprStep) the loser never touches.",
+      "why_loser_doesnt": "naive loser-blocking seeds are scattered punctuation/whitespace-heavy bytes ('T 1; c BINARY', ';$..C..C', leading ' ;.....') that never match the token-class comparison, so L159623 stays false (T:0 F:78) and downstream expression walkers have zero invocations.",
+      "mechanism_attribution": "value_profile adds a CMP_MAP keyed by (PC, operand-distance bucket): each tokenizer character/keyword CMP that gets closer to matching adds a new bucket and the near-miss input is preserved, giving a Hamming/prefix-distance gradient that ratchets bytes toward a valid token; naive has only edge counters and no such gradient, so it must hit the exact token by blind havoc."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair at this branch is value_profile beating naive on the value_profile technique axis.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "value_profile resolves the branch in all 10 trials while naive blocks in 9 of 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "winner/loser counts",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "The blocker is the true side of a branch inside the SQL tokenizer sqlite3GetToken.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "sqlite3.c:159623",
+      "exact_quote": "Enclosing function: sqlite3.c:sqlite3GetToken"
+    },
+    {
+      "claim": "Winner seeds contain recognizable SQL token text including SELECT and an arithmetic expression.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 4 (id=e77023f4c8c4c04a)",
+      "exact_quote": "SELECT 11-1133=1"
+    },
+    {
+      "claim": "Another winner seed carries a CEXT keyword-like token fragment.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 2 (id=a36d6ac5cb9f073a)",
+      "exact_quote": "CEXT 1EEEEE"
+    },
+    {
+      "claim": "Loser-blocking seeds are punctuation/whitespace-heavy non-token byte runs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 4 (id=002519fc36af717b)",
+      "exact_quote": "3b 24 f1 f1 43 f1 f1 43 13 3b 20 43 53 40 45 43"
+    },
+    {
+      "claim": "At the blocker source line the winner takes the true side while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L159623",
+      "exact_quote": "L159623  T=4 F=38  T=0 F=78    <-- BLOCKER"
+    },
+    {
+      "claim": "Only the winner reaches the expression-resolution walkers, which the loser invokes zero times.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "walkExpr / resolveExprStep rows",
+      "exact_quote": "      24         0  sqlite3.c:walkExpr"
+    },
+    {
+      "claim": "value_profile keys a CMP_MAP by operand-distance bucket and preserves inputs whose operand pair is closer to matching.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "The distance bucket encodes Hamming distance or matching-prefix length, i.e. a similarity gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation",
+      "exact_quote": "The distance bucket is a coarse encoding of how close the two\noperands were (Hamming distance bucket for `trace_cmp*`; matching-prefix\nlength for string/memory CMPs)."
+    },
+    {
+      "claim": "naive has only per-edge hit-count feedback and no CMP distance gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Feedback",
+      "exact_quote": "per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile vs naive), not I2SRandReplace, so the mandatory db_query.py lineage dash-row check does not apply; mechanism is supported by the value_profile CMP_MAP prefix-distance feedback described in MECHANISM CONTEXT plus the winner-only reach into expression-resolution code."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the gated comparison is a single byte equality with no near-miss distance structure (no partial-prefix credit) yet value_profile still resolves it far faster than naive — showing the gradient is not what enables the winner here."
+  },
+  "weakest_evidence_point": "The winner/loser seeds are stored by value_profile/naive respectively but byte-diff offsets are scattered, so the exact compared token/character-class at 159623 is inferred from surrounding SQL parsing context rather than pinned to a specific operand literal.",
+  "confidence": "medium"
+}

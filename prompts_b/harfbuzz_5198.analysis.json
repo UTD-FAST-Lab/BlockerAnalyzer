@@ -1,0 +1,81 @@
+{
+  "branch_id": 5198,
+  "target": "harfbuzz",
+  "summary_one_line": "A well-formed COLR table header with COLRv1 version field equal to 1 at the parsed version offset, so version != 1 takes its false branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A sfnt header whose table-directory entry tags the four ASCII bytes 'COLR' (offsets 0x0c-0x0f) AND whose COLR table parses to version == 1, so the equality test version != 1 evaluates false and execution falls through into the COLRv1 extents/paint path (lines 1993-2024).",
+      "why_winner_satisfies": "All five winner-resolving seeds carry the literal ASCII 'COLR' at offsets 0x0c-0x0f and a stable 00 01 00 00 00 01 header prefix at 0x00-0x05, and the winner hits the false branch 30 times (W T=0 F=30) while resolving the COLRv1 path (get_clip / paint_glyph functions show 51-176 W hits vs 0 L hits).",
+      "why_loser_doesnt": "Loser-blocking seeds carry varied non-magic bytes at 0x0c-0x0f (e.g. 00/01/2c/2b instead of 43 4f 4c 52) and never satisfy version == 1, so they take the true branch (L T=21 F=0) and return false at line 1991 before any COLRv1 code runs.",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator (absent in value_profile): the CmpLogObserver records the version != 1 comparison operands, and I2SRandReplace substitutes the constant 1 directly into the input at the version offset, deterministically driving version to 1 — value_profile only gets a CMP_MAP Hamming-distance gradient bucket, which nudges but does not place the exact value, so it stays blocked all 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the equality test version != 1 and the globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "COLR.hh:1990",
+      "exact_quote": "if (version != 1)"
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog beating value_profile on the I2S technique, prob_div=1.00.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The winner resolves all 10 trials while the loser is blocked all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "subject 14",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal ASCII COLR tag at offsets 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0f019612bc19ea54 offsets 0x0c-0x0f",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 43 4f 4c 52   ......      COLR"
+    },
+    {
+      "claim": "Across all winner seeds the COLR magic occupies offsets 0x0c-0x0f while loser seeds carry varied non-magic bytes there.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  43(C)x10                            00(.)x2 01(.)x1 2c(,)x1 2b(+)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "On the blocker line the winner takes the false branch 30 times while the loser takes the true branch 21 times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1990",
+      "exact_quote": "d=1   L1990  T=0 F=30  T=21 F=0  if (version != 1)  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner enters the COLRv1 extents/paint path that the loser never reaches.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "get_clip / paint_glyph",
+      "exact_quote": "51         0  OT::COLR::get_clip(unsigned int, hb_glyph_extents_t*, OT::VarStoreInstancer) const"
+    },
+    {
+      "claim": "value_profile_cmplog has the I2SRandReplace mutator that value_profile lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, only a CMP_MAP distance bucket signal.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5198 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0f019612bc19ea54`; the 19-level ancestor chain contains an I2S-floor dash row (mutation_op = -) at depth 18 on ancestor e0a5b09f80625fb6, the floor signal of an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on version != 1 where value_profile reaches the false branch as often as value_profile_cmplog within the same budget, showing the CMP_MAP gradient alone places version == 1 without I2S substitution."
+  },
+  "weakest_evidence_point": "The exact byte offset of the parsed version field is inferred from the COLR tag position and header prefix, not directly read from source, so the precise dataflow offset I2S must hit is uncertain.",
+  "confidence": "high"
+}

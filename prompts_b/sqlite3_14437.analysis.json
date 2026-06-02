@@ -1,0 +1,75 @@
+{
+  "branch_id": 14437,
+  "target": "sqlite3",
+  "summary_one_line": "Input must parse as valid SQL containing a bit-shift operator so the VDBE dispatches OP_ShiftLeft.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)", "value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "A syntactically valid SQL statement (a SELECT with an expression) that lexes a shift token (<< or >>), so the parser emits an OP_ShiftLeft/OP_ShiftRight VDBE opcode and the interpreter dispatches into the shift case at line 86940. This requires correct multi-byte SQL keyword and operator tokens, not just any bytes.",
+      "why_winner_satisfies": "All winner-resolving seeds begin with the literal keyword 'SELECT' and carry repeated structured token runs ('+:L', '+#L'), i.e. a real SQL expression that reaches the VDBE; the winner takes the true branch (T=4) and only the winner enters the case body (line 86950 fires T=4 for W, T=0 for L).",
+      "why_loser_doesnt": "Loser-blocking seeds are short malformed fragments ('SELEEC .`', '\"\"/\"\" ', '``g..;') that never lex into a SELECT with a shift expression; the loser's coverage shows T=0 at the OP_ShiftLeft case and the whole VDBE opcode dispatch row is T=0 F=40 for L versus T=4 for W.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs whose CMP operands move closer to matching (matching-prefix length for the string CMPs in SQL's keyword/token tables, Hamming-distance bucket for integer CMPs). This lets value_profile incrementally assemble the valid SELECT-with-shift syntax that the parser requires, whereas naive (and cmplog without value_profile) get no partial-match credit and stall on the all-or-nothing keyword/operator comparisons. Both decisive pairs add exactly value_profile, isolating CMP_MAP gradient as the enabling technique."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the OP_ShiftLeft VDBE opcode case, reached only when the SQL program contains a shift operation.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L86940",
+      "exact_quote": "case OP_ShiftLeft:              /* same as TK_LSHIFT, in1, in2, out3 */"
+    },
+    {
+      "claim": "Both decisive pairs differ by exactly the value_profile technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 deltas",
+      "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+    },
+    {
+      "claim": "The second decisive pair (value_profile_cmplog > cmplog) is also a value_profile delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 delta",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "Winner-resolving seeds begin with the literal SQL keyword SELECT and contain repeated structured token runs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id d41cd066b097416d",
+      "exact_quote": "53 45 4c 45 43 54 20 20 2b 3a 4c 20 20 2b 3a 4c   SELECT  +:L  +:L"
+    },
+    {
+      "claim": "Loser-blocking seeds are short malformed fragments that do not form a valid SELECT statement.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 001712063f69369f",
+      "exact_quote": "22 22 2f 22 22 20                                 \"\"/\"\" "
+    },
+    {
+      "claim": "Only the winner takes the true side of the OP_ShiftLeft case and enters the case body; the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L86940",
+      "exact_quote": "d=1   L86940  T=4 F=315  T=0 F=40  case OP_ShiftLeft:              /* same as TK_LSHIFT, in1...  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile's CMP_MAP rewards inputs whose CMP operands are closer to matching via prefix-length / Hamming-distance buckets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "The distance bucket encodes matching-prefix length for string/memory CMPs, the comparisons SQL's keyword/token tables use.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation",
+      "exact_quote": "matching-prefix length for string/memory CMPs"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient, not I2SRandReplace, so lineage dash-row verification is not mandatory. Attribution rests on both decisive pairs being value_profile-only deltas (vp>naive and vpc>cmplog), which isolates value_profile's CMP_MAP prefix/Hamming-distance gradient as the enabling technique rather than I2S."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating OP_ShiftLeft behind valid SQL-keyword/operator string comparisons in which naive reaches the shift case as often as value_profile, showing the CMP_MAP prefix-distance gradient gives no advantage."
+  },
+  "weakest_evidence_point": "The seed-bisect winner seeds are tagged value_profile_cmplog rather than plain value_profile, so I cannot rule out an I2S contribution leaking through vpc into the same byte structure.",
+  "confidence": "medium"
+}

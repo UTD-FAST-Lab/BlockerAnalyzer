@@ -1,0 +1,81 @@
+{
+  "branch_id": 5737,
+  "target": "harfbuzz",
+  "summary_one_line": "A valid sfnt/TrueType font with parseable cmap so hb_font_get_glyph returns a real glyph for an Arabic shaping codepoint.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Input must be a structurally valid sfnt font: the leading bytes must form a recognized TrueType signature (00 01 00 00 sfnt version) with named table records ('cmap','GSUB') at fixed offsets so the font loads and hb_font_get_glyph(font, u, ...) succeeds for an Arabic shaping-table codepoint, returning a non-zero glyph (so line 69's negated call is false rather than true).",
+      "why_winner_satisfies": "All five winner-resolving vpc seeds begin with the exact sfnt header 00 01 00 00 00 07 ff 80 ... 63 6d 61 70 ('cmap') and ... 47 53 55 4e ('GSUN'), an identical magic-byte/table-tag prefix held byte-for-byte across all 8 winner copies (BYTE DIFF shows W concentrated to one value at the header offsets); this parses as a real font, so hb_font_get_glyph resolves a glyph and the false branch is taken 1690 times (line 69 W F=1690).",
+      "why_loser_doesnt": "The loser value_profile seeds carry no font signature (offset 0 W=00x8 vs L=f1/32/d6/f5..., the cmap/GSUN tag bytes are absent), the font never loads a usable glyph table, hb_font_get_glyph always fails, so line 69 is true 2420 times and false 0 times (L T=2420 F=0) and the branch stays blocked in 10/10 trials.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile's CMP_MAP feedback. The font loader compares the input's magic/table-tag bytes against constant literals (0x00010000 sfnt version, 'cmap'/'GSUB' tag DWORDs). I2SRandReplace lifts these constants directly from the CmpLog buffer and substitutes them into the input at the comparison offset, synthesizing the exact header value_profile's blind Hamming-distance feedback could only approach byte-by-byte. The winning chain's I2S-floor dash row confirms an unwrapped I2S find in the ancestry."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the negated hb_font_get_glyph call whose globally-blocked side is false.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7",
+      "exact_quote": "!hb_font_get_glyph (font, u, 0, &u_glyph) ||"
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog beating value_profile with an I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The winner resolves the branch in 8/10 trials while the loser is blocked in all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "subject 14",
+      "exact_quote": "winner: resolved=8/10  blocked=2  unreached=0"
+    },
+    {
+      "claim": "Winner-resolving seeds carry an identical sfnt header with cmap and GSUN table tags.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "W Seed 1 offsets 0x00-0x1f",
+      "exact_quote": "00 01 00 00 00 07 ff 80 20 3f 21 20 63 6d 61 70   ........ ?! cmap"
+    },
+    {
+      "claim": "The GSUN table tag is present in the winner header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "W Seed 1 offset 0x10",
+      "exact_quote": "20 00 00 01 00 00 00 21 11 fb 20 47 53 55 4e 20    ......!.. GSUN "
+    },
+    {
+      "claim": "At the header offsets the winner bytes are concentrated to a single value across all 8 copies while the loser bytes are scattered.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0c",
+      "exact_quote": "0x000c  63(c)x8                             00(.)x2 f1(.)x1 37(7)x1 f5(.)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "On the winner the false side of line 69 is taken 1690 times; on the loser it is never taken (true 2420 times).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L 69",
+      "exact_quote": "d=1   L  69  T=238 F=1690  T=2420 F=0  !hb_font_get_glyph (font, u, 0, &u_glyph) ||  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and relies on CMP_MAP distance-bucket feedback only.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace on top of the value_profile feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5737 --role W --fuzzer value_profile_cmplog --trial 2 --seed 9fc6580d81a8226f`; the 39-level ancestor chain contains one I2S-floor dash row (mutation_op = -, ParentInfo-only) at depth 38 (ancestor e0a5b09f80625fb6), confirming an unwrapped I2SRandReplace find in the winning seed's ancestry."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating hb_font_get_glyph on a multi-byte font signature/table-tag constant where value_profile_cmplog fails to resolve the branch as fast as value_profile, or where the winning seeds reach the false branch without ever carrying the sfnt magic / cmap tag bytes."
+  },
+  "weakest_evidence_point": "The byte-diff and seeds show the winner carries a valid font header, but the prompt does not directly prove which specific comparison (sfnt version vs cmap/GSUB tag) hb_font_get_glyph hinges on, so the exact I2S-targeted literal is inferred from source structure rather than observed.",
+  "confidence": "high"
+}

@@ -1,0 +1,93 @@
+{
+  "branch_id": 14479,
+  "target": "sqlite3",
+  "summary_one_line": "Take false side when a SQL column reference resolves to a real table column (cntTab!=0), requiring a valid table.column token that matches a schema name.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)", "value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "A SQL statement whose column expression names a table/column that survives lookupName's SrcList scan so cntTab becomes non-zero before line 97941 (e.g. a qualified reference like 'M.L' whose table prefix matches a SrcList table name via sqlite3StrICmp), making zDb==0 && zTab!=0 && cntTab==0 false.",
+      "why_winner_satisfies": "The winner-resolving seed begins 'SELECT M.L' — a dotted table.column token. Per-role coverage shows the winner alone walks the zDb/table-matching block (97847-97861) and the rowid path at 98025, and at the blocker line 97941 it takes the false side (T=0 F=1 for W), i.e. cntTab incremented so the trigger-fallback guard is false.",
+      "why_loser_doesnt": "Loser-blocking seeds carry degenerate column tokens ('SELECT CC...', 'SELECT+SS...') that do not match any SrcList table, so cntTab stays 0; the loser exclusively reaches the double-quoted-string / error path at 98116-98162 and at line 97941 takes only the true side (T=0 F=20 for L) — the trigger/upsert fallback.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient feedback: the sqlite3StrICmp calls comparing the input column/table token against schema names emit Hamming/matching-prefix distance buckets; an input whose token is closer to a real table/column name produces a new CMP_MAP bucket and is preserved, letting value_profile climb toward a token that fully matches and increments cntTab, which naive (edge-only) cannot gradient toward."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the trigger/upsert fallback guard and its globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L97941, Globally blocked side",
+      "exact_quote": "if( zDb==0 && zTab!=0 && cntTab==0 ){"
+    },
+    {
+      "claim": "Both decisive pairs are won by the value_profile-bearing fuzzer with delta value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 + Pair 2 headers",
+      "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+    },
+    {
+      "claim": "The second decisive pair is value_profile_cmplog over cmplog, again with delta value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "The winner-resolving seed begins with a dotted table.column token 'SELECT M.L'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id b6b3c8f861d310d6, offset 0x0000",
+      "exact_quote": "SELECT M.L. .L.4"
+    },
+    {
+      "claim": "Loser-blocking seeds carry degenerate column tokens beginning 'SELECT CC'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 473c3c8f9d2c27ed, offset 0x0000",
+      "exact_quote": "SELECT CC......."
+    },
+    {
+      "claim": "At the blocker line the winner takes the false side while the loser takes only the true side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L97941",
+      "exact_quote": "d=1   L97941  T=0 F=1  T=20 F=0  if( zDb==0 && zTab!=0 && cntTab==0 ){  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner alone exercises the table-matching block in lookupName, indicating its token resolves against a SrcList/schema name.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L97849",
+      "exact_quote": "if( sqlite3StrICmp(db->aDb[i].zDbSName,zDb)==0 ){"
+    },
+    {
+      "claim": "The loser exclusively reaches the no-match double-quoted-string / error fallback path.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L98116-L98161",
+      "exact_quote": "if( cnt==0 && zTab==0 ){"
+    },
+    {
+      "claim": "value_profile feedback adds a CMP_MAP bucket when an input's CMP operands are closer to matching than any previously seen, preserving it as corpus.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback paragraph",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile's CMP_MAP distance bucket encodes matching-prefix length for string compares such as sqlite3StrICmp.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation paragraph",
+      "exact_quote": "matching-prefix\nlength for string/memory CMPs"
+    },
+    {
+      "claim": "naive has only per-edge hit-count feedback, with no CMP-distance gradient signal.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Feedback paragraph",
+      "exact_quote": "per-edge hit-count bucket; a new bucket triggers a\ncorpus-add"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Not applicable: both decisive pairs carry delta value_profile (value_profile>naive and value_profile_cmplog>cmplog), so the attributed technique is the CMP_MAP Hamming/prefix-distance gradient, not I2SRandReplace. Lineage dash-row verification is only mandated for I2SRandReplace claims, so no db_query.py lineage run was performed."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a column-name string compare (the gated equality) where value_profile fails to resolve the false side faster than naive, i.e. removing the CMP_MAP gradient produces no winner/loser separation at the cntTab guard."
+  },
+  "weakest_evidence_point": "The seed evidence is single-sided (one winner seed) and I infer the table-prefix match drives cntTab from source structure rather than from a direct trace of which sqlite3StrICmp comparison the winner's token satisfied.",
+  "confidence": "medium"
+}

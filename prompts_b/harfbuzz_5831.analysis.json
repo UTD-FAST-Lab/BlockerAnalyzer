@@ -1,0 +1,112 @@
+{
+  "branch_id": 5831,
+  "target": "harfbuzz",
+  "summary_one_line": "A Kannada-script syllable spanning at least 3 glyphs (start+3<=end), reached by long repeated multi-glyph byte runs.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A KANNADA-script buffer whose current syllable spans >=3 glyphs so that start+3<=end holds; produced by long repeated multi-byte glyph runs (e.g. runs of 0x74 'tttttttt' and repeated 'cb 0c 00 00' structures) that decode into syllables of length >=3.",
+      "why_winner_satisfies": "naive resolves the branch in all 10 trials with avg hitcount 52; its winning seeds carry long homogeneous runs (Seed 3/5 'ssssssssss', Seed 1 'tttttttt') that produce multi-glyph syllables, and naive's pure havoc byte-insert/copy mutators grow input length unconstrained, frequently producing >=3-glyph syllables.",
+      "why_loser_doesnt": "cmplog blocks in 8/10 trials with avg hitcount 0; at the blocker line L479 the loser takes True 0 times (T=0 F=15) while still reaching the Kannada script check at L478 (T=15), i.e. it enters Kannada syllables but they are never long enough; cmplog's loser seeds are short (10-60 bytes) and its I2S substitution pins bytes to intercepted CMP operands rather than lengthening the input.",
+      "mechanism_attribution": "naive wins by pure havoc length-growth; this is a branch where the I2S technique HURTS: cmplog (loser) spends mutation budget on I2SRandReplace operand substitutions that do not increase syllable length, while naive's unconstrained byte-insert/copy havoc readily reaches start+3<=end. The differentiating winner mechanism is havoc-only mutation, not comparison solving."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Same program-side condition: a KANNADA-script syllable spanning >=3 glyphs (start+3<=end). The axis distinguishing the two fuzzers is the value_profile (CMP_MAP gradient) feedback, not the byte feature itself.",
+      "why_winner_satisfies": "value_profile_cmplog resolves the branch in 8/10 trials (avg hitcount 2) vs cmplog's 1/10; its winning seeds (Seed 1/2, vpc trial 1) carry the same long glyph runs ('tttttttt', repeated 'G 0c 00 00') that build >=3-glyph syllables, and vpc adds CMP_MAP gradient buckets that reward progress toward branch-relevant comparison states cmplog cannot see.",
+      "why_loser_doesnt": "cmplog (loser in this pair too) blocks in 8/10 trials and never takes the True side at L479 (T=0 F=15); lacking the CMP_MAP gradient feedback it gets no partial-progress reward for inputs that approach the >=3-glyph syllable length and stays stuck on short inputs.",
+      "mechanism_attribution": "value_profile_cmplog wins over cmplog via the CMP_MAP gradient: the Hamming/value-profile comparison feedback gives a corpus-add signal for inputs that make incremental progress toward the comparison/length states gating the branch, feedback that bare cmplog lacks. The differentiating winner technique is the CMP_MAP gradient."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the syllable-span condition start+3<=end, gated on the Kannada script, with the True side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L479 / Source line",
+      "exact_quote": "Source line:       start + 3 <= end &&\nGlobally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "naive resolves in 10/10 trials and is the winner over cmplog on the I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "cmplog is the loser with avg hitcount 0 while naive (winner) hits the branch 52 times on average.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 avg hitcount",
+      "exact_quote": "avg hitcount on branch: winner=52  loser=0"
+    },
+    {
+      "claim": "At the blocker line the loser never takes True while still reaching the Kannada check, showing it enters Kannada syllables that are never long enough.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L478, L479",
+      "exact_quote": "d=1   L 479  T=21 F=13  T=0 F=15  start + 3 <= end &&  <-- BLOCKER"
+    },
+    {
+      "claim": "The loser still reaches the Kannada-script branch (L478 True 15 times), so blocking is the length condition, not the script.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L478",
+      "exact_quote": "d=1   L 478  T=34 F=0  T=15 F=0  if (buffer->props.script == HB_SCRIPT_KANNADA &&"
+    },
+    {
+      "claim": "naive winning seeds carry long homogeneous byte runs that decode into multi-glyph syllables.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 3",
+      "exact_quote": "b8 0c eb ff ca 0c 73 73 73 73 73 73 73 73 73 73"
+    },
+    {
+      "claim": "A vpc winning seed carries a long run of 0x74 building a multi-glyph syllable.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 (vpc)",
+      "exact_quote": "00 47 0c 00 00 74 74 74 74 74 74 74 74 00 47 0c"
+    },
+    {
+      "claim": "cmplog loser seeds are short (10-60 bytes).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 4 (cmplog)",
+      "exact_quote": "Seed 4 (id=9e75673273153037, size=10 bytes, fuzzer=cmplog, trial=1"
+    },
+    {
+      "claim": "naive's mutator set is pure havoc plus token with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes one CMP operand for another at matching offsets rather than lengthening input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile_cmplog is the winner over cmplog on the value_profile delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "value_profile_cmplog resolves 8/10 vs cmplog 1/10 on this branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 winner/loser",
+      "exact_quote": "winner: resolved=8/10  blocked=2  unreached=0\n  loser:  resolved=1/10  blocked=8  unreached=1"
+    },
+    {
+      "claim": "value_profile_cmplog adds CMP_MAP gradient buckets to the feedback over cmplog.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Instrumentation/Feedback",
+      "exact_quote": "per-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Neither winning mechanism is I2SRandReplace: in Pair 1 the winner is naive (no I2S, havoc-only) and in Pair 2 the winner is value_profile_cmplog via the CMP_MAP gradient over cmplog; cmplog is the LOSER in both pairs, so the I2S-floor lineage check does not apply to the winners and was not run. The closed-vocab single slot here records the Pair 2 winner technique (CMP_MAP gradient); the Pair 1 winner technique is havoc-only as stated in its hypothesis."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating True only on start+3<=end in a Kannada buffer where cmplog resolves as fast as or faster than naive and value_profile_cmplog, showing I2S/CMP_MAP help rather than hinder reaching a pure length/syllable-span gate."
+  },
+  "weakest_evidence_point": "The byte-to-glyph decoding is inferred: I assert the long 0x74/0x73 runs decode into >=3-glyph Kannada syllables, but the prompt shows only raw bytes and per-line counts, not the actual decoded glyph stream length.",
+  "confidence": "medium"
+}

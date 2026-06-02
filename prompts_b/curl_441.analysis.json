@@ -1,0 +1,87 @@
+{
+  "branch_id": 441,
+  "target": "curl",
+  "summary_one_line": "A well-formed protocol stream (POP3/HTTP magic + headers) that yields a non-empty network read, so is_empty_data is FALSE.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Input must reconstruct a syntactically valid protocol payload (leading POP3 magic 'pop'/'pop3', the literal 'HTTP/' response line and header tokens like 'Set-Cookie'/'Transfer'/'Connection', port digits '9001') so that Curl_read returns nread>0 and is_empty_data = ((nread==0)&&(k->bodywrites==0)) evaluates FALSE, taking the false (blocked) side at line 849.",
+      "why_winner_satisfies": "Winner seeds carry contiguous magic/protocol byte runs the loser lacks: 'pop' at 0x06, 'HTTP/' near 0x24-0x29, and recognizable header text ('Connect'/'Set-Coo'/'TranEfe') at 0x36-0x3e, producing data that is written as a body (bodywrites>0) so nread>0 and is_empty_data is FALSE; the branch is hit 1716/1757 times.",
+      "why_loser_doesnt": "Loser seeds are short (35 bytes) and dominated by filler runs ('%','+','A','.') with no coherent 'HTTP/' line or header tokens, so the read path yields nread==0 with bodywrites==0, forcing is_empty_data TRUE (the true side) and never exercising the false side (avg hitcount 0).",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes the program's expected protocol literals (magic, 'HTTP/', header tokens, port) directly at the matching input offsets, reconstructing the well-formed stream byte-for-byte; naive and value_profile lack this substitution mutator and cannot stitch these multi-byte literals together by chance, so they stall on the empty-read true side."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the false branch of if(is_empty_data) at transfer.c:849.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "transfer.c:849:8",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "is_empty_data is TRUE only when nread==0 and bodywrites==0, so the false side requires a non-empty read.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L594",
+      "exact_quote": "is_empty_data = ((nread == 0) && (k->bodywrites == 0)) ? TRUE : FALSE;"
+    },
+    {
+      "claim": "Both decisive pairs differ only by the I2S technique and the winner resolves 10/10 with high hitcount while the loser stays blocked at 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "avg hitcount on branch: winner=1716  loser=0"
+    },
+    {
+      "claim": "The value_profile_cmplog>value_profile pair is likewise an I2S delta resolving 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner seeds contain coherent POP3 magic and an HTTP response line with header tokens.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 id=0057778b67d14b3b",
+      "exact_quote": "....GHTTP/ me@lo"
+    },
+    {
+      "claim": "Winner seed 1 carries a 'Set-Cookie' header token in its payload.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 offset 0x30",
+      "exact_quote": "mewhe#e..Set-Coo"
+    },
+    {
+      "claim": "Loser seeds are 35 bytes and lack coherent protocol structure, dominated by filler bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 2 id=0024e5972fc0b2e0",
+      "exact_quote": "+]%A.AAAA@AAZper"
+    },
+    {
+      "claim": "At offset 0x24 winners concentrate on 'G' while losers scatter, the start of the HTTP/ literal region.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0024",
+      "exact_quote": "0x0024  47(G)x18 48(H)x2"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes one CMP operand into the input at matching offsets, which naive lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S stage so cannot perform the operand substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 441 --role W --fuzzer cmplog --trial 1 --seed 00f515acb6373e33` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 19 and 20 of the 21-level ancestor chain, the lower-bound signal of an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose false-branch read depends on no multi-byte literal (e.g. is_empty_data gated only on a length field reachable by single-byte havoc) showing naive/value_profile resolve the false side as fast as cmplog/vpc."
+  },
+  "weakest_evidence_point": "I cannot directly observe nread/bodywrites at runtime; the claim that winners produce nread>0 is inferred from the source guard at L594 plus the structured payload bytes, not measured.",
+  "confidence": "high"
+}

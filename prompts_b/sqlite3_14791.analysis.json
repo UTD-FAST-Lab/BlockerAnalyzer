@@ -1,0 +1,69 @@
+{
+  "branch_id": 14791,
+  "target": "sqlite3",
+  "summary_one_line": "Input must begin with the literal SQL keyword 'SELECT ' and a well-formed arithmetic token stream so sqlite3GetToken takes the true branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "Bytes at offsets 0x00-0x06 must spell the SQL token 'SELECT ' (53 45 4c 45 43 54 20) followed by a lexically valid arithmetic-token stream (digits, '+','-','.', '\\r') so sqlite3GetToken classifies the next character into the token class whose true branch at line 159609 is exercised.",
+      "why_winner_satisfies": "All 5 cmplog winner seeds start with the exact bytes '53 45 4c 45 43 54 20' (SELECT followed by space) and continue with '8+3' arithmetic plus repeating digit/'+'/'-'/'.' bytes; the byte-diff shows offsets 0x00-0x06 are uniformly S,E,L,E,C,T,space across all 9 winner instances.",
+      "why_loser_doesnt": "Loser naive seeds are short malformed strings (e.g. '111E.T', '1ES...', '9999EEEE...') that never reconstruct the 'SELECT ' prefix or a valid arithmetic token sequence, so the tokenizer never reaches the true side at 159609.",
+      "mechanism_attribution": "cmplog intercepts the integer/string CMP callbacks inside sqlite3GetToken's character-class comparisons and records both operands; I2SRandReplace then substitutes the expected token bytes (SELECT keyword chars and operator chars) into the input, building the valid token stream that naive's blind havoc cannot assemble."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true branch of a comparison inside the SQL tokenizer sqlite3GetToken.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L4-L7, line 159609",
+      "exact_quote": "Enclosing function: sqlite3.c:sqlite3GetToken"
+    },
+    {
+      "claim": "The globally blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 159609",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "Every winner-resolving seed begins with the literal ASCII 'SELECT 8+3' prefix.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id f46278e6659d6cfa, offset 0x0000",
+      "exact_quote": "53 45 4c 45 43 54 20 38 2b 33 0d 0d 0d 0d 26 2b   SELECT 8+3"
+    },
+    {
+      "claim": "Winner inputs are uniformly the SELECT keyword bytes at the first 7 offsets while loser inputs are scattered junk there.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0000-0x0006",
+      "exact_quote": "0x0000  53(S)x9                             31(1)x11 20( )x4 0c(.)x2 32(2)x2 +5u  PARTIAL"
+    },
+    {
+      "claim": "Loser-blocking seeds are short malformed inputs that do not form a valid SELECT token stream.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed_id 205e2c07d302d3d0, size=14",
+      "exact_quote": "31 31 31 45 f4 54 20 31 20 31 31 31 31 43            111E.T 1 1111C"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which reads recorded CMP operands and substitutes the other operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators paragraph",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mutator, only blind havoc/token mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op line",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 14791 --role W --fuzzer cmplog --trial 3 --seed f46278e6659d6cfa`; the ancestor chain has 39 levels and the tool reports 'I2S-floor signal: 2 ancestor dash row(s) at depth 37, 38', i.e. two ParentInfo-only (mutation_op = -) ancestors characteristic of unwrapped I2SRandReplace finds in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose true branch is reached at the same rate by naive as by cmplog when the gate requires the literal 'SELECT ' prefix, i.e. removing I2S substitution does not lower the resolution rate."
+  },
+  "weakest_evidence_point": "The exact comparison at line 159609 is inferred from the tokenizer function name and the SELECT-prefixed winner bytes; the prompt's source overlay shows no annotated source text for the blocker line, so the precise token-class CMP is not directly visible.",
+  "confidence": "medium"
+}

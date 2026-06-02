@@ -1,0 +1,87 @@
+{
+  "branch_id": 5968,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must encode Thai marks driving the shaper state machine to action SL, reached by havoc byte mutation not I2S substitution",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)", "naive>cmplog (I2S)"],
+      "what_input_feature": "An input byte sequence that the harness interprets as a Thai text run whose mark/consonant sequence drives the thai_above/below state machine to produce action == SL, selecting the SL_mappings switch arm at line 149. The switch operand is an enum derived from a state-machine table lookup, not a literal compared against input bytes.",
+      "why_winner_satisfies": "The non-I2S winners (naive, value_profile) reach the SL arm by accumulating Thai mark/consonant codepoints through ordinary havoc byte mutation; their winning seeds carry only havoc/token mutation ops and resolve the branch in 10/10 trials, taking the SL true side 23 times in the W coverage dump.",
+      "why_loser_doesnt": "The input-to-state losers (cmplog, value_profile_cmplog) block the branch in 8/10 and 9/10 trials respectively; their CMP-operand substitution finds no input-byte comparison feeding the enum-valued switch operand, so it cannot steer toward SL and its corpus pollution diverts effort, leaving the SL true side unhit (T=0) in the L dump.",
+      "mechanism_attribution": "The branch is enabled by plain havoc byte mutation, not by any CMP introspection: the switch operand `action` is an enum produced by Thai state-machine table lookups, with no direct input-to-state comparison for operand-substitution mutators to exploit. The comparison-solving fuzzers confer no advantage here and are the decisive losers, making this a roadblock-anti branch where the baseline havoc winner prevails."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is a switch arm selecting SL_mappings, gated on the enum value `action`.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 source line",
+      "exact_quote": "case SL:  pua_mappings = SL_mappings; break;"
+    },
+    {
+      "claim": "The switch operand is `action`, an enum, not an input-byte literal.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L145 switch",
+      "exact_quote": "switch (action) {"
+    },
+    {
+      "claim": "The action value is derived from Thai state-machine edges, not from a direct comparison against input bytes.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L253 caller",
+      "exact_quote": "thai_action_t action = above_edge.action != NOP ? above_edge.action : below_edge.action;"
+    },
+    {
+      "claim": "The non-I2S winners resolve the branch in all trials while the I2S fuzzers block it.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "L11-L14",
+      "exact_quote": "naive                           10        0          0  winner (I2S vs cmplog)"
+    },
+    {
+      "claim": "value_profile beats value_profile_cmplog decisively on this branch with the I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 L26-L33",
+      "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "naive beats cmplog decisively on this branch with the I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 L34-L41",
+      "exact_quote": "Pair 2: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "The winner takes the SL true side 23 times while the loser never takes it.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L149",
+      "exact_quote": "d=1   L 149  T=23 F=22  T=0 F=31  case SL:  pua_mappings = SL_mappings; break;  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator and is identified as found by naive or value_profile.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "I2SRandReplace works by substituting CMP operands found in the input, which requires an input-byte comparison to exploit.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "The winning naive seed was produced purely by havoc/token mutation operators.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 3 id=8cc47bfb7cab9087",
+      "exact_quote": "fuzzer=naive, trial=1, discovered_at=10852s, mutation_op=BytesInsertMutator,DwordInterestingMutator,ByteDecMutator,ByteAddMutator,QwordAddMutator,ByteRandMutator,TokenReplace"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5968 --role W --fuzzer value_profile --trial 1 --seed 2c9a8ba2e91d6c97`. The winner is value_profile, which has NO I2SRandReplace mutator, so this is an I2S-anti branch where the enabling technique is havoc, not I2S. The 14-level ancestor chain is dominated by havoc ops (BytesSet/Byte/Word/Dword mutators); one dash row appears at depth 13 but per the prompt caveat the dash=I2S equivalence holds only for cmplog/vpc, not value_profile, so it is not I2S evidence here. claimed_mechanism is havoc-only, not I2SRandReplace, so lineage I2S-floor confirmation is not required."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the SL switch arm is gated on a direct multi-byte comparison of input bytes against a fixed literal would, if cmplog/vpc then resolved it faster than naive/value_profile, refute the claim that I2S cannot help reach this arm."
+  },
+  "weakest_evidence_point": "The claim that I2S corpus pollution actively diverts the loser (rather than I2S merely being neutral) is inferred from the trial vector, not directly observed in seed bytes.",
+  "confidence": "medium"
+}

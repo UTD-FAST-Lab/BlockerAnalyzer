@@ -1,0 +1,87 @@
+{
+  "branch_id": 567,
+  "target": "curl",
+  "summary_one_line": "Input must carry a well-formed TLV protocol header (pop3 + host:port + response TLVs) so curl opens a socket and select() times out (rc==0).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A structured fuzz-corpus TLV stream whose leading record encodes a recognized curl protocol (literal `pop3` at offset 0x06) followed by a parseable host:port (`...0.1:9001`) and one or more response TLV records, so that fuzz_handle_transfer drives a connection where a socket is FUZZ_SOCK_OPEN and fuzz_select returns 0 (timed out) — the rc==0 true side at line 385.",
+      "why_winner_satisfies": "Winner-resolving seeds carry the exact protocol/host literals: seed 1 has `pop3` at 0x06 and a `:::::::900` host:port run, seeds 2-4 carry `pop3` plus `0.1:9001` and `GHTTP/`-style response TLV bytes; W bytes at offsets 0x06-0x1d are tightly concentrated (e.g. `70(p)x4`, `3a(:)x4`, `39(9)x4`, `30(0)x4`) showing all four winners agree on the host:port literal, and the W-only overlay lights up lines 386-400 (the timeout block) which the loser never reaches.",
+      "why_loser_doesnt": "Loser-blocking seeds lack the coherent protocol header — they are dominated by `%A`, `CD`, `..` and `Y`-run garbage (seed 1: `%A2%77%dCD`, seed 5: `YYYY?YYYZZZ`), the same offsets that are single-valued in W are scattered in L (offset 0x06 is `2e(.)x3 70(p)x2 00(.)x1 73(s)x1`, 0x16 is `25(%)x2 43(C)x1 6f(o)x1 59(Y)x1`), so curl never opens a socket and select takes the rc!=0 false side — the L overlay shows line 385 with `T=0 F=7`.",
+      "mechanism_attribution": "cmplog/vpc run I2SRandReplace: the CmpLogObserver records the operands of the TLV-magic and protocol-string comparisons inside curl's fuzz harness and curl's protocol dispatch, then I2SRandReplace scans the input and substitutes the matching operand verbatim, planting the `pop3`/host:port literals that naive and value_profile must stumble onto by chance. The dash-row I2S-floor ancestors in both winners' lineage confirm an I2S find in the chain."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is the rc==0 (select timed out) branch in fuzz_handle_transfer.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6, L7, L385",
+      "exact_quote": "else if(rc == 0) {"
+    },
+    {
+      "claim": "rc is the return of fuzz_select, so the rc==0 side depends on an open socket plus a select timeout.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L378-L385",
+      "exact_quote": "rc = fuzz_select(maxfd + 1, &fdread, &fdwrite, &fdexcep, &timeout);"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal protocol token pop3 and a host:port.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id faf6b58d07527f1a offset 0x06-0x1f",
+      "exact_quote": "......pop3&//pM7"
+    },
+    {
+      "claim": "Winner seeds carry a recognizable host:port run.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id faf6b58d07527f1a offset 0x10-0x1f",
+      "exact_quote": "...0.1:9001?850."
+    },
+    {
+      "claim": "The W-only overlay lights the timeout block lines 386-400 that the loser never reaches.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L386-L400",
+      "exact_quote": "[W]   386        FV_PRINTF(fuzz,"
+    },
+    {
+      "claim": "Across the four winners the host:port literal offsets are single-valued (concentrated).",
+      "cited_section": "BYTE DIFF (W vs L at common offsets)",
+      "cited_locator": "offset 0x16-0x19",
+      "exact_quote": "0x0016  3a(:)x4"
+    },
+    {
+      "claim": "Loser seeds lack the coherent header and carry percent/garbage runs instead.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed_id 0f16f47b53372c37 offset 0x0e-0x17",
+      "exact_quote": "2%77%dCD..AA%D.5"
+    },
+    {
+      "claim": "At the blocker line the loser takes the false side exclusively (T=0 F=7).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 385",
+      "exact_quote": "d=1   L 385  T=8 F=4  T=0 F=7  else if(rc == 0) {  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace which substitutes a recorded CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the loser pair member cannot plant the operand directly.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 567 --role W --fuzzer value_profile_cmplog --trial 1 --seed 5d9ce7f391be0a62` and observed I2S-floor dash rows (mutation_op = -) at depth 19 and 20; also ran the cmplog winner faf6b58d07527f1a (trial 2), which has an I2S-floor dash row at depth 22. Both winning chains contain unwrapped I2SRandReplace ancestors."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating rc==0 only on a non-comparison input property (e.g. total input length) — if cmplog/vpc show no advantage over naive/value_profile there, the I2S-operand-substitution attribution is wrong."
+  },
+  "weakest_evidence_point": "The exact CMP whose operand I2S substitutes (curl protocol-dispatch string vs harness TLV magic) is inferred from seed bytes, not pinned to a specific intercepted comparison in the cov dump.",
+  "confidence": "high"
+}

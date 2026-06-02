@@ -1,0 +1,105 @@
+{
+  "branch_id": 298,
+  "target": "curl",
+  "summary_one_line": "A well-formed scheme://host:port/path URL whose connection is reusable (conn->bits.close FALSE), reaching the connection-keep-intact else arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A structured request input that parses into a valid scheme://host:port/path URL (e.g. the bytes 70 6f 25 ... 3a 2f 2f '://' host '12' ':9001/850' and a 'GHTTP/27.0.' line with a long '////' path) so the resulting connection is cleanly completed and NOT marked for close, driving the multi_done branch '|| conn->bits.close' to FALSE and taking the connection-reuse else arm at line 718.",
+      "why_winner_satisfies": "Winner-resolving cmplog seeds carry a coherent URL skeleton: offset 0x06-0x0f spells 'po%.://12%/0((.1:9001/850\\0' and offset 0x24 onward is 'GHTTP/27.0.' followed by a long '/' run, so the request reaches multi_done with conn->bits.close FALSE (L711 W=T:0/F:17, the false side) and proceeds into the else reuse block (lines 718-742 marked [W]).",
+      "why_loser_doesnt": "Loser-blocking seeds are short (35 bytes) and byte-noise dominated by '%','+','A' fills (e.g. seed 2 '%`%a>f..c%+]%A.AAAA@AAZpermit'), so they never build a reusable connection; they always take the true disconnect arm (L711 L=T:20/F:0) executing connclose/Curl_disconnect at lines 713-716 marked [L].",
+      "mechanism_attribution": "cmplog/vpc add I2SRandReplace, which reads intercepted CMP operands (URL-scheme, host, port, HTTP-version literal comparisons in curl's parser) from the CmpLogObserver buffer and substitutes the expected operand into the input at matching offsets, synthesizing the structured URL bytes that naive/value_profile cannot assemble by blind havoc; the winning cmplog seed's ancestor chain contains I2S-floor dash rows confirming an I2S contribution."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs at this branch differ by the I2S technique and both favor the I2S-equipped fuzzer.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair is cmplog beating naive on the same I2S axis.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The blocked side is the false branch of the conn->bits.close test in multi_done.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "multi.c:711",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "The winner takes the else connection-reuse arm of the multi_done close test.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L711-L718",
+      "exact_quote": "[B]   711       ) || conn->bits.close <-- BLOCKER"
+    },
+    {
+      "claim": "The connection-reuse else block (lines 718-742) is executed only by winner-resolving seeds.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L718",
+      "exact_quote": "[W]   718    else {"
+    },
+    {
+      "claim": "The disconnect/connclose true arm (lines 713-716) is executed only by loser-blocking seeds.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L713",
+      "exact_quote": "[L]   713      connclose(conn, \"disconnecting\");"
+    },
+    {
+      "claim": "At the blocker line the winner takes the false side and the loser the true side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L711",
+      "exact_quote": "L 711  T=0 F=17  T=20 F=0  ) || conn->bits.close  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner-resolving cmplog seeds carry a structured URL skeleton with scheme/host/port and an HTTP-version literal.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 id=32d10b449c4075ee",
+      "exact_quote": "70 6f 25 00 3a 2f 2f 31 32 25   ......po%.://12%"
+    },
+    {
+      "claim": "The winner seed contains a GHTTP version literal and a long slash-path run.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 offset 0x20-0x3f",
+      "exact_quote": "47 48 54 54 50 2f 32 37 2e 30 2e 2f   ....GHTTP/27.0./"
+    },
+    {
+      "claim": "Loser-blocking seeds are short noise-filled inputs lacking a coherent URL structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 2 id=0024e5972fc0b2e0",
+      "exact_quote": "2b 5d 25 41 bf 41 41 41 41 40 41 41 5a 70 65 72   +]%A.AAAA@AAZper"
+    },
+    {
+      "claim": "cmplog adds the I2SRandReplace mutator on top of naive's stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "I2SRandReplace substitutes a recorded CMP operand into the input at matching byte offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile does not have I2SRandReplace, explaining why vpc beats it on the I2S axis.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 298 --role W --fuzzer cmplog --trial 1 --seed 32d10b449c4075ee` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 23 and 24 of the 25-level ancestor chain; the tool's trailing 'I2S-floor signal' line confirmed them as unwrapped I2SRandReplace finds characteristic of cmplog/vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where naive/value_profile resolve the conn->bits.close==FALSE reuse arm at the same rate as cmplog/vpc once the URL-parsing CMP literals are removed, showing the divergence is not driven by I2S operand substitution into the structured URL."
+  },
+  "weakest_evidence_point": "The exact CMP comparison whose operand I2S substitutes to flip conn->bits.close to FALSE is inferred from the URL-shaped winner bytes and curl's parser, not directly observed at the comparison site.",
+  "confidence": "medium"
+}

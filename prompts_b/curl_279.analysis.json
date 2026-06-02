@@ -1,0 +1,81 @@
+{
+  "branch_id": 279,
+  "target": "curl",
+  "summary_one_line": "Resolving the false side requires a content-type string that does not exactly equal the literal \"multipart/form-data\".",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A Content-Type header value reaching content_type_match must be a string that differs from the exact literal \"multipart/form-data\" so the strcmp-style comparison fails and the false branch is taken; winners carry a parsed Content-Type field (e.g. \"Content-Type:where\") that is non-empty but is NOT the magic literal.",
+      "why_winner_satisfies": "Winner seeds embed an explicit \"Content-Type:\" header byte run at offsets 0x24-0x2b (47 43 6f 6e 74 65 6e 74 = 'GContent', then 'Type:where'), so cthdr is set, the loop at L2381 advances past it, contenttype is non-null yet not equal to multipart/form-data, and content_type_match returns false (the blocked F side). The I2S substitution stage planted the comparison-relevant string content that distinguishes this branch.",
+      "why_loser_doesnt": "Loser seeds lack the parsed Content-Type field: at L2380 if(cthdr) is False (T=0 F=20), so the else-if at L2383 sets cthdr = \"multipart/form-data\" verbatim, and at the blocker L1897 content_type_match is True (T=20 F=0) — the loser is pinned to the magic literal and can only ever take the True side.",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the CmpLogObserver buffer from the content_type_match comparison and substitutes operand bytes, manufacturing a Content-Type value that satisfies the if(cthdr) path while differing from the multipart/form-data literal; naive and value_profile lack I2SRandReplace and never construct the required header byte sequence within budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a content_type_match equality test against the literal multipart/form-data and the globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "mime.c:1897",
+      "exact_quote": "if(content_type_match(contenttype, STRCONST(\"multipart/form-data\")))"
+    },
+    {
+      "claim": "Both decisive pairs differ exactly by the I2S technique, with cmplog and value_profile_cmplog resolving 10/10 while naive and value_profile block 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 + Pair 2",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "Winner seeds carry an explicit Content-Type header byte run.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 offsets 0x24-0x33",
+      "exact_quote": "47 43 6f 6e 74 65 6e 74 2d 54 79 70"
+    },
+    {
+      "claim": "Winner Content-Type value is a non-multipart string such as where.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 offset 0x30",
+      "exact_quote": "65 3a 77 68 65 72 65 00 0a 54 6f 3a 20 66 61 6b   e:where..To: fak"
+    },
+    {
+      "claim": "When the loser has no cthdr the caller substitutes the literal multipart/form-data verbatim before the blocker.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=2 L2383",
+      "exact_quote": "else if(http->sendit->kind == MIMEKIND_MULTIPART)"
+    },
+    {
+      "claim": "At the call site the loser misses the Content-Type and is forced onto the multipart default.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=2 L2380",
+      "exact_quote": "L2380  T=20 F=0  T=0 F=20  if(cthdr)"
+    },
+    {
+      "claim": "At the blocker the loser takes only the True side while the winner takes only the False side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1897",
+      "exact_quote": "L1897  T=0 F=20  T=20 F=0  if(content_type_match(contenttype, STRCONST(\"multipart/fo..."
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace which scans the input for one CMP operand and substitutes the other at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive and value_profile lack I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 279 --role W --fuzzer value_profile_cmplog --trial 1 --seed 3ada62fdafca01cd` and observed two I2S-floor dash rows (mutation_op = -) at depths 18 and 19 of the ancestor chain, the lower-bound signal of an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the comparison target is content_type_match against multipart/form-data shows naive/value_profile reaching the false (non-matching) side at the same rate as cmplog/vpc, indicating the divergence is not due to I2S operand substitution."
+  },
+  "weakest_evidence_point": "The byte-diff at offsets 0x24-0x2c is only flagged PARTIAL/DIFFER rather than a clean concentrated W vs L magic-literal split, so the exact operand I2S substitutes into the Content-Type field is inferred from source flow more than from a sharp byte signature.",
+  "confidence": "high"
+}

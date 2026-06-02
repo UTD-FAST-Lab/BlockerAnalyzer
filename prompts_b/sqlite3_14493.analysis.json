@@ -1,0 +1,75 @@
+{
+  "branch_id": 14493,
+  "target": "sqlite3",
+  "summary_one_line": "Input must contain a three-part X.Y.Z qualified column reference (non-NULL zDb) that fails to resolve, reaching the db-qualified error path.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "A SQL statement whose column reference is a three-part schema-qualified name (X.Y.Z, e.g. db.table.column) so that lookupName is called with a non-NULL zDb; the name must fail to resolve so cnt!=1 and control reaches the error block, where 'if( zDb )' (98156) is then true.",
+      "why_winner_satisfies": "Winner-resolving seed carries repeated dotted multi-part qualifier structure (e.g. '.112/1111', 'E.E.E' runs), and the d=2 dispatch shows the winner taking case TK_DOT (L98355 T=1) which builds zDb/zTable/zColumn before calling lookupName; at d=1 the winner takes 'if( zDb )' true (L97837 T=1) and the blocker 'if( zDb )' true (L98156 T=1).",
+      "why_loser_doesnt": "Loser-blocking seeds are flat single-token or repeated-letter payloads ('SELECT bbLLLL...', 'SELECT bbbbb') with no nested X.Y dotted qualifier; the loser never builds zDb (d=1 L97837 T=0 F=20, blocker L98156 T=0 F=20) — it routes through the unqualified column path (case TK_ID, L98354 T=20).",
+      "mechanism_attribution": "The pair delta is value_profile: both fuzzers share the same input-to-state comparison-substitution mutator, but only value_profile_cmplog adds the CMP_MAP gradient (Hamming/prefix-distance buckets). Reaching the db-qualified branch requires the input to first survive several near-miss string comparisons (sqlite3StrICmp on db names, schema-name matching) and to emit a syntactically valid dotted reference; the CMP_MAP gradient rewards incremental Hamming progress toward those multi-byte comparison targets, letting vpc assemble the X.Y.Z structure that plain cmplog (edge-bucket feedback only) cannot incrementally climb toward."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is value_profile_cmplog beating cmplog with the technique delta being value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The blocker is the true branch of 'if( zDb )' inside the error block of lookupName.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "sqlite3.c:98156",
+      "exact_quote": "if( zDb ){"
+    },
+    {
+      "claim": "Taking the blocker true side requires zDb non-NULL, and the loser never satisfies it.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L98156",
+      "exact_quote": "L98156  T=1 F=0  T=0 F=20  if( zDb ){  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner reaches the dotted-name dispatch (TK_DOT) that constructs zDb/zTable, while the loser stays on TK_ID.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=2 L98354/L98355",
+      "exact_quote": "L98355  T=1 F=7  T=0 F=573  case TK_DOT: {"
+    },
+    {
+      "claim": "The winner-resolving seed contains repeated dotted multi-part qualifier structure (E.E.E runs).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 439a5ab5b7375017 offsets 0x14-0x1f",
+      "exact_quote": "31 31 31 31 30 2b 2b 31 31 31 2f 45 2e 45 2e 45   11110++111/E.E.E"
+    },
+    {
+      "claim": "Loser-blocking seeds are flat repeated-letter payloads with no nested dotted qualifier.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 4e5e24efa0949096",
+      "exact_quote": "53 45 4c 45 43 54 20 62 62 4c 4c 4c 4c 4c 4c 4c   SELECT bbLLLLLLL"
+    },
+    {
+      "claim": "value_profile_cmplog adds the CMP_MAP gradient on top of cmplog's I2S buffer.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Instrumentation",
+      "exact_quote": "union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    },
+    {
+      "claim": "Reaching the schema-qualified path passes through string-compare gates on database names (sqlite3StrICmp).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "sqlite3.c:97849",
+      "exact_quote": "if( sqlite3StrICmp(db->aDb[i].zDbSName,zDb)==0 ){"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (the pair delta is value_profile: vpc beats cmplog and both already carry I2SRandReplace, so the differentiator is value_profile's Hamming/prefix-distance CMP_MAP buckets, not I2S). Lineage dash-row verification is mandatory only for I2SRandReplace claims and is not applicable here; the CMP_MAP gradient leaves no dash-row signature in seed metadata."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating an error path behind a multi-part dotted-name comparison shows value_profile_cmplog and cmplog reaching the gate at statistically indistinguishable rates (no value_profile advantage), indicating the CMP_MAP gradient is not what assembles the X.Y.Z structure."
+  },
+  "weakest_evidence_point": "Only one winner-resolving seed is shown, so the inference that the value_profile gradient (rather than lucky havoc) is what assembled its dotted E.E.E structure rests on a single example plus the per-trial prob_div.",
+  "confidence": "medium"
+}

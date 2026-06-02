@@ -1,0 +1,100 @@
+{
+  "branch_id": 6223,
+  "target": "harfbuzz",
+  "summary_one_line": "Reaching the false side needs a valid font/table structure plus a script-language subtag whose old-tag lookup returns the default script, requiring both I2S substitution and CMP_MAP gradient.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed font blob whose header/table-directory bytes (offsets 0x00-0x1f) carry recognized 4-byte table tags such as 'GSUB' / 'post' so the harness descends into hb_ot_tags_from_script_and_language and actually reaches the blocker at line 174.",
+      "why_winner_satisfies": "Winner-resolving seeds carry literal ASCII table tags at the head ('GSUB' at 0x0c-0x0f in seed 1/2, 'post' in seed 3/4), the exact 4-byte FOURCC magic an I2S CMP wants substituted; the dash-row ancestor in the lineage confirms an I2SRandReplace find planted such a tag.",
+      "why_loser_doesnt": "value_profile lacks I2SRandReplace, so it cannot copy a CMP operand (a 4-byte FOURCC) verbatim into the table-directory offsets; its loser-blocking seeds (e.g. seed 1 'y-hant-hk') never form the recognized table tags and stall taking the true branch 8/10 trials.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes a logged 4-byte FOURCC operand at the matching input offsets, planting the exact table tag that value_profile's blind havoc cannot synthesize."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "A script/language subtag string whose old-script-tag lookup (hb_ot_old_tag_from_script) returns HB_OT_TAG_DEFAULT_SCRIPT, i.e. a near-match language tag refined byte-by-byte toward a value that makes old_tag equal the default.",
+      "why_winner_satisfies": "Winner seeds carry language-like subtags ('uu-hans', '-u-hans') in the tail, the product of incremental gradient refinement; cmplog's I2S alone cannot climb such a multi-byte similarity gradient, but value_profile's CMP_MAP rewards each byte that brings the lookup operands closer.",
+      "why_loser_doesnt": "cmplog lacks the CMP_MAP gradient, so it gets no intermediate credit for partial-prefix language tags and cannot iteratively steer old_tag toward the default; it blocks 8/10 with no preserved gradient stepping stones.",
+      "mechanism_attribution": "value_profile/vpc CMP_MAP gradient buckets reward inputs whose CMP operands are closer to matching, preserving partial-prefix language tags as corpus so the lookup is incrementally steered to return the default script tag."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked false side is taken only when old_tag equals the default script tag at line 174.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6, hb-ot-tag.cc:174",
+      "exact_quote": "if (old_tag != HB_OT_TAG_DEFAULT_SCRIPT)"
+    },
+    {
+      "claim": "value_profile_cmplog resolves 10/10 while value_profile blocks 8/10, the I2S-delta pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2, L34-37",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile_cmplog beats cmplog on the value_profile delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1, L26",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "Winner-resolving seeds carry literal table tags GSUB and post at the head of the blob.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 0x0c-0x0f; seed 3 0x0c-0x0f",
+      "exact_quote": "47 53 55 42   .........0. GSUB"
+    },
+    {
+      "claim": "A winner-resolving seed carries the post table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 3 0x0c-0x0f",
+      "exact_quote": "70 6f 73 74   ......      post"
+    },
+    {
+      "claim": "Winner-resolving seeds carry language-like subtags refined into the tail.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 3/4 tail",
+      "exact_quote": "75 75 2d 68 61 6e 73   CCC......uu-hans"
+    },
+    {
+      "claim": "A loser-blocking seed carries an unrelated language tag y-hant-hk and never forms recognized table tags.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1 0x10",
+      "exact_quote": "79 2d 68 61 6e 74 2d 68 6b 00 20 00 00 00 ff 01"
+    },
+    {
+      "claim": "cmplog and vpc have I2SRandReplace; value_profile does not.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "I2SRandReplace substitutes a logged CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile's CMP_MAP rewards inputs whose operands are closer to matching, preserving gradient stepping stones.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "cmplog lacks the CMP_MAP gradient bucket signal that value_profile adds.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "edge-bucket signal **plus** new-CMP_MAP-bucket signal"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 6223 --role W --fuzzer value_profile_cmplog --trial 1 --seed 846fa0fa582cf403` and observed one I2S-floor dash row (mutation_op = -) at depth 32 of the 33-level ancestor chain, confirming an unwrapped I2SRandReplace find in the winner's lineage"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile alone (no I2SRandReplace) resolves the false branch as often as value_profile_cmplog, showing the exact-FOURCC-tag substitution axis is not necessary."
+  },
+  "weakest_evidence_point": "The split of credit between the I2S FOURCC-tag axis and the VP language-subtag gradient axis is inferred from seed content; the byte-diff offsets are mostly PARTIAL so I cannot prove each pair's win is driven by the distinct axis I assigned rather than a single shared structural requirement.",
+  "confidence": "medium"
+}

@@ -1,0 +1,69 @@
+{
+  "branch_id": 5991,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must shape into glyphs categorized H/HVM/IS (an un-ligated halant) inside the USE syllable reorder loop; reached by free havoc byte mutation.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "Bytes that drive the USE shaper to assign at least one glyph the use_category USE(H), USE(HVM), or USE(IS) AND leave that glyph un-ligated, so is_halant_use returns true at line 357 inside reorder_syllable_use's move-back loop. The gate is a glyph-category equality on a runtime-derived classification table, not a literal byte field copied from the input.",
+      "why_winner_satisfies": "naive resolved=10/10 and reaches the true side with hitcount 26; its winning seeds are produced entirely by havoc/structural byte mutators (BytesExpandMutator, BitFlipMutator, ByteRandMutator, BytesSwapMutator, CrossoverInsertMutator) that broadly explore the input space and stumble onto byte arrangements the shaper classifies as a halant glyph.",
+      "why_loser_doesnt": "cmplog blocked=10/10 with avg blocked duration 23.60h and hitcount 0; it never reaches the true side because the gate is a derived glyph-category comparison with no input-resident operand for I2SRandReplace to substitute, so cmplog spends its budget on fruitless CMP-operand replacement plus per-execution CMP-logging overhead instead of the broad havoc exploration that pays off here.",
+      "mechanism_attribution": "The winner naive uses plain havoc + token byte mutation with no CMP introspection (havoc-only); the divergence is attributable to the ABSENCE of comparison-solving, not its presence. cmplog's input-to-state operand-substitution mutator reads CmpLogObserver operands and substitutes them at matching input offsets, which is wasted here because the branch condition is a USE-table glyph-category equality (USE(H)/USE(HVM)/USE(IS)) computed from the shaped buffer rather than a direct comparison against bytes lying in the input; the CMP buffer holds no operand that maps back to an input offset, so substitution cannot manufacture the required glyph category, and the per-execution CMP cost slows cmplog's throughput relative to naive's broad havoc exploration."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a glyph use_category equality check, not a raw input-byte comparison.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 / hb-ot-shaper-use.cc:357",
+      "exact_quote": "return (info.use_category() == USE(H) || info.use_category() == USE(HVM) || info.use_category() == USE(IS)) &&"
+    },
+    {
+      "claim": "The blocker sits inside reorder_syllable_use's move-back loop guarded by is_halant_use.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L58 / line 425",
+      "exact_quote": "if (is_halant_use (info[i])) <-- CALL"
+    },
+    {
+      "claim": "naive resolves the branch in all 10 trials while cmplog blocks in all 10.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "L11-L12",
+      "exact_quote": "naive                           10        0          0  winner (I2S vs cmplog)"
+    },
+    {
+      "claim": "cmplog never reaches the true side: hitcount 0 versus naive's 26, and stays blocked far longer.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L30-L31",
+      "exact_quote": "avg hitcount on branch: winner=26  loser=0"
+    },
+    {
+      "claim": "The winner seeds are produced by havoc/structural byte mutators with no I2S operator.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 34826c70db3871cf",
+      "exact_quote": "mutation_op=BytesExpandMutator"
+    },
+    {
+      "claim": "naive's mutator stack is havoc + token with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "L258 / naive",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes a CMP operand at input offsets matching the other operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "L203-L206 / cmplog",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only (the winner naive has no I2S), so I2S-floor verification is not required for the winner. As a corroboration I ran `python3 tools/db_query.py lineage --branch 5991 --role W --fuzzer naive --trial 1 --seed 34826c70db3871cf`: the chain is entirely havoc/token mutators (BytesExpandMutator, BitFlipMutator, CrossoverReplaceMutator, etc.) with a single dash row at depth 19. Per the MECHANISM CONTEXT caveat the dash signal is I2S-exclusive only for cmplog/vpc; on a naive chain the depth-19 dash row is the seed-corpus origin (ParentInfo-only root), NOT an I2S find, consistent with naive having no I2S mutator."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on a USE-style runtime-derived glyph-category equality in which cmplog resolves the gate as fast as or faster than naive (i.e., I2S substitution measurably accelerates reaching the true side), which would show the gate IS solvable by operand substitution and the divergence is not due to wasted I2S energy."
+  },
+  "weakest_evidence_point": "The claim that cmplog is slowed specifically by wasted I2S energy (rather than ordinary run-to-run variance) rests on inference from the loser's 23.60h blocked duration and zero hitcount, not on direct evidence of I2S attempting and failing operand substitution at this gate.",
+  "confidence": "medium"
+}

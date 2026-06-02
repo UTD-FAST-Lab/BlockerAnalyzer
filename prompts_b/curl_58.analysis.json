@@ -1,0 +1,87 @@
+{
+  "branch_id": 58,
+  "target": "curl",
+  "summary_one_line": "Input must form a valid HTTP response with a parseable Set-Cookie header so a cookie is added, making the freelist loop iterate",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must contain the exact literal tokens that the cookie path requires: an HTTP status line (\"HTTP/\" at offset 0x24) and a \"Set-Cookie\" header (\"Set-Coo\" at offset 0x39+), plus a well-formed host:port so the response is parsed far enough to call Curl_cookie_add. Only then does a Cookie node exist, so Curl_cookie_freelist's while(co) takes the TRUE side at least once.",
+      "why_winner_satisfies": "All winner seeds carry the intact literals at fixed offsets: 0x24 is uniformly 'G' followed by \"HTTP/\" (47 48 54 54 50 2f), and 0x39 onward holds \"Set-Coo\". The HIT-COUNT DIVERGENCE shows Curl_cookie_add fires 20x in W and 0x in L, and the blocker takes T=20 in W vs T=0 in L, so a cookie is added and freed.",
+      "why_loser_doesnt": "Loser seeds are short and byte-noise: at offset 0x24 W is uniformly 'G' but L is a scattered set (50/42/9e/2f), and the entire \"HTTP/\"..\"Set-Coo\" region is dominated by '%' filler in L, so the response never parses a Set-Cookie header; Curl_cookie_add never runs and the freelist while(co) stays on the F side (T=0).",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes the program's expected literal (\"HTTP/\", \"Set-Cookie\") into the input at the matching offsets, planting the exact magic bytes that the HTTP/cookie parser strcmp/memcmp against. naive and value_profile lack I2SRandReplace, so they must stumble onto these multi-byte literals by chance and never do within budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the loop guard while(co) in Curl_cookie_freelist whose TRUE side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cookie.c:1553",
+      "exact_quote": "while(co) {"
+    },
+    {
+      "claim": "Both decisive pairs differ only by the I2S technique with full prob_div=1.00.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The winner takes the loop TRUE side 20 times while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1553",
+      "exact_quote": "while(co) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Curl_cookie_add executes 20 times under the winner seed set and 0 times under the loser set.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "cookie.c:494-1207",
+      "exact_quote": "20         0  Curl_cookie_add  (/src/curl/lib/cookie.c:494-1207)"
+    },
+    {
+      "claim": "Winner seeds carry the literal \"HTTP/\" at offset 0x24 onward.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 2b428b2993f47feb offset 0x20",
+      "exact_quote": "02 00 00 00 47 48 54 54 50 2f 09 6d 65 40 06 24   ....GHTTP/.me@.$"
+    },
+    {
+      "claim": "Winner seeds carry the \"Set-Coo\" cookie-header literal in the tail bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 2b428b2993f47feb offset 0x30",
+      "exact_quote": "65 63 8e 65 74 72 65 0d 0a 53 65 74 2d 43 6f 6f   ec.etre..Set-Coo"
+    },
+    {
+      "claim": "At offset 0x24 winners are uniformly 'G' (x20) while losers are a scattered noisy set.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0024",
+      "exact_quote": "0x0024  47(G)x20                            50(P)x2 42(B)x1 9e(.)x1 2f(/)x1 +7u  DIFFER"
+    },
+    {
+      "claim": "Loser seeds are short and lack the HTTP/Set-Cookie structure (e.g. 32-byte byte-noise seed).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 00182ecc311b5f0b",
+      "exact_quote": "00 01 00 00 00 19 70 6b 2b 2b 2b 2b 2b 2a 2b 2b   ......pk+++++*++"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so it is a clean I2S-negative arm.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 58 --role W --fuzzer cmplog --trial 1 --seed 2b428b2993f47feb` and observed two I2S-floor rows (mutation_op = -) at depth 14 and 15 of the 16-level ancestor chain; the trailing 'I2S-floor signal' line reports 2 dash rows, direct lower-bound evidence of an I2SRandReplace find in the winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where naive/value_profile resolve the while(co) TRUE side at the same rate as cmplog/vpc despite the input still needing the exact multi-byte \"HTTP/\" and \"Set-Cookie\" literals — showing the literals are reachable by havoc alone and I2S substitution is not the discriminator."
+  },
+  "weakest_evidence_point": "The chain from 'cookie added' to the freelist loop is inferred from per-function hit counts (Curl_cookie_add 20 vs 0); no seed directly proves the parsed Set-Cookie produced a non-NULL c->cookies[i] entry rather than another path keeping co non-NULL.",
+  "confidence": "high"
+}

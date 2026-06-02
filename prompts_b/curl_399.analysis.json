@@ -1,0 +1,99 @@
+{
+  "branch_id": 399,
+  "target": "curl",
+  "summary_one_line": "Input must carry a protocol/header token that exactly matches a curl literal so the case-insensitive compare loop runs to completion (false side).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A byte run that equals (case-insensitively) one of the protocol/header string literals Curl_strncasecompare is called with — e.g. an HTTP-version token \"HTTP/\" or scheme token \"pop3\" — so every character in the loop matches and the loop falls through to the false (loop-exit) branch instead of breaking on a mismatch.",
+      "why_winner_satisfies": "Winner-resolving seeds embed clean ASCII protocol literals: offsets 0x24-0x29 spell \"HHTTP/\"/\"GHTTP/\" and 0x06-0x08 spell \"pop\"/\"pop3\", and the loser-vs-winner byte-diff at those offsets shows the winner concentrated on the exact literal bytes (e.g. 0x25 H, 0x26 T, 0x27 T, 0x28 P, 0x29 /). Matching the literal makes Curl_raw_toupper(*first)==Curl_raw_toupper(*second) hold every iteration, so the loop exits via the while-condition (max/string exhausted) — the false branch.",
+      "why_loser_doesnt": "Loser-blocking seeds at the same offsets carry mutation noise (runs of 0x25 '%', 0x2b '+', 0x2e '.') rather than the protocol literal, so the very first character compared mismatches, Curl_raw_toupper differs, and execution hits the break (line 127->128, true side) before the loop can complete.",
+      "mechanism_attribution": "cmplog/vpc intercept the strcase comparison and record both operands (the input byte and the curl literal) in the CmpLogObserver buffer; I2SRandReplace then substitutes the literal operand into the input at the matching offset, manufacturing the exact-match token that naive/value_profile must instead stumble onto via blind havoc. The technique delta on both decisive pairs is I2S, and the vpc winner lineage shows I2S-floor dash rows."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs differ by the I2S technique only.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 + Pair 2 headers",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair is value_profile_cmplog>value_profile, also delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The blocking branch is the false side of a case-insensitive compare loop.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "strcase.c:126",
+      "exact_quote": "while(*first && *second && max) {"
+    },
+    {
+      "claim": "The loop breaks as soon as an uppercased character pair mismatches, so completing the loop (false side) requires every compared char to match.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "strcase.c:127-128",
+      "exact_quote": "if(Curl_raw_toupper(*first) != Curl_raw_toupper(*second)) {"
+    },
+    {
+      "claim": "Winner inputs carry a clean \"HTTP/\" protocol literal at offsets 0x24-0x29.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x25-0x29",
+      "exact_quote": "   0x0025  48(H)x20                            25(%)x3 2e(.)x2 41(A)x2 64(d)x1 +4u  DIFFER"
+    },
+    {
+      "claim": "Winners concentrate on the literal '/' byte at offset 0x29 while losers are noise there.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x29",
+      "exact_quote": "   0x0029  2f(/)x20                            25(%)x2 41(A)x2 31(1)x1 2f(/)x1 +6u  PARTIAL"
+    },
+    {
+      "claim": "Winner seeds embed the ASCII protocol token \"pop\"/\"HTTP/\" and \"TranSfe\" header text.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 017423e94c217ba2 offsets 0x06,0x24",
+      "exact_quote": "....HHTTP/#mea.$"
+    },
+    {
+      "claim": "Loser seeds carry runs of '%' mutation noise rather than a matchable literal.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 00225bc4819174d2",
+      "exact_quote": "%%%%%%%%%%%%&%@."
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace which substitutes a recorded CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S stage so it must find the exact literal by blind havoc.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile likewise has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "The winner resolved on all 10 trials while the loser blocked all 10, with hitcount 66 vs 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 stats",
+      "exact_quote": "avg hitcount on branch: winner=66  loser=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 399 --role W --fuzzer value_profile_cmplog --trial 1 --seed 095209cade8bf193` and observed the I2S-floor signal: 2 ancestor dash rows (mutation_op = -) at depth 23 and 24, direct lower-bound evidence of an unwrapped I2SRandReplace find in the winning vpc lineage. The four cmplog winning seeds (017423e94c217ba2, 1d9d678b6253009f, 054a689b9dd21854, 0429edfc621de054) showed all-havoc chains within their 50 recorded levels, so the floor confirmation rests on the vpc seed; cmplog I2S finds may have leaked into the havoc bucket."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness exposing this exact-match strcase gate where cmplog/vpc resolve the false branch no faster than naive/value_profile (no I2S dose-response separation), which would refute that I2S literal substitution is what unlocks the branch."
+  },
+  "weakest_evidence_point": "The cmplog winners' lineage chains are all-havoc within the 50 recorded levels, so the I2S-floor confirmation comes only from the vpc seed; cmplog I2S contribution is inferred from the technique delta rather than directly observed in those chains.",
+  "confidence": "high"
+}

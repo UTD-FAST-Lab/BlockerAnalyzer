@@ -1,0 +1,81 @@
+{
+  "branch_id": 5716,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must contain a valid GPOS table (the literal 'GPOS' tag) so apply_gpos is set true",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A TrueType/OpenType font whose table directory carries the 4-byte ASCII tag 'GPOS' (47 50 4f 53) at a table-record offset, so the shaper plan sets this->apply_gpos and takes the true branch at line 263.",
+      "why_winner_satisfies": "Every winner-resolving seed places the exact bytes 47 50 4f 53 ('GPOS') at offsets 0x0c-0x0f, the table tag the parser compares against to enable GPOS positioning; the W byte set at those offsets is a single concentrated value (G/P/O/S x20).",
+      "why_loser_doesnt": "Loser-blocking seeds never present the 'GPOS' tag at the table-record offsets — at 0x0c-0x0f the L byte sets are scattered low/high bytes (00, 01, 20, 2c, etc.) with no GPOS run, so apply_gpos stays false and the false-branch fallback path (apply_fallback_kern) runs instead.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CMP_MAP'd tag comparison from the CmpLogObserver buffer and substitutes the constant operand 'GPOS' into the input at matching offsets; naive/value_profile lack I2SRandReplace so they must stumble onto the 4-byte tag by chance and never do across 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the GPOS-enable test in the shaper position routine, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-shape.cc:263",
+      "exact_quote": "Source line:   if (this->apply_gpos)"
+    },
+    {
+      "claim": "Both decisive pairs differ only by the I2S technique and the winner resolves 10/10 while the loser blocks 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "The second decisive pair is also an I2S delta (vpc over vp).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "Winner seeds carry the literal ASCII bytes GPOS at offset 0x0c onward.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 2, offset 0x0c",
+      "exact_quote": "00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+    },
+    {
+      "claim": "At offsets 0x0c-0x0f the winner byte sets are a single concentrated GPOS run while loser sets are scattered.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "Taking the true branch routes execution into map.position (GPOS apply); the false side runs the fallback-kern path.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 264 and 274",
+      "exact_quote": "[W]   264      map.position (this, font, buffer);"
+    },
+    {
+      "claim": "The winner takes the true side (T=322) while the loser takes only the false side (F=381) at the blocker.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L263",
+      "exact_quote": "d=1   L 263  T=322 F=0  T=0 F=381  if (this->apply_gpos)  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand into the input at matching offsets, unlike naive/value_profile.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so it must find the tag by havoc/token mutation only.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5716 --role W --fuzzer cmplog --trial 1 --seed 002c9ad92acce91b` and observed 2 I2S-floor rows (mutation_op = -) at depths 29 and 30 of the 31-level ancestor chain, the lower-bound dash signal of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose GPOS-enable gate compares against the 'GPOS' tag where naive/value_profile resolve the true branch as often as cmplog/vpc — showing the 4-byte tag substitution is not what gives I2S its edge."
+  },
+  "weakest_evidence_point": "The byte-diff shows GPOS at offset 0x0c-0x0f but the prompt does not directly expose the parser's tag-comparison source, so the offset-to-table-record mapping is inferred from the seed structure rather than seen in code.",
+  "confidence": "high"
+}

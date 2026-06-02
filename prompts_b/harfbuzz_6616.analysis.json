@@ -1,0 +1,118 @@
+{
+  "branch_id": 6616,
+  "target": "harfbuzz",
+  "summary_one_line": "Reach the Sinhala vowel-constraint switch and present codepoint U+0D91 as the current glyph so case 0x0D91u is selected.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "Input bytes that decode (via the harfbuzz fuzzer harness) to a Sinhala-script buffer whose current glyph codepoint equals U+0D91 (little-endian bytes 91 0d ...), so the equality switch on buffer->cur().codepoint dispatches to case 0x0D91u.",
+      "why_winner_satisfies": "value_profile's CMP_MAP records how close each integer CMP came to matching, so the codepoint==0x0D91 comparison gets a distance-bucket gradient that preserves near-miss inputs and climbs toward the exact match; winner-resolving seeds carry the literal 91 0d codepoint bytes (e.g. value_profile seed 3 has 91 0d at offsets 0x08 and 0x0c).",
+      "why_loser_doesnt": "naive only has bare edge-counter feedback; the 0x0D91 switch arm is one discrete value among many Sinhala cases, so naive must blindly hit the exact 16-bit codepoint with no proximity signal and stays blocked all 10 trials.",
+      "mechanism_attribution": "value_profile's CMP_MAP per-(PC, operand-distance bucket) feedback gives a Hamming/prefix-distance gradient on the codepoint==0x0D91 integer comparison, rewarding near-miss codepoints and letting the fuzzer hill-climb to the exact value naive cannot find."
+    },
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "Same Sinhala-script buffer with current glyph U+0D91, but reached and rewarded because the CtxHook indexes the edge by call context, making the (caller-chain, edge) pair fresh coverage that survives into the corpus.",
+      "why_winner_satisfies": "naive_ctx folds the call-context hash into the edge-map index so the same vowel-constraints edges count as new coverage when reached through different shaper call paths (preprocess_text_use / preprocess_text_indic), giving extra corpus retention that drives it to resolve all 10 trials with 85 avg hits; its resolving seeds (naive_ctx seeds 1,4,5) carry the 91 0d codepoint and contextual byte runs.",
+      "why_loser_doesnt": "naive collapses every reach of the edge to one map slot regardless of call context, so once the bare edge is seen there is no new-coverage incentive to refine inputs toward the 0x0D91 arm; it blocks for the full 16.00h.",
+      "mechanism_attribution": "naive_ctx's CtxHook context-sensitive coverage records (call-context, edge) pairs as new buckets, retaining more intermediate seeds along the shaper call chain and thereby exploring the Sinhala switch arms that bare-edge naive abandons."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the case 0x0D91u switch arm inside the Sinhala script block of the vowel-constraints preprocessor.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6, L318",
+      "exact_quote": "case 0x0D91u:"
+    },
+    {
+      "claim": "The arm is selected by an equality switch on the current glyph codepoint.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L302-L309",
+      "exact_quote": "switch (buffer->cur ().codepoint)"
+    },
+    {
+      "claim": "Pair 1 is value_profile beating naive with the value_profile delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26",
+      "exact_quote": "Pair 1: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "value_profile resolves the branch in all 10 trials while naive is blocked in all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L28-L29",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "value_profile uses a CMP_MAP keyed by operand-distance bucket as a proximity gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile",
+      "exact_quote": "each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket)"
+    },
+    {
+      "claim": "An input producing a closer CMP operand pair is preserved as corpus, supplying the hill-climbing gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "A value_profile winner-resolving seed carries the literal codepoint bytes 91 0d.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 1372784cff16dcab",
+      "exact_quote": "f8 00 00 04 00 4c 0d 55 91 0d 00 00 91 0d 00 00"
+    },
+    {
+      "claim": "naive has only edge-counter feedback and no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive",
+      "exact_quote": "per-edge hit-count bucket; a new bucket triggers a"
+    },
+    {
+      "claim": "Pair 2 is naive_ctx beating naive with the ctx_coverage delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L34",
+      "exact_quote": "Pair 2: naive_ctx > naive  [delta: ctx_coverage]"
+    },
+    {
+      "claim": "naive_ctx folds the call context into the edge-map index so the same edge is recorded at different slots by call path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx",
+      "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "naive_ctx treats a new (call-context, edge) pair as new coverage rather than a bare edge.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx",
+      "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+    },
+    {
+      "claim": "naive_ctx resolves with 85 avg hits on the branch versus 0 for naive.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L39",
+      "exact_quote": "avg hitcount on branch: winner=85  loser=0"
+    },
+    {
+      "claim": "A naive_ctx winner-resolving seed carries the codepoint bytes 91 0d.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id d43e06caf87deda4",
+      "exact_quote": "85 0d 00 00 91 0d 00 00 91 0d 00 00 8d 0d 00 ad"
+    },
+    {
+      "claim": "The blocker is reached through the use/indic shaper preprocess call chain.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L490-L491",
+      "exact_quote": "preprocess_text_use(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism for the highest-prob_div pair is CMP_MAP gradient (value_profile), not I2SRandReplace, so the mandatory lineage check does not apply; no dash-row lineage query was required for either decisive pair (value_profile=CMP_MAP gradient, naive_ctx=context-sensitive coverage)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a bare-equality switch arm on a 16-bit codepoint where value_profile fails to resolve faster than naive (no CMP_MAP proximity advantage), and naive_ctx fails to resolve faster than naive when only call-context differs."
+  },
+  "weakest_evidence_point": "The exact mapping from input bytes through the harfbuzz harness to a Sinhala-script buffer with U+0D91 as the current glyph is inferred from the literal 91 0d byte runs and source switch, not directly observed at the codepoint level.",
+  "confidence": "medium"
+}

@@ -1,0 +1,69 @@
+{
+  "branch_id": 289,
+  "target": "curl",
+  "summary_one_line": "Input must produce a %d-style decimal-integer conversion whose value is negative so the signed-negativity test takes the true branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A '%d'-class (FORMAT_INT, non-CHAR, non-OCTAL, non-HEX, non-UNSIGNED) decimal conversion whose argument value, parsed from the harness input, is < 0 so that p->data.num.as_signed < 0 evaluates true at line 735.",
+      "why_winner_satisfies": "Winner cmplog seeds carry a structured header (00 01 00 00 00 19 ...) plus '%'-format bytes that drive an INT conversion with a negative operand; the per-role overlay marks the negative-handling block (lines 738-741, 781, 788) as winner-only [W], and the DIVERGENT BRANCHES line 735 shows W=T:5 F:20 while L never takes the true side (T:0).",
+      "why_loser_doesnt": "Naive loser seeds reach line 735 (the case-FORMAT_INT path is hit, L F:40) but every integer conversion they construct is non-negative, so is_neg stays 0 and the true branch is never taken; naive must blindly mutate bytes into a value whose signed interpretation is negative.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer, where the as_signed<0 comparison and the upstream format/parameter CMPs are recorded, and substitutes operand bytes into the input so it constructs a negative-valued %d conversion; naive lacks any CMP introspection and only stumbles onto a negative value by chance, which it managed in only 1/10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is a signed-negativity test on a decimal integer conversion.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "mprintf.c:735",
+      "exact_quote": "is_neg = (p->data.num.as_signed < (mp_intmax_t)0) ? 1 : 0;"
+    },
+    {
+      "claim": "cmplog resolves the branch in 8/10 trials while naive resolves only 1/10, a decisive I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog > naive",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The negative-handling block executed only on winner-resolving seeds, confirming the winner takes the true side.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "mprintf.c:738-741",
+      "exact_quote": "[W]   738        signed_num = p->data.num.as_signed + (mp_intmax_t)1;"
+    },
+    {
+      "claim": "Winner takes the true side of line 735 (T=5) while loser never does (T=0), reaching only the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L735",
+      "exact_quote": "d=1   L 735  T=5 F=20  T=0 F=40  is_neg = (p->data.num.as_signed < (mp_intmax_t)0) ? 1 : 0;  <-- BLOCKER"
+    },
+    {
+      "claim": "Both winner and loser reach the FORMAT_INT case, so the divergence is the value's sign, not the conversion type.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L701",
+      "exact_quote": "d=1   L 701  T=60 F=191  T=330 F=403  case FORMAT_INT:"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which scans the input for an operand and substitutes the other operand recorded in the CMP buffer.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S capability and only havoc/token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 289 --role W --fuzzer cmplog --trial 1 --seed 6543e87c49a8de08`; the chain reports 'I2S-floor signal: 2 ancestor dash row(s) at depth 12, 13' (mutation_op = -), the ParentInfo-only signature of an I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the negative %d value is fully byte-controlled (no CMP gate on its bytes) yet cmplog still beats naive on this branch, showing the divergence is not driven by I2S operand substitution."
+  },
+  "weakest_evidence_point": "The byte-diff offsets do not isolate a single literal operand that I2S substitutes to force negativity, so the exact CMP that I2S solves to flip the sign is inferred rather than pinpointed.",
+  "confidence": "medium"
+}

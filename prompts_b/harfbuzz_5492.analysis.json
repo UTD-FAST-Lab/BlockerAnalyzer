@@ -1,0 +1,93 @@
+{
+  "branch_id": 5492,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must build a MATH table whose Device.format field equals a valid case (1/2/3/0x8000), avoiding the default switch arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed sfnt with a MATH table reaching a Device record (via MathValueRecord.get_x_value -> base+deviceTable get_x_delta) whose 16-bit u.b.format field equals one of the recognized switch cases 1, 2, 3, or 0x8000, so the switch in get_x_delta dispatches to a real format arm instead of falling through to the `default:` (line 3569), thereby taking the false side of that default branch.",
+      "why_winner_satisfies": "Winner seeds carry a structured sfnt header (00 01 00 00 at 0x00) and the literal 'MATH' tag (4d 41 54 48) at offset 0x0c, plus device-record bytes producing format values 1/2/3; the per-role overlay shows winner seeds reach OT::Device::sanitize and MathValueRecord::sanitize (W=712/1130 vs L=0) and execute case 1/2/3 (line 3562 T-side hit only under W), confirming a valid Device.format reaches the switch.",
+      "why_loser_doesnt": "Loser-blocking seeds are short and lack the MATH-table structure (6-byte '87 0e 0d 0e 22 0e', 13-byte, 27-byte garbage with no 'MATH' tag at 0x0c); they never invoke OT::Device::sanitize / MathValueRecord::sanitize (L hits = 0) and only ever take the default arm (L true=140 at line 3569), so the format field is never set to a valid case value.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace intercepts the format comparison (switch lowered to integer CMPs against 1/2/3/0x8000) and the 'MATH' tag memcmp, captures the constant operands, and substitutes them directly into the input at the matched offsets; naive and value_profile lack I2SRandReplace so they must hit the exact 16-bit format constant and 4-byte tag by chance, which they fail to do within budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of a switch on u.b.format, and the globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L3559 / L3569, blocked side F",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "The switch dispatches on u.b.format with recognized cases 1/2/3 and 0x8000 before the default blocker.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L3559-3569",
+      "exact_quote": "switch (u.b.format)"
+    },
+    {
+      "claim": "Case 1/2/3 is the format arm whose taking corresponds to leaving the default; winners hit it, losers never do.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L3562",
+      "exact_quote": "d=1   L3562  T=5 F=72  T=0 F=140  case 1: case 2: case 3:"
+    },
+    {
+      "claim": "Winner seeds carry the literal 'MATH' table tag, evidence of valid table structure reaching the Device switch.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 4f05c78f8adde3c2 offset 0x0c",
+      "exact_quote": "4d 41 54 48   ......      MATH"
+    },
+    {
+      "claim": "Winner-resolving seeds were discovered by value_profile_cmplog.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 4f05c78f8adde3c2",
+      "exact_quote": "fuzzer=value_profile_cmplog, trial=1"
+    },
+    {
+      "claim": "Winner seeds invoke OT::Device::sanitize while loser seeds never do (W=712 L=0).",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "OT::Device::sanitize line 3593-3608",
+      "exact_quote": "712         0  OT::Device::sanitize(hb_sanitize_context_t*) const"
+    },
+    {
+      "claim": "Winner seeds invoke MathValueRecord::sanitize while loser seeds never do (W=1130 L=0).",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "OT::MathValueRecord::sanitize line 55-58",
+      "exact_quote": "1130         0  OT::MathValueRecord::sanitize(hb_sanitize_context_t*, void const*) const"
+    },
+    {
+      "claim": "Loser-blocking seeds are short and unstructured, lacking the MATH-table layout.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 003817559785f774, size=6",
+      "exact_quote": "Seed 1 (id=003817559785f774, size=6 bytes, fuzzer=naive, trial=1, discovered_at=0s, mutation_op=ByteDecMutator,WordAddMutator):"
+    },
+    {
+      "claim": "At the default blocker line, losers always take the true (blocking) side; winners reach the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L3569 BLOCKER",
+      "exact_quote": "d=1   L3569  T=61 F=16  T=140 F=0  default:  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace, which substitutes a captured CMP operand at matching input offsets; naive lacks it.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile (loser in pair 1) has no I2SRandReplace, so absence of the dash signal distinguishes it.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5492 --role W --fuzzer value_profile_cmplog --trial 1 --seed 4f05c78f8adde3c2`; the chain has 20 ancestor levels and the trailing I2S-floor signal reports 1 dash row (mutation_op = -) at depth 19. Per the cmplog/vpc mechanism note, a dash row in a vpc-discovered seed's ancestor chain is lower-bound evidence of an I2SRandReplace find (it is I2S-exclusive versus naive/value_profile, the two losers here)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a switch on a parsed 16-bit format field reaching this default arm shows cmplog/vpc NOT resolving the valid-case false side faster than naive/value_profile (no I2S advantage), which would refute that an I2S magic-number/tag substitution is the divergence cause."
+  },
+  "weakest_evidence_point": "The exact device-record offset that holds the winning format value is not pinned in the byte diff; I infer the format-constant requirement from the switch source and sanitize-function hit divergence rather than a single concentrated W-vs-L format byte.",
+  "confidence": "high"
+}

@@ -1,0 +1,93 @@
+{
+  "branch_id": 303,
+  "target": "curl",
+  "summary_one_line": "Input must encode a well-formed pop3 URL with valid host:port so a live connection survives to the mid-transfer removal state.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A length-prefixed pop3 URL whose host/port/path bytes parse into a connectable scheme, driving the easy handle past MSTATE_DO into an active mid-transfer state with data->conn non-NULL when curl_multi_remove_handle runs (line 800 true branch).",
+      "why_winner_satisfies": "Winner seeds carry a clean structured 'pop3' scheme followed by a concentrated host/port literal (':::::::::900', '0.1:9001?850') and a HTTP/-like header block; the connection advances so data->conn is set and mstate is between MSTATE_DO and MSTATE_COMPLETED, and per-role coverage marks the true-branch body (lines 805/814) [W].",
+      "why_loser_doesnt": "Loser seeds after the 'pop3'-region bytes degenerate into long runs of '%'/'+'/'.' filler (e.g. 'pk+++++*++' and '%%%%%%%%%%%%') that do not parse into a valid host:port, so the handle never reaches an active connection and the line-800 condition stays false (L hits the false-path msglist loop at lines 891-898).",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads CMP operands captured during URL/scheme parsing and substitutes the exact byte sequences (scheme token, port digits, separators) into the input, building the precise host:port string that naive/value_profile cannot assemble by blind havoc; the I2S-floor dash row in the winning seed's lineage confirms an I2S contribution."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs differ by the I2S technique (cmplog/vpc add I2SRandReplace over naive/value_profile).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta labels",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair is cmplog > naive, also an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The blocked true branch at line 800 requires data->conn non-NULL plus an active mid-transfer mstate.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "multi.c:800-802",
+      "exact_quote": "if(data->conn && <-- BLOCKER"
+    },
+    {
+      "claim": "Winner coverage takes the true branch body (streamclose / multi_done at 805/814) while loser does not.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 805, 814",
+      "exact_quote": "[W]   805      streamclose(data->conn, \"Removed with partial response\");"
+    },
+    {
+      "claim": "Winner seeds carry a clean structured pop3 URL with a host/port literal.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 id=5d9ce7f391be0a62",
+      "exact_quote": "70 6f 70 33 4b 2f 25 3a 3a 3a"
+    },
+    {
+      "claim": "A winner cmplog seed encodes pop3 with an address:port string '0.1:9001'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 2 id=faf6b58d07527f1a",
+      "exact_quote": "70 6f 70 33 26 2f 2f 70 4d 37"
+    },
+    {
+      "claim": "Loser seeds degenerate into '+' filler runs after the pop-region bytes, not a parseable host:port.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 id=00182ecc311b5f0b",
+      "exact_quote": "70 6b 2b 2b 2b 2b 2b 2a 2b 2b"
+    },
+    {
+      "claim": "Loser seeds are dominated by repeated '%' filler bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 3 id=00225bc4819174d2",
+      "exact_quote": "25 25 25 25 25 25 25 25 25 25 25 25 26 25 40 e8"
+    },
+    {
+      "claim": "Winner bytes concentrate on structured URL/port characters at offsets 0x16-0x1e while loser bytes are diffuse filler.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x16-0x1e",
+      "exact_quote": "0x0016  3a(:)x4                             41(A)x3 64(d)x3 42(B)x2 25(%)x2 +10u  DIFFER"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes captured CMP operands at matching input offsets, the technique enabling the winner.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the loser side of pair 1 cannot do operand substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 303 --role W --fuzzer cmplog --trial 2 --seed faf6b58d07527f1a` and observed one I2S-floor row (mutation_op = -) at depth 22 of the 23-level ancestor chain, confirming an I2S contribution under the current build's dash-row floor signal."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the line-800 condition is gated only on a literal magic value with no structured host:port parse, yet cmplog still fails to beat naive/value_profile on resolving the true branch."
+  },
+  "weakest_evidence_point": "The mapping from input URL bytes to data->conn becoming non-NULL passes through multi_runsingle's connect state machine, which I infer from coverage rather than directly trace byte-to-pointer.",
+  "confidence": "medium"
+}

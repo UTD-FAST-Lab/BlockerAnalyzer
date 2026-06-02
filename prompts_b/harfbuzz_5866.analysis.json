@@ -1,0 +1,113 @@
+{
+  "branch_id": 5866,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must decode to an Indic symbol-cluster syllable so the syllable_type switch reaches case indic_symbol_cluster.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "Byte content that, after Indic-shaper categorization, yields a syllable whose low nibble equals indic_symbol_cluster; reached by broad havoc byte mutation that varies the codepoint/category bytes rather than by CMP substitution.",
+      "why_winner_satisfies": "naive resolves 10/10 with hitcount 88; its havoc/token stack (DwordAddMutator, ByteInterestingMutator, TokenReplace etc.) randomly perturbs the codepoint bytes and lands category-bearing inputs, e.g. the naive seed prefixed f3 a8 00 00 with long a2 runs.",
+      "why_loser_doesnt": "cmplog blocks 9/10 with hitcount 0; its added I2SRandReplace stage finds no input-byte CMP to substitute because syllable_type is an internal nibble classification, so I2S energy is wasted and naive's plain havoc out-explores it.",
+      "mechanism_attribution": "The syllable_type switch is a category dispatch, not an integer/string CMP against an input constant, so cmplog's I2SRandReplace substitution gains no traction; the win is plain havoc byte mutation (havoc-only) that naive spends fully on category exploration while cmplog dilutes effort on fruitless I2S."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Same indic_symbol_cluster syllable requirement; value_profile_cmplog additionally gets CMP_MAP-bucket feedback that rewards partial progress in the comparisons feeding the categorization path.",
+      "why_winner_satisfies": "value_profile_cmplog resolves 8/10 vs cmplog's 1/10 over the same branch; its instrumentation adds CMP_MAP gradient buckets on top of cmplog, giving a Hamming-distance signal cmplog lacks.",
+      "why_loser_doesnt": "cmplog has only edge-bucket feedback and the I2S stage; with no gradient signal it stays blocked 9/10 at hitcount 0 while vpc advances.",
+      "mechanism_attribution": "The added technique vpc has over cmplog is the value_profile CMP_MAP gradient (Hamming/prefix-distance feedback buckets), which rewards inputs closer to category-relevant comparison operands, enabling vpc to reach indic_symbol_cluster where bare cmplog cannot."
+    },
+    {
+      "covers_pairs": ["grimoire>cmplog (grimoire_structural)"],
+      "what_input_feature": "Same indic_symbol_cluster syllable requirement, reached by splicing/recombining generalized token-and-gap structures from the corpus into a layout that decodes to symbol-cluster text.",
+      "why_winner_satisfies": "grimoire resolves 8/10 vs cmplog's 1/10; it adds a GeneralizationStage plus Grimoire structural mutators that recombine generalized byte runs, and the grimoire winning seeds show repeated structural motifs (f2 a8 00 00 ... patterns).",
+      "why_loser_doesnt": "cmplog lacks the generalization + structural mutators (it is grimoire's baseline minus those stages) and stays blocked 9/10 at hitcount 0.",
+      "mechanism_attribution": "grimoire's added technique over its cmplog baseline is structural mutation: GeneralizationStage replaces concrete runs with gap placeholders and the Grimoire mutators splice/recurse on them, building category-bearing structures that cmplog's byte-local mutators do not assemble."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the case indic_symbol_cluster arm of a switch on an internally-computed syllable_type nibble, not an input-byte comparison.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L59-L72",
+      "exact_quote": "indic_syllable_type_t syllable_type = (indic_syllable_type_t) (buffer->info[start].syllable() & 0x0F);"
+    },
+    {
+      "claim": "The globally blocked side is the true branch at case indic_symbol_cluster.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7",
+      "exact_quote": "case indic_symbol_cluster:"
+    },
+    {
+      "claim": "naive wins the I2S pair, resolving 10/10 with hitcount 88 while cmplog blocks 9/10 at hitcount 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 L28-L32",
+      "exact_quote": "avg hitcount on branch: winner=88  loser=0"
+    },
+    {
+      "claim": "naive winning seeds were produced by plain havoc/token mutators including DwordAddMutator and ByteInterestingMutator.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 5",
+      "exact_quote": "mutation_op=DwordAddMutator,ByteInterestingMutator,BytesRandSetMutator,QwordAddMutator,TokenReplace,BytesDeleteMutator"
+    },
+    {
+      "claim": "naive has no I2S stage, only havoc + token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive section L299",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes operands at offsets matching a logged CMP operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog section L210-L213",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile_cmplog adds CMP_MAP gradient buckets on top of cmplog's stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "vpc section L303-L307",
+      "exact_quote": "per-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    },
+    {
+      "claim": "value_profile_cmplog resolves 8/10 vs cmplog's 1/10 at this branch, delta attributed to value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 L34-L37",
+      "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "grimoire adds a GeneralizationStage plus structural mutators on top of the cmplog stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire section L249-L254",
+      "exact_quote": "it includes the `CmpLogObserver`, the `TracingStage`, and the\n`I2SRandReplace` (i2s) stage — and ADDS a `GeneralizationStage` plus\nGrimoire structural mutators."
+    },
+    {
+      "claim": "Grimoire mutators splice and recurse on generalized token/gap structures.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire section L268-L270",
+      "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)."
+    },
+    {
+      "claim": "grimoire winning seeds show a repeated f2 a8 00 00 structural motif.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 3 id=68d1ae222de2c678",
+      "exact_quote": "f2 a8 00 00 f2 a8 00 00 dc 09 00 00 00 06"
+    },
+    {
+      "claim": "grimoire resolves 8/10 vs cmplog's 1/10, delta attributed to grimoire_structural.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 3 L42",
+      "exact_quote": "Pair 3: grimoire > cmplog  [delta: grimoire_structural]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only (for the I2S-direction pair naive>cmplog, where cmplog is the LOSER), not I2SRandReplace, so lineage verification is not mandatory; the winner here lacks I2S entirely (naive section: 'No I2S'), so there is no I2S floor to confirm. The other two hypotheses attribute to CMP_MAP gradient and grimoire structural respectively, neither of which is I2SRandReplace."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose switch dispatches on an input-byte integer compared against a literal (a true I2S CMP), where cmplog then BEATS naive at reaching the symbol arm, would refute the claim that the category dispatch denies cmplog any I2S traction here."
+  },
+  "weakest_evidence_point": "The exact byte-to-Indic-category mapping is not shown; the claim that winning seeds decode to indic_symbol_cluster syllables is inferred from hitcount/blocked counts and seed structure rather than a decoded categorization trace.",
+  "confidence": "medium"
+}

@@ -1,0 +1,81 @@
+{
+  "branch_id": 5723,
+  "target": "harfbuzz",
+  "summary_one_line": "Input containing a ZWJ (U+200D) glyph that is last-in-buffer or followed by a non-Extended_Pictographic codepoint, taking the false branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A buffer whose decoded codepoint sequence contains a ZWJ (joiner) glyph that is either at the final position (i+1 >= count) or whose following codepoint is NOT an Emoji Extended_Pictographic, so the conjunct at line 491 short-circuits to false.",
+      "why_winner_satisfies": "naive resolves the false branch in all 10/10 trials; its winning seeds are dominated by long runs of repeated filler bytes (e.g. 0x85, 0x32, 0x95) and trailing 0d 20 sequences that decode into multi-glyph buffers where a ZWJ appears as the trailing/penultimate glyph, so i+1 reaches count or the next codepoint is not Extended_Pictographic.",
+      "why_loser_doesnt": "cmplog blocks the false branch in 9/10 trials (resolved only 1/10); the I2S substitution mutator steers its inputs toward CMP-matched operands so it tends to satisfy the true-branch condition (ZWJ followed by an Extended_Pictographic), keeping i+1<count AND the pictographic test true, which is exactly the blocked-side L behavior shown at line 491 (L true=11, false=0).",
+      "mechanism_attribution": "The winner is naive, which has NO comparison introspection — it explores the false branch purely by havoc byte mutation (havoc-only) that happens to produce ZWJ-terminal or ZWJ-then-non-pictographic buffers. The loser cmplog's input-to-state substitution actively biases bytes toward the operands recorded at the line-492 pictographic comparison, pulling it onto the true side and starving the false branch; thus the divergence is attributable to the ABSENCE of comparison steering in naive, i.e. naive's lucky havoc exploration is what enables the winning side."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is naive>cmplog with delta I2S; naive is the winner and cmplog the loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "naive resolves the false branch in 10/10 trials while cmplog blocks 9/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 winner/loser counts",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0"
+    },
+    {
+      "claim": "The blocker is the conjunct guarding the next-codepoint pictographic test; the false branch is the globally blocked side.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-shape.cc:491:11",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "The blocker line is a conjunction that first checks i+1<count then the next codepoint's Extended_Pictographic status, reached only inside the ZWJ branch.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 488-492",
+      "exact_quote": "if (i + 1 < count && <-- BLOCKER"
+    },
+    {
+      "claim": "The ZWJ branch gates the blocker; only ZWJ glyphs reach line 491.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 488",
+      "exact_quote": "else if (unlikely (_hb_glyph_info_is_zwj (&info[i])))"
+    },
+    {
+      "claim": "Loser-blocking inputs take the true branch at line 491 (L true=11, false=0), i.e. ZWJ followed in-range by an Extended_Pictographic codepoint.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L491",
+      "exact_quote": "d=1   L 491  T=35 F=10  T=11 F=0  if (i + 1 < count &&  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner seeds contain long runs of repeated filler bytes and trailing 0d 20 sequences.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving Seed 2 / Seed 3",
+      "exact_quote": "95 95 00 00 20 00 20 00 80 00 00 00 20 00 96 95"
+    },
+    {
+      "claim": "naive has no I2S; it mutates purely with the havoc + token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes a recorded CMP operand into the input at matching offsets, steering bytes toward the compared value.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only (the WINNER is naive, which has no I2S/CMP introspection per MECHANISM CONTEXT), so the I2SRandReplace lineage query is not applicable. The divergence is attributable to the absence of I2S steering in naive rather than a substitution mutator; no dash-row floor signal is expected or required on the winning naive seeds (naive produces zero dash rows by construction)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the next-codepoint Extended_Pictographic CMP at line 492 is the ONLY gate and cmplog still resolves the false branch as fast as naive — showing I2S steering does not bias cmplog onto the true side and that naive's advantage is not from lacking that steering."
+  },
+  "weakest_evidence_point": "The claim that cmplog's I2S steering specifically pulls inputs onto the true (pictographic) side is inferred from the L-side branch counts and CMP mechanism, not directly observed in seed lineage.",
+  "confidence": "medium"
+}

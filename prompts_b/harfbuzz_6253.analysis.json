@@ -1,0 +1,75 @@
+{
+  "branch_id": 6253,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must encode a codepoint pair with 'a' in the Hangul L-jamo range and 'b' in the V-jamo range to take the true branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)", "naive>cmplog (I2S)"],
+      "what_input_feature": "A codepoint pair (a,b) where a falls in the half-open range [LBASE, LBASE+LCOUNT) and b falls in [VBASE, VBASE+VCOUNT) — i.e. a Hangul leading-consonant (L) jamo paired with a vowel (V) jamo. The gate is two conjoined RANGE checks, not exact-equality comparisons, so no single literal value satisfies it.",
+      "why_winner_satisfies": "The non-I2S winners (naive, value_profile) reach the true side by lucky havoc byte mutation that lands codepoints inside the two jamo ranges; winner avg hitcount on the branch is non-zero (8 and 5) and the per-role overlay shows the blocker line taking T=14 and T=4 under the winner-resolving seed set, whereas the loser set never takes it.",
+      "why_loser_doesnt": "The I2S losers (cmplog, value_profile_cmplog) spend execution and mutation budget on input-to-state operand substitution / CMP_MAP gradient feedback that targets exact-match comparisons; a two-sided range gate yields no single CMP operand to copy in, so the I2S stage provides no useful substitution and the loser stays blocked (avg hitcount 0, longer avg blocked duration ~22h vs ~10h).",
+      "mechanism_attribution": "The winner is the fuzzer WITHOUT the input-to-state stage. The branch is a conjunction of range comparisons (a>=LBASE && a<LBASE+LCOUNT && b>=VBASE && b<VBASE+VCOUNT), which has no exact magic operand for an operand-substitution stage to copy in. Naive havoc byte mutation explores the codepoint ranges directly and wins; the comparison-solving machinery in cmplog/vpc adds per-execution cost and corpus pollution without solving a range gate, so this is a havoc-only win."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a conjunction of two half-open range comparisons on a and b, not exact-equality CMPs.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 source line / hb-ucd.cc:98",
+      "exact_quote": "else if (a >= LBASE && a < (LBASE + LCOUNT) && b >= VBASE && b < (VBASE + VCOUNT))"
+    },
+    {
+      "claim": "Both decisive pairs have the non-I2S fuzzer as the winner and the I2S fuzzer as the loser, with the delta being the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26 and L34",
+      "exact_quote": "Pair 2: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile (no I2S) beats value_profile_cmplog (I2S) at this branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26",
+      "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "The winner resolves the branch with non-zero hitcount while the loser never hits the true side.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L39 (pair 2 avg hitcount)",
+      "exact_quote": "avg hitcount on branch: winner=5  loser=0"
+    },
+    {
+      "claim": "The winner-resolving seed set takes the blocker true side while the loser-blocking set takes only the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L129 blocker line d=1 L98",
+      "exact_quote": "T=14 F=7  T=0 F=27"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace operand substitution on top of naive, targeting matched CMP operands.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "L223-226 cmplog mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive uses only havoc + token mutators with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "L278 naive observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile's CMP_MAP feedback rewards operand-pair Hamming/prefix closeness, an exact-match gradient signal.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "L286-293 value_profile feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Not applicable / not required: claimed_mechanism is havoc-only, not I2SRandReplace. The winner in BOTH decisive pairs is the NON-I2S fuzzer (naive, value_profile), so the enabling technique cannot be I2SRandReplace. The branch is a two-sided range conjunction with no exact CMP operand for I2S to substitute, so lineage dash-row verification (an I2S-floor signal) would not support the winner's mechanism. No lineage query was run because the I2S floor is irrelevant to a havoc-only attribution."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the same two-sided range gate on a codepoint pair where cmplog/vpc resolve the true branch significantly faster than naive/value_profile — that would show I2S DOES help here, refuting the havoc-only / I2S-anti attribution."
+  },
+  "weakest_evidence_point": "The corpus-pollution / wasted-budget explanation for WHY I2S actively loses (rather than merely failing to help) is inferred from mechanism cost, not directly observed in the seeds.",
+  "confidence": "medium"
+}

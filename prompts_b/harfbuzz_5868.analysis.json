@@ -1,0 +1,75 @@
+{
+  "branch_id": 5868,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must be a structurally valid sfnt font whose Indic plan loads a non-zero virama glyph via cmap/GSUB table tags.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed OpenType/TrueType sfnt byte stream: the 4-byte sfnt version (00 01 00 00) followed by a table directory carrying FOURCC table tags (e.g. 'cmap') so that the Indic shape plan resolves indic_plan->virama_glyph to a non-zero codepoint, making `if (virama_glyph)` take the true branch.",
+      "why_winner_satisfies": "The winner-resolving seed begins 00 01 00 00 (sfnt version) and contains the literal ASCII table tag 'cmap' at offset 0x0c plus a 'SUN ' tag, i.e. a parseable font directory; the true side is exercised 16 times (T=16 F=0 at the blocker) and the branch reaches hitcount 72.",
+      "why_loser_doesnt": "The loser-blocking seeds are short (31-144 bytes) runs of repeated filler bytes (8a 8a 8a, 86 86 86, 02 02 02, 55 55) with no sfnt version and no recognizable table tags, so the font fails to define a virama glyph; the false side dominates (T=0 F=153) and the branch is never resolved.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile. The CMP_MAP-only loser can only inch toward the magic sfnt version and FOURCC table-tag comparisons via Hamming-distance buckets, which stall on these multi-byte exact-equality gates; I2SRandReplace copies the observed comparison operands (sfnt version word, table tags) directly from the CMP buffer into the input, constructing a parseable font that resolves the virama glyph."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the gate `if (virama_glyph)` whose true side is globally blocked, where virama_glyph comes from the loaded Indic shape plan.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1029-1030",
+      "exact_quote": "hb_codepoint_t virama_glyph = indic_plan->virama_glyph;\n[B]  1030    if (virama_glyph) <-- BLOCKER"
+    },
+    {
+      "claim": "The winner-resolving seed contains a valid sfnt version header and the literal table tag 'cmap'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 94ee6502f4aed8ba offset 0x00-0x0f",
+      "exact_quote": "0000: 00 01 00 00 00 07 ff 80 20 3f 21 20 63 6d 61 70   ........ ?! cmap"
+    },
+    {
+      "claim": "The winner-resolving seed also carries a 'SUN ' FOURCC tag, consistent with a font table directory.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 94ee6502f4aed8ba offset 0x10-0x1f",
+      "exact_quote": "0010: 1d 1d 00 01 00 00 00 21 11 fb 20 83 53 55 4e 20   .......!.. .SUN "
+    },
+    {
+      "claim": "The winner takes the true side 16 times while the loser only ever takes the false side, never resolving the branch.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1030",
+      "exact_quote": "d=1   L1030  T=16 F=0  T=0 F=153  if (virama_glyph)  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser-blocking seeds are short runs of repeated filler bytes with no font structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0097c8dd9cd41be2 offset 0x00-0x0f",
+      "exact_quote": "0000: 10 09 00 00 00 10 0e 00 00 80 00 01 8a 8a 8a 8a   ................"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace; it only has havoc plus token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace on top of the havoc/token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog over value_profile with an I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5868 --role W --fuzzer value_profile_cmplog --trial 2 --seed 94ee6502f4aed8ba` and observed 1 I2S-floor dash row (mutation_op = -) at depth 41 of the 42-level ancestor chain, the characteristic unwrapped-I2SRandReplace signal for cmplog/vpc finds under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on `if (virama_glyph)` where value_profile (no I2S) resolves the multi-byte sfnt-version + FOURCC-tag equality gates at the same rate as value_profile_cmplog, showing CMP_MAP gradient alone suffices and I2S substitution is not what distinguishes the winner."
+  },
+  "weakest_evidence_point": "The link from the literal 'cmap'/'SUN ' tags in the winner seed to the specific CMP operands that I2SRandReplace substituted is inferred from font-parsing structure, not directly traced through the CMP buffer.",
+  "confidence": "medium"
+}

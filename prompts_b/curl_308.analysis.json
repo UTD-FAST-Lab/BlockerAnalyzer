@@ -1,0 +1,81 @@
+{
+  "branch_id": 308,
+  "target": "curl",
+  "summary_one_line": "A well-formed scheme://host:port URL (e.g. pop3://...:900) that survives parsing and connect so curl_multi_remove_handle is reached with an empty msglist (loop-exit false side).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A byte string parseable as a valid scheme://host:port URL — the winner seeds carry a literal 'pop3' scheme token followed by a host and a ':900' port and a digit run, structured enough to drive the easy handle through the multi_runsingle state machine down to curl_multi_remove_handle, where the message-queue loop at line 891 exits immediately (false side) because no pending message targets this handle.",
+      "why_winner_satisfies": "Winner seeds contain the literal scheme bytes 'pop3' at offset 0x06 and a ':900' / port-like digit run (':::::::900' / ':9001') in the 0x10-0x1f region, plus an embedded 'HTTP/' request line — the structured URL parses and connects, so execution reaches line 891 and takes the false (loop-exit) side; the per-role overlay marks line 891 [W] resolving and the cmplog winner shows hit-count 2 on the branch.",
+      "why_loser_doesnt": "Loser-blocking seeds are short, repetitive byte runs ('pk+++++*++', '%`%a>f', long '%%%%' / 'AAAA' fills) with no coherent scheme://host:port structure; they fail to parse/connect, so they never reach line 891 with an empty msglist and instead stall earlier in the state machine (loser blocked the branch in 8/10 trials).",
+      "mechanism_attribution": "cmplog / value_profile_cmplog add I2SRandReplace, which reads intercepted CMP operands (scheme-string compares, port-integer compares along the URL parse and connect path) from the CmpLogObserver buffer and substitutes the expected operand into the input, synthesizing the structured 'pop3://...:900' URL that naive/value_profile cannot stumble onto by havoc; this lets only the I2S-equipped arm drive execution deep enough to reach and exit the message-queue loop."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a for-loop over the multi message list whose globally blocked side is false.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "multi.c:891, blocked side F",
+      "exact_quote": "for(e = multi->msglist.head; e; e = e->next) {"
+    },
+    {
+      "claim": "Both decisive pairs differ only by the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta",
+      "exact_quote": "value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair is cmplog over naive, also an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "Winner-resolving seeds contain a literal pop3 scheme token and port-like digit runs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed faf6b58d07527f1a offsets 0x06-0x1f",
+      "exact_quote": "00 01 00 00 00 19 70 6f 70 33 26 2f 2f 70 4d 37   ......pop3&//pM7"
+    },
+    {
+      "claim": "A winner seed embeds an HTTP request line, evidence of structured URL/protocol content.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 5d9ce7f391be0a62 offset 0x24",
+      "exact_quote": "11 00 00 00 47 48 54 54 50 2f 20 6d 65 40 6c 6f   ....GHTTP/ me@lo"
+    },
+    {
+      "claim": "Line 891 is reached and exits the loop on the winner side (W-only) but the loser takes the true side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L891",
+      "exact_quote": "d=1   L 891  T=0 F=4  T=20 F=0  for(e = multi->msglist.head; e; e = e->next) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser-blocking seeds are short repetitive byte runs lacking URL structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 00182ecc311b5f0b",
+      "exact_quote": "00 01 00 00 00 19 70 6b 2b 2b 2b 2b 2b 2a 2b 2b   ......pk+++++*++"
+    },
+    {
+      "claim": "cmplog and vpc add the I2SRandReplace mutator that substitutes one intercepted CMP operand into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile (the loser of pair 1) has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 308 --role W --fuzzer cmplog --trial 2 --seed faf6b58d07527f1a` and observed 1 I2S-floor dash row (mutation_op = -) at depth 22 of the 23-level ancestor chain, the lower-bound signal of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on a structured scheme://host:port URL parse, where cmplog/vpc show no advantage over naive/value_profile in reaching the loop-exit (false) side — i.e. naive resolves it at the same rate as cmplog."
+  },
+  "weakest_evidence_point": "The exact CMP operand that I2S solves (scheme string vs. port integer vs. something deeper in connect) is inferred from seed bytes and the deep call chain, not pinned to a specific intercepted comparison.",
+  "confidence": "medium"
+}

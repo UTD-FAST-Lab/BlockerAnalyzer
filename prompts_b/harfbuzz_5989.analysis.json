@@ -1,0 +1,75 @@
+{
+  "branch_id": 5989,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must encode a glyph whose USE shaping category resolves to H/HVM/IS (halant) and is non-ligated, reached by broad havoc exploration.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)", "value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A font/text input that drives at least one glyph into the USE shaper's halant category (use_category() == USE(H) || USE(HVM) || USE(IS)) while that glyph is NOT ligated, so the true branch at line 357 fires. The category is assigned by harfbuzz's USE machine-class tables from glyph properties, not by a literal integer/string CMP against an input byte field.",
+      "why_winner_satisfies": "naive resolves 10/10 and value_profile resolves 10/10; their winner-resolving seeds are broad havoc/interesting-byte mutations (e.g. BitFlipMutator / DwordInterestingMutator / QwordAddMutator chains) that produce varied glyph-category inputs and hit the true side 18 and 15 times respectively.",
+      "why_loser_doesnt": "cmplog blocks 10/10 and value_profile_cmplog blocks 8/10 with hitcount 0 on the branch; their I2SRandReplace stage substitutes intercepted CMP operands into the input, steering bytes toward solved integer comparisons that do not control the shaper-derived USE category, so budget is diverted away from producing a halant-category glyph.",
+      "mechanism_attribution": "The winner is enabled by plain havoc byte mutation (naive's havoc/token stack, also present unmodified in value_profile), not by any comparison-solving. The branch condition tests a shaper-derived glyph category, not a byte-equality roadblock, so the comparison-operand substitution added by the I2S-bearing fuzzers is counterproductive here and those fuzzers are the losers."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is a disjunctive equality test on the glyph's USE shaping category combined with a non-ligated requirement.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6, hb-ot-shaper-use.cc:357",
+      "exact_quote": "return (info.use_category() == USE(H) || info.use_category() == USE(HVM) || info.use_category() == USE(IS)) &&"
+    },
+    {
+      "claim": "The true side of the branch is the globally blocked side, requiring the halant category to be satisfied.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "naive resolves the branch in all 10 trials while cmplog blocks in all 10, with naive hitting the true side 18 times and cmplog 0 times.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1, L30-32",
+      "exact_quote": "avg hitcount on branch: winner=18  loser=0"
+    },
+    {
+      "claim": "value_profile resolves the branch (10/10) while value_profile_cmplog blocks it (8/10) with the winner hitting the true side 15 times and the loser 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2, L39",
+      "exact_quote": "avg hitcount on branch: winner=15  loser=0"
+    },
+    {
+      "claim": "The winner-resolving seeds were found by naive using broad havoc/interesting-byte mutation chains, not comparison substitution.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1, L99",
+      "exact_quote": "fuzzer=naive, trial=1, discovered_at=15s, mutation_op=BitFlipMutator,BitFlipMutator,BytesDeleteMutator,DwordInterestingMutator,ByteIncMutator"
+    },
+    {
+      "claim": "cmplog and value_profile_cmplog add the I2SRandReplace mutator that substitutes one CMP operand into input offsets matching the other operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators, L176-179",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive uses only the havoc + token mutation stack with no I2S stage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op, L231",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile uses naive's havoc+token stack with no I2SRandReplace, so its win is not comparison-solving.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators, L248",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only (not I2SRandReplace), so lineage verification is not mandatory. The winners (naive, value_profile) carry no I2S stage at all per the MECHANISM CONTEXT section, so a dash-row lineage check is inapplicable to the winning side; the I2S-bearing fuzzers are the losers here, and the winner's seeds were found by broad havoc/interesting-byte chains (e.g. BitFlipMutator/DwordInterestingMutator)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on a halant-class glyph category where cmplog/vpc resolve as fast as or faster than naive/value_profile would refute the claim that I2S substitution is counterproductive and that plain havoc is the enabling mechanism."
+  },
+  "weakest_evidence_point": "The seeds are font-shaper inputs whose bytes map to glyph categories through opaque USE machine-class tables, so I cannot directly tie any specific input offset in the BYTE DIFF to the halant category that satisfies the gate.",
+  "confidence": "medium"
+}

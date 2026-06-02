@@ -1,0 +1,69 @@
+{
+  "branch_id": 5727,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must be a well-formed sfnt/TrueType font with the literal 'GDEF' table tag at offset 0x0c so fallback_glyph_classes stays unset (false branch).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A valid sfnt font header (sfnt version 00 01 00 00, numTables fields) followed by the exact 4-byte table tag 'GDEF' (47 44 45 46) at offset 0x0c, so the font carries a real GDEF table and HarfBuzz does NOT synthesize fallback glyph classes — taking the false side of line 909.",
+      "why_winner_satisfies": "Every winner-resolving seed begins with the 00 01 00 00 00 01 sfnt magic/header and carries the literal 'GDEF' tag at offsets 0x0c-0x0f; the BYTE DIFF shows W is fully concentrated 47(G)/44(D)/45(E)/46(F)x20 at those four offsets, supplying the GDEF table the parser needs to set fallback_glyph_classes=false.",
+      "why_loser_doesnt": "Loser-blocking seeds lack the 'GDEF' tag at 0x0c-0x0f (L bytes there are scattered low/zero values, never G/D/E/F), so HarfBuzz finds no GDEF table, leaves fallback_glyph_classes truthy, and falls into hb_synthesize_glyph_classes — the blocked true side (line 910).",
+      "mechanism_attribution": "cmplog/vpc intercept the 4-byte table-tag comparison (sfnt tag == 'GDEF') and log the constant operand into the CmpLogObserver buffer; I2SRandReplace then substitutes the exact 47 44 45 46 bytes at the matching input offset, planting the magic tag that naive/value_profile can only reach by blind luck. This is input-to-state substitution."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of a check on c->plan->fallback_glyph_classes; the true side synthesizes glyph classes.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "hb-ot-shape.cc:909-910",
+      "exact_quote": "if (c->plan->fallback_glyph_classes) <-- BLOCKER"
+    },
+    {
+      "claim": "Taking the true side enters hb_synthesize_glyph_classes, which W never executes and L executes 381 times.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "hb_synthesize_glyph_classes W=0 L=381",
+      "exact_quote": "0       381  hb-ot-shape.cc:hb_synthesize_glyph_classes(hb_buffer_t*)"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal 'GDEF' table tag, e.g. seed 1 has GDEF at offsets 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 60bd962a3dc60d31 offset 0x0000",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 47 44 45 46   ......      GDEF"
+    },
+    {
+      "claim": "Across all winner seeds, offsets 0x0c-0x0f are fully concentrated on the bytes G/D/E/F (GDEF), while losers are scattered and never carry that tag.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x000c-0x000f",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which reads the post-execution CmpLogObserver buffer and substitutes a CMP operand at the matching input offset.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile (the I2S-loser arm) has naive's havoc/token stack only with no I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs differ only by the I2S technique and the winner resolves in 10/10 trials while the loser is blocked 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive [delta: I2S]",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5727 --role W --fuzzer cmplog --trial 1 --seed 60bd962a3dc60d31` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 4 and 5 of the ancestor chain, the floor signal that cmplog/vpc planted an unwrapped I2SRandReplace find planting the GDEF tag."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a synthetic harness gating the false branch on an exact 4-byte 'GDEF' tag comparison showed naive/value_profile resolving it as fast as cmplog/vpc, the I2S-substitution attribution would be refuted."
+  },
+  "weakest_evidence_point": "The mapping from the literal GDEF tag bytes to fallback_glyph_classes being unset is inferred from the font-table-parsing context, not directly observed at the compare site, so the exact CMP that I2S solves is assumed rather than shown.",
+  "confidence": "high"
+}

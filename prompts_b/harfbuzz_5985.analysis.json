@@ -1,0 +1,93 @@
+{
+  "branch_id": 5985,
+  "target": "harfbuzz",
+  "summary_one_line": "A glyph-category sequence forming a virama-terminated USE cluster resolved at end-of-buffer lookahead, reachable by broad byte mutation, not CMP substitution.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "An input whose bytes, after USE-category classification, drive the Ragel syllable machine into the case 11 transition action (use_virama_terminated_cluster via the te=p;p-- end-of-buffer-resolved arm at line 1013) rather than the broken/standard arms. This requires a sequence of glyph use_category values matching the virama-terminated-cluster grammar with the terminating lookahead, not any specific literal byte constant.",
+      "why_winner_satisfies": "naive resolves the branch in 10/10 trials. Its winning seeds carry long homogeneous byte runs (e.g. e7 e7 e7..., dc dc dc..., f5 f5...) and havoc op chains (BytesExpandMutator, BytesRandInsertMutator+WordAddMutator+ByteIncMutator, BytesCopyMutator) that lengthen and vary glyph sequences; broad byte-space exploration eventually produces a category run that the state machine routes into case 11, which fires only at line 1013 with T=7 on the W side.",
+      "why_loser_doesnt": "cmplog blocks the branch in 10/10 trials (T=0 on the L side at line 1013). The blocking arm it does reach is the broken-cluster arm (case 4 / case 17, L-tagged). Its CMP-interception budget is spent generating I2S substitutions keyed to intercepted integer/string compares, but the syllable dispatch is a category-table range lookup (_keys[0] <= use_category() <= _keys[1]), so there is no literal operand for I2SRandReplace to substitute toward the virama-terminated path; that effort displaces the broad havoc exploration naive uses to stumble into the category sequence.",
+      "mechanism_attribution": "The winner is naive, whose only mutators are the havoc + token stack with no CMP introspection; the divergence is attributable to plain havoc byte mutation exploring glyph-category sequences, while cmplog's added comparison-substitution stage provides no traction on a table-range dispatch and crowds out that exploration. This is a havoc-only win in the input-to-state-anti direction."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is naive winning over cmplog with the I2S technique as the differentiating axis.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "The blocker is the case 11 transition action calling found_syllable(use_virama_terminated_cluster) with a te=p;p-- end-of-buffer lookahead form.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1013-1015",
+      "exact_quote": "case 11: <-- BLOCKER"
+    },
+    {
+      "claim": "The blocker arm uses the lookahead form te=p;p-- rather than te=p+1, indicating end-of-buffer resolution.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1015",
+      "exact_quote": "{te = p;p--;{ found_syllable (use_virama_terminated_cluster); }}"
+    },
+    {
+      "claim": "The syllable state-machine transition is selected by a category-range table lookup, not a literal byte comparison.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L966-968",
+      "exact_quote": "_trans = _inds[ _slen > 0 && _keys[0] <=( (*p).second.second.use_category()) &&"
+    },
+    {
+      "claim": "naive resolves the branch in all 10 trials while cmplog blocks in all 10 trials.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 winner/loser",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "On the winner side the case 11 arm is taken (T=7) while on the loser side it is never taken (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1013",
+      "exact_quote": "d=1   L1013  T=7 F=40  T=0 F=135  case 11:  <-- BLOCKER"
+    },
+    {
+      "claim": "The cmplog (loser) seeds reach the broken-cluster arm, which is the loser-blocking path.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1041-1043",
+      "exact_quote": "{te = p;p--;{ found_syllable (use_broken_cluster); buffer->scratch_flags |= HB_BUFFER_SCRATCH_FLAG_HAS_BROKEN_SYLLABLE; }}"
+    },
+    {
+      "claim": "naive winning seeds carry havoc mutation ops that lengthen and vary byte/glyph sequences.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 3",
+      "exact_quote": "mutation_op=BytesRandInsertMutator,WordAddMutator,ByteIncMutator"
+    },
+    {
+      "claim": "naive winning seeds contain long homogeneous byte runs producing repeated glyph categories.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 4 offset 0x04-0x0c",
+      "exact_quote": "b4 00 00 ff fe e7 e7 e7 e7 e7 e7 e7 e7 00 00 80"
+    },
+    {
+      "claim": "naive has no I2S mutator; its mutators are only the havoc + token stack with no CMP introspection.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive mutation_op note",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes an intercepted CMP operand at matching input offsets, which presupposes a literal operand to match.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Lineage verification not required: the decisive winner is naive, which has no I2SRandReplace mutator (claimed_mechanism is havoc-only, not I2SRandReplace). The I2S-floor dash-row signal applies to cmplog/vpc winners; here cmplog is the LOSER, so there is no winning cmplog/vpc seed whose chain to inspect for an I2S floor. The win is attributable to naive havoc byte mutation, and cmplog's extra I2S stage failed to help on this category-range table dispatch."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness that gates the case 11 path on a literal multi-byte magic constant comparison (instead of a category-range table lookup) on which cmplog then resolves the branch at least as fast as naive — showing the divergence was a solvable-comparison problem that I2S should have won, contradicting the havoc-only / table-dispatch attribution."
+  },
+  "weakest_evidence_point": "The byte-level link from naive's homogeneous runs to the specific glyph use_category sequence that drives the virama-terminated case 11 arm is inferred from source structure, not directly confirmed by per-glyph category tracing.",
+  "confidence": "medium"
+}

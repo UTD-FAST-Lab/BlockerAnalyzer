@@ -1,0 +1,106 @@
+{
+  "branch_id": 16001,
+  "target": "sqlite3",
+  "summary_one_line": "Take the false side of sqlite3NameFromToken by parsing a well-formed PRAGMA/ALTER-RENAME SQL string with a non-error token sequence",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "A byte string that incrementally satisfies the SQL keyword/token comparisons feeding sqlite3NameFromToken, e.g. a near-complete 'PRAGMA <name>;' form where multi-byte keyword/identifier compares are progressively closer to matching.",
+      "why_winner_satisfies": "Winner seeds begin with the exact ASCII keyword 'PRAGMA' (50 52 41 47 4d 41) and a structured identifier/terminator tail, a token sequence the parser accepts so the blocker takes its false (resolving) side.",
+      "why_loser_doesnt": "cmplog loser seeds are short malformed fragments ('SELEEC', '\"\"/\"\"') that fail keyword compares early; without the Hamming/prefix-distance CMP_MAP gradient, cmplog cannot retain and refine inputs that are only partially closer to a valid keyword, so it stays blocked 10/10.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient feedback preserves inputs whose CMP operands are closer to matching the SQL keyword/identifier comparisons; this gradient is the delta cmplog lacks, letting vpc climb toward the well-formed token stream that reaches the false branch."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The literal SQL keyword bytes (e.g. 'PRAGMA') and structural punctuation that the lexer/parser compares against fixed string constants, placed at the offsets the comparisons read.",
+      "why_winner_satisfies": "Winner seeds carry the exact 'PRAGMA' literal plus a trailing identifier ('Ostor', 'vdbe_'); the winning vpc seed's ancestor chain contains an I2S-floor dash row, evidence that I2SRandReplace substituted a matched CMP operand into the input to produce the keyword.",
+      "why_loser_doesnt": "value_profile loser seeds are corrupt keyword fragments ('ac 45 4c 45 ...ELE', repeated ';;' runs) lacking the exact literal; without I2SRandReplace, value_profile cannot copy the parser's expected string constant directly into the input and stays blocked 10/10.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer and substitutes the comparison's other operand (the expected SQL keyword literal) into the input at the matched offset; this I2S substitution is the delta value_profile lacks, supplying the exact keyword bytes that drive the parser to the false branch."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker sits in sqlite3NameFromToken, reached only through the SQL parser via the ALTER RENAME / PRAGMA path.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "call chain hop 2-5",
+      "exact_quote": "calls sqlite3.c:sqlite3NameFromToken at line 106191"
+    },
+    {
+      "claim": "The blocker's resolving side is the false branch, globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Winner-resolving seeds begin with the exact ASCII 'PRAGMA' keyword bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 69cbf4dccc13a12b offset 0x0000",
+      "exact_quote": "50 52 41 47 4d 41 20 4f 73 74 6f 72 3b 2d 14 22   PRAGMA Ostor;-.\""
+    },
+    {
+      "claim": "A second winner seed also leads with 'PRAGMA' followed by an identifier.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 995af0cf34ba0c6c offset 0x0000",
+      "exact_quote": "50 52 41 47 4d 41 20 76 64 62 65 5f 00 70 6f 72   PRAGMA vdbe_.por"
+    },
+    {
+      "claim": "cmplog loser seeds are short malformed fragments that fail keyword comparisons.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 00150fd27837b85b",
+      "exact_quote": "53 45 4c 45 45 43 20 02 60                        SELEEC .`"
+    },
+    {
+      "claim": "value_profile loser seeds are corrupt keyword fragments lacking the exact literal.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 004ff00694e66fcf",
+      "exact_quote": "ac 45 4c 45 ac 45 4c 40 45 10 9c 43 54 20 10 0a   .ELE.EL@E..CT .."
+    },
+    {
+      "claim": "The winner side leads with 'P' 'R' 'A' at the first offsets while losers carry semicolons and error tokens there.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0000",
+      "exact_quote": "0x0000  50(P)x2                             3b(;)x5 53(S)x2 22(\")x1 ac(.)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "value_profile preserves inputs whose CMP operands are closer to matching, a gradient cmplog lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "I2SRandReplace substitutes the matched CMP operand into the input at the matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "Only value_profile_cmplog resolves the branch; cmplog and value_profile alone stay blocked 10/10.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "L12-14",
+      "exact_quote": "value_profile_cmplog             9        1          0  winner (value_profile vs cmplog); winner (I2S vs value_profile)"
+    },
+    {
+      "claim": "The winning vpc seed's ancestor chain contains an I2S-floor dash row indicating an I2SRandReplace find.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Observed mutation_op",
+      "exact_quote": "indicate an I2SRandReplace find under the current build"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 16001 --role W --fuzzer value_profile_cmplog --trial 1 --seed 69cbf4dccc13a12b` and observed one I2S-floor row (mutation_op = -) at depth 6 of the 7-level ancestor chain; the tool's trailing 'I2S-floor signal: 1 ancestor dash row(s) at depth 6' line confirms the floor. Note this is a multi_feature branch: the I2S delta (vpc>value_profile) is verified here, while the co-decisive value_profile delta (vpc>cmplog) is attributed to CMP_MAP gradient per that hypothesis."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the SQL keyword gate feeding sqlite3NameFromToken is resolved by cmplog or value_profile alone at the same rate as value_profile_cmplog, showing neither I2S substitution nor the CMP_MAP gradient is individually necessary."
+  },
+  "weakest_evidence_point": "The CMP_MAP-gradient attribution for the vpc>cmplog pair is inferred from seed shape and mechanism text, not directly verified in lineage (the dash-row signal evidences I2S, not the gradient).",
+  "confidence": "medium"
+}

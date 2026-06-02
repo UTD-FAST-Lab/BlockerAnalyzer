@@ -1,0 +1,81 @@
+{
+  "branch_id": 5969,
+  "target": "harfbuzz",
+  "summary_one_line": "A long Thai-glyph sequence that drives the above/below state machine to emit the RD action, reaching case RD",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "An input long enough and structured so the Thai shaper's above/below state machine emits action == RD at line 256, which dispatches the switch into case RD at line 150; this requires a multi-glyph Thai mark sequence rather than any single literal byte value.",
+      "why_winner_satisfies": "Naive winning seeds are large (128-236 bytes) and built by byte-expansion/insert havoc (BytesExpandMutator, BytesInsertCopyMutator, BytesRandInsertMutator), carrying repeated 0e / 3a 0e 00 Thai-region byte runs that feed many state-machine transitions until action == RD fires; naive resolves the branch in all 10 trials (hitcount 37).",
+      "why_loser_doesnt": "Cmplog blocking seeds are short (21-78 bytes) and lack the sustained Thai-mark sequence, so action == RD (line 256, L T=0) never fires and the switch never reaches case RD; cmplog stays blocked 10/10 trials with hitcount 0 for 21.5h.",
+      "mechanism_attribution": "The winner is naive, whose only edge is plain havoc/token byte mutation (no CMP introspection). The RD action is reached by accumulating enough Thai glyphs through the state machine, a quantitative/structural property that byte-expansion havoc stumbles onto. Cmplog's added CMP-operand substitution stage gives no advantage here; if anything cmplog's CMP-biased budget produced shorter inputs that under-drive the state machine, so naive's pure havoc wins."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is case RD inside a switch on the action variable.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 source line",
+      "exact_quote": "case RD:  pua_mappings = RD_mappings; break;"
+    },
+    {
+      "claim": "The decisive pair has naive as winner and cmplog as loser, delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "case RD is dispatched only when action == RD, which is gated on the state-machine edge at line 256.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L256",
+      "exact_quote": "if (action == RD)"
+    },
+    {
+      "claim": "The loser never takes the RD-action branch: line 256 is true 0 times in L versus 11 in W.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=2 L256",
+      "exact_quote": "d=2   L 256  T=11 F=26  T=0 F=15  if (action == RD)"
+    },
+    {
+      "claim": "Naive winning seeds are large and produced by byte-expansion/insert havoc mutators.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 4 id=b25527afd098ea61",
+      "exact_quote": "size=236 bytes, fuzzer=naive, trial=1, discovered_at=58585s, mutation_op=BytesSwapMutator,BytesRandSetMutator,ByteAddMutator,BytesInsertCopyMutator,BytesExpandMutator,BitFlipMutator,QwordAddMutator"
+    },
+    {
+      "claim": "Cmplog blocking seeds are short.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 id=37f8e71ac2ac9677",
+      "exact_quote": "size=21 bytes, fuzzer=cmplog, trial=1"
+    },
+    {
+      "claim": "The loser remained blocked far longer with zero hits on the branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 aggregates",
+      "exact_quote": "avg duration blocked: winner=4.10h  loser=21.50h"
+    },
+    {
+      "claim": "The winning fuzzer naive uses only havoc + token byte mutation with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "Cmplog's extra technique over naive is I2SRandReplace operating on CMP operands.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only, not I2SRandReplace, so lineage verification is not required. The winner is naive (no CMP introspection); this is an I2S-anti case where the I2S fuzzer (cmplog) loses, so the winning mechanism cannot be I2SRandReplace. The branch is reached by byte-expansion havoc accumulating a long Thai-glyph sequence that drives the state machine to emit action == RD."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic experiment in which cmplog reaches case RD as fast as or faster than naive (equal time-to-first-hit and equal final hit rate), which would show I2S substitution helps rather than that pure havoc length-growth is the determining factor."
+  },
+  "weakest_evidence_point": "The claim that input length / Thai-glyph accumulation (not a specific literal) is what gates RD relies on inference from seed sizes and the line-256 state-machine edge rather than a direct decode of which Thai codepoints in the winner seeds produce the RD edge.",
+  "confidence": "medium"
+}

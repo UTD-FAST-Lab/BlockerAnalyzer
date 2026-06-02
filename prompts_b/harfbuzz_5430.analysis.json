@@ -1,0 +1,93 @@
+{
+  "branch_id": 5430,
+  "target": "harfbuzz",
+  "summary_one_line": "A well-formed sfnt/cmap table whose only encoding record carries platform=0 encoding=0, so find_subtable(0,0) matches.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A structurally valid sfnt header (version 00 01 00 00) with a 'cmap' table whose encoding records sanitize, and where the only matching subtable is the last-tried (platform=0, encoding=0) record, so the chain of higher-priority find_subtable lookups (3,0)/(3,10)/(0,6)/(0,4)/(3,1)/(0,3)/(0,2)/(0,1) all miss and the (0,0) lookup at line 1837 finally hits.",
+      "why_winner_satisfies": "All five winner seeds begin with the canonical sfnt version 00 01 00 00 followed by a coherent table directory whose records include the 'cmap' tag, so the cmap table sanitizes and EncodingRecord::cmp/sanitize run (534 and 234 W hits vs 0 L); the (0,0) lookup at L1837 takes the True side 10/0 for W vs 0/20 for L.",
+      "why_loser_doesnt": "Loser-blocking seeds are short and unstructured (13-62 bytes of high-entropy bytes like e0 17 00 00 / 92 92 92), the cmap encoding records never sanitize so EncodingRecord::cmp/sanitize get 0 L hits, and L1837 stays False (T=0 F=20), falling through to return &Null at L1840.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which copies the compared table-tag / encoding-record constants (e.g. the 'cmap' fourcc and the (platform,encoding) shorts compared in EncodingRecord::cmp) directly from the CMP buffer into the input, building the exact byte layout that satisfies the nested find_subtable comparisons; value_profile only has CMP_MAP Hamming-distance feedback and no I2S substitution mutator, so it cannot place those multi-byte constants and stalls at the False side."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is value_profile_cmplog beating value_profile with an I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The blocked side is the True branch of the find_subtable(0,0) lookup at line 1837.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1837",
+      "exact_quote": "if ((subtable = this->find_subtable (0, 0))) return subtable; <-- BLOCKER"
+    },
+    {
+      "claim": "The (0,0) lookup is the last in a chain of higher-priority find_subtable lookups that all must miss first.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1821-L1836",
+      "exact_quote": "if ((subtable = this->find_subtable (3, 0)))"
+    },
+    {
+      "claim": "Winner takes the True side at L1837 ten times while loser takes the False side twenty times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1837",
+      "exact_quote": "d=1   L1837  T=10 F=0  T=0 F=20"
+    },
+    {
+      "claim": "EncodingRecord comparison and sanitize run hundreds of times for the winner but never for the loser, indicating the cmap encoding records only sanitize for structured winner inputs.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "EncodingRecord::cmp / sanitize",
+      "exact_quote": "306         0  OT::EncodingRecord::cmp(OT::EncodingRecord const&) const"
+    },
+    {
+      "claim": "Winner seeds carry the canonical sfnt version 00 01 00 00 and a cmap table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 9b29484356b4664e offsets 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 02 20 20 20 3f 21 20 63 6d 61 70   ......   ?! cmap"
+    },
+    {
+      "claim": "Loser seeds are short and unstructured, e.g. a 13-byte high-entropy input.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0003cbd2b6f5fff8",
+      "exact_quote": "e0 17 00 00 1a 20 00 00 29 2b 29 29 2c            ..... ..)+)),"
+    },
+    {
+      "claim": "Winner bytes at the sfnt-header offsets are concentrated and differ sharply from the loser's scattered bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0005",
+      "exact_quote": "0x0005  02(.)x10                            00(.)x5 20( )x3 0e(.)x2 2d(-)x1 +9u  DIFFER"
+    },
+    {
+      "claim": "value_profile_cmplog's mutator set includes I2SRandReplace whereas value_profile's does not.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile_cmplog explicitly adds I2SRandReplace to the havoc/token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile's feedback is CMP_MAP Hamming/prefix distance buckets, not state substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5430 --role W --fuzzer value_profile_cmplog --trial 2 --seed 9b29484356b4664e` and observed an I2S-floor dash row (mutation_op = -) at depth 21 of the 22-level ancestor chain (ancestor e0a5b09f80625fb6), consistent with an unwrapped I2SRandReplace find in vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on find_subtable(0,0) where value_profile (CMP_MAP only) resolves the True branch as often as value_profile_cmplog, showing I2S substitution is not what places the (platform,encoding) constants."
+  },
+  "weakest_evidence_point": "The byte diff does not pinpoint a single (platform=0, encoding=0) two-byte encoding-record field; the structural argument rests on the cmap-tag header plus EncodingRecord::cmp/sanitize hit-count divergence rather than an exact offset for the (0,0) match.",
+  "confidence": "medium"
+}

@@ -1,0 +1,87 @@
+{
+  "branch_id": 5481,
+  "target": "harfbuzz",
+  "summary_one_line": "Input needs a valid GDEF table whose ClassDef format field equals 2 to select case 2 of the switch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A structurally valid GDEF table (FOURCC 'GDEF' at offset 0x0c) whose ClassDef subtable carries format==2, so OT::ClassDef::get_class dispatches into case 2 (format2.get_class) rather than the default return-0 arm.",
+      "why_winner_satisfies": "Every winner-resolving seed begins with the same parsed sfnt header and carries the literal bytes 47 44 45 46 ('GDEF') at offsets 0x0c-0x0f, then format/structure bytes that drive 540 entries through case 2; the format2 get_class implementations are hit 540 times by W and 0 by L.",
+      "why_loser_doesnt": "Loser-blocking seeds are short, unstructured byte runs (e.g. a 6-byte seed and 13-byte seed) that never place the 'GDEF' tag at offset 0x0c; they take the default arm 1020 times (L T=1020 on default, T=0 on case 2), so format2 is never selected.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver buffer from the format-tag and format-field integer compares and substitutes the matching constants (e.g. the 'GDEF' tag and the format==2 discriminant) into the input, building the structured header that naive/value_profile cannot synthesize by blind havoc; value_profile lacks the I2S substitution mutator entirely and cannot place the exact multi-byte tag by feedback alone."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is case 2 of a switch on u.format inside OT::ClassDef::get_class, and the default arm is the loser-taken side.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1995-L2002",
+      "exact_quote": "case 2: return u.format2.get_class (glyph_id); <-- BLOCKER"
+    },
+    {
+      "claim": "The switch discriminates on u.format and the loser inputs fall through to the default return-0 arm.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1995, L2002",
+      "exact_quote": "switch (u.format) {"
+    },
+    {
+      "claim": "Winner inputs drive case 2 540 times while losers take the default arm 1020 times and never reach case 2.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1997 / L2002",
+      "exact_quote": "d=1   L1997  T=540 F=0  T=0 F=1020  case 2: return u.format2.get_class (glyph_id);  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal 'GDEF' table tag at offsets 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1, offset 0x0c",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 00 20 20 10 00 47 44 45 46   ...... .  ..GDEF"
+    },
+    {
+      "claim": "At offsets 0x0c-0x0f every winner seed holds the GDEF FOURCC while losers hold scattered unstructured bytes.",
+      "cited_section": "BYTE DIFF (W vs L at common offsets)",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x10                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "The format2 get_class implementations are invoked 540 times by the winner set and 0 by the loser set.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "ClassDefFormat2_4 get_class",
+      "exact_quote": "540         0  OT::ClassDefFormat2_4<OT::Layout::SmallTypes>::get_class(unsigned int) const  (/src/harfbuzz/src/hb-ot-layout-common.hh:1706-1708)"
+    },
+    {
+      "claim": "Loser-blocking seeds are short unstructured byte runs lacking the parsed GDEF header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1 (6 bytes)",
+      "exact_quote": "Seed 1 (id=003817559785f774, size=6 bytes, fuzzer=naive, trial=1, discovered_at=0s, mutation_op=ByteDecMutator,WordAddMutator):"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes one CMP operand at offsets matching the other, the technique distinguishing the winner from naive.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, so the I2S-vs-value_profile delta is the substitution stage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs differ from their loser by exactly the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 deltas",
+      "exact_quote": "--- Pair 2: cmplog > naive  [delta: I2S] ---"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5481 --role W --fuzzer cmplog --trial 1 --seed 1c44206ca833678e`; the 27-level ancestor chain contains I2S-floor dash rows (mutation_op = -) at depth 25 and depth 26, the lower-bound signal of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose case-2 dispatch depends on a single-byte format==2 discriminant (no multi-byte tag gate) where naive resolves the branch as fast as cmplog/vpc, showing the I2S substitution is not what places the format discriminant."
+  },
+  "weakest_evidence_point": "I cannot directly observe which exact CMP operands (the GDEF tag vs the format==2 byte) I2SRandReplace substituted, since the dash-row floor only confirms an unwrapped I2S find existed in the chain, not its target offset.",
+  "confidence": "high"
+}

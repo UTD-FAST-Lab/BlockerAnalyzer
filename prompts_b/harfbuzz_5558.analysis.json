@@ -1,0 +1,81 @@
+{
+  "branch_id": 5558,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must be a valid sfnt font carrying a parseable GPOS/GSUB table whose lookup_count is non-zero to enter the per-lookup loop.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed sfnt header (00 01 00 00 version, table directory) with a table record bearing the literal FOURCC tag 'GPOS' (or 'GSUB') at the tag offset, so that get_lookup_count() returns a value > 0 and the loop guard i < this->lookup_count is taken true.",
+      "why_winner_satisfies": "Every winner-resolving seed carries the exact ASCII FOURCC 'GPOS'/'GSUB' at offsets 0x0c-0x0f and the canonical sfnt version prefix 00 01 00 00 at offsets 0x00-0x03, plus structured table-record bytes; the loop runs heavily (avg hitcount 77280 / 55420) and the per-lookup init at line 4457 is hit only in W.",
+      "why_loser_doesnt": "Loser-blocking seeds are short or garbage (6, 13, 27, 35, 57 bytes) lacking the GPOS/GSUB FOURCC at 0x0c-0x0f; they never produce a parseable table directory, so lookup_count stays 0 and the loop guard is always false (blocked=10/10, hitcount 0).",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the CmpLogObserver buffer where the FOURCC tag comparison and sfnt-header integer comparisons are logged, then substitutes the expected operand (the 'GPOS'/'GSUB' tag and header magic) into the input at the matching offsets — bridging the multi-byte exact-match gate that the plain havoc/token stack in naive/value_profile cannot brute-force."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the loop guard whose true side requires lookup_count > 0.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6, L68",
+      "exact_quote": "for (unsigned int i = 0; i < this->lookup_count; i++)"
+    },
+    {
+      "claim": "lookup_count is set from the parsed table just before the loop.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L58",
+      "exact_quote": "this->lookup_count = table->get_lookup_count ();"
+    },
+    {
+      "claim": "Winner seeds contain the literal FOURCC 'GPOS'/'GSUB' tag at offsets 0x0c-0x0f while loser seeds do not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "Winner seed bytes carry the sfnt version prefix and the GPOS FOURCC.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 002c9ad92acce91b offset 0x00",
+      "exact_quote": "00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+    },
+    {
+      "claim": "Loser-blocking seeds are tiny and unstructured, lacking any table directory.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 003817559785f774 (6 bytes)",
+      "exact_quote": "Seed 1 (id=003817559785f774, size=6 bytes, fuzzer=naive, trial=1, discovered_at=0s, mutation_op=ByteDecMutator,WordAddMutator):"
+    },
+    {
+      "claim": "The winner runs the loop with very high hit count while the loser never enters it.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 hitcount",
+      "exact_quote": "avg hitcount on branch: winner=77280  loser=0"
+    },
+    {
+      "claim": "The per-lookup init at line 4457 is exercised only in the winner role.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L69",
+      "exact_quote": "[W]  4457  \tthis->accels[i].init (table->get_lookup (i));"
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace which substitutes the matching CMP operand at the offsets where it occurs in the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "Both decisive pairs differ from their loser by exactly the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5558 --role W --fuzzer cmplog --trial 1 --seed 002c9ad92acce91b` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 29 and 30 of the 31-level ancestor chain — the lower-bound I2SRandReplace signal under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A naive or value_profile trial reaching the true branch (resolved>0) on an input lacking the GPOS/GSUB FOURCC, or a synthetic harness where removing the exact FOURCC tag-match gate leaves the cmplog>naive divergence intact."
+  },
+  "weakest_evidence_point": "The byte-diff shows the FOURCC tag offset is data-dependent (a table directory can place the GPOS record at varying offsets), so the fixed 0x0c-0x0f location is seed-specific rather than a guaranteed structural offset.",
+  "confidence": "high"
+}

@@ -1,0 +1,81 @@
+{
+  "branch_id": 5391,
+  "target": "harfbuzz",
+  "summary_one_line": "Header bytes whose u.tag equals the rare DFont/resource-fork magic rather than the common SFNT/TrueType or OpenType-table tags.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "The leading header bytes must form a tag value that the switch on u.tag classifies as DFontTag (Apple resource-fork dfont container), exercising the ResourceForkHeader/ResourceMap path, NOT the TrueType/OpenType SFNT layout. Winner inputs start 00 00 01 00 with the trailing structure-bytes spread across many distinct values; loser inputs start 00 01 00 00 and carry ASCII OpenType table tags (MATH/GPOS/GSUB) keeping u.tag on the TrueTypeTag arm.",
+      "why_winner_satisfies": "Naive winner seeds begin 00 00 01 00 (offset 0x00-0x03) and resolve the true side at offset 0x01=00, 0x02=01 (W bytes) with no embedded SFNT table tags; the per-role overlay shows only the W set reaching the ResourceFork/ResourceMap functions (e.g. ResourceForkHeader::get_face W=154 L=0) and taking case DFontTag T=154.",
+      "why_loser_doesnt": "Cmplog loser seeds begin 00 01 00 00 (offset 0x01=01, 0x02=00) and embed canonical SFNT/OpenType table tags MATH/GPOS/GSUB/OS at offsets 0x0c-0x0f, so u.tag classifies as TrueTypeTag (L takes case TrueTypeTag T=384) and the OffsetTable/TableRecord::cmp path runs (TableRecord::cmp W=0 L=384) instead of the dfont arm.",
+      "mechanism_attribution": "The winner is the baseline fuzzer (naive) with only havoc/token mutators and no CMP introspection; its undirected byte mutation stumbles into the rare DFont magic. Cmplog LOSES because its input-to-state substitution mutator, fed the logged SFNT/OpenType-tag CMP operands, keeps substituting the input toward those well-known table tags (MATH/GPOS/GSUB), pinning u.tag on the common TrueTypeTag arm and starving the DFontTag arm. The enabling technique for the winner is therefore havoc-only mutation."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the DFontTag case-arm of the switch on u.tag inside get_face.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-open-file.hh:490",
+      "exact_quote": "case DFontTag:\treturn u.rfHeader.get_face (i, base_offset);"
+    },
+    {
+      "claim": "Winner inputs select the DFont arm and exercise the resource-fork path that loser inputs never reach.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "ResourceForkHeader::get_face W=154 L=0",
+      "exact_quote": "154         0  OT::ResourceForkHeader::get_face(unsigned int, unsigned int*) const"
+    },
+    {
+      "claim": "Loser inputs instead take the TrueTypeTag arm and run the OpenType TableRecord comparison path that the winner never enters.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L488 / L490",
+      "exact_quote": "T=0 F=154  T=384 F=0  case TrueTypeTag:\treturn u.fontFace;"
+    },
+    {
+      "claim": "The DFont blocker side is taken by the winner only (T=154 vs L T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L490",
+      "exact_quote": "case DFontTag:\treturn u.rfHeader.get_face (i, base_offset);  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner header bytes start 00 00 01 00 while loser header bytes start 00 01 00 00, a tag-classification divergence at offsets 0x01-0x02.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0001-0x0002",
+      "exact_quote": "0x0001  00(.)x4                             01(.)x10                            DIFFER"
+    },
+    {
+      "claim": "Loser seeds embed canonical OpenType table tags (MATH/GPOS/GSUB) characteristic of the SFNT/TrueType layout.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 000abe48ad9847bd offset 0x0c",
+      "exact_quote": "20 ff 20 20 4d 41 54 48   ...... . .  MATH"
+    },
+    {
+      "claim": "The winner is the naive baseline fuzzer with no I2S, only havoc and token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "Cmplog adds I2SRandReplace which substitutes logged CMP operands into the input, steering bytes toward compared literals.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "Winner-resolving seeds were discovered by the naive fuzzer using havoc byte mutators.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed b2a2493cc4390501",
+      "exact_quote": "fuzzer=naive, trial=1, discovered_at=201s, mutation_op=BytesExpandMutator,ByteRandMutator,BytesDeleteMutator"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only (the winner is naive, the baseline fuzzer with no CMP introspection), so the mandatory I2SRandReplace lineage check does not apply. The winning seeds are naive-discovered with explicit havoc mutation_op chains (BytesExpandMutator, ByteRandMutator, BytesDeleteMutator etc.), confirming undirected byte mutation rather than I2S substitution; cmplog is the LOSER here, not the winner."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If a synthetic harness with a switch on a leading-tag field shows cmplog reaching the rare DFont-equivalent arm at least as often as naive (i.e. cmplog NOT being pinned to the common SFNT/table-tag arm by its CMP operands), the havoc-only-wins / I2S-misdirection mechanism would be refuted."
+  },
+  "weakest_evidence_point": "The claim that cmplog's I2S actively misdirects toward TrueTypeTag (rather than merely failing to help) is inferred from loser seeds carrying SFNT table tags, not from a direct lineage trace of an I2S substitution event.",
+  "confidence": "medium"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 5920,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must decode to a Khmer Coeng (K_Cat(H)) glyph with <=2 prior coengs at a non-final position so the syllable reorder loop takes the true arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "Bytes that decode to a Khmer text run containing a Coeng codepoint (U+17D2, classified as K_Cat(H)) positioned so info[i].khmer_category()==K_Cat(H) holds with num_coengs<=2 and i+1<end, i.e. a non-final Coeng glyph inside a consonant/broken-cluster syllable.",
+      "why_winner_satisfies": "naive-discovered winners carry repeated 17/d2 byte runs (e.g. seed 1 d2 17 .. d2 00 1a 17) that decode to Coeng-bearing Khmer syllables; on the W role the H/Coeng arm at 246-274 is taken and the branch hits 203 times in 10/10 trials.",
+      "why_loser_doesnt": "cmplog-discovered losers instead drive the input into the sibling VPre arm (line 277 else-if, tagged [L] 278-283) so the K_Cat(H) true side is never satisfied; the loser blocks the branch in 10/10 trials with hitcount 0.",
+      "mechanism_attribution": "The winner is naive (plain havoc byte stack), not cmplog. The compared operand K_Cat(H) is a Unicode-property-derived glyph category computed inside harfbuzz, not a literal present in the input bytes, so cmplog's input-to-state CMP-operand substitution has no operand to swap and gains no traction; broad havoc byte mutation is what stumbles onto the Coeng-producing byte arrangement. cmplog's comparison-solving effort is wasted/misdirected here, so the havoc-only baseline (naive) wins."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker condition tests the Khmer glyph category K_Cat(H) (Coeng) under a coeng-count and position guard.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-shaper-khmer.cc:245:9",
+      "exact_quote": "if (info[i].khmer_category() == K_Cat(H) && num_coengs <= 2 && i + 1 < end)"
+    },
+    {
+      "claim": "naive is the decisive winner and cmplog is the decisive loser; the delta technique is I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "naive resolves all 10 trials while cmplog blocks all 10, with winner hitcount 203 vs loser 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 counts",
+      "exact_quote": "avg hitcount on branch: winner=203  loser=0"
+    },
+    {
+      "claim": "On the winner role the H/Coeng arm body (246-274) is executed, while on the loser role the sibling VPre arm (277-283) is taken.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 246-284",
+      "exact_quote": "[B]   277      else if (info[i].khmer_category() == K_Cat(VPre))"
+    },
+    {
+      "claim": "Winner-resolving seeds carry repeated 17 / d2 byte runs consistent with Khmer codepoints such as U+17D2 (Coeng) in little-endian.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 id=0d431e94a78d2b78",
+      "exact_quote": "e9 17 00 00 d2 17 00 00 80 32 00 00 d2 00 1a 17"
+    },
+    {
+      "claim": "The winning seed was produced by a plain havoc byte mutator (BytesExpandMutator), characteristic of naive's mutation stack.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 mutation_op",
+      "exact_quote": "fuzzer=naive, trial=1, discovered_at=3599s, mutation_op=BytesExpandMutator"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes one CMP operand for the other by scanning the input for matching byte sequences.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive's mutators are purely the havoc/token stack with no I2S introspection.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only (the decisive WINNER is naive, not a cmplog/vpc fuzzer), so the I2S-floor lineage check does not apply to the winner's technique. For completeness I ran `python3 tools/db_query.py lineage --branch 5920 --role W --fuzzer naive --trial 1 --seed 0d431e94a78d2b78`: the chain is dominated by havoc ops (BytesExpandMutator, QwordAddMutator, CrossoverInsertMutator, etc.) with a single dash row at depth 10; per the MECHANISM CONTEXT caveat the dash=I2S signal is only valid for cmplog/vpc, and naive uses plain LineageMutator, so that deep dash row is a seeding/import artifact and not I2S evidence. This confirms the winner reached the branch via havoc, not I2S."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the K_Cat(H) gate is replaced by a direct comparison of an input byte field against a fixed literal would, if cmplog then beats naive at reaching the true side, refute the claim that the Coeng category is opaque to I2S substitution."
+  },
+  "weakest_evidence_point": "The byte-level claim that 17/d2 runs decode specifically to U+17D2 Coeng rather than any other Khmer codepoint is inferred from the source category gate, not directly confirmed by a decoder trace.",
+  "confidence": "medium"
+}

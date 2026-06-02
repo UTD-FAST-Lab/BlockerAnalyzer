@@ -1,0 +1,87 @@
+{
+  "branch_id": 5828,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must be a font whose cmap/structure makes load_virama_glyph succeed, requiring exact magic/table bytes I2S can substitute from the parser CMPs.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed TrueType/OpenType font header whose sfnt magic, table directory and cmap subtable parse cleanly so that load_virama_glyph can look up a virama glyph and return true (taking the T side at hb-ot-shaper-indic.cc:447). This requires exact multi-byte literals (sfnt version 00 01 00 00, table count, and the 'cmap' FOURCC) at fixed parser offsets that the byte stream must equal, not merely approximate.",
+      "why_winner_satisfies": "The winning vpc seed contains a structured font preamble: bytes 00 01 00 00 (sfnt version) at offset 0x00 followed by the literal 'cmap' tag at offsets 0x0c-0x0f and more table tags ('SUN ', 'ke...'), so the parser advances through the table directory and reaches a working cmap, letting load_virama_glyph resolve a glyph and return true. The seed was produced by value_profile_cmplog and its lineage contains an I2S-floor dash row, evidence the exact magic/tag bytes were planted by an input-to-state substitution copying parser CMP operands into the buffer.",
+      "why_loser_doesnt": "The value_profile losing seeds are short, byte-noisy blobs (31-144 bytes) dominated by repeated filler runs (8a 8a 8a 8a, 02 02 02 ..., 55 55 ...) with no clean 00 01 00 00 sfnt version and no 'cmap' FOURCC at the directory offsets, so the font fails to parse a usable cmap; load_virama_glyph never resolves a virama and the false branch is taken in all 10 trials.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile's distance-bucket comparison feedback. I2SRandReplace records the concrete operands of integer/string comparisons in the font parser (magic-number and FOURCC tag equality checks) and substitutes them verbatim into the input at the offset that flowed into the comparison, planting the exact 'cmap' tag and sfnt version that value_profile's bucket gradient cannot land in a single mutation because these are wide exact-equality literals with no partial-credit slope."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of the load_virama_glyph gate inside update_consonant_positions_indic.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-shaper-indic.cc:447",
+      "exact_quote": "if (indic_plan->load_virama_glyph (font, &virama))"
+    },
+    {
+      "claim": "The true branch is the globally blocked side of this branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "blocked side",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog beating value_profile with an I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The winning vpc seed begins with the sfnt version 00 01 00 00 and contains the literal 'cmap' table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 94ee6502f4aed8ba offsets 0x00-0x0f",
+      "exact_quote": "0000: 00 01 00 00 00 07 ff 80 20 3f 21 20 63 6d 61 70   ........ ?! cmap"
+    },
+    {
+      "claim": "The winning seed was discovered by value_profile_cmplog.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 94ee6502f4aed8ba",
+      "exact_quote": "fuzzer=value_profile_cmplog, trial=2"
+    },
+    {
+      "claim": "The loser-blocking seeds are short noisy blobs with repeated filler bytes and no font header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 0097c8dd9cd41be2",
+      "exact_quote": "0000: 10 09 00 00 00 10 0e 00 00 80 00 01 8a 8a 8a 8a   ................"
+    },
+    {
+      "claim": "Loser seeds were discovered by value_profile, the I2S-lacking arm.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed metadata",
+      "exact_quote": "size=31 bytes, fuzzer=value_profile, trial=1"
+    },
+    {
+      "claim": "The loser resolved the branch in zero of ten trials while the winner resolved eight of ten.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "winner/loser counts",
+      "exact_quote": "winner: resolved=8/10  blocked=2  unreached=0"
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace to the mutator stack, which value_profile lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile uses a CMP_MAP distance-bucket gradient and has no I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5828 --role W --fuzzer value_profile_cmplog --trial 2 --seed 94ee6502f4aed8ba`; the 42-level ancestor chain contains one I2S-floor dash row (mutation_op = -) at depth 41, the floor signal of an unwrapped I2SRandReplace find in the vpc arm under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the virama/cmap gate is reached by an arbitrary-length match with partial-credit distance (e.g. a Hamming-similarity-friendly comparison) and value_profile resolves the branch as often as value_profile_cmplog, showing the exact-literal requirement is not what excludes the CMP_MAP-gradient arm."
+  },
+  "weakest_evidence_point": "Only one winning seed is shown, so the claim that the 'cmap' FOURCC bytes specifically (rather than some other parsed structural byte) are the I2S-planted operand gating load_virama_glyph is inferred from the header layout, not directly traced to the comparison.",
+  "confidence": "medium"
+}

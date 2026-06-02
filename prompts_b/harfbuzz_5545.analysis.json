@@ -1,0 +1,87 @@
+{
+  "branch_id": 5545,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must be a well-formed OpenType sfnt header (version 0x00010000) carrying a GSUB/GPOS table tag so version.major==1 selects the version1 featureList case.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A valid OpenType font: the leading 4 bytes must equal the sfnt version 00 01 00 00, and a table-directory record must carry one of the literal FOURCC tags GPOS (47 50 4f 53) or GSUB (47 53 55 42) so that GSUBGPOS::u.version.major reads 1 and case 1 (return this+u.version1.featureList) is taken.",
+      "why_winner_satisfies": "All five winner-resolving seeds open with 00 01 00 00 (sfnt version major=1) and contain an exact GPOS or GSUB FOURCC: at offsets 0x0c-0x0f winner bytes concentrate on 47(G) 50(P)/53(S) 4f(O)/55(U) 53(S)/42(B), reproducing the GPOS/GSUB table tags the parser compares against.",
+      "why_loser_doesnt": "Loser-blocking seeds are short and lack the sfnt header and table tags: their first bytes scatter (00/e0/05/87 at 0x00, 00/0e/ff/07 at 0x01) and offsets 0x0c-0x0f hold no G/P/O/S or G/S/U/B literal, so version.major is never 1 and the true side stays unhit (T=0).",
+      "mechanism_attribution": "cmplog/vpc intercept the integer/string CMP that compares the parsed sfnt version and the table FOURCC against the constants 1, 'GPOS', 'GSUB'; I2SRandReplace lifts those operands out of the CmpLogObserver buffer and stamps them at the matching input offsets, manufacturing the exact magic bytes that naive/value_profile must stumble onto by blind havoc."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is case 1 of a switch on u.version.major returning the version1 featureList, and the true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-7, hb-ot-layout-gsubgpos.hh:4249",
+      "exact_quote": "case 1: return this+u.version1.featureList;"
+    },
+    {
+      "claim": "The blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "Winner seeds begin with the sfnt version 00 01 00 00 and carry the GPOS table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 002c9ad92acce91b, offset 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+    },
+    {
+      "claim": "Another winner seed carries the GSUB table tag after the same sfnt version prefix.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 001eeb5a047b00d0, offset 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 04 00 ff 00 30 00 20 47 53 55 42   .........0. GSUB"
+    },
+    {
+      "claim": "At offset 0x0c winner bytes are uniformly 47 (G) while loser bytes scatter, marking the table tag position as informative dataflow.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "At offsets 0x0d-0x0f winner bytes split GPOS/GSUB (P/S, O/U, S/B) while losers do not, confirming the FOURCC requirement.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000d-0x000f",
+      "exact_quote": "0x000d  50(P)x16 53(S)x4                    20( )x4 00(.)x4 18(.)x1 17(.)x1  +8u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds are short and lack the sfnt header (e.g. a 6-byte seed with no 00 01 00 00 prefix).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 003817559785f774, offset 0x00",
+      "exact_quote": "87 0e 0d 0e 22 0e                                 ....\"."
+    },
+    {
+      "claim": "cmplog's I2SRandReplace reads the CMP buffer and substitutes one intercepted operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so its loss against value_profile_cmplog is attributable to the I2S delta.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs differ by the I2S technique with prob_div=1.00.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "value_profile_cmplog > value_profile  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5545 --role W --fuzzer cmplog --trial 1 --seed 002c9ad92acce91b`; chain has 31 levels and the tool reported the I2S-floor signal with 2 ancestor dash rows (mutation_op = -) at depths 29 and 30, the floor evidence of an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where naive/value_profile reach the version1 case at the same rate as cmplog/vpc when the gate is a plain integer/FOURCC equality comparison would refute the I2S attribution; equivalently, observing the true side resolved with no 00 01 00 00 prefix and no GPOS/GSUB tag present in the input."
+  },
+  "weakest_evidence_point": "The byte-diff evidence localizes the GPOS/GSUB FOURCC at 0x0c-0x0f, but the sfnt-version comparison and the table-offset traversal between the directory and the GSUBGPOS struct are inferred from source structure rather than directly traced byte-by-byte.",
+  "confidence": "high"
+}

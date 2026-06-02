@@ -1,0 +1,81 @@
+{
+  "branch_id": 6025,
+  "target": "harfbuzz",
+  "summary_one_line": "Buffer must hold the 3-glyph Devanagari conjunct RA(0x0930)+VIRAMA(0x094D)+I(0x0907) as consecutive codepoints to take case 0x0930's true side.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Three consecutive buffer codepoints encoding 0x0930 (RA) at the current glyph, then 0x094D (virama) at cur(1), then 0x0907 at cur(2), with idx+2 < count so the third glyph exists. In the harness input these appear as little-endian 32-bit glyph words 30 09 00 00 / 4d 09 00 00 followed by the third codepoint slot.",
+      "why_winner_satisfies": "The winner-resolving seed begins 30 09 00 00 4d 09 00 00 06 00 00 00 — the first glyph word is 0x0930 (entering case 0x0930) and the second word is 0x094D (the virama required by cur(1)), supplying the leading two operands of the three-way conjunction that the loser never satisfies; the winner takes the true side (L94 W T=1 F=14 vs L T=0 F=149).",
+      "why_loser_doesnt": "Loser-blocking seeds carry unrelated bytes at those slots (e.g. 19 09 00 00, 00 00 00 00, sn-hant/zh- ASCII tag strings) so they never co-locate 0x0930, 0x094D and 0x0907 at adjacent glyph positions; across 10 loser trials case 0x0930 stays false (L94 L T=0 F=149) and the branch is blocked for 18.80h.",
+      "mechanism_attribution": "value_profile_cmplog adds CMP_MAP gradient buckets on top of cmplog's I2S. The blocker is a conjunction of three exact 32-bit codepoint equalities; CMP_MAP's Hamming/prefix-distance feedback rewards inputs that match MORE of the three operands partially (e.g. getting cur()==0x0930 and cur(1)==0x094D before cur(2)==0x0907), giving an intermediate-credit gradient that cmplog (edge-bucket feedback only) cannot see, so vpc climbs the multi-equality gate that cmplog stalls on."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker true side requires a three-codepoint conjunction: cur(1)==0x094D, idx+2<count, and cur(2)==0x0907.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L95-L97",
+      "exact_quote": "if (0x094Du == buffer->cur (1).codepoint &&\n[W]    96  \t\tbuffer->idx + 2 < count &&\n[W]    97  \t\t0x0907u == buffer->cur (2).codepoint)"
+    },
+    {
+      "claim": "The blocker line is case 0x0930u, so the current glyph codepoint must equal 0x0930 to enter this arm.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L94",
+      "exact_quote": "case 0x0930u: <-- BLOCKER"
+    },
+    {
+      "claim": "The winner-resolving seed encodes 0x0930 then 0x094D as the first two little-endian glyph words.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id b59f70477fb60424, offsets 0x00-0x07",
+      "exact_quote": "0000: 30 09 00 00 4d 09 00 00 06 00 00 00 10 00 10 34"
+    },
+    {
+      "claim": "Loser-blocking seeds carry unrelated bytes / ASCII tag strings at the codepoint slots instead of the conjunct.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0cc973685868d14f / 158d79bf644e1c91",
+      "exact_quote": "0000: 19 09 00 00 72 1b 1b 1b 1b 00 00 40 20 20 20 6e"
+    },
+    {
+      "claim": "Winner takes the true side while all loser trials keep case 0x0930 false.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L94",
+      "exact_quote": "case 0x0930u:  <-- BLOCKER"
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog over cmplog with the value_profile technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "value_profile_cmplog feedback adds CMP_MAP gradient buckets on top of the edge-bucket and CMP buffer signals.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Feedback",
+      "exact_quote": "edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    },
+    {
+      "claim": "cmplog feedback is the same edge-bucket signal as naive, with no value-profile gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Feedback",
+      "exact_quote": "**Feedback**: same edge-bucket signal as naive."
+    },
+    {
+      "claim": "The loser stays blocked far longer than the winner resolves.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 avg duration",
+      "exact_quote": "avg duration blocked: winner=2.20h  loser=18.80h"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Decisive delta is value_profile (value_profile_cmplog > cmplog), so the winning technique is CMP_MAP gradient, not I2SRandReplace; lineage dash-row verification is mandatory only for I2SRandReplace and is therefore not required here. Both involved fuzzers already carry I2S, so I2S cannot be the differentiator; the only added capability in the winner is the CMP_MAP value-profile gradient feedback."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose blocker is a single exact 32-bit equality (one operand, not a conjunction) shows no value_profile_cmplog advantage over cmplog at the gate, indicating the divergence is not driven by partial-match CMP_MAP gradient over a multi-operand conjunction."
+  },
+  "weakest_evidence_point": "Only one winner-resolving seed is shown, so the claimed 0x0907 third-operand placement at the cur(2) slot is inferred from the conjunction source rather than directly read off a distinct byte offset in that seed.",
+  "confidence": "medium"
+}

@@ -1,0 +1,81 @@
+{
+  "branch_id": 5556,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry a well-formed GPOS/GSUB table whose LangSys feature index resolves to a valid (not NOT_FOUND) feature tag, taking the false branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "An sfnt font blob with the 4-byte 'GPOS' table tag at bytes 0x0c-0x0f preceded by the sfnt version 00 01 00 00 and a valid table offset/structure, so that the LangSys feature-index loop yields i != Index::NOT_FOUND_INDEX and get_feature_tag returns a real tag via the false (else) branch.",
+      "why_winner_satisfies": "Every winner-resolving seed begins with sfnt version 00 01 00 00 00 01 and carries the literal ASCII 'GPOS' at offsets 0x0c-0x0f (47 50 4f 53); the byte-diff shows these offsets are concentrated on the GPOS magic in W (e.g. 0x0c=47(G)x19), and the branch's false side is hit 296 times in W while the loser blocks it entirely.",
+      "why_loser_doesnt": "Loser-blocking seeds are short, malformed blobs (6, 13, 27, 35, 57 bytes) without the GPOS table tag at 0x0c-0x0f, so the feature-index loop in the caller never matches a feature and get_feature_tag is reached only with the NOT_FOUND_INDEX true side (L hits T=112 F=0), never resolving the false branch.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver buffer that captured the 4-byte table-tag comparison (GPOS magic and feature-tag equality) and substitutes the recorded operand into the input at the matching offset, planting the exact 'GPOS' tag and feature-tag bytes that the equality gate demands; naive and value_profile lack I2SRandReplace and cannot synthesize these exact 4-byte literals from havoc alone."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a ternary on the feature index returning HB_TAG_NONE for NOT_FOUND_INDEX or a real tag otherwise; the false (else) branch is the globally blocked side.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-layout-gsubgpos.hh:4304",
+      "exact_quote": "{ return i == Index::NOT_FOUND_INDEX ? HB_TAG_NONE : get_feature_list ().get_tag (i); }"
+    },
+    {
+      "claim": "Both decisive pairs are I2S deltas (cmplog>naive and vpc>vp).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner seeds carry sfnt version and the literal ASCII GPOS table tag at offsets 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0119dc42c7db21ec offset 0x0000",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 47 50 4f 53   ......      GPOS"
+    },
+    {
+      "claim": "The byte-diff confirms offsets 0x0c-0x0f are concentrated on the GPOS magic in winners.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  47(G)x19 00(.)x1"
+    },
+    {
+      "claim": "The winner takes the false side 296 times while the loser blocks it (F=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L4304",
+      "exact_quote": "T=296 F=339  T=112 F=0"
+    },
+    {
+      "claim": "Loser-blocking seeds are short malformed blobs without the GPOS table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 003817559785f774",
+      "exact_quote": "Seed 1 (id=003817559785f774, size=6 bytes, fuzzer=naive, trial=1, discovered_at=0s, mutation_op=ByteDecMutator,WordAddMutator):"
+    },
+    {
+      "claim": "The caller loops over features and compares feature_tag against the result of get_feature_tag, requiring an exact tag match to resolve.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "hb-ot-layout.cc:1004",
+      "exact_quote": "if (feature_tag == g.get_feature_tag (f_index)) { <-- CALL"
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace which reads the CmpLogObserver buffer and substitutes a recorded CMP operand into matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile and naive do not have I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5556 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0119dc42c7db21ec`; the chain has 18 ancestor levels and the I2S-floor signal reports 1 dash row (mutation_op = -) at depth 17, which under the current build is lower-bound evidence of an I2SRandReplace find in this vpc-discovered seed's ancestry."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a 4-byte equality gate against a fixed tag literal where naive/value_profile resolve the false branch as fast as cmplog/vpc (no I2S advantage), showing the divergence is not driven by exact 4-byte literal substitution."
+  },
+  "weakest_evidence_point": "The single dash row at depth 17 is a lower-bound floor signal, not a logged I2SRandReplace name, so I infer rather than directly observe the I2S substitution that planted the GPOS/feature-tag bytes.",
+  "confidence": "high"
+}

@@ -1,0 +1,87 @@
+{
+  "branch_id": 73,
+  "target": "curl",
+  "summary_one_line": "Input must parse into multiple cached connections so the hash iterator advances to a non-NULL current_element on a later list node.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "Bytes that parse into a well-formed URL/protocol so a connection bundle is added to the connection-cache hash; reaching the true branch requires the iterator to already hold a current_element (i.e. a populated, multi-node hash list traversed past its first slot). The winner inputs carry a valid scheme/authority structure (`://`, host digits, port `9001`, `HTTP/2` token) that survives parsing.",
+      "why_winner_satisfies": "Winner cmplog seeds are 131 bytes with structured fields: a `://` separator, host `12`, port `9001`, an `HTTP/27.0` version token, and a long run of `/` path bytes — enough valid structure for curl to create and cache a connection so the iterator advances and current_element becomes non-NULL (true branch hit T=17 vs L T=0).",
+      "why_loser_doesnt": "Loser seeds are short (35 bytes) and dominated by `%`/`+`/`A` noise with no coherent `://` authority; parsing fails to seat a usable connection in the cache, so the iterator never advances past the initial NULL current_element and only the false branch fires (L T=0 F=40).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer and substitutes the other operand of intercepted comparisons (e.g. the protocol/scheme/port string compares in the URL parser) into matching input offsets, synthesizing the valid scheme/version tokens that naive/value_profile must stumble on by chance; this lets cmplog/vpc seat the connection and drive the iterator past the first element."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs differ only by the I2S technique and both have the winner equipped with I2SRandReplace.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair is cmplog over naive, also an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The blocked side is the true branch of a guard that the iterator advances current_element on.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hash.c:314",
+      "exact_quote": "if(iter->current_element) <-- BLOCKER"
+    },
+    {
+      "claim": "Taking the true branch advances current_element to the next list node, which only the winner-resolving seeds exercise.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "hash.c:315",
+      "exact_quote": "[W]   315      iter->current_element = iter->current_element->next;"
+    },
+    {
+      "claim": "The blocker line is hit on the true side 17 times by winners but never by losers.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L314 d=1",
+      "exact_quote": "d=1   L 314  T=17 F=68  T=0 F=40  if(iter->current_element)  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner cmplog seeds carry a structured URL with scheme separator, port 9001, and an HTTP version token.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1, offsets 0x0a-0x2b",
+      "exact_quote": "2f 30 28 28 2e 31 3a 39 30 30 31 2f 38 35 30 00   /0((.1:9001/850."
+    },
+    {
+      "claim": "Winner seeds embed an HTTP protocol/version token consistent with URL parsing.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1, offset 0x24",
+      "exact_quote": "02 00 00 00 47 48 54 54 50 2f 32 37 2e 30 2e 2f   ....GHTTP/27.0./"
+    },
+    {
+      "claim": "Loser seeds are short 35-byte inputs dominated by percent and plus noise without a coherent authority.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 3 (size=73 / others 35 bytes)",
+      "exact_quote": "26 25 65 24 25 64 45 72 46 25 41 27 25 31 25 25   &%e$%dErF%A'%1%%"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for one CMP operand and substitutes the other.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so it cannot perform operand substitution like the vpc winner.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 73 --role W --fuzzer cmplog --trial 1 --seed 32d10b449c4075ee`; the ancestor chain (25 levels) contains 2 I2S-floor dash rows (mutation_op = -) at depth 23 (33f314f66adaa80d) and depth 24 (1ce58f232eec81f2), the lower-bound signal of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose URL parser seats exactly one cached connection (single hash node) yet still drives the true branch at hash.c:314 — would show the divergence is not about multi-element hash population / parseable second connection but something else."
+  },
+  "weakest_evidence_point": "The link from 'valid URL token bytes' to 'two or more cached connection bundles populating the hash so the iterator advances' is inferred from the call chain and seed structure, not directly observed in a per-connection count.",
+  "confidence": "medium"
+}

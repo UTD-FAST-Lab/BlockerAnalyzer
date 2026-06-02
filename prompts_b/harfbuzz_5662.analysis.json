@@ -1,0 +1,81 @@
+{
+  "branch_id": 5662,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must encode a font/glyph whose modified combining class equals CCC129, reached by diverse structured bytes rather than CMP-operand substitution.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A structured font input that, after shaping, yields a non-spacing-mark glyph whose modified combining class is exactly 129 (CCC129), so the switch(klass) at line 154 takes the case CCC129 true side. This is a derived integer state set deep in the shaping pipeline, not a literal byte compared at a fixed offset.",
+      "why_winner_satisfies": "naive's plain havoc/byte stack explores diverse multi-byte structured font content (winner seeds carry varied tables and string-like fields such as 97 97 97, 61 61 61 61 'aaaa', and 73 6e 2d 'sn-'), giving it a higher chance to land an input whose recategorized combining class reaches 129; naive resolved the branch in 8/10 trials.",
+      "why_loser_doesnt": "cmplog spends per-execution budget on CMP interception and I2S substitution, but the blocker has no input-to-state CMP edge feeding klass==129 (klass is derived from glyph property tables, not from a byte compared against a constant), so I2S substitution gains nothing here while the extra cost slows exploration; cmplog blocked in 8/10 trials and its blocking seeds are dominated by low-diversity uniform runs (08 08 08..., 44 44 44...).",
+      "mechanism_attribution": "The winner is naive, which has NO I2S. The branch is enabled by lucky havoc byte mutation discovering structured font content that produces combining class 129; cmplog's input-to-state substitution finds no useful CMP operand for this derived-state switch (klass is not a byte compared against a constant), so its comparison-solving machinery confers no advantage while its per-execution CMP overhead leaves it behind. This is a havoc-only win."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is naive>cmplog with an I2S technique delta; naive is the winner and cmplog the loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "naive resolved the branch in 8/10 trials while cmplog blocked in 8/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "winner/loser counts",
+      "exact_quote": "winner: resolved=8/10  blocked=2  unreached=0"
+    },
+    {
+      "claim": "cmplog blocked the branch in 8/10 trials.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "loser counts",
+      "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+    },
+    {
+      "claim": "The blocker is the CCC129 case of the switch on klass, a derived combining-class integer.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L154",
+      "exact_quote": "case HB_MODIFIED_COMBINING_CLASS_CCC129: /* sign aa */ <-- BLOCKER"
+    },
+    {
+      "claim": "The klass value gating the blocker comes from a glyph property derived in the shaping pipeline, not a byte compared at a fixed offset.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L181-182",
+      "exact_quote": "unsigned int combining_class = _hb_glyph_info_get_modified_combining_class (&info[i]);"
+    },
+    {
+      "claim": "Winner seeds carry diverse structured font content including repeated byte runs and string-like fields.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 id=aee1ecb9daad6b20",
+      "exact_quote": "0010: 0e 00 61 61 61 61 0c 0c 73 6e 2d 48 00 00 e3 0c   ..aaaa..sn-H...."
+    },
+    {
+      "claim": "Loser (cmplog) blocking seeds are dominated by low-diversity uniform byte runs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 2 id=007c63ce736c0eb9",
+      "exact_quote": "0000: 00 01 00 00 00 08 08 08 08 08 08 08 08 08 08 08   ................"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace works by matching a CMP operand in the input and substituting the other operand, which requires an input-to-state comparison edge to exploit.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S and relies on a havoc + token byte mutation stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Not applicable / not required: the decisive winner is naive (no I2S), so claimed_mechanism is havoc-only, not I2SRandReplace. Lineage dash-row verification is only mandated when the winning technique is I2SRandReplace. Here cmplog (the I2S-bearing fuzzer) is the LOSER, so there is no I2S win to verify; the win is attributed to naive's plain havoc byte mutation discovering structured font content that yields combining class 129."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating a branch on a derived combining-class-style integer (no input-to-state CMP edge) in which cmplog reaches the branch as fast as or faster than naive — that would show I2S helps here and refute the havoc-only attribution."
+  },
+  "weakest_evidence_point": "The claim that no exploitable input-to-state CMP edge feeds klass==129 is inferred from the source structure (klass derived from glyph tables) rather than directly observed in CmpLog buffers.",
+  "confidence": "medium"
+}

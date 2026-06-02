@@ -1,0 +1,87 @@
+{
+  "branch_id": 118,
+  "target": "curl",
+  "summary_one_line": "Winner must construct a well-formed HTTP response (status line + headers) so a non-zero bytecount makes the false branch taken.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A byte sequence parseable as a complete HTTP transaction: a recognizable 'HTTP/' status line followed by header bytes, so curl's HTTP machinery accumulates data->req.bytecount/headerbytecount > 0 and the (bytecount + headerbytecount - deductheadercount) <= 0 test evaluates false (line 1708-1710).",
+      "why_winner_satisfies": "Winner-resolving seeds carry a literal 'HTTP/' token at offsets 0x24-0x29 (47 48 54 54 50 2f -> GHTTP/) plus trailing CRLF-delimited header text ('Set-Coo', 'Connect', 'TranEfe'), so curl parses a status line and headers, driving Curl_http_statusline/Curl_http_header (W hits 20 and 55) and accumulating positive bytecount; the false branch (1720 return CURLE_OK) is taken.",
+      "why_loser_doesnt": "Loser-blocking seeds are short (35 bytes) with garbage at the HTTP-token offsets ('%`%a', repeated '%'/'A'/'.' filler) and never form a valid status line, so Curl_http_statusline/Curl_http_header are never reached (L hits 0), bytecount stays 0, and the true branch (failf 'Empty reply from server', 1714-1718) fires.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver buffer from the HTTP-parse string comparisons (e.g. matching the 'HTTP/' literal and header names) and substitutes the expected operand bytes directly into the input, planting the status-line/header structure that naive and value_profile only reach by blind havoc; the dash-row I2S floor in the winning seed's ancestor chain confirms an I2S find contributed."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of a comparison summing request byte counters against <= 0.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1708-1710",
+      "exact_quote": "(data->req.bytecount + <-- BLOCKER"
+    },
+    {
+      "claim": "Taking the true branch produces an 'Empty reply from server' error, which is the loser-blocking outcome.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1714",
+      "exact_quote": "failf(data, \"Empty reply from server\");"
+    },
+    {
+      "claim": "The winner-resolving seeds contain a literal 'HTTP/' token near offset 0x24.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0057778b67d14b3b offset 0x20",
+      "exact_quote": "47 48 54 54 50 2f 20 6d 65 40 6c 6f"
+    },
+    {
+      "claim": "Winner seeds carry CRLF-delimited HTTP header text such as Set-Cookie.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0057778b67d14b3b offset 0x30",
+      "exact_quote": "6d 65 77 68 65 23 65 0d 0a 53 65 74 2d 43 6f 6f"
+    },
+    {
+      "claim": "The HTTP-token offset 0x24 is concentrated on G/H in the winner but scattered garbage in the loser.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0024",
+      "exact_quote": "0x0024  47(G)x18 48(H)x2                    50(P)x2 42(B)x1 9e(.)x1 2e(.)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds are short (35 bytes) and lack a valid HTTP status line.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 003e4994f2c65fcf",
+      "exact_quote": "Seed 1 (id=003e4994f2c65fcf, size=35 bytes, fuzzer=value_profile, trial=1"
+    },
+    {
+      "claim": "HTTP status-line and header parsing functions fire only in the winner (W hits 20/55, L hits 0).",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "Curl_http_statusline / Curl_http_header",
+      "exact_quote": "55         0  Curl_http_header  (/src/curl/lib/http.c:3451-3765)"
+    },
+    {
+      "claim": "Both decisive pairs differ by the I2S technique only (cmplog vs naive, vpc vs value_profile).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "I2SRandReplace substitutes a CMP operand into the input at matching offsets, which naive lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the vpc>vp delta is also attributable to I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 118 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0057778b67d14b3b` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 23 and 24 in the 25-level ancestor chain, the lower-bound signal of an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on the byte-count comparison resolves the false branch equally fast under naive and cmplog when the required 'HTTP/' status-line literal is present in the seed corpus dictionary, showing I2S substitution was not the deciding factor."
+  },
+  "weakest_evidence_point": "The dash-row floor signal is a lower bound and does not prove the specific 'HTTP/'-token substitution was the I2S find; some I2S finds leak into the havoc bucket and the exact CMP solved is inferred from source/byte structure rather than logged.",
+  "confidence": "high"
+}

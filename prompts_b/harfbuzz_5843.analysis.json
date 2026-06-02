@@ -1,0 +1,75 @@
+{
+  "branch_id": 5843,
+  "target": "harfbuzz",
+  "summary_one_line": "A font whose Indic shaping plan + glyph stream takes the REPH_MODE_LOG_REPHA path so has_reph becomes true at line 643.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A structured font/glyph input that drives initial_reordering_consonant_syllable down the REPH_MODE_LOG_REPHA else-if at line 534 (info[start] classified as Repha), which sets has_reph=true so the line 643 'if (has_reph)' true side is taken. The winner inputs are 64-byte binary font tables with repeating little-endian record patterns (e.g. bf 0c 00 00), not the short text-like blobs the loser produces.",
+      "why_winner_satisfies": "Winner-resolving seed 61118ed1d1d7f65e is a 64-byte binary blob of repeating 4-byte records; in the per-role overlay the winner is the ONLY role that hits lines 534-541 ([W]) which set has_reph=true, and line 644 ([W]) which is the body of the blocked true branch. Naive's broad havoc/token mutation reaches a structurally valid Repha-bearing syllable.",
+      "why_loser_doesnt": "Loser-blocking cmplog seeds are short text-like inputs (38-48 bytes) containing 'kern' and long 0x1a runs; on the chain the loser hits the line 643 branch 14 times but takes the true side ZERO times (L 643 T=0 F=14), and never executes the [W]-only LOG_REPHA body, so has_reph stays false.",
+      "mechanism_attribution": "The enabling technique is naive's plain havoc + token mutation stack: it explores the font/glyph structure broadly enough to land a Repha-classified first glyph. cmplog spends its comparison-substitution budget on CMP operands (e.g. table magic like 'kern'), steering its corpus toward a different syllable-type region and under-exploring the LOG_REPHA path; here input-to-state substitution is not helpful and the I2S-free havoc-only baseline wins."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is 'if (has_reph)' at line 643, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-shaper-indic.cc:643:7",
+      "exact_quote": "Source line:   if (has_reph)\nGlobally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "has_reph is set true on the REPH_MODE_LOG_REPHA path, hit only by the winner role.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 534-540",
+      "exact_quote": "[B]   534      } else if (indic_plan->config->reph_mode == REPH_MODE_LOG_REPHA && info[start].indic_category() == I_Cat(Repha))\n[W]   535      {\n[W]   536  \tlimit += 1;\n[W]   537  \twhile (limit < end && is_joiner (info[limit]))\n[ ]   538  \t  limit++;\n[W]   539  \tbase = start;\n[W]   540  \thas_reph = true;"
+    },
+    {
+      "claim": "The blocked true-branch body at line 644 is hit only by the winner role.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 643-644",
+      "exact_quote": "[B]   643    if (has_reph) <-- BLOCKER\n[W]   644      info[start].indic_position() = POS_RA_TO_BECOME_REPH;"
+    },
+    {
+      "claim": "The loser executes the line 643 branch 14 times but takes the true side zero times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 643",
+      "exact_quote": "d=1   L 643  T=2 F=2  T=0 F=14  if (has_reph)  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner-resolving seed is a 64-byte binary font-table blob of repeating 4-byte records produced by naive.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 61118ed1d1d7f65e",
+      "exact_quote": "Seed 1 (id=61118ed1d1d7f65e, size=64 bytes, fuzzer=naive, trial=2, discovered_at=73290s, mutation_op=BytesCopyMutator,ByteAddMutator,BytesSetMutator):"
+    },
+    {
+      "claim": "Loser-blocking cmplog seeds are short text-like inputs containing 'kern' and long 0x1a runs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0237ec581d21f6c0",
+      "exact_quote": "Seed 1 (id=0237ec581d21f6c0, size=41 bytes, fuzzer=cmplog, trial=1, discovered_at=9s, mutation_op=BytesInsertMutator):\n  0000: ff 20 20 20 20 6b 65 72 6e 20 df 10 20 0a 00 00   .    kern .. ..."
+    },
+    {
+      "claim": "naive's mutation stack is plain havoc + tokens with no I2S, which is the technique behind the winner.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive section",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes CMP operands found in the input, the technique the delta isolates.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only (the WINNER is naive, the I2S-free baseline), so I2S lineage verification is not required. Nonetheless I ran `python3 tools/db_query.py lineage --branch 5843 --role W --fuzzer naive --trial 2 --seed 61118ed1d1d7f65e`: the 25-level chain is entirely naive havoc/token mutators (ByteRand/ByteInteresting/Token/Crossover/Word/Dword etc.). It reports one dash row at depth 24, but per the prompt caveat the dash=I2S signal holds ONLY for cmplog/vpc (and is muddied by mopt/grimoire); naive has no I2SRandReplace mutator (\"No I2S\"), so that nameless row is an unwrapped havoc/token find, not I2S. This corroborates a havoc-driven win, not an I2S win."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where forcing the REPH_MODE_LOG_REPHA / Repha-first-glyph condition reachable, cmplog resolves the has_reph true branch as fast as or faster than naive across trials — showing I2S helps rather than hurts here, refuting the havoc-only/baseline-wins attribution."
+  },
+  "weakest_evidence_point": "I infer cmplog under-explores the LOG_REPHA region because its I2S budget is spent on CMP operands like 'kern'; the prompt shows the loser's text-like seeds but does not directly prove the I2S budget diverted it away from the Repha path.",
+  "confidence": "medium"
+}

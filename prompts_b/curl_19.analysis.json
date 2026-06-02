@@ -1,0 +1,87 @@
+{
+  "branch_id": 19,
+  "target": "curl",
+  "summary_one_line": "A well-formed URL/HTTP request that drives a real connection into the cache so the teardown path locks the cache (lock=TRUE).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "Bytes forming a structurally valid URL: a scheme/`://` separator, a numeric port, and an HTTP version token, so curl actually creates and caches a connection that is later torn down via Curl_conncache_close_all_connections, which calls Curl_conncache_remove_conn with lock=TRUE — taking the true side of `if(lock)`.",
+      "why_winner_satisfies": "Winner seeds carry a literal `://` separator at offsets 0x0a-0x0c, a `:9001` port followed by `/850`, and a `HTTP/27.0` version token at 0x24-0x2c, i.e. a parseable connection target whose teardown reaches the locked-remove path (the W-only CONNCACHE_LOCK lines 284/295 are hit).",
+      "why_loser_doesnt": "Loser seeds are short (35-73 bytes) with `://` replaced by run-length `%`/`.`/`+` filler and no port or HTTP-version token, so no real connection is cached and the false (lock=0) side dominates (L hits L283 F=20, never the true side).",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes the exact comparison operands (scheme/`://`, port `9001`, `HTTP/` token) that the URL parser compares against, building the structured connection target by construction; naive and value_profile lack I2SRandReplace and must stumble onto these multi-byte literals via blind havoc, which they fail to do within budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of `if(lock)` in Curl_conncache_remove_conn, reached from the connection-teardown caller.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "conncache.c:283",
+      "exact_quote": "Location: /src/curl/lib/conncache.c:283:8"
+    },
+    {
+      "claim": "The 1-hop caller passes lock=TRUE explicitly, so reaching this caller exercises the true side.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "conncache.c:543",
+      "exact_quote": "Curl_conncache_remove_conn(connc->closure_handle, conn, TRUE); <-- CALL"
+    },
+    {
+      "claim": "The winner-resolving seeds take the true side and the loser-blocking seeds take the false side at the blocker.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L283",
+      "exact_quote": "L 283  T=17 F=0  T=0 F=20  if(lock) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner seeds contain a `://` separator and a numeric port/path target.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 32d10b449c4075ee offsets 0x0a-0x1f",
+      "exact_quote": "2f 2f 31 32 25   ......po%.://12%"
+    },
+    {
+      "claim": "Winner seeds contain an HTTP version token.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 32d10b449c4075ee offset 0x24",
+      "exact_quote": "47 48 54 54 50 2f 32 37 2e 30 2e 2f   ....GHTTP/27.0./"
+    },
+    {
+      "claim": "Loser seeds are short and lack the structured URL/port/HTTP target, being dominated by `%` filler.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00225bc4819174d2 size=73",
+      "exact_quote": "25 25 25 25 25 25 25 25 25 25 25 25 26 25 40 e8   %%%%%%%%%%%%&%@."
+    },
+    {
+      "claim": "At offset 0x0c the winner concentrates on `/` while losers carry scattered `.`/`%` bytes, a likely-informative dataflow difference.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  2f(/)x14 39(9)x2 4a(J)x1            2e(.)x5 25(%)x4 41(A)x2 45(E)x2 +7u  DIFFER"
+    },
+    {
+      "claim": "Only cmplog and vpc add the I2SRandReplace mutator that substitutes intercepted CMP operands into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive lacks any I2S mutator, so it cannot perform operand substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace as well.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 19 --role W --fuzzer cmplog --trial 1 --seed 32d10b449c4075ee`; the chain has 25 levels and the tool reports 'I2S-floor signal: 2 ancestor dash row(s) at depth 23, 24' (mutation_op = -), the lower-bound I2S contribution signal under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the lock=TRUE teardown path is reached regardless of input structure (e.g. lock taken on any non-empty input) would show naive/value_profile resolving as fast as cmplog/vpc, refuting that the structured URL/HTTP literals are the gating feature."
+  },
+  "weakest_evidence_point": "The byte diff shows winner URL/port/HTTP literals but does not directly prove these are the exact CMP operands curl's URL parser compares against; the connection-caching causal chain is inferred from source plus the W-only CONNCACHE_LOCK lines rather than instrumented at the compare site.",
+  "confidence": "high"
+}

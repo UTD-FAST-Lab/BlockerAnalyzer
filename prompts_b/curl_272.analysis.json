@@ -1,0 +1,75 @@
+{
+  "branch_id": 272,
+  "target": "curl",
+  "summary_one_line": "Input must contain the literal 'Content-Type:' header so search_header sets customct non-NULL and the true branch is taken",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must embed the literal ASCII string 'Content-Type:' (and an enclosing MIME/userheaders structure) so that search_header(part->userheaders, STRCONST(\"Content-Type\")) returns non-NULL, making customct non-NULL at line 1792 and taking the true branch (contenttype = customct).",
+      "why_winner_satisfies": "All five winner-resolving seeds carry the exact byte run 'Content-Type:' starting at offset 0x24 (47 43 6f 6e 74 65 6e 74 2d 54 79 70 65 3a = 'GContent-Type:'); the per-offset byte-set shows W concentrated on these literal bytes (e.g. 0x24=47('G'), 0x25=43('C'), 0x26=6f('o') with x20 counts), matching the STRCONST(\"Content-Type\") operand the comparison interception logs.",
+      "why_loser_doesnt": "The loser-blocking seeds lack the 'Content-Type:' literal at those offsets (e.g. naive seeds carry runs of 2d('-') and 00 bytes; offset 0x25 L bytes are 80/00/41/74 not 43('C')), so search_header finds no matching header, customct stays NULL, and the false branch is taken (L1792 T=0 F=41).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer recording the STRCONST(\"Content-Type\") string-CMP operand and substitutes that literal into the input at matching offsets, synthesizing the header string that naive/value_profile can only stumble on by chance; value_profile_cmplog wins over value_profile by the same I2S mutator (the only delta between vp and vpc is I2SRandReplace)."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of if(customct) at mime.c:1792, where customct is set by search_header for a Content-Type header.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "mime.c:1789-1792",
+      "exact_quote": "customct = search_header(part->userheaders, STRCONST(\"Content-Type\"));"
+    },
+    {
+      "claim": "The globally blocked side is the true branch at line 1792.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "mime.c:1792:6",
+      "exact_quote": "if(customct) <-- BLOCKER"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the literal Content-Type header string.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id acb98175a6d3d5c3 offset 0x24",
+      "exact_quote": "06 00 00 00 47 43 6f 6e 74 65 6e 74 2d 54 79 70   ....GContent-Typ"
+    },
+    {
+      "claim": "At offset 0x25 the winner bytes are concentrated on 43 ('C') across all 20 occurrences, while the loser bytes are not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0025",
+      "exact_quote": "0x0025  43(C)x20                            80(.)x7 00(.)x3 41(A)x2 74(t)x2 +5u  DIFFER"
+    },
+    {
+      "claim": "The winner takes the true side at the blocker while the loser takes only the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1792",
+      "exact_quote": "d=1   L1792  T=20 F=21  T=0 F=41  if(customct)  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand into the input at matching offsets, and value_profile lacks it.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators / value_profile Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace, isolating I2S as the technique delta for the vpc>vp pair.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs differ by the I2S technique with prob_div=1.00.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 / Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 272 --role W --fuzzer cmplog --trial 1 --seed acb98175a6d3d5c3` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 10 and 11 of the 12-level ancestor chain, the lower-bound signal of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on search_header(\"Content-Type\") where cmplog/vpc reach the true branch no faster than naive/value_profile (no I2S advantage), or where winner seeds resolve the branch without the literal 'Content-Type:' bytes present."
+  },
+  "weakest_evidence_point": "Whether the structural framing around the literal (userheaders parsing / null-terminator placement) is also required, or whether the bare 'Content-Type:' substring suffices, is not fully isolated by the byte-diff alone.",
+  "confidence": "high"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 5692,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must be a well-formed font whose table directory contains a 'morx' AAT table so apply_morx is true.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A font blob with a valid magic/sfnt header and a table-directory record carrying the literal four-byte tag 'morx' (0x6d 0x6f 0x72 0x78), so _hb_apply_morx returns true and apply_morx is set; the true side at line 95 then also needs shaper != _hb_ot_shaper_default.",
+      "why_winner_satisfies": "Winner-resolving seed ae73a8c9 begins with the 'OTTO' sfnt magic and embeds the exact ASCII bytes 'morx' at offset 0x0c-0x0f, satisfying the morx-table tag match that drives apply_morx true; the lineage of that seed contains an I2S-floor dash row, evidence the morx tag was placed by an input-to-state substitution.",
+      "why_loser_doesnt": "Loser-blocking value_profile seeds carry no 'morx' tag at the table-directory offsets (e.g. seed 00546490 holds 'y-hant-hk' / jy text instead), so apply_morx stays false and the true side never fires; loser took the false side 18 times vs winner's 2 true.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which copies a compared constant (the 'morx' tag bytes harfbuzz checks against the directory record) directly into the input offset, planting the 4-byte tag in one shot; value_profile, lacking I2SRandReplace, can only nudge bytes via havoc against a 4-byte exact-equality string compare and effectively never assembles the tag."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the morx-and-non-default-shaper guard at hb-ot-shape.cc:95 and the globally blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-shape.cc:95:7",
+      "exact_quote": "if (apply_morx && shaper != &_hb_ot_shaper_default)"
+    },
+    {
+      "claim": "apply_morx is computed from _hb_apply_morx over the face, i.e. presence of the AAT morx table.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L46 (line 85)",
+      "exact_quote": ", apply_morx (_hb_apply_morx (face, props))"
+    },
+    {
+      "claim": "The winner-resolving seed contains the OTTO sfnt magic and the literal ASCII 'morx' tag bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id ae73a8c9233c3cb8 offset 0x00",
+      "exact_quote": "4f 54 54 4f 00 01 20 20 21 21 20 20 6d 6f 72 78   OTTO..  !!  morx"
+    },
+    {
+      "claim": "The winner resolved the branch 8/10 trials while the loser blocked 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=8/10  blocked=2  unreached=0"
+    },
+    {
+      "claim": "A loser-blocking value_profile seed carries text bytes (jy-hant-hk) rather than a morx font-table tag at those offsets.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00546490999c9c0b offset 0x10",
+      "exact_quote": "79 2d 68 61 6e 74 2d 68 6b 00 20 00 00 00 ff 01"
+    },
+    {
+      "claim": "On the blocker line the loser takes the false side 18 times and the true side 0, while the winner takes the true side twice.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 95",
+      "exact_quote": "T=2 F=0  T=0 F=18"
+    },
+    {
+      "claim": "value_profile_cmplog's mutator set adds I2SRandReplace over value_profile's havoc/token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5692 --role W --fuzzer value_profile_cmplog --trial 1 --seed ae73a8c9233c3cb8` and observed one I2S-floor dash row (mutation_op = -) at depth 18 of the 19-level ancestor chain (ancestor e0a5b09f80625fb6), consistent with an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on apply_morx where value_profile resolves the true side as fast as value_profile_cmplog despite the morx tag being checked by a 4-byte exact string compare, showing CMP_MAP gradient alone suffices and I2S substitution is not the divergence driver."
+  },
+  "weakest_evidence_point": "Only one winner seed shows the clean 'morx' tag; the second winner seed (47909b1d) shows 'mort'/'GPOS' tags, so the exact tag the I2S substitution planted to flip apply_morx is inferred rather than uniquely pinned.",
+  "confidence": "medium"
+}

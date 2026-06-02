@@ -1,0 +1,87 @@
+{
+  "branch_id": 5441,
+  "target": "harfbuzz",
+  "summary_one_line": "A valid sfnt header plus the literal 'post' table tag at the directory so the post table parses and get_glyph_name returns true.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed TrueType/sfnt header (magic 00 01 00 00) followed by a table directory entry whose 4-byte tag equals the ASCII literal 'post' (70 6f 73 74), so harfbuzz locates and parses the post table and ot_face->post->get_glyph_name returns true.",
+      "why_winner_satisfies": "Every winner-resolving seed begins with 00 01 00 00 and carries the literal bytes 70 6f 73 74 ('post') at offset 0x0c, the exact 4-byte sfnt table tag the loader matches; the byte diff shows offsets 0x0c-0x0f concentrated on p/o/s/t in W and unrelated bytes in L.",
+      "why_loser_doesnt": "Loser-blocking seeds carry no 'post' tag at offset 0x0c (bytes are 00/2c/2b etc.) and most lack the 00 01 00 00 sfnt magic, so the post table is never matched/parsed and get_glyph_name falls through to the false branch.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile. The 4-byte tag comparison in the sfnt directory scan is logged by CmpLogObserver and substituted directly into the input by I2SRandReplace, planting the exact 'post' literal; plain value_profile only gets a CMP_MAP prefix-distance gradient toward the tag and never lands the full 4-byte match in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the post-table glyph-name call whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-font.cc:410:7",
+      "exact_quote": "if (ot_face->post->get_glyph_name (glyph, name, size)) return true;"
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog beating value_profile with technique delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The winner resolved all 10 trials while the loser was blocked in all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "winner/loser counts",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "Winner-resolving seeds carry a valid sfnt magic and the literal 'post' table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1, offset 0x00 and 0x0c",
+      "exact_quote": "00 01 00 00 00 01 ee ff 00 30 00 00 70 6f 73 74   .........0..post"
+    },
+    {
+      "claim": "Multiple winner seeds repeat the 'post' tag at offset 0x0c with sfnt magic.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 2, offset 0x00",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 70 6f 73 74   ......      post"
+    },
+    {
+      "claim": "At offsets 0x0c-0x0f the winner bytes are concentrated on the ASCII characters p/o/s/t while the loser bytes are unrelated.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  70(p)x5"
+    },
+    {
+      "claim": "The loser bytes at offset 0x0c are not the 'post' tag character p.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0c L bytes",
+      "exact_quote": "00(.)x2 01(.)x1 2c(,)x1 2b(+)x1"
+    },
+    {
+      "claim": "Loser-blocking seeds take the false branch and lack the post-table structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1, offset 0x00",
+      "exact_quote": "fe ff ff ff f4 01 e0 e0 20 00 00 00 01 20 e0 6a   ........ .... .j"
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator that plants comparison operands directly into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator and only the CMP_MAP distance-bucket gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5441 --role W --fuzzer value_profile_cmplog --trial 1 --seed a5465e0cbf5a7934` and observed an I2S-floor dash row (mutation_op = -) at depth 26 of the 27-level ancestor chain; tool reports '1 ancestor dash row(s) at depth 26', the unwrapped-I2SRandReplace floor signal for vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose post-table tag comparison is required, in which value_profile_cmplog and value_profile resolve the true branch at statistically indistinguishable rates, would refute the I2S-substitution attribution."
+  },
+  "weakest_evidence_point": "The byte diff only directly shows the 'post' tag at offset 0x0c; the deeper post-table sub-fields (version/length at 0x10+) that get_glyph_name actually dereferences are inferred from source rather than pinned to specific concentrated diff offsets.",
+  "confidence": "high"
+}

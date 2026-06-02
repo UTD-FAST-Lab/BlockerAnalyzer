@@ -1,0 +1,99 @@
+{
+  "branch_id": 210,
+  "target": "curl",
+  "summary_one_line": "Input must contain a recognizable HTTP protocol-prefix literal (\"HTTP/\") so checkprotoprefix accepts the header and headerline advances past zero.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A header buffer beginning with the literal protocol-status prefix \"HTTP/\" (bytes 47 48 54 54 50 2f around offset 0x24) so that checkprotoprefix returns non-STATUS_BAD, a full header line is consumed, k->headerline is incremented past 0, and the blocker's false (else-of-first-header) side is taken instead of the perpetually-true !k->headerline guard.",
+      "why_winner_satisfies": "All five winner-resolving seeds carry the exact ASCII run \"HTTP/\" at offset 0x24 (e.g. \"GHTTP/\" 47 48 54 54 50 2f), so checkprotoprefix/sscanf match the protocol line and the status-line parse path (Curl_http_statusline, verify_header) executes only in W.",
+      "why_loser_doesnt": "Loser-blocking seeds have no \"HTTP/\" literal at the protocol-prefix offsets; their bytes there are scattered (0x24 = 50/42/9e/2e, 0x25 = 25/2e/41/64, etc.), so checkprotoprefix never recognizes a header line, k->headerline stays 0, and only the true side of the blocker is ever taken (loser hitcount on branch = 0).",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver buffer recorded when sscanf/checkprotoprefix compares the input against the constant \"HTTP/\" token and substitutes that exact operand into the input, planting the literal that naive/value_profile can only reach by blind havoc. value_profile only rewards distance-bucket closeness via feedback and has no operand-substitution mutator, so vp cannot plant the exact literal and also loses."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs are I2S-delta pairs that the cmplog-equipped fuzzer wins 10/10 while the I2S-less counterpart is blocked 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive, Pair 2 value_profile_cmplog>value_profile",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "The second decisive pair is also an I2S delta with the same winner/loser resolution profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "The blocker guards the first-header path; taking its false side requires checkprotoprefix to accept the buffered line as a protocol header.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "http.c:3932-3937",
+      "exact_quote": "if(!k->headerline) { <-- BLOCKER"
+    },
+    {
+      "claim": "Recognition of a protocol prefix is what gates the winning path; checkprotoprefix is called on the buffered header.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "http.c:3933-3935",
+      "exact_quote": "/* check if this looks like a protocol header */"
+    },
+    {
+      "claim": "The winning path parses an HTTP status line via sscanf against the literal \"HTTP/\" format string.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "http.c:4319",
+      "exact_quote": "\" HTTP/%1d.%1d%c%3d%c\","
+    },
+    {
+      "claim": "All winner-resolving seeds contain the literal ASCII bytes for \"HTTP/\" near offset 0x24.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 0057778b67d14b3b offset 0x24",
+      "exact_quote": "47 48 54 54 50 2f 20 6d 65 40 6c 6f   ....GHTTP/ me@lo"
+    },
+    {
+      "claim": "The byte diff shows W concentrates 'HTTP/' literal bytes at offsets 0x24-0x29 while L bytes there are scattered with no literal.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0024",
+      "exact_quote": "0x0024  47(G)x17 48(H)x3                    50(P)x2 42(B)x1 9e(.)x1 2e(.)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "Offset 0x29 is the '/' of HTTP/ in 20 of 20 winner seeds but never in losers.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0029",
+      "exact_quote": "0x0029  2f(/)x20                            25(%)x2 31(1)x1 2e(.)x1 42(B)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "Loser fuzzers never advance past the first-header guard: their on-branch hitcount is zero and they remain blocked the full 24h.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 loser stats",
+      "exact_quote": "avg hitcount on branch: winner=2792  loser=0"
+    },
+    {
+      "claim": "The status-line / header-verification functions execute only under the winner, never the loser.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "Curl_http_statusline, verify_header",
+      "exact_quote": "20         0  Curl_http_statusline  (/src/curl/lib/http.c:3774-3844)"
+    },
+    {
+      "claim": "I2SRandReplace substitutes a CMP operand it captured from the input/constant comparison, which is the cmplog-only mutator absent from naive and value_profile.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and only rewards distance-bucket closeness, so it cannot plant the exact literal.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 210 --role W --fuzzer cmplog --trial 1 --seed 0143967c1d8f8005`; the chain reported 2 I2S-floor dash rows (mutation_op = -) at depths 23 and 24, the lower-bound signal of an unwrapped I2SRandReplace find in the winner's ancestry."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the blocker's false side is reached at equal rate by naive/value_profile and cmplog/vpc when the gate is the literal \"HTTP/\" prefix would refute the I2S attribution; conversely, if cmplog still won when the prefix were replaced by a runtime-computed (non-constant, non-CMP'd) value, the literal-substitution mechanism is wrong."
+  },
+  "weakest_evidence_point": "The I2S-floor dash rows appear at depths 23-24, distant from the leaf, so the literal-planting substitution is attributed to a remote ancestor rather than directly observed as the proximal mutation that crossed the gate.",
+  "confidence": "high"
+}

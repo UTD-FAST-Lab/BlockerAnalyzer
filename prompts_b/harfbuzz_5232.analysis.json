@@ -1,0 +1,69 @@
+{
+  "branch_id": 5232,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry the literal 'GDEF' table tag and a valid version so the version switch falls through past the default Null arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must contain a sanitizable OpenType font carrying a GDEF table whose 4-byte tag is the ASCII literal 'GDEF' (0x47 0x44 0x45 0x46) at the relevant table-directory offset, plus a version major of 1 or 2 so OT::GDEF::get_var_store()'s switch hits case 1 or case 2 rather than the default arm at line 794.",
+      "why_winner_satisfies": "All winner-resolving seeds carry the exact bytes 47 44 45 46 ('GDEF') at offsets 0x0c-0x0f and a 00 01 version major at offset 0x00-0x01, so get_var_store() takes case 1/case 2 and the GDEF sanitize chain (CaretValue, GDEFVersion1_2, etc.) is exercised.",
+      "why_loser_doesnt": "Loser-blocking seeds have no concentrated 'GDEF' literal at 0x0c-0x0f (bytes are scattered: 00, 01, 20, 2c, ...), so no valid GDEF table is parsed; get_var_store() falls to the default arm and the GDEF sanitize functions show zero L hits.",
+      "mechanism_attribution": "cmplog/vpc intercept the 4-byte memcmp/integer comparison of the table tag against 'GDEF' and I2SRandReplace substitutes the constant 'GDEF' operand directly into the input at the matching offset; naive and value_profile lack I2SRandReplace and must stumble on the exact 4-byte literal by chance, which they never do."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of a version switch in get_var_store(); the winning side takes case 1 or case 2.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "GDEF.hh:789-794",
+      "exact_quote": "switch (u.version.major) {"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal 'GDEF' tag at offset 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 13b375b9eff5c760 offset 0x0c",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 47 44 45 46   ......      GDEF"
+    },
+    {
+      "claim": "The 'GDEF' literal is fully concentrated in the winner set and absent/scattered in the loser set at offsets 0x0c-0x0f.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds take the true (default) branch and do not exercise the GDEF sanitize chain.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "OT::GDEF::sanitize W=60 L=0",
+      "exact_quote": "60         0  OT::GDEF::sanitize(hb_sanitize_context_t*) const"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile (the loser of pair 2) has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs differ by the I2S technique and the winner resolves in 10/10 trials.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta I2S",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5232 --role W --fuzzer cmplog --trial 1 --seed 13b375b9eff5c760` and observed two I2S-floor rows (mutation_op = -, ParentInfo-only) at depth 10 and depth 11 of the ancestor chain, the lower-bound dash signal exclusive to cmplog/vpc in the canonical 4-fuzzer set."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on the 4-byte 'GDEF' tag in which cmplog and naive resolve the branch at statistically indistinguishable rates (no cmplog>naive separation), showing the I2S substitution of the tag is not what drives the divergence."
+  },
+  "weakest_evidence_point": "The byte diff shows the 'GDEF' literal concentrated at a fixed offset 0x0c, but real fonts place the table tag at a directory-record offset that depends on table count, so the exact-offset framing may oversimplify how I2S lands the tag.",
+  "confidence": "high"
+}

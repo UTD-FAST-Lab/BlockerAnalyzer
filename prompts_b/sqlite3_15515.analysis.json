@@ -1,0 +1,81 @@
+{
+  "branch_id": 15515,
+  "target": "sqlite3",
+  "summary_one_line": "Input must place '=' immediately after a '>'/'<' so the tokenizer forms a two-char relational operator token (>=, <=).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "A relational-operator character ('>' or '<') in sqlite3GetToken's lexer stream followed immediately by '=', so the true branch at 159511 fires (the second-character check that extends a single-char operator into the two-char form >= / <=).",
+      "why_winner_satisfies": "value_profile winner seeds carry SQL with adjacent '>'+'=' pairs: seed 0fadca0bde089a74 is literal `SELECT 11-013>=13=13...` containing `>=` and `<=`, and seeds c30df6313b55abb4 / ee8e63139c7a9d2c begin with bytes 3e 3d ('>='). The branch true side at L159511 is taken in W (T=3 F=0) but never in L (T=0 F=12).",
+      "why_loser_doesnt": "naive loser seeds put '>' next to ';' rather than '=' (e.g. byte runs `3e 3b 3b 3e 3b 3b` = `>;;>;;`, and the `vacuum` seed has no operator at all), so the second-char-is-'=' test never succeeds and the true branch stays blocked across all 10 trials.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient: the tokenizer's character comparison against '=' is intercepted, and an input whose byte is operand-closer to '=' than any seen before adds a new CMP_MAP distance bucket and is preserved, climbing the gradient until the '=' lands right after '>'/'<'. naive has only edge-hit feedback and no such operand-distance signal, so it cannot steer toward the exact adjacent '=' byte."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The single decisive pair is value_profile beating naive with the value_profile technique as the delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "The blocker is in the SQL tokenizer sqlite3GetToken and its true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "sqlite3GetToken / true branch",
+      "exact_quote": "Enclosing function: sqlite3.c:sqlite3GetToken"
+    },
+    {
+      "claim": "The blocker true side fires in the winner-resolving view (T=3) but never in the loser-blocking view (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L159511",
+      "exact_quote": "L159511  T=3 F=0  T=0 F=12    <-- BLOCKER"
+    },
+    {
+      "claim": "A winner seed is literal SQL containing the relational operators >= and <=.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0fadca0bde089a74",
+      "exact_quote": "53 45 4c 45 43 54 20 31 31 2d 30 31 33 3e 3d 31   SELECT 11-013>=1"
+    },
+    {
+      "claim": "Other winner seeds begin with the two bytes '>' '=' (3e 3d).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id c30df6313b55abb4",
+      "exact_quote": "0000: 3e 3d 20 20 20 20 15 20 ff 30 3b 3b 80 64 00 10   >=    . .0;;.d.."
+    },
+    {
+      "claim": "A loser seed places '>' adjacent to ';' rather than '=' and another loser is the bare word vacuum.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 3386cb3013096cfc / 84fc92d40773c99e",
+      "exact_quote": "0000: 3e 3b 3b 3e 3b 3b 7b fb 3b 3b 3b 3b 05 31 3b 57   >;;>;;{.;;;;.1;W"
+    },
+    {
+      "claim": "value_profile uses a CMP_MAP keyed by operand-distance bucket, and an input closer to matching adds a new bucket and is preserved.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "naive has only per-edge hit-count feedback, with no comparison-operand introspection.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive",
+      "exact_quote": "**Feedback**: per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+    },
+    {
+      "claim": "value_profile does not use I2SRandReplace substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Lineage check not required: claimed_mechanism is CMP_MAP gradient (value_profile), not I2SRandReplace. The MECHANISM CONTEXT explicitly states value_profile has no I2SRandReplace mutator, so the dash-row I2S floor is not the relevant signal here; the CMP_MAP distance-bucket feedback is the value_profile-specific signal."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose tokenizer requires '=' adjacent to '>'/'<' shows value_profile and naive resolving the true branch at statistically indistinguishable rates (no CMP_MAP advantage), refuting the gradient attribution."
+  },
+  "weakest_evidence_point": "The blocker source lines render blank in SOURCE CONTEXT, so the exact comparison at L159511 is inferred from the operator-token byte pattern (>=, <=) rather than read directly from the conditional expression.",
+  "confidence": "medium"
+}

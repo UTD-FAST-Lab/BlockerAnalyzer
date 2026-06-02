@@ -1,0 +1,94 @@
+{
+  "branch_id": 5442,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry a well-formed 'post' table whose name index resolves a glyph, requiring both the 'post' FOURCC tag and a matching name entry.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The literal 4-byte table tag 'post' (70 6f 73 74) placed at the table-directory offset (here 0x0c-0x0f), so the OpenType loader recognizes and parses a post table whose name lookup can succeed.",
+      "why_winner_satisfies": "All three winner-resolving seeds contain the exact ASCII run 'post' at offsets 0x0c-0x0f (70 6f 73 74) plus the 'true' magic at 0x00-0x03, and value_profile_cmplog resolves the true branch in 8/10 trials.",
+      "why_loser_doesnt": "The value_profile loser seeds carry no 'post' tag at 0x0c-0x0f (they show 'kern'/'fff'/'erdn' style bytes there) and resolve the branch 0/10, because plain value_profile lacks I2SRandReplace to substitute the exact 'post' FOURCC into the directory offset.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer, finds the table-tag comparison against the literal 'post', and substitutes that operand into the seed at the directory offset; value_profile has no such substitution stage so it cannot place the exact 4-byte tag."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Beyond the 'post' tag, the input must supply post-table substructure (version/name-index/string bytes) close enough to a valid name entry that get_glyph_from_name returns a glyph; partial-match feedback is needed to incrementally home in on it.",
+      "why_winner_satisfies": "value_profile_cmplog carries CMP_MAP gradient buckets that reward inputs whose post-table CMP operands move closer to matching, and it resolves the branch 8/10 with avg hitcount 4 on the branch.",
+      "why_loser_doesnt": "Plain cmplog has I2SRandReplace but no CMP_MAP partial-match feedback, so it cannot preserve incremental progress toward a valid name entry and resolves only 1/10 trials (blocked 9).",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming-distance / matching-prefix buckets) preserves corpus inputs that get closer to a satisfying post-table name comparison; cmplog lacks this feedback so partial progress is discarded between executions."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a post-table glyph-name lookup that must succeed to take the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 source line",
+      "exact_quote": "if (ot_face->post->get_glyph_from_name (name, len, glyph)) return true;"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the literal 'post' tag and 'true' magic.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 39fb20c9e671238a offset 0x00-0x0f",
+      "exact_quote": "74 72 75 65 00 02 20 01 10 00 01 00 70 6f 73 74   true.. .....post"
+    },
+    {
+      "claim": "At the table-directory offsets 0x0c-0x0f the winner bytes are 'post' while loser bytes differ.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  70(p)x3                             47(G)x35 00(.)x12 4d(M)x4 01(.)x2 +23u  DIFFER"
+    },
+    {
+      "claim": "value_profile_cmplog wins over value_profile via the I2S delta, resolving 8/10 vs 0/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile_cmplog wins over cmplog via the value_profile delta, resolving 8/10 vs 1/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The winner attains a nonzero hitcount on the branch while losers stay at zero.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 avg hitcount",
+      "exact_quote": "avg hitcount on branch: winner=4  loser=0"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a matched CMP operand into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile's CMP_MAP preserves inputs whose operand pair is closer to matching as new corpus.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile_cmplog unions the CMP_MAP gradient with the cmplog buffer.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Instrumentation",
+      "exact_quote": "union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5442 --role W --fuzzer value_profile_cmplog --trial 6 --seed 39fb20c9e671238a` and observed one I2S-floor dash row (mutation_op = -) at depth 26 of the 27-level ancestor chain; fuzzer is vpc (not mopt/grimoire) so the dash signal is I2S-exclusive under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating the true branch on a 'post' FOURCC tag in which value_profile resolves the branch as often as value_profile_cmplog (i.e. I2S substitution gives no advantage in placing the exact 4-byte tag)."
+  },
+  "weakest_evidence_point": "The Pair-2 claim that CMP_MAP gradient (not just I2S) is independently necessary rests on the cmplog loser's 1/10 resolution being attributable to missing partial-match feedback rather than scheduling variance.",
+  "confidence": "medium"
+}

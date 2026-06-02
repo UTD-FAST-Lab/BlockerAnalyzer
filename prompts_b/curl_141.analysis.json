@@ -1,0 +1,75 @@
+{
+  "branch_id": 141,
+  "target": "curl",
+  "summary_one_line": "Winner needs the literal header name 'Transfer-Encoding:' present so Curl_checkheaders returns non-NULL and the true branch is taken.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must contain the ASCII string 'Transfer-Encoding:' (or its case-insensitive header-name prefix) so that Curl_checkheaders(data, STRCONST(\"Transfer-Encoding\")) at line 2398 returns a non-NULL pointer, making the if(ptr) gate at 2399 true.",
+      "why_winner_satisfies": "All five value_profile_cmplog winner seeds embed the literal bytes 'Transfer-Encoding:' starting near offset 0x24 (47 54 72 61 6e 73 66 65 72 2d 45 6e 63 6f 64 69 6e 67 3a), so the header lookup matches and the W-only true-branch body (lines 2401-2404) executes.",
+      "why_loser_doesnt": "The value_profile loser seeds carry only short repetitive byte runs (e.g. '%%%%' / '.././') with no 'Transfer-Encoding' substring, so Curl_checkheaders returns NULL, ptr is false, and execution falls into the L-only else branch at 2405.",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator, which captures the runtime CMP operand 'Transfer-Encoding' (the constant Curl_checkheaders compares against) and substitutes it into the input, planting the exact header string that value_profile's havoc/CMP_MAP-only stack cannot synthesize."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the if(ptr) gate guarded by a Curl_checkheaders Transfer-Encoding lookup.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L2398-2399",
+      "exact_quote": "ptr = Curl_checkheaders(data, STRCONST(\"Transfer-Encoding\"));"
+    },
+    {
+      "claim": "The globally blocked side is the true branch and only the winner takes it.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L2399",
+      "exact_quote": "L2399  T=6 F=0  T=0 F=10  if(ptr) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner seeds contain the literal 'Transfer-Encoding:' bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed b8044d1b09c5ef1e offsets 0x24-0x33",
+      "exact_quote": "06 00 00 00 47 54 72 61 6e 73 66 65 72 2d 45 6e   ....GTransfer-En"
+    },
+    {
+      "claim": "The header string continues with 'coding:' completing 'Transfer-Encoding:'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed b8044d1b09c5ef1e offset 0x30",
+      "exact_quote": "63 6f 64 69 6e 67 3a 54 72 61 6e 43 66 65 72 2d   coding:TranCfer-"
+    },
+    {
+      "claim": "Loser seeds carry repetitive non-header byte runs and no Transfer-Encoding substring.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 00225bc4819174d2 offset 0x30",
+      "exact_quote": "25 25 25 25 25 25 25 25 25 25 25 25 26 25 40 e8   %%%%%%%%%%%%&%@."
+    },
+    {
+      "claim": "The winner-only true-branch body executes Curl_compareheader, which the loser never reaches.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "Curl_compareheader",
+      "exact_quote": "6         0  Curl_compareheader  (/src/curl/lib/http.c:1490-1534)"
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator that the loser lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 141 --role W --fuzzer value_profile_cmplog --trial 1 --seed b8044d1b09c5ef1e`; chain of 41 ancestor levels with I2S-floor signal reporting 2 dash rows (mutation_op = -) at depth 39 and 40, the characteristic unwrapped I2SRandReplace find for vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating an if(ptr) on a Curl_checkheaders-style fixed-string header lookup where value_profile resolves the true branch as often as value_profile_cmplog (no I2S advantage)."
+  },
+  "weakest_evidence_point": "The assumption that the Transfer-Encoding literal originated from I2S substitution rather than lucky havoc plus token-stack assembly, since the dash rows are at deep ancestor levels (39-40) not the leaf.",
+  "confidence": "high"
+}

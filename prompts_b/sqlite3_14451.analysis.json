@@ -1,0 +1,113 @@
+{
+  "branch_id": 14451,
+  "target": "sqlite3",
+  "summary_one_line": "VDBE must dispatch case OP_Lt: a parseable SELECT containing a '<' comparison whose compiled OP_Lt opcode actually executes.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "Input bytes must form a SQL statement that the parser accepts (a literal 'SELECT' keyword at offset 0) and that compiles to a VDBE program containing an OP_Lt opcode whose True (jump-dispatch) side is reached. The loser-blocking corpus is full of un-parseable byte runs; cmplog must repair the 'SELECT' keyword and surrounding token bytes so the bytecode reaches the comparison switch arm.",
+      "why_winner_satisfies": "The cmplog winning seeds all begin with the literal 'SELECT' (53 45 4c 45 43 54) followed by arithmetic/comparison expressions, e.g. seed 1 '53 45 4c 45 43 54 0d 35 2d 35 2f...' decoding to 'SELECT.5-5/55555' — a parseable SELECT body that the VDBE executes, reaching OP_Lt at L87187 (the blocker T side, hit 120 times in W).",
+      "why_loser_doesnt": "The naive loser-blocking seeds are non-parseable: seed 1 is '69 3b 3b 3b...' ('i;;;;;;;') and seed 3 is 'd5 d5 d5 d5 5d 5d...', neither a valid SELECT, so the VDBE never builds/executes an OP_Lt opcode (L87187 shows T=0 for the loser).",
+      "mechanism_attribution": "cmplog intercepts integer/string CMPs into a per-execution CmpLogObserver buffer, then I2SRandReplace scans the input for bytes matching one CMP operand and substitutes the other — letting it install/repair the exact keyword and token bytes (e.g. the 'SELECT' lexeme compared inside the tokenizer) that naive's blind havoc cannot synthesize, so the VDBE compiles and dispatches the OP_Lt arm."
+    },
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "Same program-side requirement: a parseable SELECT with a '<' comparison that compiles to and dispatches OP_Lt. The byte-level requirement is a multi-byte match against the parser's token comparisons (the 'SELECT' keyword and operator tokens), which value_profile reaches via incremental partial-prefix progress feedback.",
+      "why_winner_satisfies": "The value_profile decisive subject resolves 10/10 with avg hitcount 506 on the branch vs the loser's 189; its corpus reaches OP_Lt (L87187 T side) because value_profile's CMP_MAP preserves inputs that get progressively closer to matching the parser's keyword/operator comparisons.",
+      "why_loser_doesnt": "Naive's loser-blocking seeds never match the multi-byte keyword comparison (their offset-0 bytes are 'i', ' ', 'd5' rather than 'S'), and naive has no distance feedback to reward a near-match, so it stays blocked (8/10 blocked, branch True side T=0 for loser).",
+      "mechanism_attribution": "value_profile writes each CMP into a CMP_MAP keyed by (PC, operand-distance bucket); an input whose operand pair is closer to matching than any seen before adds a new bucket and is preserved as corpus. This Hamming/prefix gradient guides the corpus toward the exact 'SELECT'/operator bytes needed to compile an OP_Lt, which naive's edge-only feedback cannot reward."
+    },
+    {
+      "covers_pairs": ["minimizer>naive (calibrated_energy)"],
+      "what_input_feature": "Same program-side requirement: a parseable SELECT containing a '<' operator (literal 0x3c) so the compiled OP_Lt arm is dispatched. No CMP introspection is available; the feature must be reached by more havoc mutations spent on promising seeds.",
+      "why_winner_satisfies": "The minimizer winning seeds 4 and 5 contain a literal '<' (0x3c): seed 4 is '53 45 4c 45 43 54 20 31 31 31 31 30 3c 31 31 2a' decoding to 'SELECT 11110<11*', an explicit '<' comparison that compiles to OP_Lt; minimizer resolves 9/10 with avg hitcount 568 on the branch.",
+      "why_loser_doesnt": "Naive (same mutators, plain StdMutationalStage, no calibrated energy) blocks 8/10 and reaches the branch True side 0 times; its loser-blocking seeds contain neither a parseable SELECT nor a '<' operator, and naive spends uniform energy so it never lucks into the long valid '...<...' expression.",
+      "mechanism_attribution": "minimizer runs havoc+token in a StdPowerMutationalStage whose per-seed mutation count (energy) is derived from a calibration-based perf_score (faster/smaller/more-stable seeds earn more mutations). The extra calibrated mutation budget on parseable seeds raises the odds of havoc producing the valid 'SELECT ... < ...' byte sequence that compiles to OP_Lt — purely a scheduling effect, no CMP introspection."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the True side of the OP_Lt switch-case dispatch in the VDBE interpreter.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L87187 / globally blocked side",
+      "exact_quote": "Source line: case OP_Lt:               /* same as TK_LT, jump, in1, in3 */"
+    },
+    {
+      "claim": "The OP_Lt case True side is reached 120 times in the winner cov dump but 0 times in the loser.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L87187",
+      "exact_quote": "L87187  T=120 F=2370  T=0 F=20  case OP_Lt:               /* same as TK_LT, jump, in1, in...  <-- BLOCKER"
+    },
+    {
+      "claim": "The cmplog winning seed begins with the literal SELECT keyword followed by an expression body.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 fa3bc2c7412c56d2",
+      "exact_quote": "53 45 4c 45 43 54 0d 35 2d 35 2f 35 35 35 35 35   SELECT.5-5/55555"
+    },
+    {
+      "claim": "The naive loser-blocking seeds are non-parseable byte runs, not a valid SELECT.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1 000952009e376012",
+      "exact_quote": "69 3b 3b 3b 3b 3b 3b 3b 20 02 20 5a 3b 45 4c 45   i;;;;;;; . Z;ELE"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which scans the input for one CMP operand and substitutes the other.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "The cmplog winner's ancestor chain contains dash rows, the I2S-floor signal under the current build.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog dash-row interpretation",
+      "exact_quote": "indicate an I2SRandReplace find under the current build. The dash\nrows are exclusive to cmplog and value_profile_cmplog"
+    },
+    {
+      "claim": "The value_profile decisive subject resolves 10/10 with a higher branch hitcount than the loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 value_profile > naive",
+      "exact_quote": "avg hitcount on branch: winner=506  loser=189"
+    },
+    {
+      "claim": "value_profile preserves inputs whose CMP operands get closer to matching, a distance-bucket gradient naive lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "A minimizer winning seed contains an explicit '<' comparison after the SELECT keyword.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 4 26fd39bf97943365",
+      "exact_quote": "53 45 4c 45 43 54 20 31 31 31 31 30 3c 31 31 2a   SELECT 11110<11*"
+    },
+    {
+      "claim": "minimizer derives a per-seed mutation budget (energy) from a calibration-based perf_score, unlike naive.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "minimizer Mutators / stages",
+      "exact_quote": "The power stage derives the number of havoc mutations per seed visit (the\n\"energy\") from a calibration-based `perf_score` — faster, smaller,\nmore-stable seeds earn more mutations."
+    },
+    {
+      "claim": "naive has only edge-bucket feedback and havoc+token mutators, with no I2S and no distance feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "The first six W bytes are exactly the SELECT keyword while the loser bytes at those offsets are scattered garbage.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0000-0x0005",
+      "exact_quote": "0x0000  53(S)x22                            69(i)x2 20( )x2 53(S)x1 d5(.)x1 +4u  PARTIAL"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 14451 --role W --fuzzer cmplog --trial 1 --seed fa3bc2c7412c56d2` and observed 2 I2S-floor rows (mutation_op = -) at depth 18 and 19 of the ancestor chain; the tool's trailing 'I2S-floor signal' line reports '2 ancestor dash row(s) at depth 18, 19', the lower-bound I2S evidence for the cmplog winner."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic SELECT-with-'<' harness on which cmplog, value_profile, and minimizer each fail to out-resolve naive at the OP_Lt arm would refute the claim that these three techniques are what carries the winner past this blocker."
+  },
+  "weakest_evidence_point": "The minimizer hypothesis relies on a pure calibrated-energy scheduling advantage with no CMP introspection, so attributing its win to energy rather than to seeds it happened to inherit is the least certain claim.",
+  "confidence": "medium"
+}

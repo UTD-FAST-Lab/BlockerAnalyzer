@@ -1,0 +1,81 @@
+{
+  "branch_id": 5438,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry a valid sbix table directory whose has_data() check passes, requiring the literal 'sbix' tag and a non-empty sbix structure.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A font blob containing the 4-byte table tag 'sbix' (0x73 0x62 0x69 0x78) in the table directory plus an sbix table whose has_data() returns true, so the true side of `if (font->face->table.sbix->has_data ())` is taken.",
+      "why_winner_satisfies": "All five winner-resolving seeds (value_profile_cmplog) contain the ASCII bytes 73 62 69 78 ('sbix') at offsets 0x0c-0x0f, immediately after the SFNT header, and the per-role overlay marks line 354 (the sbix reference_png body) as winner-only [W], with W taking the true side (T=6 F=0) at the blocker.",
+      "why_loser_doesnt": "Loser-blocking seeds (naive / value_profile) lack the 'sbix' tag at offsets 0x0c-0x0f (e.g. they carry 00/20/2c bytes instead of 73 62 69 78), so has_data() returns false and they take the false side (T=0 F=20) at the blocker, never reaching line 354.",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the CmpLogObserver buffer after a memcmp/table-tag comparison against the constant 'sbix', finds the operand in the input, and substitutes the matching 4-byte tag at the table-directory offset; naive and value_profile have no I2S stage and must blindly havoc-mutate the exact 4-byte tag, which they fail to do in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of an sbix has_data() check in hb_ot_color_glyph_reference_png.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-color.cc:353",
+      "exact_quote": "if (font->face->table.sbix->has_data ())"
+    },
+    {
+      "claim": "Both decisive pairs differ by the I2S technique and the winner is the cmplog-family fuzzer.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair is value_profile_cmplog over value_profile, also an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the ASCII 'sbix' tag in the table directory.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 offsets 0x0c-0x0f",
+      "exact_quote": "73 62 69 78   ......      sbix"
+    },
+    {
+      "claim": "At the blocker, the winner seed set takes the true side and the loser set takes the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L353",
+      "exact_quote": "d=1   L 353  T=6 F=0  T=0 F=20  if (font->face->table.sbix->has_data ())  <-- BLOCKER"
+    },
+    {
+      "claim": "Line 354 (the sbix reference_png body) is hit only by the winner-resolving seed set.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 354 [W] marker",
+      "exact_quote": "[W]   354      blob = font->face->table.sbix->reference_png (font, glyph, nullptr, nullptr, nullptr);"
+    },
+    {
+      "claim": "At offsets 0x0c-0x0f the winner bytes are concentrated 's','b','i','x' while loser bytes differ.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  73(s)x6                             00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "cmplog adds the I2SRandReplace mutator that substitutes a CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive and value_profile have no I2SRandReplace stage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5438 --role W --fuzzer value_profile_cmplog --trial 1 --seed e157098e95bbf655` and observed one I2S-floor dash row (mutation_op = -) at depth 17 of the 18-level ancestor chain, confirming an unwrapped I2SRandReplace find in the vpc winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on a 4-byte exact-match table tag where naive resolves the branch at the same rate as cmplog within the trial budget, showing havoc alone reaches the tag and I2S is not the differentiator."
+  },
+  "weakest_evidence_point": "The exact comparison form behind has_data() (a memcmp on the table tag vs. an offset/length check) is inferred from the seed bytes and source, not directly observed in a CMP trace.",
+  "confidence": "high"
+}

@@ -1,0 +1,87 @@
+{
+  "branch_id": 42,
+  "target": "curl",
+  "summary_one_line": "Input must be a well-formed Set-Cookie HTTP header that parses into a stored cookie, so the jar's per-bucket list is non-empty when remove_expired scans it.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must contain a recognizable HTTP response with the literal token 'HTTP/' followed by a 'Set-Cookie:' header whose name=value parses cleanly, so Curl_cookie_add accepts the cookie and links it into cookies->cookies[i]; only then does remove_expired's while(co) loop see a non-NULL list head and take the true side.",
+      "why_winner_satisfies": "Winner seeds carry the exact ASCII bytes 'HTTP/' at offset 0x24 and 'Set-Coo' at the tail, and W reaches the cookie-storage path (Curl_cookie_add entry-line W hits=20 vs L=0), so the per-bucket cookie list is populated and while(co) is entered (W T=20 on L404).",
+      "why_loser_doesnt": "Loser seeds carry random havoc bytes (mostly '%','A','+' runs) at the same offsets instead of the 'HTTP/'/'Set-Cookie' literals, never reach Curl_cookie_add (L entry-line hits=0), so the cookie list stays empty and remove_expired only ever takes the false side of while(co) (L T=0).",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the CmpLogObserver buffer recorded when curl's parser compares header bytes against the literals 'HTTP/' and 'Set-Cookie' and substitutes the matching operand at those input offsets, manufacturing the exact tokens that naive/value_profile must instead stumble onto by chance; both decisive pairs differ only by I2S, and the winning cmplog seed's ancestor chain contains I2S-floor dash rows."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the while(co) loop head in remove_expired and the globally blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cookie.c:404:11",
+      "exact_quote": "Source line:     while(co) {"
+    },
+    {
+      "claim": "Both decisive pairs are I2S deltas with prob_div 1.0, winner resolving 10/10 and loser blocked 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 / Pair 2",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "The second decisive pair is value_profile_cmplog over value_profile, also an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "The true side of while(co) requires a non-NULL cookie list head taken from cookies->cookies[i].",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L401-L404",
+      "exact_quote": "co = cookies->cookies[i];"
+    },
+    {
+      "claim": "Winner seeds reach the cookie-storage function while losers never do, isolating the storage path as the gating condition.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "Curl_cookie_add",
+      "exact_quote": "      20         0  Curl_cookie_add  (/src/curl/lib/cookie.c:494-1207)"
+    },
+    {
+      "claim": "Winner inputs contain the literal 'HTTP/' token at the same offset where loser inputs hold random bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0024",
+      "exact_quote": "   0x0024  47(G)x20                            50(P)x2 42(B)x1 9e(.)x1 2f(/)x1 +7u  DIFFER"
+    },
+    {
+      "claim": "Winner seed bytes show 'GHTTP/' and 'Set-Coo' literal runs that the loser seeds lack.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 2b428b2993f47feb",
+      "exact_quote": "0020: 02 00 00 00 47 48 54 54 50 2f 09 6d 65 40 06 24   ....GHTTP/.me@.$"
+    },
+    {
+      "claim": "Loser seeds are dominated by havoc '%' and 'A' byte runs rather than HTTP/cookie tokens.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00225bc4819174d2",
+      "exact_quote": "0000: 00 01 00 00 00 43 64 55 43 25 25 25 25 21 25 65   .....CdUC%%%%!%e"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a CMP operand at the matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the loser arm of pair 2 cannot perform operand substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 42 --role W --fuzzer cmplog --trial 1 --seed 2b428b2993f47feb`; the 16-level ancestor chain reports I2S-floor signal with 2 dash rows (mutation_op = -) at depth 14 and 15, the under-build floor evidence of an unwrapped I2SRandReplace find in cmplog."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where cmplog still resolves the while(co) true side at the same rate as naive after the 'HTTP/' and 'Set-Cookie' literals are replaced with runtime-derived (non-constant) tokens that I2S cannot pre-image."
+  },
+  "weakest_evidence_point": "The mapping from specific byte-diff offsets (e.g. 0x24 'HTTP/') to the exact CMP that I2S solves is inferred from source plus byte runs, not directly observed in the CmpLogObserver buffer.",
+  "confidence": "high"
+}

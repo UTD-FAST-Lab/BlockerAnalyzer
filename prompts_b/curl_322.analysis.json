@@ -1,0 +1,99 @@
+{
+  "branch_id": 322,
+  "target": "curl",
+  "summary_one_line": "Input must carry well-formed URL/protocol literals (scheme '://', port '9001', 'HTTP/' token) so the parser advances the connect/FTP state machine to the socket-close path where data->multi is NULL.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A structured input whose leading bytes form a parseable URL with a scheme separator '://' (offsets ~0x0a-0x0c) and a numeric port like '9001' (offsets ~0x19-0x1c) followed by a protocol token 'HTTP/' / 'GHTTP/27.0' near offset 0x24, driving curl's connect/FTP state machine deep enough that Curl_closesocket -> Curl_multi_closed runs while data->multi is NULL (false side of if(multi)).",
+      "why_winner_satisfies": "Winner-resolving seeds are 131-byte structured inputs containing '://', port digits '9001', and 'GHTTP/27.0' literals; their per-offset byte sets are concentrated on these protocol characters (e.g. '/'x14 at 0x0c, '9'x15 at 0x17, '0'x14 at 0x19) and they take the false branch, with winner avg hitcount 332 vs loser 13.",
+      "why_loser_doesnt": "Loser-blocking seeds are short 35-byte low-structure inputs dominated by '%','+','A' fill bytes with no coherent '://' / port / 'HTTP/' literals; they take the true branch and the state machine never reaches the socket-close path with multi==NULL.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads intercepted string/integer CMPs in curl's URL and protocol parser and substitutes the exact expected literals ('://', port number, 'HTTP/') into the input, letting it pass the comparison gates that advance the connect/FTP state machine; naive and value_profile lack I2SRandReplace and cannot synthesize these multi-byte literals by chance."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of if(multi) in Curl_multi_closed.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "multi.c:3014",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Both decisive pairs differ only by the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The cmplog>naive pair is also an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "Winner takes the false branch and hits the branch far more often than the loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 hitcount",
+      "exact_quote": "avg hitcount on branch: winner=332  loser=13"
+    },
+    {
+      "claim": "Winner-resolving seeds are 131-byte structured inputs containing a 'GHTTP/27.0' protocol literal.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 offset 0x20-0x2f",
+      "exact_quote": "47 48 54 54 50 2f 32 37 2e 30 2e 2f   ....GHTTP/27.0./"
+    },
+    {
+      "claim": "Winner seeds contain the '://' scheme separator and port-like digits.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 offset 0x00-0x0f",
+      "exact_quote": "3a 2f 2f 31 32 25"
+    },
+    {
+      "claim": "Loser-blocking seeds are short 35-byte inputs that take the true branch.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1",
+      "exact_quote": "Loser-blocking seeds (take true branch)"
+    },
+    {
+      "claim": "Loser seeds are 35 bytes, much shorter than the 131-byte winners.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 size",
+      "exact_quote": "id=003e4994f2c65fcf, size=35 bytes"
+    },
+    {
+      "claim": "At offset 0x0c the winner bytes concentrate on '/' while losers are diffuse non-slash bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  2f(/)x14 39(9)x2 4a(J)x1"
+    },
+    {
+      "claim": "At offset 0x24 winners concentrate on 'G' (start of the HTTP token) where losers do not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0024",
+      "exact_quote": "0x0024  47(G)x16 48(H)x1"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a matching CMP operand into the input at the matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, isolating the I2S delta.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 322 --role W --fuzzer cmplog --trial 1 --seed 32d10b449c4075ee` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 23 and 24 of the 25-level ancestor chain; the tool's I2S-floor signal line confirms unwrapped I2SRandReplace finds under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating if(multi==NULL) behind the URL/protocol literals where value_profile resolves the branch as fast as cmplog/vpc (no I2S advantage), showing the divergence is driven by CMP_MAP gradient rather than I2S literal substitution."
+  },
+  "weakest_evidence_point": "The causal link from the protocol literals in the input to data->multi being NULL at the socket-close path is inferred from the call chain and source, not directly observed in a per-seed trace.",
+  "confidence": "medium"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 152,
+  "target": "curl",
+  "summary_one_line": "Input must NOT already contain a 'Content-Type' header literal, so the parser reaches the auto-insert false branch when the magic string is decoded.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The input must carry the ASCII literal 'Content-Type:' (bytes 43 6f 6e 74 65 6e 74 2d 54 79 70 65 3a) positioned where the harness feeds it to Curl_checkheaders, so the request reaches HTTPREQ_POST processing and exercises the !Curl_checkheaders(\"Content-Type\") gate at line 2615.",
+      "why_winner_satisfies": "The cmplog winner seed embeds the exact literal 'Content-Type:' contiguously at offsets 0x24-0x32 ('....GContent-Typ' then 'e:'), the same string constant compared inside Curl_checkheaders, letting the harness drive the POST path that reaches and evaluates the blocker.",
+      "why_loser_doesnt": "The naive loser seeds contain no 'Content-Type' substring; their header-region bytes are short fragments like 'pOARAMETER' or '%op..----' with no occurrence of the 14-byte magic string, so the comparison inside Curl_checkheaders is never satisfied and they sit on the true side / never reach the gate as resolved.",
+      "mechanism_attribution": "cmplog intercepts the strcmp/memcmp comparing the header name against the 'Content-Type' constant and records both operands in the CmpLogObserver buffer; I2SRandReplace then substitutes the constant operand into the input at matching offsets, planting the literal that naive's blind havoc/token stack must hit by chance and does not."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of a Curl_checkheaders comparison against the literal 'Content-Type'.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "http.c:2615",
+      "exact_quote": "if(!Curl_checkheaders(data, STRCONST(\"Content-Type\"))) {"
+    },
+    {
+      "claim": "cmplog resolves the branch in 8/10 trials while naive never resolves it (0/10), a decisive I2S pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "The cmplog winner-resolving seed contains the literal ASCII 'Content-Typ' / 'e:' at offsets 0x24 onward.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 6d68b5da252422ab offsets 0x24-0x32",
+      "exact_quote": "....GContent-Typ"
+    },
+    {
+      "claim": "The 'e:' continuation of the Content-Type literal appears at the start of the next 16-byte row of the winner seed.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 6d68b5da252422ab offset 0x30",
+      "exact_quote": "e:"
+    },
+    {
+      "claim": "The naive loser seeds carry unrelated header fragments such as 'pOARAMETER' with no Content-Type literal.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 53b0a593a7569378 offsets 0x0d-0x16",
+      "exact_quote": "pOAR"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which scans the input for one CMP operand and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "cmplog intercepts string/memory comparisons and records both operands per execution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Instrumentation",
+      "exact_quote": "string/memory-CMP interception (`__sanitizer_weak_hook_strcmp`,\n`__sanitizer_weak_hook_memcmp`, etc.)"
+    },
+    {
+      "claim": "naive's mutator stack has no I2S capability.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": false,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 152 --role W --fuzzer cmplog --trial 1 --seed 6d68b5da252422ab`. The chain walked all 50 recorded ancestor levels (max) and contained NO I2S-floor (mutation_op = -) rows; the tool reported 'No I2S-floor rows in this chain (all ancestors have a mutator list).' Floor is a lower bound, so I2S contribution may still exist in the leaked havoc bucket (TokenReplace/Bytes* finds that wrap I2S as a sub-mutator and tag the result with their own names). The byte-level evidence (exact 'Content-Type:' literal materialized only in the cmplog seed, absent in all naive seeds) independently supports the I2S substitution attribution despite the unverified floor."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on an exact 'Content-Type' string comparison where naive resolves the false branch at a rate comparable to cmplog, showing the literal is reachable by blind havoc without CMP introspection."
+  },
+  "weakest_evidence_point": "The I2S-floor lineage signal was absent (all-havoc chain to the 50-level cap), so the I2SRandReplace attribution rests on the byte-level appearance of the exact literal rather than a confirmed dash-row ancestor.",
+  "confidence": "medium"
+}

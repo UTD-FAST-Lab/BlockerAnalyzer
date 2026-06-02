@@ -1,0 +1,87 @@
+{
+  "branch_id": 78,
+  "target": "curl",
+  "summary_one_line": "Input must contain a well-formed HTTP/ response header block so at least one header gets stored, making the cleanup loop iterate (true side).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Bytes that pass the HTTP header parser so that a Curl_header_store is appended to data->state.httphdrs (a non-empty list head). This requires the literal token 'HTTP/' near offset 0x24 followed by parseable name:value header lines (e.g. 'Set-Cookie', 'Connect...', CRLF terminators 0d 0a). Only then is httphdrs.head non-NULL and the for-loop true side taken.",
+      "why_winner_satisfies": "Winner-resolving seeds carry the literal 'HTTP/' token at offsets 0x24-0x29 (47 48 54 54 50 2f = 'GHTTP/' / 'HHTTP/') plus header-line structure with CRLF (0d 0a) and header names ('Set-Coo', 'TranEfe', 'Connect'); they reach Curl_headers_push 36 times (W hits) so headers are actually stored and the cleanup loop iterates 3000+ times.",
+      "why_loser_doesnt": "Loser-blocking seeds are short (32-36 bytes) and carry no 'HTTP/' token at 0x24 (instead 25/2b/2e bytes — '%','+','.' filler); Curl_headers_push has 0 L hits so no header is ever stored, httphdrs.head stays NULL, and the loop false side is taken (blocked for the full 24h).",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the CmpLogObserver buffer and substitutes the exact comparison operand ('HTTP/' and header-token byte sequences) into the input at matching offsets, synthesizing the well-formed header bytes that naive/value_profile only reach by blind havoc. The lineage of a winning cmplog seed contains ParentInfo-only dash rows, the I2S floor signal under the current build."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the cleanup loop condition iterating over the stored-headers list head.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "headers.c:348",
+      "exact_quote": "for(e = data->state.httphdrs.head; e; e = n) {"
+    },
+    {
+      "claim": "Both decisive pairs are I2S-delta pairs with full prob_div=1.00.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the literal HTTP/ token bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 3 offset 0x24",
+      "exact_quote": "47 48 54 54 50 2f 25 6d 65 61 06 24   ....GHTTP/%mea.$"
+    },
+    {
+      "claim": "Winner seeds carry header-line structure with CRLF and a Set-Cookie header name.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 offset 0x30",
+      "exact_quote": "6d 65 77 68 65 23 65 0d 0a 53 65 74 2d 43 6f 6f   mewhe#e..Set-Coo"
+    },
+    {
+      "claim": "Headers are actually stored only in the winner: Curl_headers_push runs 36 times for W and 0 for L.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "Curl_headers_push",
+      "exact_quote": "36         0  Curl_headers_push  (/src/curl/lib/headers.c:278-330)"
+    },
+    {
+      "claim": "The loop true side is taken only in the winner: L takes zero true iterations at the blocker line.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L348",
+      "exact_quote": "L 348  T=26 F=60  T=0 F=60  for(e = data->state.httphdrs.head; e; e = n) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser-blocking seeds are short and lack the HTTP/ token, carrying filler bytes instead.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 (32 bytes)",
+      "exact_quote": "00 01 00 00 00 19 70 6b 2b 2b 2b 2b 2b 2a 2b 2b   ......pk+++++*++"
+    },
+    {
+      "claim": "At offset 0x24 winner bytes concentrate on G/H while loser bytes are P/B/other.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0024",
+      "exact_quote": "0x0024  47(G)x18 48(H)x2                    50(P)x2 42(B)x1 9e(.)x1 2f(/)x1 +7u  DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes one intercepted CMP operand at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, explaining why it loses to vpc on this I2S pair.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 78 --role W --fuzzer cmplog --trial 1 --seed 00a044736f809ce4`; the 29-level ancestor chain contains I2S-floor dash rows (mutation_op = -) at depths 27 and 28, the lower-bound I2SRandReplace signal under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating the loop on a stored HTTP header in which cmplog and naive resolve the true side at equal rates (no I2S advantage), i.e. the HTTP/ + header-token byte sequence is reachable by blind havoc as easily as by operand substitution."
+  },
+  "weakest_evidence_point": "The exact set of byte sequences I2SRandReplace must substitute (HTTP/ plus which header names) is inferred from seed bytes and source; the CMP operands that gate header storage are not directly listed in the prompt.",
+  "confidence": "high"
+}

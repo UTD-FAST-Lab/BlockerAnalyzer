@@ -1,0 +1,75 @@
+{
+  "branch_id": 5437,
+  "target": "harfbuzz",
+  "summary_one_line": "Winning side requires a parseable sbix (or CBDT) color table whose 4-byte ASCII tag 'sbix' appears at the OpenType table-directory offset.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must present a valid OpenType font header followed by a table-directory entry tagged with the 4-byte ASCII literal 'sbix' (0x73 0x62 0x69 0x78) so that face->table.sbix->has_data() returns true (or symmetrically a CBDT tag); the winning seeds carry 'sbix' at offset 0x0c with a sfnt header at 0x00.",
+      "why_winner_satisfies": "All five winner-resolving seeds open with 00 01 00 00 (sfnt version) and carry the literal ASCII bytes 73 62 69 78 ('sbix') at offsets 0x0c-0x0f, so the table-directory lookup finds an sbix table with data and the true branch is taken.",
+      "why_loser_doesnt": "The loser-blocking seeds contain no 'sbix' tag at offsets 0x0c-0x0f (e.g. bytes there are 00/20/-/other), so neither CBDT nor sbix has_data() succeeds and only the false branch is reachable.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver buffer, sees the tag-comparison operand 'sbix' that the table-directory scan compares against, and substitutes those 4 bytes into the input at the matching offset; naive and value_profile lack I2SRandReplace and must land the 4-byte magic tag by blind havoc, which fails across all 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is a disjunction gated on CBDT or sbix color-table presence.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-color.cc:330",
+      "exact_quote": "return face->table.CBDT->has_data () || face->table.sbix->has_data ();"
+    },
+    {
+      "claim": "Both decisive pairs differ only by the I2S technique, with winners cmplog and value_profile_cmplog.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 & Pair 2",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair adds I2S on top of value_profile and wins.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal ASCII 'sbix' tag and an sfnt header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1, offset 0x00 and 0x0c",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 73 62 69 78   ......      sbix"
+    },
+    {
+      "claim": "At offsets 0x0c-0x0f the winners concentrate on the 'sbix' bytes while losers do not share them.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  73(s)x6                             00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "The loser bytes at offset 0x0f are not 'x', confirming the missing tag.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0f",
+      "exact_quote": "0x000f  78(x)x6                             00(.)x5 6a(j)x1 6f(o)x1 fa(.)x1 +10u  DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the matching CMP operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so it cannot perform input-to-state substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5437 --role W --fuzzer value_profile_cmplog --trial 1 --seed e157098e95bbf655` and observed an I2S-floor row (mutation_op = -) at depth 17 of the 18-level ancestor chain; tool reported '1 ancestor dash row(s) at depth 17', the cmplog/vpc-exclusive floor signal for an I2SRandReplace find."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on the 4-byte 'sbix'/'CBDT' tag where naive resolves the true branch as often as cmplog within the budget, showing blind havoc lands the magic tag without I2S."
+  },
+  "weakest_evidence_point": "The byte-diff shows 'sbix' lives at a fixed offset 0x0c in the winners, but whether the table-directory tag comparison (the CMP operand I2S substitutes) is at that exact offset rather than at a parsed dynamic offset is inferred from source, not directly observed in the CMP buffer.",
+  "confidence": "high"
+}

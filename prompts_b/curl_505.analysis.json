@@ -1,0 +1,75 @@
+{
+  "branch_id": 505,
+  "target": "curl",
+  "summary_one_line": "Input must carry a structured protocol/URL prefix (pop3 scheme + path) so data->state.wildcardmatch is set, gating the true branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed scheme/URL header in the leading bytes (e.g. literal 'pop3' at offset 0x06 followed by a '/' path) that drives curl's URL parser to set data->state.wildcardmatch=TRUE, after which the true side of 'if(data->state.wildcardmatch && !(PROTOPT_WILDCARD))' is taken.",
+      "why_winner_satisfies": "All 5 winner seeds carry an intact protocol-string prefix: offsets 0x06-0x09 are concentrated on 70(p) 6f(o) 70(p) 33(3) ('pop3') and offsets 0x0a-0x1a hold a coherent host:port path '/?27.0.0.1:9001'; the per-role overlay shows only the winner taking the assignment line 4273 and the divergent-branch table shows the blocker T=6 F=0 for W.",
+      "why_loser_doesnt": "Loser seeds are short, degenerate noise ('%' runs, repeated punctuation) with no recognizable scheme at offsets 0x06-0x09 (e.g. 64(d) 55(U) 43(C) at those offsets), so the parser never sets wildcardmatch and the blocker resolves T=0 F=10 for L.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile's CMP_MAP feedback; the I2S stage substitutes intercepted comparison operands (scheme tokens like 'pop3') directly into the input at the compared offsets, synthesizing the structured prefix the blocker depends on. value_profile lacks I2SRandReplace and only gets coarse Hamming/prefix-distance bucket credit, which is insufficient to assemble the multi-byte scheme literal."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of a wildcardmatch gate inside Curl_init_do.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "url.c:4271",
+      "exact_quote": "if(data->state.wildcardmatch &&"
+    },
+    {
+      "claim": "The single decisive pair is value_profile_cmplog > value_profile with delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner seeds carry an intact 'pop3' scheme prefix and a host:port path.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 7bcbae710a7130dd offset 0x06",
+      "exact_quote": "00 01 00 00 00 19 70 6f 70 33 4b 2f 3f 3a 3a 3a"
+    },
+    {
+      "claim": "Winner bytes at the scheme offsets are concentrated on the literal 'pop3' characters.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x06-0x09",
+      "exact_quote": "0x0006  70(p)x5 4d(M)x1"
+    },
+    {
+      "claim": "Only the winner takes the wildcardmatch=FALSE assignment, and the blocker resolves true only for W.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L4271",
+      "exact_quote": "d=1   L4271  T=6 F=0  T=0 F=10  if(data->state.wildcardmatch &&  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser seeds lack a recognizable scheme at the same offsets, holding noise bytes instead.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x07",
+      "exact_quote": "0x0007  6f(o)x6                             55(U)x2 2e(.)x2 49(I)x1 6e(n)x1 +4u  DIFFER"
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace on top of value_profile's feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 505 --role W --fuzzer value_profile_cmplog --trial 1 --seed 7bcbae710a7130dd`; the 23-level ancestor chain contains I2S-floor dash rows (mutation_op = -) at depth 21 and 22, the unwrapped-I2SRandReplace floor signal exclusive to cmplog/vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile_cmplog reaches the true branch just as often when the scheme/URL prefix is replaced with random bytes (i.e. wildcardmatch is set independent of any compared literal), showing I2S operand substitution is not what built the structured prefix."
+  },
+  "weakest_evidence_point": "The exact parser path from the leading bytes to data->state.wildcardmatch=TRUE is inferred from source structure plus seed shape; the prompt does not show the URL-parse code that sets wildcardmatch.",
+  "confidence": "medium"
+}

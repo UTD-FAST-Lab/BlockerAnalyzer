@@ -1,0 +1,81 @@
+{
+  "branch_id": 5561,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must place a valid OpenType table (GSUB/GPOS) header whose script-list contains the 4-byte 'DFLT' default-script FOURCC tag so find_script_index succeeds.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed OpenType GSUB/GPOS table whose ScriptList records the exact 4-byte FOURCC tag 'DFLT' (0x44 0x46 0x4c 0x54 = HB_OT_TAG_DEFAULT_SCRIPT), so the equality comparison inside g.find_script_index(HB_OT_TAG_DEFAULT_SCRIPT, ...) at line 566 matches and the true branch is taken.",
+      "why_winner_satisfies": "Winner-resolving seeds carry intact ASCII table tags (GPOS/GSUB at offsets 0x0c-0x0f) and Seed 1 even contains the literal 'DFLT' bytes near offset 0x39, demonstrating the value_profile_cmplog input reproduces the exact magic tag the comparison demands; the branch is hit 15 times and resolved in 9/10 winner trials.",
+      "why_loser_doesnt": "Loser-blocking seeds carry noise bytes at the tag offsets (e.g. 0xe0/0xff/0x4c) instead of the ASCII 'GPOS'/'GSUB' header, never construct a valid ScriptList containing 'DFLT', so the true side of line 566 is never taken (L: T=0 F=36) and all 10 loser trials stay blocked.",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator, which captures the comparison's expected operand (the 4-byte constant HB_OT_TAG_DEFAULT_SCRIPT) from the CmpLogObserver buffer and substitutes it directly into the input at the compared offset, planting the exact 'DFLT' tag. value_profile only has the CMP_MAP Hamming/prefix-distance gradient plus havoc/token mutators and no I2SRandReplace, so it must blindly stumble onto a 4-byte exact match it never achieves."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side gates on an equality comparison against the default-script tag constant.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 / L58",
+      "exact_quote": "if (g.find_script_index (HB_OT_TAG_DEFAULT_SCRIPT, script_index)) {"
+    },
+    {
+      "claim": "value_profile_cmplog wins decisively over value_profile via an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The winner takes the true branch and resolves while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L128",
+      "exact_quote": "d=1   L 566  T=10 F=10  T=0 F=36"
+    },
+    {
+      "claim": "Winner-resolving seeds carry intact ASCII OpenType table tags such as GPOS at the tag offsets.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed b3e74f215af34936, offsets 0x0c-0x0f",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 47 50 4f 53   ......      GPOS"
+    },
+    {
+      "claim": "A winner-resolving seed contains the literal DFLT tag bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed b3e74f215af34936, offset ~0x39",
+      "exact_quote": "00 00 01 00 20 20 3a 44 46 4c 54 61 92 73 0a 00   ....  :DFLTa.s.."
+    },
+    {
+      "claim": "Loser-blocking seeds carry noise bytes at the leading/tag offsets instead of an ASCII table header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 00546490999c9c0b, offset 0x00",
+      "exact_quote": "fe ff ff ff f4 01 e0 e0 20 00 00 00 01 20 e0 6a   ........ .... .j"
+    },
+    {
+      "claim": "The byte-diff shows winner bytes at offsets 0x0c-0x0f are concentrated on the GPOS ASCII tag while loser bytes are noise.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0c",
+      "exact_quote": "0x000c  47(G)x5                             00(.)x2 01(.)x1 2c(,)x1 2b(+)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator on top of the CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5561 --role W --fuzzer value_profile_cmplog --trial 1 --seed b3e74f215af34936`; observed an I2S-floor dash row (mutation_op = -, ParentInfo-only) at depth 16 of the 17-level ancestor chain. The tool's trailing line reports '1 ancestor dash row(s) at depth 16', confirming an unwrapped I2SRandReplace find in this vpc lineage (lower bound)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating a branch on a 4-byte exact-match constant in which value_profile resolves the branch in a comparable fraction of trials to value_profile_cmplog, showing the CMP_MAP gradient alone suffices and I2SRandReplace substitution is not the decisive technique."
+  },
+  "weakest_evidence_point": "Only one of five winner seeds shows the literal 'DFLT' bytes; the others are inferred to satisfy the tag-equality requirement structurally rather than shown to contain the exact FOURCC at the compared offset.",
+  "confidence": "high"
+}

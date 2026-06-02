@@ -1,0 +1,75 @@
+{
+  "branch_id": 5564,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must present a well-formed GSUB/GPOS script record so find_lang_sys_index resolves the exact 'dflt' (HB_OT_TAG_DEFAULT_LANGUAGE) language tag.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A font blob whose OpenType layout table carries valid 4-byte FOURCC tags ('GSUB'/'GPOS' table tag plus script/langsys offset structure) so that hb_ot_layout_script_select_language2 reaches the 'dflt'-lookup branch at line 775 and s.find_lang_sys_index matches HB_OT_TAG_DEFAULT_LANGUAGE.",
+      "why_winner_satisfies": "The winner-resolving seed contains literal ASCII FOURCC tags 'GSUB' and 'GSGB' at offsets 0x0a-0x0f/0x18-0x1f plus a structured offset block (03 00 01 00 10 00 ...) at 0x20, exactly the table/script/langsys layout the parser walks; the per-role overlay shows the winner uniquely taking the true side (lines 776-779 marked [W]).",
+      "why_loser_doesnt": "The loser-blocking seeds carry no clean GSUB/GPOS FOURCC table tag at those offsets (offsets 0x0c-0x0f hold 00/ff/9a/2c noise, not the 'GSUB' ASCII run); they never assemble the script-record structure, so find_lang_sys_index never matches 'dflt' and line 775 stays false (L hits T=0 F=74).",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator: cmplog records the concrete operands of the tag/offset comparisons during execution and substitutes those exact bytes into the input, planting the FOURCC tag and offset constants that find_lang_sys_index demands. value_profile has only the CMP_MAP Hamming/prefix gradient and havoc/token mutators (no I2SRandReplace), so it can only approach the tag bucket-by-bucket and never lands the exact multi-byte tag."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the 'dflt' language-tag lookup at line 775, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-layout.cc:775",
+      "exact_quote": "if (s.find_lang_sys_index (HB_OT_TAG_DEFAULT_LANGUAGE, language_index))"
+    },
+    {
+      "claim": "The winner uniquely executes the true-branch body (lines 776-779) that the loser never reaches.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 776-779",
+      "exact_quote": "[W]   776    {"
+    },
+    {
+      "claim": "The winner-resolving seed carries literal FOURCC layout tags GSUB/GSGB and a structured offset block.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id ad81f9e09b6230b7 offsets 0x0c-0x1f, 0x20",
+      "exact_quote": "0010: b2 b2 2d b2 00 00 00 21 20 6b 20 47 53 47 42 20   ..-....! k GSGB "
+    },
+    {
+      "claim": "The winner seed has the structured table/script/langsys offset block at offset 0x20.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id ad81f9e09b6230b7 offset 0x20",
+      "exact_quote": "0020: 03 00 01 00 10 00 2c 00 06 00 10 00 20 00 10 00   ......,..... ..."
+    },
+    {
+      "claim": "At the FOURCC tag offsets the winner holds the 'GSUB' ASCII run while loser seeds hold unrelated noise bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x1                             00(.)x4 01(.)x1 9a(.)x1 2c(,)x1 +13u  DIFFER"
+    },
+    {
+      "claim": "The loser never takes the line-775 true side: L counts are T=0 F=74 at the blocker.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 775",
+      "exact_quote": "d=1   L 775  T=2 F=2  T=0 F=74  if (s.find_lang_sys_index (HB_OT_TAG_DEFAULT_LANGUAGE, la...  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator that value_profile lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, only havoc/token plus CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5564 --role W --fuzzer value_profile_cmplog --trial 2 --seed ad81f9e09b6230b7` and observed an I2S-floor dash row (mutation_op = -) at depth 40 of the 41-level ancestor chain; the trailing signal reported '1 ancestor dash row(s) at depth 40', characteristic of an unwrapped I2SRandReplace find in vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on find_lang_sys_index for HB_OT_TAG_DEFAULT_LANGUAGE where value_profile resolves the branch as often as value_profile_cmplog (no I2S advantage), showing the exact-tag substitution is not what separates them."
+  },
+  "weakest_evidence_point": "The winner seed shows 'GSUB'/'GSGB' but the exact byte offsets the parser reads for the dflt-langsys record are inferred from the structured offset block, not directly confirmed against the find_lang_sys_index operand layout.",
+  "confidence": "medium"
+}

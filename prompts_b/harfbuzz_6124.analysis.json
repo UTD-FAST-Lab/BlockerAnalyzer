@@ -1,0 +1,112 @@
+{
+  "branch_id": 6124,
+  "target": "harfbuzz",
+  "summary_one_line": "Buffer must carry Tirhuta codepoint 0x1148B/0x1148D (LE 8b/8d 14 01 00) at cur to reach this switch case; baseline havoc finds it, technique-enabled variants get diverted to sibling codepoints.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A 4-byte little-endian codepoint 0x1148D (bytes 8d 14 01 00) or 0x1148B (8b 14 01 00) positioned as the current glyph in a TIRHUTA-script buffer, so the switch on buffer->cur().codepoint hits case 0x1148Bu/0x1148Du (line 409 true).",
+      "why_winner_satisfies": "value_profile (winner) seeds carry the literal run 8d 14 01 00 (= 0x1148D LE) repeated across the input (e.g. winner-resolving Seed 1 at offset 0x00), so the switch dispatch lands on the blocker case; line 409 takes its true side T=14 for W.",
+      "why_loser_doesnt": "value_profile_cmplog (loser) blocked seed carries 81 14 01 00 (0x11481, a sibling case at line 406), not the 8b/8d 14 01 00 run; the CMP_MAP/I2S machinery steers the loser toward neighboring Tirhuta codepoints rather than the specific 0x1148B/0x1148D value, so line 409 true is never taken (T=0 for L).",
+      "mechanism_attribution": "The winner is the baseline value_profile fuzzer; it discovers the required literal 4-byte codepoint by plain havoc byte mutation. Adding the I2SRandReplace mutator in value_profile_cmplog is an anti-divergence: the loser's I2S substitution latches onto whichever sibling Tirhuta operand it last logged (0x11481/0x114AA), diluting the havoc budget so the exact 0x1148B/0x1148D value is found less often. The enabling technique for the winner is therefore lucky havoc, not I2S."
+    },
+    {
+      "covers_pairs": ["naive>naive_ctx (ctx_coverage)"],
+      "what_input_feature": "Same feature: the current glyph in a TIRHUTA buffer must encode codepoint 0x1148B or 0x1148D (LE 8b/8d 14 01 00) so the switch reaches case 0x1148Bu/0x1148Du at line 409.",
+      "why_winner_satisfies": "naive (winner) also stores the 8d 14 01 00 run (winner-resolving Seed 5, fuzzer=naive, contains 8d 8d 8d 14 01 00 near offset 0x0a), reaching the blocker case via plain havoc edge-guided mutation.",
+      "why_loser_doesnt": "naive_ctx (loser) blocked seeds carry sibling/neighboring 4-byte values like ba 14 01 00 and b0 14 01 00 (e.g. loser-blocking Seed 1 fuzzer=naive_ctx) which route to other Tirhuta cases (0x114B0 etc.), so the exact 0x1148B/0x1148D codepoint is absent and line 409 true is never reached (L hits T=0).",
+      "mechanism_attribution": "The winner is the baseline naive fuzzer using havoc + edge feedback. naive_ctx adds context-sensitive coverage (the CtxHook folds the call context into the edge-map index). Here that is counter-productive: the call chain into _hb_preprocess_text_vowel_constraints is shallow and fixed (1-hop from preprocess_text_use), so context-indexing yields no new useful coverage signal but inflates the map, spending the loser's effort exploring sibling switch arms instead of converging on the specific 0x1148B/0x1148D codepoint. The winner's enabling technique is plain havoc, not context coverage."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the TIRHUTA switch case 0x1148Bu/0x1148Du, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 6, line 7",
+      "exact_quote": "case 0x1148Bu: case 0x1148Du:"
+    },
+    {
+      "claim": "Both decisive pairs have the simpler baseline fuzzer as winner and the technique-enabled variant as loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "--- Pair 1: value_profile > value_profile_cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "Pair 2 is the naive > naive_ctx ctx_coverage delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: naive > naive_ctx  [delta: ctx_coverage] ---"
+    },
+    {
+      "claim": "A value_profile winner seed carries the literal codepoint bytes 8d 14 01 00 at offset 0.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving Seed 1, fuzzer=value_profile",
+      "exact_quote": "8d 14 01 00 01 20 20 20 20 20 20 6b 65 72 6e 20"
+    },
+    {
+      "claim": "A naive winner seed also carries the 8d ... 14 01 00 codepoint run.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving Seed 5, fuzzer=naive",
+      "exact_quote": "bb 14 00 ff 80 20 00 01 ff 00 8d 8d 8d 14 01 00"
+    },
+    {
+      "claim": "The winner takes the line 409 true side (T=14) while the loser does not (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L 409",
+      "exact_quote": "d=1   L 409  T=14 F=91  T=0 F=195  case 0x1148Bu: case 0x1148Du:  <-- BLOCKER"
+    },
+    {
+      "claim": "A value_profile_cmplog loser seed carries 81 14 01 00, the sibling 0x11481 codepoint, not the blocker case bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser-blocking Seed 5, fuzzer=value_profile_cmplog",
+      "exact_quote": "20 20 1f 6b 81 14 01 00 14 01 1b 61 6e 20 02 0a"
+    },
+    {
+      "claim": "A naive_ctx loser seed carries ba 14 01 00 (0x114BA) rather than the 8b/8d 14 01 00 case codepoint.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser-blocking Seed 1, fuzzer=naive_ctx",
+      "exact_quote": "6e 74 00 00 ff ba 14 01 00 5f 10 00 00 00 03 ff"
+    },
+    {
+      "claim": "The TIRHUTA case 0x1148Bu/0x1148Du requires the following glyph to equal 0x114BA for matched, confirming the switch dispatches on cur().codepoint.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 409-410",
+      "exact_quote": "matched = 0x114BAu == buffer->cur (1).codepoint;"
+    },
+    {
+      "claim": "value_profile uses only havoc + token mutators with no I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator on top of havoc.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "naive_ctx folds call context into the edge-map index, recording the same edge at different slots per call path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Instrumentation",
+      "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "The call chain into the enclosing function is a shallow fixed 1-hop from preprocess_text_use.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "Caller (1 hop) block",
+      "exact_quote": "_hb_preprocess_text_vowel_constraints (plan, buffer, font); <-- CALL"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only, not I2SRandReplace, so no lineage query is mandated. The winner in BOTH decisive pairs is the baseline fuzzer (value_profile, naive) which has no I2S stage; the I2S/ctx machinery belongs to the LOSERS (value_profile_cmplog, naive_ctx). This is an anti-divergence where the added technique hurts, so there is no winner I2S floor to verify. Winning seeds reach the case by plain havoc byte mutation producing the literal 4-byte codepoint 8d 14 01 00 (confirmed in winner seeds 1 and 5)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a single switch case gated on an exact 4-byte little-endian codepoint, swept against value_profile vs value_profile_cmplog (and naive vs naive_ctx), in which the technique-enabled variant reaches the case AS OFTEN OR MORE than the baseline — i.e. no anti-divergence — would refute the claim that the literal-codepoint feature is found by havoc and diluted by I2S/ctx-coverage."
+  },
+  "weakest_evidence_point": "The mechanism for WHY the technique-enabled losers underperform (I2S latching onto sibling Tirhuta operands; ctx-coverage inflating the map without useful signal) is inferred from seed byte patterns and mechanism descriptions, not directly observed in a controlled per-operand trace.",
+  "confidence": "medium"
+}

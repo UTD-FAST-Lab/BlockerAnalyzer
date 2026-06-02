@@ -1,0 +1,100 @@
+{
+  "branch_id": 5998,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must drive the USE shaper to a syllable containing a halant-category glyph during reorder; reached by broad byte exploration, not CMP-operand substitution.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A multi-glyph USE-cluster input where reorder_syllable_use iterates a syllable whose info[i] carries the halant use_category, taking the is_halant_use true branch at line 425. No exact magic-value match against any program constant gates this; it requires populating the buffer with enough varied glyph categories that one resolves to halant.",
+      "why_winner_satisfies": "naive resolves 10/10 in 0.60h average with W hitcount 45 on the branch. Its pure havoc/token byte mutation broadly perturbs the input so the font-mapped glyph stream reaches a halant-bearing reorder syllable; the W cov overlay shows lines 425/426/429 hit (true side taken).",
+      "why_loser_doesnt": "cmplog blocks 10/10 for 23.60h with hitcount 0. The added I2SRandReplace stage spends mutation budget substituting logged CMP operands, which does not help build the structural glyph-category state this branch needs, so cmplog never takes the true side (L 425 shows T=0).",
+      "mechanism_attribution": "naive's havoc + token stack explores the byte space without CMP introspection; this branch is gated by accumulated structural glyph-category state rather than an exact comparison, so naive's broad mutation reaches it while cmplog's I2S budget is misallocated. Enabling technique = havoc-only."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Same structural requirement (a halant-category glyph inside a reordered USE syllable), but reached here under value_profile's CMP_MAP gradient feedback which rewards partial progress toward the comparison/category state.",
+      "why_winner_satisfies": "value_profile_cmplog resolves 9/10, blocked only 1, average blocked duration 8.50h with prob_div 0.90 vs cmplog. The CMP_MAP gradient buckets give intermediate-distance credit so the corpus retains seeds that approach the needed glyph-category state.",
+      "why_loser_doesnt": "cmplog (no value_profile) blocks 10/10 for 23.60h with hitcount 0; lacking the Hamming/prefix-distance gradient feedback, it gets no intermediate credit toward the structural state and stalls.",
+      "mechanism_attribution": "The only technique delta between the winner value_profile_cmplog and loser cmplog is value_profile, i.e. the CMP_MAP gradient feedback that rewards partial comparison progress and keeps near-miss seeds. Enabling technique = CMP_MAP gradient."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the is_halant_use(info[i]) check at line 425 inside the reorder_syllable_use USE shaper.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-shaper-use.cc:425:9",
+      "exact_quote": "Source line:     if (is_halant_use (info[i]))"
+    },
+    {
+      "claim": "The blocked side is the true branch, requiring a halant-category glyph.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "globally blocked side",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "naive wins the I2S-delta pair, resolving 10/10 while cmplog blocks 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "naive resolves quickly (0.60h) with high branch hitcount while cmplog blocks for 23.60h with hitcount 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 durations and hitcounts",
+      "exact_quote": "avg duration blocked: winner=0.60h  loser=23.60h\n  avg hitcount on branch: winner=45  loser=0"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace on top of naive's mutator stack, which is the only technique difference.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "I2SRandReplace substitutes logged CMP operands at matching offsets in the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog I2SRandReplace description",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "The winner cov overlay shows the true side taken (lines 426/429 hit only by W).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 426 and 429",
+      "exact_quote": "[W]   429        j = i + 1;"
+    },
+    {
+      "claim": "On the blocker line the loser-blocking seeds never take the true side (L 425 T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 425",
+      "exact_quote": "d=1   L 425  T=25 F=247  T=0 F=144  if (is_halant_use (info[i]))  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog wins over cmplog on the value_profile delta, resolving 9/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "value_profile_cmplog blocks only 8.50h on average vs cmplog's 23.60h, with prob_div 0.90.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 durations",
+      "exact_quote": "avg duration blocked: winner=8.50h  loser=23.60h\n  avg hitcount on branch: winner=2  loser=0\n  prob_div=0.90"
+    },
+    {
+      "claim": "value_profile_cmplog adds CMP_MAP gradient buckets to the feedback, distinguishing it from cmplog.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Instrumentation/Feedback",
+      "exact_quote": "per-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Neither hypothesis claims I2SRandReplace as the WINNER's enabler, so lineage verification is not mandatory. For Pair 1 the winner is naive (no I2S; technique = havoc-only) and cmplog is the I2S LOSER, so an I2S-floor dash-row in cmplog would corroborate the loser's wasted budget, not the winner's mechanism. The branch is gated by structural USE glyph-category state, not an exact-value CMP, so no I2S substitution mechanism applies to the winner."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where cmplog with I2SRandReplace resolves the is_halant_use true branch as fast as naive (matching prob_div ~1.0 at equal time), which would show I2S does not misallocate budget here and that the branch is not purely structural."
+  },
+  "weakest_evidence_point": "The claim that cmplog's I2S budget is actively misallocated (rather than cmplog simply being neutral) is inferred from the 23.60h block vs naive's 0.60h, not directly observed in a per-seed lineage trace.",
+  "confidence": "medium"
+}

@@ -1,0 +1,99 @@
+{
+  "branch_id": 5619,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry a Thai/Lao codepoint in 0x0E00-0x0EFF with klass==0 to enter the switch(u); baseline havoc reaches it, I2S fuzzers do not.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)", "value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A glyph codepoint u satisfying (u & ~0xFF) == 0x0E00u (a Thai/Lao codepoint in 0x0E00-0x0EFF) with combining class klass==0 and < 200, so the inner if at line 44 holds and control reaches the switch(u) at line 46. No specific 4-byte magic literal need match a CMP operand; the gate is a range/mask test plus a per-glyph category, reached by raw bytes near 0x0E.",
+      "why_winner_satisfies": "naive and value_profile resolve 10/10 trials using plain havoc/token mutation. Their winning seeds are dense with 0x0e bytes (e.g. value_profile seed 053d0247... has runs '0e 0e 0e 0e' and naive seed 060872d3... has '0e' bytes) that decode into the 0x0E00-block codepoints needed to drive switch(u) and downstream the klass switch (lines 97/107/110/129 hit only by W).",
+      "why_loser_doesnt": "cmplog (resolved 1/10) and value_profile_cmplog (resolved 2/10) stay blocked because the switch operand u is a font-derived Unicode codepoint produced by a range/mask test, not a literal that appears as a logged CMP operand. I2SRandReplace/CMP_MAP have no useful operand to substitute or hill-climb toward, so the I2S stages spend execution budget without progressing this gate, while their havoc share is diluted.",
+      "mechanism_attribution": "The winner's enabling technique is plain havoc byte mutation (havoc-only): naive and value_profile lack any input-to-state substitution mutator entirely and reach the Thai-codepoint switch by stochastically producing 0x0E-block bytes. The comparison-solving stage in the losers gains no traction because the gate is a mask/range test on a derived codepoint, not a comparison whose operand can be copied from the per-execution CMP buffer."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is switch(u) at line 46, reached only after a Thai/Lao codepoint mask test and a klass==0 check.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L42-46",
+      "exact_quote": "if ((u & ~0xFF) == 0x0E00u)"
+    },
+    {
+      "claim": "Reaching the switch additionally requires klass==0.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L44",
+      "exact_quote": "if (unlikely (klass == 0))"
+    },
+    {
+      "claim": "The two decisive pairs both differ by the I2S technique, with the NON-I2S fuzzer as winner.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 + Pair 2 headers",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile beats value_profile_cmplog at this branch, also a [delta: I2S] pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "Pair 2: value_profile > value_profile_cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "naive resolves all 10 trials and cmplog only 1, showing the baseline (non-I2S) fuzzer wins.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive / cmplog rows",
+      "exact_quote": "naive                           10        0          0  winner (I2S vs cmplog)"
+    },
+    {
+      "claim": "cmplog is the I2S loser, blocked in 9/10 trials.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "cmplog row",
+      "exact_quote": "cmplog                           1        9          0  loser (I2S vs naive)"
+    },
+    {
+      "claim": "Winning value_profile seed bytes are dense with 0x0e (the Thai-block high byte), supplying codepoints in the 0x0E00 range.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 id=053d0247691f7c01 offsets 0x1a-0x1d",
+      "exact_quote": "0e 0e 0e 0e ff 4c"
+    },
+    {
+      "claim": "cmplog (an I2S fuzzer) is the storing fuzzer for the loser-blocking seeds that take the false branch.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser-blocking Seed 2 id=0eb8a04033f2ab8b",
+      "exact_quote": "fuzzer=cmplog, trial=1"
+    },
+    {
+      "claim": "cmplog's distinguishing mutator over naive is I2SRandReplace, which substitutes a logged CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "naive's mutator set is havoc + token with no I2S, the technique enabling the winner here.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile also lacks I2SRandReplace, so the value_profile winner cannot be an I2S find.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "W explores downstream klass-switch arms (lines 97/107/110/129) that L never reaches, consistent with W feeding the switch real Thai codepoints.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 97",
+      "exact_quote": "97  T=5 F=79  T=0 F=46  case HB_MODIFIED_COMBINING_CLASS_CCC22: /* meteg */"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5619 --role W --fuzzer naive --trial 1 --seed 060872d3eb5bff14` and `--fuzzer value_profile --seed 053d0247691f7c01`. Both winning chains are 16 levels of pure havoc/token mutators (DwordInterestingMutator, CrossoverReplaceMutator, ByteNegMutator, etc.). Each reports one dash row at depth 15 (shared root ancestor e0a5b09f80625fb6), but that root is common to both a naive and a value_profile chain; value_profile has NO I2SRandReplace mutator, so the dash row is a shared imported corpus-root artifact, not an I2S find by the winner. The winning mechanism is therefore havoc, not I2S; the dash signal is not I2S-exclusive across these provenances."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on switch(u) over a Thai-block codepoint in which cmplog/vpc resolve the branch faster than naive/value_profile — would show the gate is in fact I2S-solvable and I2S is not a net handicap here."
+  },
+  "weakest_evidence_point": "The byte-level claim that 0x0e-dense winner seeds decode to in-range codepoints is inferred from raw bytes plus source mask test, not from a confirmed codepoint trace through the harness's UTF decoder.",
+  "confidence": "medium"
+}

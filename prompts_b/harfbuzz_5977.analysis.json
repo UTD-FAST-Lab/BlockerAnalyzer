@@ -1,0 +1,100 @@
+{
+  "branch_id": 5977,
+  "target": "harfbuzz",
+  "summary_one_line": "Buffer must hold a ZWNJ glyph followed by a non-ignorable non-mark glyph, requiring a coherent script/language tag sequence rather than CMP-substituted byte runs.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "An input that drives the USE shaper to build a glyph buffer containing a ZWNJ glyph (USE(ZWNJ)) followed at some later index by a glyph that is not_ccs_default_ignorable and not a Unicode mark, so the false-branch return path is reached; in practice readable script/language tag bytes (e.g. 'srch', 'jy-hant', 'an-hant', 'nt-hk').",
+      "why_winner_satisfies": "naive winning seeds carry intact, human-readable script/language tag substrings ('srch' at offset 0x1d-0x20, 'jy-hant' / 'an-hant', 'nt-hk') that map to real USE categories and populate the buffer with a ZWNJ-plus-following-glyph structure, letting the lambda iterate the loop and exit on the false side.",
+      "why_loser_doesnt": "cmplog blocking seeds are dominated by repeated CMP-derived byte runs ('00 72 10' x4, '0c 18 00 00 0c 20') that do not assemble into the categorized glyph sequence; without a real ZWNJ-then-non-ignorable structure the loop body never reaches the false-branch return.",
+      "mechanism_attribution": "naive's plain havoc/token byte mutation is free to keep and recombine the intact tag substrings that survive in the corpus; cmplog's I2SRandReplace continually overwrites byte offsets with operands harvested from the CMP buffer, displacing the readable tag bytes and steering the corpus toward CMP-satisfying noise rather than the structural glyph sequence — so the WINNER (naive) succeeds by NOT applying I2S substitution. This is havoc-only."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Same structural requirement (ZWNJ glyph followed by a non-ignorable non-mark glyph in the buffer), reached by gradually accreting the multi-byte tag/category bytes that select the right USE categories.",
+      "why_winner_satisfies": "value_profile_cmplog adds CMP_MAP gradient buckets that reward partial progress toward the byte patterns selecting ZWNJ + following non-ignorable glyph categories, so it accretes the needed structure and resolves the false side in 8/10 trials.",
+      "why_loser_doesnt": "Plain cmplog has only edge-bucket feedback plus I2S substitution and no Hamming/prefix gradient; it gets no reward for partial matches, the I2S substitutions overwrite progress, and it stays blocked in 9/10 trials.",
+      "mechanism_attribution": "value_profile_cmplog's CMP_MAP gradient feedback gives a smooth Hamming-distance signal that incrementally guides the input toward the byte combination producing the ZWNJ-plus-non-ignorable glyph structure, which plain cmplog lacks. This is the CMP_MAP gradient mechanism."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a loop over the glyph buffer that runs only after a ZWNJ glyph and returns on the false side when a non-ignorable non-mark glyph is found.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L52",
+      "exact_quote": "for (unsigned i = p.first + 1; i < buffer->len; ++i) <-- BLOCKER"
+    },
+    {
+      "claim": "The globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "naive winning seeds contain intact readable script/language tag substrings.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 2e4a22672f7de1e4 offsets 0x00-0x07 and 0x1d-0x25",
+      "exact_quote": "6a 79 2d 68 61 6e 74 00 00 66 66 00 0c 00 0c 00   jy-hant..ff....."
+    },
+    {
+      "claim": "Another naive winning seed carries an 'srch' tag substring.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id f481295249a6092a offset 0x1d-0x21",
+      "exact_quote": "63 68 18 18 18 18 18 00 00 00 00 00 1a 0d 20 00   ch............ ."
+    },
+    {
+      "claim": "Pair 1 (naive > cmplog) carries the I2S technique delta with naive as winner and cmplog as loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "cmplog's only added mutator over naive is I2SRandReplace, which substitutes CMP-buffer operands at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "L196-L199",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive uses only havoc + token mutators with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "L251",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog blocking seeds are dominated by repeated short byte runs rather than tag structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id b99d80be1530c37f offset 0x00-0x0f",
+      "exact_quote": "00 72 10 02 00 72 10 00 00 72 10 00 00 72 10 00   .r...r...r..."
+    },
+    {
+      "claim": "Pair 2 (value_profile_cmplog > cmplog) carries the value_profile technique delta with vpc as winner and cmplog as loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L34",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "value_profile_cmplog adds CMP_MAP gradient buckets to the feedback that plain cmplog lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "L255-L259",
+      "exact_quote": "**Instrumentation**: union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    },
+    {
+      "claim": "vpc resolves 8/10 trials while cmplog stays blocked 9/10 at this branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L36-L37",
+      "exact_quote": "winner: resolved=8/10  blocked=2  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Lineage not required: claimed_mechanism is havoc-only (and CMP_MAP gradient for the second hypothesis), not I2SRandReplace. The winners here are naive and value_profile_cmplog while cmplog (the I2S fuzzer) is the LOSER in both pairs, so the I2S-floor dash-row check does not apply; verification rests on seed-byte and source evidence."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the same loop is gated only on a single integer/byte comparison (no buffer-structure dependency) and cmplog with I2SRandReplace resolves it as fast as or faster than naive — showing I2S is not displacing structural progress."
+  },
+  "weakest_evidence_point": "The claim that I2S substitution actively displaces the readable tag bytes (rather than cmplog simply failing to find them by chance) is inferred from the seed-byte contrast, not directly observed in lineage.",
+  "confidence": "medium"
+}

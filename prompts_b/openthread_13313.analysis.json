@@ -1,0 +1,93 @@
+{
+  "branch_id": 13313,
+  "target": "openthread",
+  "summary_one_line": "A UDP/IP6 datagram whose computed checksum equals kValidRxChecksum, requiring the checksum field and header bytes to be mutually consistent.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed IPv6/UDP datagram with a coherent header at fixed offsets (magic 0x78 0x66 at 0x00-0x01, protocol/length region 0x10 0x11 at 0x06-0x07, address bytes such as af fd de ad 00 be ef) AND a checksum field whose value is mutually consistent with those header bytes so that checksum.GetValue() == kValidRxChecksum holds, taking the false (kErrorDrop-avoiding) side.",
+      "why_winner_satisfies": "The cmplog winner seeds are compact 57-byte inputs with a stable, structurally-coherent header: byte 0x00=0x78 and byte 0x01=0x66 are constant across all 10 winners, and the address bytes af fd de ad 00 be ef recur, so the checksum equality operand can be matched and substituted into the input.",
+      "why_loser_doesnt": "The naive loser seeds are oversized 296-byte inputs dominated by long runs of 0x44 ('D') and 0x30 ('0') filler and noise; they never assemble a header whose bytes make the computed checksum equal kValidRxChecksum, so they stay blocked on the true side.",
+      "mechanism_attribution": "cmplog intercepts the integer CMP in checksum.GetValue() == kValidRxChecksum, records both operands into the CmpLogObserver buffer, and I2SRandReplace substitutes the wanted operand at matching input offsets; naive has only havoc/token mutators and cannot solve the relational checksum equality by chance."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is a checksum equality gate that selects kErrorNone vs kErrorDrop.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "checksum.cpp:154",
+      "exact_quote": "return (checksum.GetValue() == kValidRxChecksum) ? kErrorNone : kErrorDrop;"
+    },
+    {
+      "claim": "The false (drop-avoiding) side is the globally blocked side.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "blocked side",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "cmplog resolves the branch in all trials while naive almost always stays blocked, a strong I2S divergence.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "The loser naive arm is blocked in 8 of 10 trials.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 loser",
+      "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+    },
+    {
+      "claim": "Winner cmplog seeds are compact 57-byte inputs with a stable header magic 0x78 0x66.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1, offset 0x00-0x01",
+      "exact_quote": "0000: 78 66 10 01 00 00 10 11 7f 00 fc c4 ff ff ff fc"
+    },
+    {
+      "claim": "Winner seeds repeat the address byte run af fd de ad 00 be ef as coherent header structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1, offset 0x18-0x1e",
+      "exact_quote": "0010: 03 00 07 00 2d a3 07 00 af fd de ad 00 be ef 00"
+    },
+    {
+      "claim": "The header magic byte at offset 0x00 is constant 0x78 across all winners but is db/dc in losers.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0000",
+      "exact_quote": "0x0000  78(x)x10                            db(.)x8 dc(.)x1 96(.)x1             DIFFER"
+    },
+    {
+      "claim": "The second header byte is constant 0x66 across all winners but 0x62 across all losers.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0001",
+      "exact_quote": "0x0001  66(f)x10                            62(b)x10                            DIFFER"
+    },
+    {
+      "claim": "Loser naive seeds are oversized 296-byte inputs full of 0x44 ('D') filler runs that never form a valid checksum.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 4, size and bytes",
+      "exact_quote": "0000: db 62 5c 00 00 00 ff 00 64 78 44 44 44 44 44 44   .b\\.....dxDDDDDD"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which reads the CmpLogObserver buffer and substitutes a CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has only havoc/token mutators and no I2S capability.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 13313 --role W --fuzzer cmplog --trial 1 --seed 09b78be3f8e2fbed`; the 26-level ancestor chain contains 1 I2S-floor dash row (mutation_op = -) at depth 25 (ancestor 4578ba613b6d1a35), direct lower-bound evidence of an I2SRandReplace contribution under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the checksum equality gate where naive resolves the false branch as often as cmplog within the same budget, showing havoc can solve the relational checksum constraint without I2S CMP introspection."
+  },
+  "weakest_evidence_point": "The byte-diff shows the header magic and address bytes are I2S-stabilized, but no byte offset is directly identifiable as the checksum field, so the I2S-on-checksum claim is inferred from the CMP source shape rather than an exact substituted operand offset.",
+  "confidence": "high"
+}

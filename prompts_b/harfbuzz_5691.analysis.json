@@ -1,0 +1,81 @@
+{
+  "branch_id": 5691,
+  "target": "harfbuzz",
+  "summary_one_line": "Font must carry an AAT morx substitution table (sfnt with 'morx' tag), gated by an exact 4-byte FOURCC comparison hb_aat_layout_has_substitution checks.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed sfnt/TrueType container whose table directory advertises the AAT 'morx' table tag (the literal FOURCC bytes 0x6d 0x6f 0x72 0x78 = 'morx'), so hb_aat_layout_has_substitution(face) returns true and the true side of the && at line 59 is taken.",
+      "why_winner_satisfies": "Winner seed 1 (vpc) contains the 'OTTO' sfnt magic at offset 0 and the literal ASCII 'morx' table tag at offsets 0x0c-0x0f; winner seed 2 (vpc) contains 'GPOS' plus 'mort'/'morx'-adjacent tag bytes, supplying the exact table-tag literal the AAT-table presence check matches.",
+      "why_loser_doesnt": "value_profile loser seeds carry no 'morx'/'OTTO' table-tag bytes at the discriminating offsets (offsets 0x00-0x0f are filled with 0xe0/0xff/0x20/0x3d runs and language-tag text like 'y-hant-hk', not FOURCC table tags), so hb_aat_layout_has_substitution(face) stays false and the true branch is never reached across all 10 trials.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which captures the exact 4-byte table-tag comparison operand from the CmpLog buffer and substitutes the literal 'morx' FOURCC directly into the input; plain value_profile only has the CMP_MAP distance-bucket gradient and havoc, which cannot synthesize the exact 4-byte tag, so it never resolves the table-presence gate."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of a hb_aat_layout_has_substitution(face) check, i.e. a test for AAT substitution-table presence.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 source line / L7 blocked side",
+      "exact_quote": "return hb_aat_layout_has_substitution (face) &&"
+    },
+    {
+      "claim": "The globally blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "The winning vpc seed contains the literal ASCII 'morx' table tag and the 'OTTO' sfnt magic.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id ae73a8c9233c3cb8, offset 0x0000-0x000f",
+      "exact_quote": "4f 54 54 4f 00 01 20 20 21 21 20 20 6d 6f 72 78   OTTO..  !!  morx"
+    },
+    {
+      "claim": "A second winning vpc seed carries OpenType table tags ('GPOS', 'mort').",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 47909b1df33a210f, offsets 0x000c-0x001f",
+      "exact_quote": "20 28 20 03 00 00 00 00 ff ff 00 ec 6d 6f 72 74    ( .........mort"
+    },
+    {
+      "claim": "The loser value_profile seeds lack table-tag FOURCC bytes at the discriminating offsets, carrying language-tag text and byte runs instead.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00546490999c9c0b, offset 0x0008-0x0017",
+      "exact_quote": "79 2d 68 61 6e 74 2d 68 6b 00 20 00 00 00 ff 01   y-hant-hk. ....."
+    },
+    {
+      "claim": "At the discriminating offsets 0x0c-0x0f, the winner bytes spell the table tag while the loser bytes are unrelated control/run bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x000c-0x000f",
+      "exact_quote": "0x000c  6d(m)x1 47(G)x1                     00(.)x2 01(.)x1 2c(,)x1 2b(+)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and uses only havoc plus token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators line",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace on top of the havoc and token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators line",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog wins this branch (resolved 8/10) while value_profile loses (resolved 0/10).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=8/10  blocked=2  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5691 --role W --fuzzer value_profile_cmplog --trial 1 --seed ae73a8c9233c3cb8` and observed 1 I2S-floor row (mutation_op = -) at depth 18 of the 19-level ancestor chain — the dash-row floor signal that, under the current build, marks an unwrapped I2SRandReplace find in cmplog/vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on an exact 4-byte 'morx' tag comparison where value_profile resolves the true branch as fast as value_profile_cmplog — showing the CMP_MAP gradient alone, without I2SRandReplace substitution, suffices to synthesize the exact FOURCC."
+  },
+  "weakest_evidence_point": "The blocker line shows hb_aat_layout_has_substitution but the prompt does not include that function's body, so the inference that it does an exact 4-byte 'morx' FOURCC comparison (vs a coarser table-scan) rests on the seed-byte tag evidence rather than the compared source.",
+  "confidence": "high"
+}

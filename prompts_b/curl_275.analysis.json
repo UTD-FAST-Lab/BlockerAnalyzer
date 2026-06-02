@@ -1,0 +1,81 @@
+{
+  "branch_id": 275,
+  "target": "curl",
+  "summary_one_line": "Input must carry a parseable Content-Type header value so contenttype is non-NULL and string-compared against the literal \"multipart/\" prefix.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The fuzz input must build a MIME part whose Content-Type is set to a concrete string (a custom 'Content-Type:' header value) so that contenttype is non-NULL when reaching line 1828; the false side of the branch then requires that contenttype be compared by strncasecompare against the 10-byte literal \"multipart/\". Bytes must spell out a recognizable 'Content-Type:' header token followed by a value.",
+      "why_winner_satisfies": "All five winner-resolving (value_profile_cmplog) seeds embed the ASCII run 'Content-Typ'/'Content-Type:' at offsets 0x24-0x37 followed by a value such as 'where'/'miltip', so contenttype is set and the strncasecompare(contenttype,\"multipart/\",10) call executes and resolves the false branch (DIVERGENT BRANCHES L1828 shows W T=10 F=11 / W T=10 F=0 — winner takes both sides).",
+      "why_loser_doesnt": "value_profile seeds carry corrupted/garbage payloads ('reee/rrrzrr', 'sslv23', random b7/ff bytes) at the offsets where the winner spells 'Content-Type:', so the parser never assembles a usable contenttype reaching the strncasecompare; DIVERGENT BRANCHES L1828 shows L T=10 F=0 (loser only ever takes the true side, never the blocked false side).",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator that value_profile lacks. strncasecompare(contenttype,\"multipart/\",10) is a string comparison whose constant operand \"multipart/\" is captured in the CmpLog buffer; I2SRandReplace substitutes that captured constant (and the surrounding 'Content-Type:' tokens captured at other CMPs) directly into the input at the operand offset, planting the exact bytes the parser needs in one step. value_profile has no I2SRandReplace and can only nudge bytes by coarse distance-bucket feedback, which never assembles the multi-byte header token, so it stays blocked."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side of branch 275 is the false branch of a strncasecompare against the literal \"multipart/\" over 10 bytes.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "mime.c:1828, blocked side F",
+      "exact_quote": "(contenttype && !strncasecompare(contenttype, \"multipart/\", 10)))"
+    },
+    {
+      "claim": "The globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Winner-resolving seeds embed a 'Content-Type:' header token followed by a value such as 'where'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 id=3ada62fdafca01cd offsets 0x24-0x37",
+      "exact_quote": "65 3a 77 68 65 72 65 00 0a 54 6f 3a 20 66 61 6b   e:where..To: fak"
+    },
+    {
+      "claim": "A winner seed value is 'miltip', a non-'multipart/' Content-Type value, exercising the strncasecompare.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 2 id=705a0fa0ecdc55d4",
+      "exact_quote": "65 3a 6d 69 6c 74 69 70 0a 54 6f 3a 20 66 61 6b   e:miltip.To: fak"
+    },
+    {
+      "claim": "At the blocker line the winner takes both true and false sides while the loser only ever takes the true side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1828",
+      "exact_quote": "L1828  T=10 F=0  T=0 F=10  (contenttype && !strncasecompare(contenttype, \"multipart/...  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser-blocking seeds carry garbage byte runs where the winner spells the Content-Type token.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1 id=15b9bbc304e3dba1",
+      "exact_quote": "2f 72 72 72 7a 72 72 b7 a0 b7 b7 b7 70 65 74 cd   /rrrzrr.....pet."
+    },
+    {
+      "claim": "The byte-diff shows the winner concentrates the ASCII 'Content' run at offsets 0x24-0x2b while the loser scatters unrelated bytes there.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x24-0x2b",
+      "exact_quote": "   0x0026  6f(o)x10                            72(r)x2 06(.)x2 74(t)x1 01(.)x1 +2u  DIFFER"
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator that value_profile lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator and relies on CMP_MAP distance buckets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 275 --role W --fuzzer value_profile_cmplog --trial 1 --seed 3ada62fdafca01cd`; the 20-level ancestor chain shows the I2S-floor signal with 2 dash rows (mutation_op = -) at depths 18 and 19, confirming unwrapped I2SRandReplace finds in the winner's lineage (lower bound; some I2S leaks into havoc bucket)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile resolves the false side of strncasecompare(contenttype,\"multipart/\",10) at the same rate as value_profile_cmplog despite the multi-byte 'Content-Type:'/'multipart/' literal being required, showing CMP_MAP gradient alone suffices and I2SRandReplace is not the discriminating technique."
+  },
+  "weakest_evidence_point": "The exact parsing path that turns the input 'Content-Type:' bytes into the contenttype argument (via search_header/customct at lines 1789-1793) is inferred from source, not directly observed in the seed-to-branch dataflow.",
+  "confidence": "medium"
+}

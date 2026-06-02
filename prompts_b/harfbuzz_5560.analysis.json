@@ -1,0 +1,87 @@
+{
+  "branch_id": 5560,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must contain a 4-byte OpenType script tag (e.g. GPOS/GSUB/latn) at a position where find_script_index matches the table's script list.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A 4-byte OpenType script tag (FOURCC such as 'GPOS', 'GSUB', 'latn') present in the input at offsets that flow into script_tags[i], so that g.find_script_index matches an entry in the parsed table's script list and the true branch at line 557 is taken.",
+      "why_winner_satisfies": "Winner-resolving seeds carry literal ASCII FOURCC tags: at offsets 0x0c-0x0f the W bytes are concentrated on G/S/U/O/B/P producing 'GPOS' and 'GSUB', and seeds 2/4/5 carry the 'latn' tag at 0x18-0x1b; these exact tag values let find_script_index match and resolve the lookup (W takes the true side T=12 at line 557).",
+      "why_loser_doesnt": "Loser-blocking seeds have no concentrated tag at those offsets (0x0c is 00/01/20/2c, 0x0d-0x0f are scattered non-tag bytes), so find_script_index never matches at line 557 (L shows T=0 F=86) and the lookup falls through to the DFLT/dflt/latn fallbacks that all return false.",
+      "mechanism_attribution": "cmplog/vpc intercept the per-table tag comparison inside find_script_index and record both operands into the CmpLogObserver buffer; I2SRandReplace then substitutes the real table script tag into the input at the matching offset, manufacturing the exact FOURCC that naive/value_profile must stumble onto by chance and rarely do."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of a find_script_index call gated on script_tags[i].",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7",
+      "exact_quote": "Source line:     if (g.find_script_index (script_tags[i], script_index))"
+    },
+    {
+      "claim": "Both decisive pairs are I2S-delta pairs separating cmplog/vpc from their non-I2S counterparts.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26,L34",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "The second decisive pair is cmplog over naive, also an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L34",
+      "exact_quote": "--- Pair 2: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal ASCII FOURCC tags GPOS and GSUB.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed de55a8859d5a2153 @0x0c, seed f7542ad9430e0514 @0x0c",
+      "exact_quote": "60 31 20 20 47 50 4f 53   ......  `1  GPOS"
+    },
+    {
+      "claim": "A winner-resolving cmplog seed carries the GSUB tag at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed f7542ad9430e0514 @0x0c-0x0f",
+      "exact_quote": "df 20 47 53 55 42   .........{. GSUB"
+    },
+    {
+      "claim": "Winner cmplog seeds also carry the 'latn' script tag at offset 0x18.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed f7542ad9430e0514 @0x18",
+      "exact_quote": "00 00 00 00 6c 61 74 6e 17 00 20 00   ........latn.. ."
+    },
+    {
+      "claim": "At the FOURCC offsets the W byte sets are concentrated on tag letters while the L byte sets are scattered non-tag bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x10                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "The winner takes the true side at the blocker line while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 557",
+      "exact_quote": "d=1   L 557  T=12 F=28  T=0 F=86  if (g.find_script_index (script_tags[i], script_index))  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog records both CMP operands into the CmpLogObserver buffer and I2SRandReplace substitutes one operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so it has no operand-substitution path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5560 --role W --fuzzer value_profile_cmplog --trial 1 --seed de55a8859d5a2153` and observed one I2S-floor dash row (mutation_op = -, ancestor e0a5b09f80625fb6) at depth 19 of the 20-level chain; tool printed 'I2S-floor signal: 1 ancestor dash row(s) at depth 19'."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating find_script_index on a 4-byte script tag where cmplog/vpc resolve the branch no faster than naive/value_profile (no cmplog>naive or vpc>vp separation), which would refute that I2S tag substitution is the enabling mechanism."
+  },
+  "weakest_evidence_point": "The exact input offset where the matched tag flows into script_tags[i] is inferred from byte concentration rather than confirmed by dataflow, since the script_tags array is populated by hb_ot_tags_from_script_and_language upstream of the parsed font bytes.",
+  "confidence": "high"
+}

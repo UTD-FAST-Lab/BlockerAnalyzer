@@ -1,0 +1,87 @@
+{
+  "branch_id": 297,
+  "target": "curl",
+  "summary_one_line": "Input must form a well-formed URL/protocol header so multi_done runs with result==0 and a nonzero progress-callback rc.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A structured request whose leading bytes spell a recognizable scheme/host/port and HTTP token (e.g. the 'pop3'/'9001'/'HTTP/' literals at offsets 0x06-0x2b) so the transfer reaches multi_done with result==0 and a nonzero Curl_pgrsDone rc, taking the true branch at multi.c:654.",
+      "why_winner_satisfies": "vpc winning seeds carry concentrated structural literals — '/:::' run at 0x0b-0x10, '9001' at 0x17-0x1a, and the 'GHTTP/ m' token at 0x24-0x2b — that the cmplog I2S stage substituted to satisfy the scheme/header comparisons, driving execution down to the blocker with !result true and rc nonzero (winner avg hitcount on branch 1674).",
+      "why_loser_doesnt": "value_profile seeds are short, '%'-padded noise (e.g. 'CdUC%%%%!%e', './/././') lacking the matching scheme/port/HTTP literals; they never reach a state where multi_done sees result==0 with a nonzero rc, so they stay on the false side (loser avg hitcount 1).",
+      "mechanism_attribution": "Both fuzzers share value_profile's comparison-distance feedback; the only technique delta is vpc's I2SRandReplace, which copies the parser's expected comparison operands directly into the input, manufacturing the exact scheme/port/HTTP-token bytes that the distance feedback alone could not climb to within budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of if(!result && rc) at multi.c:654, globally blocked on the T side.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "multi.c:654:8",
+      "exact_quote": "Source line:     if(!result && rc)"
+    },
+    {
+      "claim": "The single decisive pair is value_profile_cmplog beating value_profile with technique delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The winner resolves all 10 trials with high branch hitcount while the loser stays blocked at hitcount 1.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 aggregates",
+      "exact_quote": "avg hitcount on branch: winner=1674  loser=1"
+    },
+    {
+      "claim": "Winner-resolving seeds carry structured scheme/port/HTTP literals such as pop3, 9001 and HTTP/.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 2 id=01bc69e4b71e5bec",
+      "exact_quote": "70 6f 70 33 4b 2f 3a 3a 3a 3a   ......pop3K/::::"
+    },
+    {
+      "claim": "Winner seeds concentrate the GHTTP/ token at offsets around 0x24.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 id=0057778b67d14b3b offset 0x20",
+      "exact_quote": "02 00 00 00 47 48 54 54 50 2f 20 6d 65 40 6c 6f   ....GHTTP/ me@lo"
+    },
+    {
+      "claim": "Loser-blocking seeds are short percent-padded noise lacking the structural literals.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 2 id=00225bc4819174d2 offset 0x06",
+      "exact_quote": "64 55 43 25 25 25 25 21 25 65   .....CdUC%%%%!%e"
+    },
+    {
+      "claim": "At the blocker line the winner takes T=10/F=0 while the loser takes T=0/F=10.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L654",
+      "exact_quote": "d=1   L 654  T=10 F=0  T=0 F=10  if(!result && rc)  <-- BLOCKER"
+    },
+    {
+      "claim": "The byte-diff shows the winner has a concentrated HTTP-token block at 0x24-0x2b absent in the loser.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x24-0x28",
+      "exact_quote": "   0x0024  47(G)x10                            42(B)x1 9e(.)x1 2e(.)x1 44(D)x1 +3u  DIFFER"
+    },
+    {
+      "claim": "The only mutator-level difference between the two involved fuzzers is that vpc adds I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, so its only comparison aid is the CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 297 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0057778b67d14b3b`; the 25-level ancestor chain contains 2 I2S-floor dash rows (mutation_op = -) at depths 23 and 24, the characteristic unwrapped-I2SRandReplace signal exclusive to cmplog/vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the scheme/port/HTTP literals gating multi_done are made byte-derivable by a Hamming gradient (no exact-match cliff) and value_profile then resolves the branch as fast as value_profile_cmplog, showing the divergence was CMP_MAP-solvable rather than I2S-dependent."
+  },
+  "weakest_evidence_point": "The source line if(!result && rc) is a generic post-transfer guard, so the specific scheme/port literals being the gate is inferred from seed bytes and call-chain divergence rather than from the CMP at the blocker itself.",
+  "confidence": "medium"
+}

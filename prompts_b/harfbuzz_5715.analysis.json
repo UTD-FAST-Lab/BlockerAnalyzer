@@ -1,0 +1,81 @@
+{
+  "branch_id": 5715,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must embed the literal 'trak' FOURCC table tag so the font exposes a tracking table and requested_tracking becomes true.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The 4-byte sequence 74 72 61 6b ('trak') must appear at a table-tag offset (seen at 0x0c-0x0f) so hb_aat_layout_has_tracking(face) is true and plan.requested_tracking (set from the 'trak' mask at line 126) is non-zero, making line 211 take the true branch.",
+      "why_winner_satisfies": "All five value_profile_cmplog winner seeds place the exact bytes 74 72 61 6b ('trak') at offsets 0x0c-0x0f (W byte set is 74(t)x9 / 72(r)x9 / 61(a)x9 / 6b(k)x9), and W uniquely invokes hb_aat_layout_track 151 times while L invokes it 0 times.",
+      "why_loser_doesnt": "value_profile loser seeds carry unconcentrated non-'trak' bytes at 0x0c-0x0f (e.g. 00/01/2c/2b/18/08/00/6a) and never present the 'trak' tag, so hb_aat_layout_track is invoked 0 times and line 211 stays on the false side (T=0 F=18).",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator on top of value_profile. The hb_aat_layout_has_tracking lookup compares the font's table tags against the constant HB_TAG('t','r','a','k'); cmplog intercepts that 4-byte comparison and I2SRandReplace substitutes the captured constant into the input, planting 'trak' at the tag offset. value_profile lacks I2SRandReplace, so its CMP_MAP Hamming-distance feedback cannot reconstruct the exact 4-byte tag and the branch stays blocked."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The branch is the true side of line 211, gated by requested_tracking AND hb_aat_layout_has_tracking(face).",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L211",
+      "exact_quote": "plan.apply_trak = plan.requested_tracking && hb_aat_layout_has_tracking (face);"
+    },
+    {
+      "claim": "requested_tracking is set from the 'trak' table mask earlier in compile.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L125-126",
+      "exact_quote": "plan.trak_mask = plan.map.get_mask (HB_TAG ('t','r','a','k'));"
+    },
+    {
+      "claim": "Winner seeds place the literal 'trak' tag bytes at offsets 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 3f368b250ab4cc50 offset 0x0c",
+      "exact_quote": "00 01 00 00 00 01 02 00 00 01 20 20 74 72 61 6b   ..........  trak"
+    },
+    {
+      "claim": "The W byte set at offsets 0x0c-0x0f is concentrated on the 'trak' bytes while L is unconcentrated and non-'trak'.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  74(t)x9 47(G)x1                     00(.)x2 01(.)x1 2c(,)x1 2b(+)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "Winner uniquely invokes the tracking apply path 151 times while loser invokes it 0 times.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "hb_aat_layout_track",
+      "exact_quote": "151         0  hb_aat_layout_track(hb_ot_shape_plan_t const*, hb_font_t*, hb_buffer_t*)  (/src/harfbuzz/src/hb-aat-layout.cc:359-364)"
+    },
+    {
+      "claim": "The blocker branch is true-only in W and false-only in L.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L211",
+      "exact_quote": "d=1   L 211  T=15 F=0  T=0 F=18  plan.apply_trak = plan.requested_tracking && hb_aat_layou...  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace on top of value_profile.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "The winner resolves the branch in all 10 trials and the loser is blocked in all 10, a perfect I2S separation.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5715 --role W --fuzzer value_profile_cmplog --trial 1 --seed 3f368b250ab4cc50` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 5 and 6 of the 7-level ancestor chain — the characteristic unwrapped-I2SRandReplace signal for cmplog/vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on hb_aat_layout_has_tracking where value_profile (no I2S) resolves the 'trak'-tag true branch as fast as value_profile_cmplog, showing CMP_MAP gradient alone reconstructs the 4-byte tag without I2S substitution."
+  },
+  "weakest_evidence_point": "The leaf mutation_op is TokenInsert and the dash rows sit two levels up the chain, so the final 'trak' placement could partly be token-dictionary aided rather than purely I2S substitution.",
+  "confidence": "high"
+}

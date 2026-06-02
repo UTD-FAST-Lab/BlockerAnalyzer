@@ -1,0 +1,81 @@
+{
+  "branch_id": 14765,
+  "target": "sqlite3",
+  "summary_one_line": "Input must build a valid SQL token sequence reaching a specific yy_reduce grammar reduction; value_profile's CMP_MAP gradient incrementally solves the keyword/token comparisons.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)", "value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "A byte sequence that parses into the specific SQL grammar production whose reduce action is dispatched at yy_reduce:157966 — i.e. real SQL keyword tokens (e.g. 'vacuum', ';') laid out so the LALR parser reaches that reduce rule, rather than malformed/garbage token streams that fault out earlier.",
+      "why_winner_satisfies": "Both winner-resolving seeds carry literal SQL keyword bytes: Seed 1 begins ';vacuum\\n\\n' and Seed 2 begins 'vacuum' followed by quote/semicolon punctuation, so they tokenize into a recognized statement that drives the parser to the true side of L157966 (W: T=2 F=17).",
+      "why_loser_doesnt": "Loser-blocking seeds are short, malformed token soup ('SELEEC .`', '\"\"/\"\" ', 'T 1; c BINARY...') that never tokenize into the production reaching the reduce action — the false side dominates (L: T=0 F=131) so the true branch is never taken across naive/cmplog runs.",
+      "mechanism_attribution": "value_profile adds CMP_MAP gradient feedback: each integer/string CMP records a Hamming/prefix-distance bucket, so a partial keyword match (e.g. progressively matching 'vacuum') is rewarded with a new coverage bucket and preserved as corpus. This lets value_profile / value_profile_cmplog climb toward the exact token strings the grammar needs, whereas naive and cmplog (lacking CMP_MAP) get no gradient on these keyword comparisons and stall."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs differ by exactly the value_profile technique, with value_profile-bearing fuzzers winning.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+    },
+    {
+      "claim": "The second decisive pair is value_profile_cmplog over cmplog, again with delta value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "The blocker is inside the LALR parser reduce-action dispatcher yy_reduce.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Enclosing function",
+      "exact_quote": "Enclosing function: sqlite3.c:yy_reduce"
+    },
+    {
+      "claim": "At the blocker line the winner takes the true side while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L157966",
+      "exact_quote": "d=1   L157966  T=2 F=17  T=0 F=131    <-- BLOCKER"
+    },
+    {
+      "claim": "A winner-resolving seed begins with the literal SQL keyword 'vacuum' preceded by a semicolon.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id aa08bf5050d49a18",
+      "exact_quote": "3b 76 61 63 75 75 6d 0a 0a 45 4c ac 3b c5 0a 0a   ;vacuum..EL.;..."
+    },
+    {
+      "claim": "A second winner-resolving seed begins with the literal SQL keyword 'vacuum'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 8cb368bd2cb2d84d",
+      "exact_quote": "76 61 63 75 75 6d 27 6d 27 64 27 27 27 27 27 27   vacuum'm'd''''''"
+    },
+    {
+      "claim": "Loser-blocking seeds are short malformed token streams, e.g. a corrupted SELECT and bare quote punctuation.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00150fd27837b85b, 001712063f69369f",
+      "exact_quote": "53 45 4c 45 45 43 20 02 60                        SELEEC .`"
+    },
+    {
+      "claim": "value_profile's distance bucket is a coarse encoding of how close two CMP operands were, rewarding partial keyword matches with new coverage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile section",
+      "exact_quote": "The distance bucket is a coarse encoding of how close the two\noperands were (Hamming distance bucket for `trace_cmp*`; matching-prefix\nlength for string/memory CMPs)."
+    },
+    {
+      "claim": "An input producing a CMP-operand pair closer to matching than any seen before adds a new CMP_MAP bucket and is preserved, giving the gradient that drives the winner.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile), not I2SRandReplace, so the mandatory lineage check does not apply. The technique attribution rests on both decisive pairs having delta=value_profile (value_profile beats naive; value_profile_cmplog beats cmplog), isolating value_profile's CMP_MAP gradient feedback as the divergence cause; no dash-row lineage verification is required for this mechanism."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the same yy_reduce-style keyword-token gate where value_profile shows no advantage over naive (equal resolve rates), indicating the CMP_MAP gradient is not what lets the winner assemble the required SQL token sequence."
+  },
+  "weakest_evidence_point": "The mapping from the keyword bytes in the winning seeds to the specific grammar production reduced at L157966 is inferred from yy_reduce's role plus the T=2/T=0 split, not from a confirmed parse trace of those exact seeds.",
+  "confidence": "medium"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 5951,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must encode a font cmap that maps codepoint U+25CC (dotted circle) so get_nominal_glyph returns true.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A font blob whose cmap subtable resolves the constant codepoint 0x25CC to a glyph id, so font->get_nominal_glyph(0x25CCu, ...) succeeds and the false branch is taken. The seed must carry a parseable cmap table keyed for U+25CC rather than an arbitrary byte run.",
+      "why_winner_satisfies": "The winning vpc seed contains a literal 'cmap' table tag at offsets 0x0c-0x0f plus a sfnt-style table directory header (00 01 00 00 ...), and on the W role the blocker line 46 takes T=0 F=1 (false branch), with downstream dotted-circle-insertion lines 49-87 marked [W] only. The I2SRandReplace mutator can substitute the cmap codepoint key 0x25CC directly into the cmap subtable from the intercepted CMP against the constant.",
+      "why_loser_doesnt": "The value_profile loser seeds are short arbitrary byte runs (e.g. repeated 56 10 00 and UU patterns) with no valid cmap mapping for U+25CC, so get_nominal_glyph fails: the L role takes line 46 T=10 F=0 (always true branch) and only line 47 'return false' is hit ([L]). value_profile has only CMP_MAP gradient feedback and no I2SRandReplace, so it cannot inject the exact codepoint key into the cmap.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of the shared CMP_MAP feedback: the per-execution CmpLogObserver captures the comparison against the cmap key and I2SRandReplace substitutes the matching bytes into the input, planting a U+25CC-resolving cmap entry. value_profile lacks I2SRandReplace and stalls at the Hamming-bucket gradient, never landing the exact key."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of a get_nominal_glyph call on the fixed codepoint 0x25CC.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6, L7",
+      "exact_quote": "if (!font->get_nominal_glyph (0x25CCu, &dottedcircle_glyph))"
+    },
+    {
+      "claim": "value_profile_cmplog is the winner and value_profile the loser on the single I2S decisive pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The winning vpc seed carries a literal cmap table tag and sfnt-style directory header bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 W (94ee6502f4aed8ba) offset 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 07 ff 80 20 3f 21 20 63 6d 61 70   ........ ?! cmap"
+    },
+    {
+      "claim": "On the winner role the blocker line takes the false branch while the loser role only ever takes the true branch and returns false.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 46",
+      "exact_quote": "T=0 F=1  T=10 F=0  if (!font->get_nominal_glyph (0x25CCu, &dottedcircle_glyph))"
+    },
+    {
+      "claim": "On the loser role the dotted-circle insertion follows the failure path 'return false' at line 47.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 47",
+      "exact_quote": "[L]    47      return false;"
+    },
+    {
+      "claim": "The downstream dotted-circle setup is reached only on the winner role.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 49-50",
+      "exact_quote": "[W]    49    hb_glyph_info_t dottedcircle = {0};"
+    },
+    {
+      "claim": "value_profile has only CMP_MAP gradient feedback and no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace on top of the shared havoc/token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5951 --role W --fuzzer value_profile_cmplog --trial 2 --seed 94ee6502f4aed8ba` and observed 1 I2S-floor dash row (mutation_op = -) at depth 41 of the 42-level ancestor chain, the floor signal for an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the input requires only matching a fixed integer key (no surrounding cmap table structure) and value_profile resolves the false branch as often as value_profile_cmplog, showing the divergence is not driven by exact-key substitution."
+  },
+  "weakest_evidence_point": "The byte-level link from the winning seed's 'cmap' tag to an actual U+25CC mapping is inferred from font format knowledge; the prompt does not show the resolved glyph-id mapping inside the subtable.",
+  "confidence": "medium"
+}

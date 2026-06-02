@@ -1,0 +1,81 @@
+{
+  "branch_id": 13321,
+  "target": "openthread",
+  "summary_one_line": "Input must encode the IPv6 next-header chain so the extension-header dispatch reaches the exact kProtoDstOpts switch arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A next-header byte (chained through the extension-header walk) that equals the exact protocol constant kProtoDstOpts, so the switch in HandleExtensionHeaders selects `case kProtoDstOpts:` rather than kProtoHopOpts / kProtoFragment / default.",
+      "why_winner_satisfies": "Winner cmplog seeds resolve the branch 10/10 with hitcount 1239 and reach kProtoDstOpts (W hits the case 900 arm and HandleFragment/HandleOptions), the byte fields driving the dispatch being precisely placed concentrated values (e.g. header bytes 78/77 and 66/67 at offsets 0x00-0x01).",
+      "why_loser_doesnt": "Naive loser seeds block 8/10 with hitcount only 70; their next-header bytes land them on kProtoHopOpts / default arms (L hits case 890 and default 911 but never the case-900 true side), the L bytes being scattered 0x44/0x30 fill rather than the exact dispatch constant.",
+      "mechanism_attribution": "cmplog intercepts the integer CMP that compares aNextHeader against the kProtoDstOpts switch constant, records both operands in the CmpLogObserver buffer, and I2SRandReplace substitutes the required protocol constant into the next-header byte; naive must hit the exact constant by blind havoc, which it does only 2/10 times."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is the kProtoDstOpts switch arm inside HandleExtensionHeaders.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "ip6.cpp:900:9",
+      "exact_quote": "Source line:         case kProtoDstOpts:"
+    },
+    {
+      "claim": "The branch is a switch dispatch on aNextHeader selecting among protocol constants.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "ip6.cpp:888",
+      "exact_quote": "switch (aNextHeader)"
+    },
+    {
+      "claim": "Winner reaches the kProtoDstOpts arm while loser does not; W takes case 900, L stays on the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L900",
+      "exact_quote": "case kProtoDstOpts:  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog resolves the branch 10/10 with high hitcount while naive blocks 8/10 with low hitcount.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "avg hitcount on branch: winner=1239  loser=70"
+    },
+    {
+      "claim": "naive resolves only 2/10 by blind mutation, the loser role of the I2S pair.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive row",
+      "exact_quote": "naive                            2        8          0  loser (I2S vs cmplog)"
+    },
+    {
+      "claim": "Winner and loser differ at concentrated header byte offsets driving the dispatch.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x00-0x01",
+      "exact_quote": "0x0001  66(f)x7 67(g)x3                     62(b)x10                            DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a recorded CMP operand into matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "cmplog intercepts integer CMPs and records both operands keyed by PC.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Instrumentation",
+      "exact_quote": "Each CMP callback records\nboth operands into a per-execution `CmpLogObserver` buffer keyed by\nPC."
+    },
+    {
+      "claim": "naive has no I2S mutator, so it must hit the dispatch constant by blind havoc.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 13321 --role W --fuzzer cmplog --trial 1 --seed 04f7c870a8101848` and observed 1 I2S-floor dash row (mutation_op = -) at depth 32 of the 33-level ancestor chain; under the current build this nameless ParentInfo-only ancestor is lower-bound evidence of an I2SRandReplace find in the cmplog lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose switch arm constant is randomized per-build (defeating CMP operand logging) showing cmplog resolving the kProtoDstOpts arm no faster than naive."
+  },
+  "weakest_evidence_point": "The byte-diff offsets 0x00-0x01 are header fields whose exact mapping to aNextHeader through the chained extension-header walk is inferred from source structure, not directly traced to the intercepted CMP.",
+  "confidence": "medium"
+}

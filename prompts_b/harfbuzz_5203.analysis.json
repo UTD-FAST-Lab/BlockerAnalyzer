@@ -1,0 +1,87 @@
+{
+  "branch_id": 5203,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry a well-formed sbix table (correct 'sbix' tag at the table directory offset) so has_data() returns true.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A structurally valid OpenType font whose table directory names a real 'sbix' table (ASCII tag 73 62 69 78 = 'sbix') at the offset has_data() inspects, so the accelerator binds sbix data and !has_data() is false.",
+      "why_winner_satisfies": "Every winner-resolving seed contains the literal ASCII 'sbix' tag at offsets 0x0c-0x0f (73 62 69 78) plus a sfnt header (00 01 00 00 = version 1.0), giving has_data() a non-empty strike table so the F (false) branch is taken and downstream PNG-extent code runs.",
+      "why_loser_doesnt": "Loser-blocking seeds are short/garbage (e.g. 6 bytes, or all-zero/random) with no 'sbix' tag at 0x0c-0x0f, so has_data() returns false, the T (true) branch returns false, and the function exits before reaching get_png_extents body.",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the CmpLogObserver buffer where the sbix table-tag comparison logged the expected operand 'sbix', then substitutes that 4-byte literal into the input at the matching offset; naive/value_profile lack I2SRandReplace and cannot plant the exact 4-byte magic, so they stay blocked."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of `if (!has_data ())` in get_png_extents, the globally blocked side being F.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7",
+      "exact_quote": "Source line:       if (!has_data ())\nGlobally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Both decisive pairs are I2S-delta winners (cmplog over naive, vpc over value_profile), each 8/10 resolved vs 0/10 for the loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26-L41",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile_cmplog>value_profile is also an I2S-delta decisive pair with the loser blocked 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L34-L37",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Taking the false branch leads into the get_png_extents body (x_offset init, reference_png, IHDR reads), which only winner-resolving seeds reach.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L53-L58",
+      "exact_quote": "[B]   325        if (!has_data ()) <-- BLOCKER"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal ASCII 'sbix' tag bytes at offsets 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id e157098e95bbf655, offsets 0x0c-0x0f",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 73 62 69 78   ......      sbix"
+    },
+    {
+      "claim": "At offsets 0x0c-0x0f the winner bytes are uniformly 73('s') 62('b') 69('i') 78('x') x6 while loser bytes diverge entirely, confirming the tag is the discriminating dataflow feature.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  73(s)x6                             00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "A loser-blocking seed is only 6 bytes of unstructured data with no sbix table.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 003817559785f774",
+      "exact_quote": "Seed 1 (id=003817559785f774, size=6 bytes, fuzzer=naive, trial=1, discovered_at=0s, mutation_op=ByteDecMutator,WordAddMutator):"
+    },
+    {
+      "claim": "On the loser side has_data() and the false branch are never resolved: the loser takes T=38 at line 325 (true side) while the winner takes F=7 (false side).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L325 d=1",
+      "exact_quote": "d=1   L 325  T=0 F=7  T=38 F=0  if (!has_data ())  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace which scans the input for an operand and substitutes the other CMP operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so it cannot plant the exact magic via I2S substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5203 --role W --fuzzer value_profile_cmplog --trial 1 --seed e157098e95bbf655` and observed exactly one I2S-floor dash row (mutation_op = -, ancestor e0a5b09f80625fb6) at depth 17 of the 18-level ancestor chain — direct lower-bound evidence of an I2SRandReplace find in the winning seed's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose has_data() gate keys on the 4-byte 'sbix' tag still showing naive/value_profile resolving as often as cmplog/vpc — i.e. no I2S advantage at planting the exact magic literal."
+  },
+  "weakest_evidence_point": "The byte diff confirms 'sbix' at 0x0c-0x0f is necessary, but it does not directly prove has_data() compares that specific tag rather than depending on a separately-validated table directory offset.",
+  "confidence": "high"
+}

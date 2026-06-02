@@ -1,0 +1,81 @@
+{
+  "branch_id": 5400,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must form a well-formed sfnt+cmap structure that selects a Format 0 subtable with at least one nonzero glyphIdArray byte.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A parseable OpenType/sfnt font header carrying the literal 'cmap' table tag (bytes 63 6d 61 70) plus the structural table-record offsets needed to route into CmapSubtableFormat0::collect_unicodes, where the 256-entry glyphIdArray must hold >=1 nonzero byte so the true branch of `if (glyphIdArray[i])` fires.",
+      "why_winner_satisfies": "The winner seed contains the magic sfnt header 00 01 00 00 at offset 0 and the ASCII literal 'cmap' at offsets 0x0c-0x0f, followed by a run of 0x15 (non-zero) glyphIdArray bytes (offsets 0x1e-0x27); collect_unicodes therefore reaches the true branch and adds glyphs (hitcount 2143, out->add at line 65 [W]).",
+      "why_loser_doesnt": "The loser seeds are short, unstructured byte salads (sizes 13-62) starting with e0/fe/4c rather than the sfnt magic; they never present the 'cmap' tag or a Format 0 subtable with a nonzero glyphIdArray, so the loop runs but every glyphIdArray[i] is zero (L: T=0 F=2560), keeping the branch on the false side.",
+      "mechanism_attribution": "value_profile_cmplog's I2SRandReplace logs the operands of the structural cmap-routing comparisons (table-tag equality, version/format checks) and substitutes the required literals (the 'cmap' tag, version words) directly into the input from the CMP buffer; plain value_profile has only the CMP_MAP Hamming/prefix-distance gradient and havoc/token mutators with no I2SRandReplace, so it cannot place the multi-byte structural literals that route execution to Format 0 and produce nonzero glyphIdArray entries."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is the body of `if (glyphIdArray[i])` inside CmapSubtableFormat0::collect_unicodes.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-cmap-table.hh:64:11",
+      "exact_quote": "Source line:       if (glyphIdArray[i])"
+    },
+    {
+      "claim": "Only value_profile_cmplog wins this pair via the I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The winner resolves the branch in 9/10 trials with high hitcount while the loser never resolves it.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "subject 14 counts",
+      "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+    },
+    {
+      "claim": "The winner-resolving seed carries the ASCII 'cmap' table tag in its header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 offset 0x0c-0x0f",
+      "exact_quote": "00 01 00 00 00 0c 02 ff 00 30 00 1f 63 6d 61 70   .........0..cmap"
+    },
+    {
+      "claim": "The winner seed contains a run of nonzero 0x15 bytes serving as nonzero glyphIdArray entries.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 offset 0x1e-0x27",
+      "exact_quote": "15 15 15 15 15 15 15 15 15 15 20 20 20 20 00 00   ..........    .."
+    },
+    {
+      "claim": "The loser-blocking seeds are short and lack the sfnt magic header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 2 (13 bytes)",
+      "exact_quote": "Seed 2 (id=0003cbd2b6f5fff8, size=13 bytes, fuzzer=value_profile"
+    },
+    {
+      "claim": "Under the loser, the blocker loop runs but every glyphIdArray[i] is zero so the true side never fires.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 64",
+      "exact_quote": "if (glyphIdArray[i])  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile lacks the I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator on top of the havoc/token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5400 --role W --fuzzer value_profile_cmplog --trial 1 --seed fd117cd3e66df32b` and observed an I2S-floor row (mutation_op = -) at depth 47 of the 48-level ancestor chain; the tool reports '1 ancestor dash row(s) at depth 47' confirming an unwrapped I2SRandReplace find in the winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile (no I2SRandReplace) reaches the true side of `if (glyphIdArray[i])` as often as value_profile_cmplog despite the input needing the exact multi-byte 'cmap' tag and structural offsets — i.e. the CMP_MAP gradient alone places the literals at equal rate."
+  },
+  "weakest_evidence_point": "Whether the decisive literal is specifically the 'cmap' tag equality vs. an earlier sfnt version/offset comparison is inferred from byte position, not from a CMP-level trace of which comparison I2S solved.",
+  "confidence": "medium"
+}

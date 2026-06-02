@@ -1,0 +1,75 @@
+{
+  "branch_id": 5675,
+  "target": "harfbuzz",
+  "summary_one_line": "A coherent sfnt/OpenType font with valid cmap+GSUB tables so a decomposed mark b resolves to a real nominal glyph.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed OpenType/sfnt font (magic 00 01 00 00, table directory with valid 'cmap' and a GSUB/'GSUN'-tagged table) such that decompose() produces a secondary codepoint b whose nominal glyph lookup succeeds, taking the line-132 FALSE branch instead of the early return-0 TRUE branch.",
+      "why_winner_satisfies": "All five winner-resolving seeds begin with the sfnt magic 00 01 00 00 and an identical table-directory prefix containing the literal ASCII 'cmap' tag at 0x0c and a 'GS..' table tag near 0x1b-0x1e (GSUN/GS.B), so font->get_nominal_glyph(b,...) returns true and the FALSE side at 132 is reached; winner hits the branch 39 times vs loser 0.",
+      "why_loser_doesnt": "Loser-blocking seeds are short, non-font byte salads (e.g. 13-byte and 27-byte inputs starting e0 17 / e0 e8 ff ff) lacking the sfnt magic and table directory, so either decompose() fails or b's nominal-glyph lookup fails, forcing the TRUE early-return side; loser hitcount on the branch is 0.",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator absent in value_profile: cmplog records the per-execution CMP operand buffer and substitutes the runtime-observed magic/tag constants (the sfnt magic and the 4-byte table tags compared during table-directory parsing) directly into the input, synthesizing the structured font header that the value_profile loser, having only havoc/token mutation, cannot construct byte-by-byte."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The only decisive pair is value_profile_cmplog beating value_profile with technique delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The blocker is the false side of the get_nominal_glyph check on the decomposed codepoint b at line 132.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 132",
+      "exact_quote": "(b && !font->get_nominal_glyph (b, &b_glyph))"
+    },
+    {
+      "claim": "All winner-resolving seeds carry the sfnt magic 00 01 00 00 and the ASCII 'cmap' table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 offset 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 07 ff 80 20 3f 21 20 63 6d 61 70   ........ ?! cmap"
+    },
+    {
+      "claim": "Winner seeds contain a GSUN/GSUB-style 4-byte table tag in the table directory.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 offset 0x10-0x1f",
+      "exact_quote": "20 00 ed 05 00 00 00 21 11 fb 20 47 53 55 4e 20    ......!.. GSUN "
+    },
+    {
+      "claim": "Loser-blocking seeds are short non-font byte salads without an sfnt header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 2 (13 bytes)",
+      "exact_quote": "e0 17 00 00 1a 20 00 00 29 2b 29 29 2c            ..... ..)+)),"
+    },
+    {
+      "claim": "The winner reaches and resolves the branch while the loser never resolves it (winner hitcount 39, loser 0).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "avg hitcount line",
+      "exact_quote": "avg hitcount on branch: winner=39  loser=0"
+    },
+    {
+      "claim": "value_profile lacks the I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator on top of havoc and tokens.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5675 --role W --fuzzer value_profile_cmplog --trial 2 --seed ccf94a75d15faf4a` over a 38-level ancestor chain; observed the I2S-floor dash row (mutation_op = -) at depth 37, i.e. an unwrapped I2SRandReplace find in the vpc lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile resolves the line-132 false branch as often as value_profile_cmplog despite the gating constant (sfnt magic + table tag) being many bytes wide, showing CMP_MAP gradient alone reconstructs the structured header without I2S substitution."
+  },
+  "weakest_evidence_point": "The assumption that get_nominal_glyph succeeds specifically because of the cmap/GSUB tags rather than some other property of the larger winner seeds is inferred from the table-directory bytes, not directly observed at the glyph-lookup callsite.",
+  "confidence": "medium"
+}

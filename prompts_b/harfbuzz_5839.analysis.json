@@ -1,0 +1,81 @@
+{
+  "branch_id": 5839,
+  "target": "harfbuzz",
+  "summary_one_line": "Indic syllable with a non-consonant ZWJ at position i whose immediately-preceding glyph info[i-1] is a Halant (H), encountered during backward base-consonant search.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "A glyph buffer that, after Indic categorization, produces a syllable where the backward base-consonant scan hits a non-consonant glyph that is a ZWJ (info[i].indic_category()==ZWJ) with start<i AND the glyph one position earlier is a Halant (info[i-1].indic_category()==I_Cat(H)). This requires a specific multi-glyph ordering (..., H, ZWJ, ...) inside one syllable reached via the consonant-syllable / standalone-cluster reordering path.",
+      "why_winner_satisfies": "naive_ctx resolves the true side in 10/10 trials with avg 18 hits on the branch; the CtxHook folds the call context into the edge-map index, so the line-584 edge reached via initial_reordering_consonant_syllable's two callers (standalone_cluster at line 960, myanmar at line 314) counts as distinct new coverage, keeping the reordering region rewarding and letting havoc keep building the H,ZWJ glyph ordering. The winner seeds carry 'uu-han'/'-han' ASCII runs and dense 0x0d/0x20 glyph-id bytes that map into the joiner/halant categories.",
+      "why_loser_doesnt": "naive sees the same bare edge regardless of which caller reached it, so once the reordering edges are bucketed it stops getting coverage reward there; it resolves true only 2/10 (blocked 8/10, avg 1 hit, avg 16.60h blocked) and never assembles the H-immediately-before-ZWJ ordering, taking the false side 12 times at L 584 (T=0 F=12).",
+      "mechanism_attribution": "naive_ctx's CtxHook (HookableInProcessExecutor) makes a (call-context, edge) pair the unit of new coverage instead of a bare edge. The same reordering code reached from consonant_syllable vs standalone_cluster vs myanmar yields fresh map slots, so the fuzzer keeps energy on the syllable-reordering region and havoc eventually lands the H,ZWJ glyph sequence the true branch needs. This is context-sensitive coverage, not any comparison-solving technique."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker true side requires info[i] to be ZWJ with the immediately preceding glyph info[i-1] being a Halant (H), inside a syllable.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L584 BLOCKER",
+      "exact_quote": "info[i - 1].indic_category() == I_Cat(H))"
+    },
+    {
+      "claim": "The decisive pair is naive_ctx over naive with delta ctx_coverage, winner resolving 10/10 and loser blocked 8/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: naive_ctx > naive  [delta: ctx_coverage] ---"
+    },
+    {
+      "claim": "Winner resolves all trials with 18 avg hits while loser averages 1 hit and 16.60h blocked.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 aggregates",
+      "exact_quote": "avg hitcount on branch: winner=18  loser=1"
+    },
+    {
+      "claim": "At the blocker line the loser takes the true side 0 times against 12 false, while the winner takes it 13 times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L 584",
+      "exact_quote": "L 584  T=13 F=7  T=0 F=12  info[i - 1].indic_category() == I_Cat(H))  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner seeds contain ASCII han-tag runs and dense 0x0d/0x20 glyph bytes feeding the categorizer.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 id=204647f407d75add offset 0x2c-0x33",
+      "exact_quote": "00 4e 09 00 75 75 2d 68   .. ... ..N..uu-h"
+    },
+    {
+      "claim": "The CtxHook folds the call context into the edge-map index so the same edge is recorded at different slots per call path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Instrumentation",
+      "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "naive_ctx treats a new (call-context, edge) pair as new coverage rather than a bare edge.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Feedback",
+      "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+    },
+    {
+      "claim": "naive has no comparison introspection in its mutators or instrumentation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "The blocker function is reached from multiple distinct callers including standalone_cluster and myanmar reorder, giving the CtxHook distinct contexts.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "Call chain hop 2",
+      "exact_quote": "hop 2  hb-ot-shaper-myanmar.cc:reorder_syllable_myanmar"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "context-sensitive coverage",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is context-sensitive coverage (naive_ctx CtxHook), not I2SRandReplace, so the lineage/dash-row I2S-floor check is not applicable; no lineage query was required or run. Evidence is the MECHANISM CONTEXT naive_ctx paragraph plus the multi-caller call chain that supplies distinct call contexts for the same line-584 edge."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness reaching the line-584 syllable-reordering code from only ONE call context shows no naive_ctx-over-naive advantage in taking the H-before-ZWJ true side (both resolve or both block equally), demonstrating the divergence is not driven by context-indexed coverage."
+  },
+  "weakest_evidence_point": "Whether the winner's advantage is specifically the call-context multiplicity (vs naive_ctx merely getting more total execs in that region) cannot be isolated from the byte/source evidence alone; the byte diff is diffuse PARTIAL with no concentrated I2S-style operand.",
+  "confidence": "medium"
+}

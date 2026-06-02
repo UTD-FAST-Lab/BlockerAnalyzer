@@ -1,0 +1,93 @@
+{
+  "branch_id": 6162,
+  "target": "harfbuzz",
+  "summary_one_line": "Font input whose resolved script tag falls in the USE-shaper case-block (HB_SCRIPT_PHAGS_PA and the Unicode-5.0+ additions) reaches the blocked case arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A font whose parsed script property (planner->props.script) resolves to one of the Unicode-5.0+ scripts handled by the shared USE case block at line 300 (HB_SCRIPT_PHAGS_PA). This requires valid OpenType table magic (e.g. GSUB/GPOS) plus script/script-tag bytes that decode to a USE-routed script rather than DFLT/latn, so the categorize switch lands on the line-300 arm.",
+      "why_winner_satisfies": "value_profile winning seeds carry structured table-ish byte runs (e.g. ascii 'darf', repeated 0x06/0x64/0x6e fields and embedded tags like 'h-hans', 'h-min') that drive the script property into the USE case block; the W-only overlay marks line 300 and the entire downstream USE block (lines 303-398) as hit, and the branch averages 34 hits for the winner.",
+      "why_loser_doesnt": "value_profile_cmplog blocking seeds are dominated by literal magic-table tokens 'GSUB'/'GPOS' at offset 0x0c with long 0x20/0x5a/0x47 filler runs; they resolve to scripts handled by earlier arms (the L-only overlay hits the Indic/Telugu block at 231-244 and the Myanmar block at 249-262, never line 300), so the loser blocks on this branch in 9/10 trials with 0 hits.",
+      "mechanism_attribution": "The winner value_profile uses the CMP_MAP gradient: each script-tag / table-magic CMP writes a Hamming/prefix-distance bucket, and an input that is one bucket closer to a USE-routed script tag is preserved, letting the corpus incrementally walk the operand toward the line-300 USE block. The loser value_profile_cmplog additionally carries the input-to-state comparison-substitution mutator (the only technique delta), which swaps whole CMP operands toward the nearest matching literal (the GSUB/GPOS magic and the DFLT/latn anchor arms), over-committing the corpus to the earlier high-frequency literal case arms and starving exploration of the line-300 USE case; thus the gradient-only fuzzer wins. The winner-enabling technique is the CMP_MAP gradient, not the comparison-substitution mutator."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the case arm for HB_SCRIPT_PHAGS_PA inside the script-dispatch switch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6, hb-ot-shaper.hh:300",
+      "exact_quote": "case HB_SCRIPT_PHAGS_PA:"
+    },
+    {
+      "claim": "The enclosing function switches on the parsed script property of the font.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L179",
+      "exact_quote": "switch ((hb_tag_t) planner->props.script)"
+    },
+    {
+      "claim": "The winner-resolving overlay marks line 300 and the downstream USE block as hit by W only.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 300, 397-398",
+      "exact_quote": "[W]   300      case HB_SCRIPT_PHAGS_PA: <-- BLOCKER"
+    },
+    {
+      "claim": "The winning USE-routing tail returns the USE shaper and is hit only by W.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 398",
+      "exact_quote": "[W]   398  \treturn &_hb_ot_shaper_use;"
+    },
+    {
+      "claim": "Loser-blocking seeds only reach earlier case arms (Telugu/Indic block) and not line 300.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 231",
+      "exact_quote": "[L]   231      case HB_SCRIPT_TELUGU:"
+    },
+    {
+      "claim": "The winner resolved this branch 10/10 with avg 34 hits while the loser blocked 9/10 with 0 hits.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L30-32",
+      "exact_quote": "avg hitcount on branch: winner=34  loser=0"
+    },
+    {
+      "claim": "Winner seeds contain structured table-like byte runs and embedded tag-like ascii ('darf', 'h-hans').",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "W seed 1 offset 0x10 / W seed 3 offset 0x30",
+      "exact_quote": "darf.nnnnnnnnnn"
+    },
+    {
+      "claim": "Loser seeds are dominated by the literal table-magic tokens GSUB/GPOS.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "L seed 2 offset 0x0c / L seed 4 offset 0x0c",
+      "exact_quote": "GSUB"
+    },
+    {
+      "claim": "At offset 0x0c the loser is uniformly the byte 0x47 ('G', start of GSUB/GPOS) while the winner is not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "47(G)x10"
+    },
+    {
+      "claim": "value_profile uses the CMP_MAP distance-bucket gradient as its comparison-solving feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback paragraph",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "The winner value_profile has no I2SRandReplace mutator; the loser value_profile_cmplog adds it, so I2S is the single technique delta.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators paragraph",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Lineage check is mandatory only when the winning mechanism is I2SRandReplace. Here the winner is value_profile (CMP_MAP gradient, no I2S mutator) and the loser is value_profile_cmplog (adds I2S); this is an I2S-anti branch where adding I2S regresses coverage, so the winner-enabling technique is the CMP_MAP gradient, not I2SRandReplace. No lineage query is required for a CMP_MAP-gradient attribution; I2S contribution would only appear in the LOSER lineage, not the winner's."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose script-dispatch switch routes a USE-block script via a CMP that value_profile_cmplog (with I2S) resolves as fast or faster than value_profile, showing I2S does not regress reaching the line-300 arm."
+  },
+  "weakest_evidence_point": "The claim that I2S over-commits the loser to the GSUB/GPOS and DFLT/latn literal arms is inferred from byte concentration and overlay, not from a loser lineage trace confirming I2S substitutions toward those literals.",
+  "confidence": "medium"
+}

@@ -1,0 +1,87 @@
+{
+  "branch_id": 5397,
+  "target": "harfbuzz",
+  "summary_one_line": "Input needs a valid sfnt header with a non-zero table count and a recognized 4-byte table tag so the array sanitize loop has elements to iterate.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed OpenType header: magic 00 01 00 00 at offset 0, a non-zero numTables/count field (offsets 0x04-0x05), and one of the literal 4-byte sfnt/AAT table tags (e.g. 'feat', 'trak', 'name', 'VORG') at offsets 0x0c-0x0f, so sanitize_shallow's check_array succeeds and count>0 makes the for-loop enter its body (true side).",
+      "why_winner_satisfies": "Winner-resolving seeds carry the 00 01 00 00 sfnt magic, a non-zero count byte at offset 0x05, and ASCII table tags at 0x0c-0x0f ('feat','trak','name'), the exact bytes whose CMP against harfbuzz's known-tag constants the I2S stage can satisfy by substitution.",
+      "why_loser_doesnt": "Loser-blocking seeds carry 00 in offsets 0x05-0x10 (count and tag region all zero), so the tag never matches a recognized table and count stays 0, taking the false side and never entering the loop body.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace: cmplog buffers the failing tag/count CMP operands per execution and substitutes the harfbuzz-side comparison constant (the table tag, the count check) directly into the input, planting the literal bytes that plain value_profile's Hamming-distance feedback cannot reliably assemble at these multi-byte tag offsets."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the loop-entry test of an array sanitize over font table records; the true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7",
+      "exact_quote": "Source line:     for (unsigned int i = 0; i < count; i++)\nGlobally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "Entering the loop body requires sanitize_shallow to succeed via len.sanitize and check_array; the body is only hit by the winner.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L42-L48, L55",
+      "exact_quote": "[W]   542        if (unlikely (!c->dispatch (arrayZ[i], std::forward<Ts> (ds)...)))"
+    },
+    {
+      "claim": "The 1-hop caller gates the loop on check_array(arrayZ, len), reached only by the winner.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L55",
+      "exact_quote": "return_trace (len.sanitize (c) && c->check_array (arrayZ, len)); <-- CALL"
+    },
+    {
+      "claim": "Winner seeds carry the 00 01 00 00 sfnt magic and an ASCII table tag ('feat') at offsets 0x0c onward.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id c62e53eef0209e96 offsets 0x00-0x0f",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 66 65 61 74   ......      feat"
+    },
+    {
+      "claim": "Another winner seed carries the 'trak' table tag at offsets 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 9c804af094eab4e9 offsets 0x00-0x0f",
+      "exact_quote": "0000: 00 01 00 00 00 10 20 20 20 20 20 20 74 72 61 6b   ......      trak"
+    },
+    {
+      "claim": "Loser-blocking seeds are all-zero across the count and tag region (offsets 0x05-0x10), so no recognized tag and count=0.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 6a9f1dbd630938ea offsets 0x00-0x0f",
+      "exact_quote": "0000: 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00   ................"
+    },
+    {
+      "claim": "The byte diff shows winner carries printable tag bytes at 0x0c-0x0f while loser carries 00 there.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  74(t)x4 43(C)x4 66(f)x1 6e(n)x1     00(.)x5 20( )x2                     DIFFER"
+    },
+    {
+      "claim": "At offset 0x05 the winner carries a non-zero count byte (mostly 01) while the loser carries 00.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0005",
+      "exact_quote": "0x0005  01(.)x8 10(.)x1 02(.)x1             00(.)x7                             DIFFER"
+    },
+    {
+      "claim": "value_profile_cmplog's mutator set adds I2SRandReplace on top of havoc/token, which value_profile lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "L212, L233",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "L212",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5397 --role W --fuzzer value_profile_cmplog --trial 1 --seed c62e53eef0209e96` and observed an I2S-floor dash row (mutation_op = -) at depth 16 of the 17-level ancestor chain, the characteristic unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "If value_profile resolves the branch at the same rate as value_profile_cmplog when the harness front-matter (sfnt magic + non-zero count + a recognized 4-byte table tag) is supplied pre-formed in the seed, showing the divergence is not driven by I2S supplying the multi-byte tag/count operands."
+  },
+  "weakest_evidence_point": "The byte diff is multi-tag and noisy (different winner seeds use feat/trak/name/VORG), so I cannot pin the divergence to a single fixed tag literal versus the more general 'any recognized tag + non-zero count' structural requirement.",
+  "confidence": "medium"
+}

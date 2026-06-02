@@ -1,0 +1,81 @@
+{
+  "branch_id": 6010,
+  "target": "harfbuzz",
+  "summary_one_line": "Buffer must shape as a Devanagari 0x0905 base followed by a second codepoint in the 0x0946-0x094B vowel set so the inner switch case matches.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A glyph buffer routed to HB_SCRIPT_DEVANAGARI whose current codepoint is 0x0905 and whose next codepoint (buffer->cur(1)) equals one of 0x0946/0x0949/0x094A/0x094B, so the inner switch on cur(1).codepoint takes the true arm at line 68.",
+      "why_winner_satisfies": "value_profile wins 8/10 and reaches the branch true side (avg hitcount 9 vs 0); its CMP_MAP gradient steadily preserves inputs whose CMP operands inch toward the required Devanagari codepoint constants, and the resolving seed carries 09 09 05 09 byte runs consistent with the 0x0905/0x094X 16-bit codepoints driving the switch.",
+      "why_loser_doesnt": "value_profile_cmplog resolves only 2/10 (avg hitcount 0); it pays I2SRandReplace per-execution cost and corpus churn on top of the same CMP_MAP gradient, and its blocking seeds stay on the false arm (line 68 L counts T=0/T=1 F=17/F=18) without assembling the 0x0905-then-0x094X pair.",
+      "mechanism_attribution": "Both involved fuzzers share the CMP_MAP gradient (Hamming/prefix distance feedback) that incrementally rewards inputs whose codepoint CMP operands approach the case constants; value_profile beats value_profile_cmplog because the winner relies on that gradient unburdened, whereas adding the I2S input-to-state substitution mutator (the single technique delta) does not help solve this nested 16-bit-codepoint switch and its overhead/corpus churn dilutes the loser's progress."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The only decisive pair is value_profile > value_profile_cmplog with technique delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile > value_profile_cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "The blocker is the inner switch case on the second Devanagari codepoint, line 68, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 68",
+      "exact_quote": "case 0x0946u: case 0x0949u: case 0x094Au: case 0x094Bu:"
+    },
+    {
+      "claim": "Matching in this shaper depends on buffer->cur(1).codepoint, the second glyph's codepoint, being a specific Devanagari constant.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 84",
+      "exact_quote": "matched = 0x0941u == buffer->cur (1).codepoint;"
+    },
+    {
+      "claim": "value_profile resolves the branch 8/10 with average hitcount 9 while value_profile_cmplog resolves 2/10 with average hitcount 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 aggregates",
+      "exact_quote": "avg hitcount on branch: winner=9  loser=0"
+    },
+    {
+      "claim": "The winner-resolving value_profile seed carries 0x0905/0x094X-consistent codepoint byte runs (09 09 05 09).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed b66b6d7aad45d988",
+      "exact_quote": "13 10 10 10 10 10 09 09 05 09 00 00 4a 09 00 00"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and is driven by the CMP_MAP gradient that preserves inputs whose CMP operands approach a match.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators/feedback",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace on top of the same edge plus CMP_MAP machinery the winner already has.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "The CMP_MAP gradient preserves an input whose CMP-operand pair is closer to matching than any seen before.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "Loser-blocking seeds stay on the false arm at the blocker line (true counts 0/1 vs large false counts).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L 68",
+      "exact_quote": "L  68  T=0 F=1  T=1 F=17  case 0x0946u: case 0x0949u: case 0x094Au: case 0x094Bu:  <-- BLOCKER"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (not I2SRandReplace), so lineage is not required, but I ran `python3 tools/db_query.py lineage --branch 6010 --role W --fuzzer value_profile --trial 2 --seed b66b6d7aad45d988` for corroboration: the winner chain is havoc/token-dominated (DwordAddMutator/WordAddMutator/TokenReplace etc.) consistent with a CMP_MAP-guided, non-I2S winner; one dash row appears at depth 32, which I treat as cross-fuzzer corpus-inheritance noise rather than evidence that the value_profile winner used I2S, since the winning mechanism is the shared gradient, not the I2S delta."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the same nested 16-bit-codepoint Devanagari switch in which value_profile_cmplog resolves the case as fast as or faster than value_profile across trials, showing that adding I2SRandReplace does not hurt and the CMP_MAP gradient is not the decisive advantage."
+  },
+  "weakest_evidence_point": "The byte-level link from the winner seed's 09 09 05 09 run to the specific 0x0905/0x094X codepoints is inferred from glyph-codepoint plausibility, not from a confirmed input-to-codepoint decode path in this harness.",
+  "confidence": "medium"
+}

@@ -1,0 +1,93 @@
+{
+  "branch_id": 5323,
+  "target": "harfbuzz",
+  "summary_one_line": "A short/degenerate input whose first 2 bytes route buffer->props.script to an RTL script tag (HB_SCRIPT_THAANA case), reached by byte mutation not CMP substitution.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)", "value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "An input whose leading bytes (offset 0x00-0x01) drive buffer->props.script to one of the RTL script tags handled by the switch in hb_script_get_horizontal_direction, taking the true (THAANA-group) case at line 594. The winning inputs are short, low-structure byte blobs (e.g. 2-byte `9b 07`, `97 07`, `b1 07`, `ab 07`) rather than well-formed font files with a valid sfnt header.",
+      "why_winner_satisfies": "Winner seeds are tiny/loosely-structured blobs found by plain byte havoc mutators (naive/value_profile leaf op ByteInterestingMutator,ByteIncMutator,ByteFlipMutator); their first two bytes vary across many values (offset 0x0000 has 07+ distinct bytes, offset 0x0001 is 07 in 10 of them), exploring the script-tag space until one lands on the RTL case. naive resolves 10/10 and value_profile 8/10.",
+      "why_loser_doesnt": "Loser seeds are well-formed OpenType inputs pinned to the sfnt header `00 01 00 00` at offset 0x00-0x03 with real table tags (GSUB/GPOS/MATH at offset 0x0c-0x0f), so their script never reaches the THAANA RTL case. cmplog/vpc converge on these CMP-satisfying font-structure literals via I2SRandReplace and rarely mutate the leading script bytes freely, blocking 8/10 and 9/10 respectively.",
+      "mechanism_attribution": "The winner is enabled by plain havoc byte mutation: naive and value_profile share the same havoc+token mutator stack and lack the input-to-state CMP-substitution stage. Input-to-state substitution actively hurts here: cmplog/vpc spend energy substituting CmpLogObserver operands to satisfy font-table magic comparisons, locking inputs into the `00 01 00 00`+tag structure and away from the free leading-byte mutation that lands the RTL script case. This is an anti-roadblock branch where the absence of CMP-driven substitution (havoc-only exploration) is the discriminating capability."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of a switch on the script tag, matching the HB_SCRIPT_THAANA RTL-script case.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-common.cc:594",
+      "exact_quote": "Source line:     case HB_SCRIPT_THAANA:"
+    },
+    {
+      "claim": "The switch dispatches on the script value derived from the buffer/font input.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L586",
+      "exact_quote": "switch ((hb_tag_t) script)"
+    },
+    {
+      "claim": "Both decisive pairs have the non-I2S fuzzer as winner: naive beats cmplog and value_profile beats value_profile_cmplog, both with delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "value_profile beats value_profile_cmplog with the I2S delta, the second decisive pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: value_profile > value_profile_cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "Winner seeds are tiny, low-structure blobs found by byte mutators; the smallest is a 2-byte naive seed.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 d4ae3009a925c920",
+      "exact_quote": "Seed 1 (id=d4ae3009a925c920, size=2 bytes, fuzzer=naive, trial=1, discovered_at=2s, mutation_op=ByteInterestingMutator,ByteIncMutator,ByteFlipMutator)"
+    },
+    {
+      "claim": "Loser seeds are well-formed OpenType inputs anchored to the sfnt header 00 01 00 00 with real table tags like GSUB.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 2 00347ed302ef3460 offsets 0x00-0x0f",
+      "exact_quote": "00 01 00 00 00 01 ee ff 00 30 00 20 47 53 55 42   .........0. GSUB"
+    },
+    {
+      "claim": "At the discriminating leading offsets winners spread across many byte values while losers are pinned to the sfnt header bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0000-0x0001",
+      "exact_quote": "0x0000  ab(.)x6 ed(.)x2 9b(.)x1 97(.)x1 +7u  00(.)x19 ff(.)x1"
+    },
+    {
+      "claim": "At offset 0x01 the loser bytes are uniformly 01 (the sfnt minor-version byte) while winners are 07 across most seeds.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0001",
+      "exact_quote": "0x0001  07(.)x10 ed(.)x2 00(.)x1 ea(.)x1 +3u  01(.)x19 00(.)x1"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace on top of naive's havoc/token stack, substituting CmpLogObserver operands into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "naive and value_profile use only the havoc + token stack with no I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "The winning side at the blocker switch is taken by inputs absent the GSUB-style font structure (the divergent-branch view shows W takes the true side while L stays false).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L594",
+      "exact_quote": "d=1   L 594  T=34 F=338  T=0 F=381  case HB_SCRIPT_THAANA:  <-- BLOCKER"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Winner is naive/value_profile, neither of which has I2SRandReplace, so claimed_mechanism is havoc-only and lineage I2S verification is not the discriminating signal. As corroboration I ran `python3 tools/db_query.py lineage --branch 5323 --role W --fuzzer naive --trial 1 --seed d4ae3009a925c920`: the leaf op is ByteInterestingMutator,ByteIncMutator,ByteFlipMutator (pure byte havoc). One anomalous dash row appears at depth 4, but per the MECHANISM CONTEXT caveat dash rows are I2S-exclusive only for cmplog/vpc (zero in 6000 naive/vp samples); a dash row in a naive chain is a corpus-import/provenance artifact, not I2S, and does not support an I2SRandReplace claim for this winner."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating the THAANA case behind a multi-byte magic comparison (e.g. requiring an exact sfnt header plus a specific script tag) in which cmplog/vpc resolve the branch as fast as or faster than naive/value_profile — showing I2S helps rather than hurts and the winner is not driven by free leading-byte havoc."
+  },
+  "weakest_evidence_point": "The causal claim that I2S energy-misallocation toward font-structure literals is what blocks cmplog/vpc, rather than a coincidental corpus difference, is inferred from seed structure and not directly observed in cmplog/vpc lineage.",
+  "confidence": "medium"
+}

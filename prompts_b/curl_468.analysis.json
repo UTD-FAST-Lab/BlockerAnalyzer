@@ -1,0 +1,99 @@
+{
+  "branch_id": 468,
+  "target": "curl",
+  "summary_one_line": "A well-formed scheme://host:port/path URL whose scheme parses to an FTP-family wildcard-capable handler that sets wildcard_enabled.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The leading bytes (offset 0x06 onward) must spell a recognizable URL scheme followed by '://127.0.0.1:9001/850' so curl parses a valid scheme and host:port, letting an FTP-family handler set data->set.wildcard_enabled (and thus data->state.wildcardmatch). The winner needs structured ASCII scheme/host literals, not random punctuation soup.",
+      "why_winner_satisfies": "Winner-resolving seeds carry intact scheme+authority literals: 'pop8://127' / 'MQTT://127' at offsets 0x06-0x18 and '.0.0.1:9001/850' continuing, with the byte-diff showing W concentrated on '/'(0x2f) at 0x0c, '127'/'.0.0.1' digits and ':' at 0x10-0x1b. This parses as a real URL, reaching the wildcard-enabled true branch.",
+      "why_loser_doesnt": "Loser-blocking seeds are degenerate runs of '%','.','-','+' punctuation (e.g. '%%%%!%e&%e$%dErF') with no scheme delimiter or host:port, so the URL parse never yields a wildcard-capable handler and wildcardmatch stays false (false branch taken 10/10).",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile's CMP_MAP. I2S substitution copies the exact comparison operands (scheme/host literal bytes curl's parser checks) directly into the input at the right offsets, synthesizing the well-formed scheme://host:port/path string that the CMP_MAP Hamming-gradient alone (value_profile) could not assemble within budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is value_profile_cmplog beating value_profile with technique delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The winner resolves 9/10 trials and the loser blocks 9/10, a strong divergence.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "prob_div",
+      "exact_quote": "prob_div=0.80  dur_div=16.50h  hit_div=7"
+    },
+    {
+      "claim": "The blocked branch is the wildcardmatch test in Curl_pretransfer.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "transfer.c:1499",
+      "exact_quote": "if(data->state.wildcardmatch) {"
+    },
+    {
+      "claim": "wildcardmatch is set from data->set.wildcard_enabled immediately before the blocker.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1498",
+      "exact_quote": "data->state.wildcardmatch = data->set.wildcard_enabled;"
+    },
+    {
+      "claim": "Winner-resolving seeds contain a well-formed scheme://host:port/path URL.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1",
+      "exact_quote": "70 6f 70 38 3a 2f 2f 31 32 37   ......pop8://127"
+    },
+    {
+      "claim": "Another winner seed carries the MQTT scheme prefix with the same authority.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 3",
+      "exact_quote": "4d 51 54 54 3a 2f 2f 31 32 37   ......MQTT://127"
+    },
+    {
+      "claim": "Loser-blocking seeds are degenerate punctuation runs with no scheme or host literal.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1",
+      "exact_quote": "43 64 55 43 25 25 25 25 21 25 65   .....CdUC%%%%!%e"
+    },
+    {
+      "claim": "The byte diff shows W concentrated on a '/' delimiter at offset 0x0c while L is punctuation.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  2f(/)x8 3f(?)x1                     25(%)x3 2e(.)x2 45(E)x1 2b(+)x1 +3u  DIFFER"
+    },
+    {
+      "claim": "The byte diff shows W carries the host digits/colon while L is unstructured.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0016",
+      "exact_quote": "0x0016  3a(:)x9                             64(d)x3 45(E)x1 42(B)x1 4e(N)x1 +4u  DIFFER"
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace on top of the CMP_MAP gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile (the loser) has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "The blocker true branch is taken only by the winner role and never by the loser role.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1499",
+      "exact_quote": "if(data->state.wildcardmatch) {  <-- BLOCKER"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 468 --role W --fuzzer value_profile_cmplog --trial 1 --seed 5fec9094ba291fe6` and observed an I2S-floor row (mutation_op = -) at depth 4 of the ancestor chain (1 dash row reported), the dash-floor signal exclusive to cmplog/vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the wildcard-enabling URL scheme/host literal is reachable by gradient alone shows value_profile resolving the wildcardmatch branch as often as value_profile_cmplog (no I2S advantage), refuting that I2S substitution of the scheme literal is the divergence driver."
+  },
+  "weakest_evidence_point": "The causal link from the parsed scheme literal to data->set.wildcard_enabled is inferred from the assignment at L1498 plus seed structure; the prompt does not expose the URL-parser code path that actually sets wildcard_enabled.",
+  "confidence": "medium"
+}

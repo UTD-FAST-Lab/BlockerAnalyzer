@@ -1,0 +1,87 @@
+{
+  "branch_id": 13311,
+  "target": "openthread",
+  "summary_one_line": "Input must carry the structured IPv6-fragment header bytes that set the kIp6FragmentReassembler receiver bit so the mask test takes the true branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed header prefix (winner seeds open with 78 66 10 .. and embed anchored constant runs ff ff fe fc / de ad 00 be ef / ff fe 00 fc) that drives the parser to register the kIp6FragmentReassembler TimeTicker receiver, so that mReceivers & Mask(kIp6FragmentReassembler) is non-zero at line 108.",
+      "why_winner_satisfies": "Winner cmplog seeds all share a stable structured prefix (78 66 10 at offsets 0x00-0x02) and identical anchored constant runs at offsets 0x19-0x1f (fd de ad 00 be ef 00) and 0x24-0x27 (ff fe 00 fc); these magic byte sequences match comparison operands the parser checks before subscribing the Ip6 fragment reassembler, letting execution reach and take the true side (W-only lines 109-111).",
+      "why_loser_doesnt": "Loser naive seeds instead open with db 62 5c and are dominated by undirected ASCII fill runs (44(D) and 30(0) repeated across offsets 0x0a-0x27); they never reconstruct the magic prefix/constant operands, so mReceivers never sets the fragment-reassembler bit and the true branch is never taken (loser blocked 8/10, T=0).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads intercepted CMP operands from the CmpLogObserver buffer and substitutes the expected magic bytes (header tag, ff fe 00 fc, de ad be ef constants) directly into the input at the matching offsets, deterministically placing the operands naive must stumble onto by blind havoc; the winning seed's ancestor chain contains an I2S-floor dash row, confirming an unwrapped I2SRandReplace find."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is a bitmask test on whether the IPv6 fragment reassembler receiver is subscribed.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "time_ticker.cpp:108:9",
+      "exact_quote": "if (mReceivers & Mask(kIp6FragmentReassembler))"
+    },
+    {
+      "claim": "Only the winner-resolving seeds take the true branch and execute the Ip6 fragment-reassembler tick body.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 108-111",
+      "exact_quote": "[W]   109      {\n[W]   110          Get<Ip6::Ip6>().HandleTimeTick();"
+    },
+    {
+      "claim": "Winner seeds share a structured header prefix at offsets 0x00-0x02 that losers lack.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x00-0x02",
+      "exact_quote": "0x0000  78(x)x9 77(w)x1                     db(.)x8 dc(.)x1 96(.)x1             DIFFER"
+    },
+    {
+      "claim": "Winner seeds carry an anchored constant run de ad ... be ef at offsets 0x1a-0x1e absent from losers.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x1a-0x1e",
+      "exact_quote": "0x001a  de(.)x10                            b4(.)x4 e3(.)x2 03(.)x1 ff(.)x1 +2u  PARTIAL"
+    },
+    {
+      "claim": "Winner seeds carry a stable ff fe 00 fc constant run at offsets 0x24-0x27 that losers do not reproduce.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x24-0x27",
+      "exact_quote": "0x0024  ff(.)x10                            34(4)x7 30(0)x2 76(v)x1             DIFFER"
+    },
+    {
+      "claim": "Loser naive seeds are dominated by undirected ASCII fill runs (44 'D' bytes).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 006f860b208405fe",
+      "exact_quote": "db 62 5c 00 00 00 ff 00 64 78 44 44 44 44 44 44   .b\\.....dxDDDDDD"
+    },
+    {
+      "claim": "Winner seeds open with the 78 66 10 structured prefix.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 04bb4b2850dea584",
+      "exact_quote": "78 66 10 00 00 00 10 2c 00 00 b0 00 ff ff fe fc   xf.....,........"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes one intercepted CMP operand for the other at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S capability and relies only on havoc/token mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog wins the pair decisively (10/10 resolved vs naive 2/10).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 13311 --role W --fuzzer cmplog --trial 1 --seed 04bb4b2850dea584`; the ancestor chain has 16 levels and the tool reported 'I2S-floor signal: 1 ancestor dash row(s) at depth 15' (mutation_op = - / ParentInfo-only), the I2S-floor signal under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where naive resolves the kIp6FragmentReassembler mask test at the same rate as cmplog despite the gate requiring multi-byte magic operands, showing the constant runs are reachable by blind havoc and not an I2S-gated feature."
+  },
+  "weakest_evidence_point": "The exact parser path mapping the magic header/constant bytes to the kIp6FragmentReassembler subscription is inferred from byte-diff anchoring, not read directly from the call-chain source.",
+  "confidence": "medium"
+}

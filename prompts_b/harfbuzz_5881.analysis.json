@@ -1,0 +1,87 @@
+{
+  "branch_id": 5881,
+  "target": "harfbuzz",
+  "summary_one_line": "Reach Indic matra-reordering with a pre-base matra under a non-Malayalam/non-Tamil script; broad havoc byte exploration finds it where I2S keeps anchoring Malayalam/Tamil.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "An input whose shaped buffer has script != HB_SCRIPT_MALAYALAM AND != HB_SCRIPT_TAMIL while still entering the pre-base-matra block (start+1<end && start<base), i.e. an Indic-classified syllable that is neither Malayalam nor Tamil. The false branch at L1149 requires the script to be any OTHER Indic script.",
+      "why_winner_satisfies": "naive resolves 10/10 with avg hitcount 74 on the branch. Its broad havoc/byte mutation explores a wide range of script-tag byte combinations: winning seeds carry diverse non-Malayalam/non-Tamil byte content (e.g. 'rafc', 'radupe', 'an-' ASCII runs and varied 0x0c/0xcb/0xbd fills) that drive the buffer into the false (non-Malayalam, non-Tamil) branch (L1149 W: T=0 F=29).",
+      "why_loser_doesnt": "cmplog blocks 9/10 with avg hitcount 0; at L1149 the loser only ever takes the TRUE side (L1149 L: T=14 F=0), meaning cmplog inputs keep producing Malayalam or Tamil scripts. cmplog's I2S substitution copies CMP operands (e.g. script-tag/codepoint constants) back into the input, repeatedly anchoring the buffer onto the Malayalam/Tamil branch rather than diversifying away from it.",
+      "mechanism_attribution": "The winner is naive, whose plain coverage-guided havoc/token mutation stack (havoc-only, no comparison introspection) performs broad undirected byte exploration of the script/codepoint bytes, hitting the common non-Malayalam/non-Tamil false branch. cmplog's added input-to-state operand substitution is counter-productive here: it pins CMP operand values that bias the buffer toward the Malayalam/Tamil true side, so the divergence is attributable to the loser's comparison-solving technique making it worse, not to any comparison the havoc-only winner had to solve."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked false side is the non-Malayalam/non-Tamil script branch at L1149.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L1149",
+      "exact_quote": "if (buffer->props.script != HB_SCRIPT_MALAYALAM && buffer->props.script != HB_SCRIPT_TAMIL)"
+    },
+    {
+      "claim": "The globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "naive is the winner and cmplog is the loser of the only decisive pair, with delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "naive resolves the branch in all trials while cmplog is blocked in nine.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive / cmplog rows",
+      "exact_quote": "naive                           10        0          0  winner (I2S vs cmplog)"
+    },
+    {
+      "claim": "The block requires entering the pre-base-matra region first.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1140",
+      "exact_quote": "if (start + 1 < end && start < base) /* Otherwise there can't be any pre-base matra characters. */"
+    },
+    {
+      "claim": "The winner takes the false (non-Malayalam/non-Tamil) side while the loser only takes the true side at L1149.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1149",
+      "exact_quote": "d=1   L1149  T=0 F=29  T=14 F=0  if (buffer->props.script != HB_SCRIPT_MALAYALAM && buffer..."
+    },
+    {
+      "claim": "The winner hits the branch 74 times on average while the loser never hits the resolving side.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "avg hitcount on branch",
+      "exact_quote": "avg hitcount on branch: winner=74  loser=0"
+    },
+    {
+      "claim": "Winning naive seeds carry diverse ASCII/byte content driving varied scripts.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving seed 4 (id=23226f58b250bfb5)",
+      "exact_quote": "61 64 75 70 65 01 00 00 20 00 7f 10 00 ff 01 87   adupe... ......."
+    },
+    {
+      "claim": "cmplog's mutator stack adds I2SRandReplace which substitutes one CMP operand for another at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive uses an undirected havoc + token mutation stack with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only, not I2SRandReplace, so no lineage query is mandated. The winner here is naive (the loser is cmplog), so the resolving technique is naive's plain havoc/token byte exploration; the I2S delta belongs to the losing arm and is the suspected cause of cmplog being WORSE (anchoring onto the Malayalam/Tamil true side), not a comparison the winner had to solve."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the script tag is selected by an exact integer compare against HB_SCRIPT_MALAYALAM/TAMIL and cmplog resolves the non-equal (false) branch at least as fast as naive across trials, which would show I2S helps rather than hinders reaching this branch."
+  },
+  "weakest_evidence_point": "The mechanism that pins cmplog onto the Malayalam/Tamil true side is inferred from I2S operand-substitution behavior and the L1149 T=14 F=0 loser pattern; no seed lineage directly shows an I2S substitution forcing a Malayalam/Tamil script tag.",
+  "confidence": "medium"
+}

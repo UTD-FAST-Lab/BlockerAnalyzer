@@ -1,0 +1,100 @@
+{
+  "branch_id": 5311,
+  "target": "harfbuzz",
+  "summary_one_line": "Reach a backward cluster-merge where the loop guard fails immediately (k=0 or first prior cluster differs), i.e. the false-exit of the cluster-backfill scan.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A font/shaping input that drives delete_glyphs_inplace through a backward cluster merge whose loop k && info[k-1].cluster == old_cluster fails on the first iteration (k reaches 0 or the immediately-prior glyph cluster already differs), taking line 633's false side. This requires deep, high-volume traversal of the glyph buffer (many merge_clusters invocations), which broad havoc byte mutation on a valid font reaches faster than I2S.",
+      "why_winner_satisfies": "naive resolves 10/10 with avg hitcount 24 on the branch and only 1.30h blocked; its broad havoc/token byte churn produces large multi-table inputs (101-byte seed of repeated runs like dc dc dc and 62 62 62) that drive merge_clusters 42x (W) and exercise the loop body until the guard falls false.",
+      "why_loser_doesnt": "cmplog resolves only 2/10, blocked 18.10h with hitcount 1; its CMP-buffer processing and I2SRandReplace substitution spend execution budget aligning comparison operands rather than growing buffer volume, so it reaches the loop far fewer times (merge_clusters L hits 6) and rarely drives the guard to its false exit.",
+      "mechanism_attribution": "The winning technique is plain naive havoc byte/word mutation: this branch has no integer/string CMP gate that I2S could solve, so cmplog's I2SRandReplace introspection is pure overhead and naive's faster, broader mutation reaches the data-volume-dependent loop-exit more often. Mechanism is havoc-only (absence of I2S helps, not its presence)."
+    },
+    {
+      "covers_pairs": ["grimoire>cmplog (grimoire_structural)"],
+      "what_input_feature": "A structurally well-formed multi-table font input that repeatedly invokes delete_glyphs_inplace's backward-merge path and reaches the line-633 loop's false exit. Grimoire's generalized token/gap splicing assembles the table-tag and feature structure (e.g. 'typ1', 'feats', 'sn-hans', 'vdsc') that keeps the shaper running long enough to hit the merge loop and exit it.",
+      "why_winner_satisfies": "grimoire resolves 9/10 (blocked 1, 6.10h) and its seeds (a732bc59..., d1a42223...) carry recognizable table/script tokens ('typ1', 'feats', 'sn-hans', 'vdsc', 'darfhdscpglh') produced by structural splicing of generalized corpus fragments, building inputs that traverse the cluster-merge code.",
+      "why_loser_doesnt": "cmplog resolves only 2/10 and stays blocked 18.10h; lacking the GeneralizationStage and Grimoire structural mutators it cannot recombine these token/gap structures, so its byte-level I2S substitution does not assemble the deep, valid table structure needed to repeatedly enter the merge loop.",
+      "mechanism_attribution": "The winning technique is grimoire structural mutation: GeneralizationStage plus the Grimoire splice/recurse mutators build grammar-free structural variants that exercise the cluster-merge path more reliably than cmplog's I2S-only stack. Mechanism is grimoire structural."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false-exit side of a backward cluster-merge loop at hb-buffer.cc:633.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-buffer.cc:633:25, false branch",
+      "exact_quote": "for (unsigned k = j; k && info[k - 1].cluster == old_cluster; k--)"
+    },
+    {
+      "claim": "The globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "line 7",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "naive resolves the branch 10/10 while cmplog blocks it 8/10 in the I2S pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 naive > cmplog",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "cmplog is the loser of the I2S pair, blocked for 18.10h with hitcount 1.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 loser",
+      "exact_quote": "avg duration blocked: winner=1.30h  loser=18.10h"
+    },
+    {
+      "claim": "Winner naive drives merge_clusters far more than loser cmplog (42 vs 6 invocations).",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "merge_clusters_impl",
+      "exact_quote": "42         6  hb_buffer_t::merge_clusters_impl(unsigned int, unsigned int)"
+    },
+    {
+      "claim": "A naive winner seed is large (101 bytes) and built by havoc/token mutators with repeated byte runs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1, naive trial 1",
+      "exact_quote": "size=101 bytes, fuzzer=naive, trial=1, discovered_at=25s, mutation_op=DwordAddMutator,CrossoverReplaceMutator,ByteIncMutator,QwordAddMutator,BytesInsertMutator,CrossoverInsertMutator,DwordInterestingMutator"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes CMP operands at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "grimoire resolves 9/10 while cmplog blocks 8/10 in the grimoire_structural pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 grimoire > cmplog",
+      "exact_quote": "Pair 2: grimoire > cmplog  [delta: grimoire_structural]"
+    },
+    {
+      "claim": "A grimoire winner seed carries structural table/script tokens produced by structural splicing.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 3, grimoire trial 1",
+      "exact_quote": "74 79 70 31 00 01 20 20 20 20 20 20 66 65 61 74   typ1..      feat"
+    },
+    {
+      "claim": "Grimoire adds a GeneralizationStage plus structural mutators that splice generalized token/gap structures.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire Mutators / stages",
+      "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+    },
+    {
+      "claim": "The single-technique delta separating grimoire from cmplog is generalization plus Grimoire mutators, both already having I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire Baseline relationship",
+      "exact_quote": "grimoire adds generalization + Grimoire mutators), not vs naive"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only, not I2SRandReplace, so no lineage check is required. In both decisive pairs cmplog (the I2S-bearing variant) is the LOSER, not the winner; the winners are naive (no I2S) and grimoire (structural). The branch is a data-volume-dependent loop exit at hb-buffer.cc:633 with no integer/string CMP gate for I2S to solve, so I2S introspection is overhead rather than the resolving mechanism. The pair_decision is multi_feature, so the second hypothesis legitimately carries the distinct mechanism grimoire structural; the consistency cross-check applies per-hypothesis here."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with an explicit integer/string comparison gate guarding entry to the cluster-merge loop on which cmplog (I2S) then resolves at least as fast as naive — showing the branch is in fact a CMP roadblock that I2S solves rather than a data-volume loop exit where I2S is overhead."
+  },
+  "weakest_evidence_point": "The claim that naive's larger buffers (vs cmplog) are what drives the line-633 false-exit is inferred from merge_clusters hit counts (42 vs 6) and seed sizes, not from a direct trace of the loop guard's first-iteration outcome.",
+  "confidence": "medium"
+}

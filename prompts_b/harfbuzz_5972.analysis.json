@@ -1,0 +1,87 @@
+{
+  "branch_id": 5972,
+  "target": "harfbuzz",
+  "summary_one_line": "A multi-glyph Thai consonant+mark byte sequence long enough to drive the above/below state machine to emit action==RD.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "An input containing a multi-glyph Thai sequence (a base consonant followed by mark glyphs) of sufficient length that, when run through the thai_above/below state machines, the resolved edge produces action==RD so the true branch at line 256 executes and line 257 (info[base] reshaping) is reached.",
+      "why_winner_satisfies": "Naive's winning seeds are large (128-236 bytes) and were grown by sequence-building byte mutators (BytesExpandMutator, BytesInsertCopyMutator, BytesCopyMutator, CrossoverInsertMutator), accumulating repeated mark-like byte runs; under the winner seed set the true side fires (line 256 T=11) and line 257 [W] is reached, i.e. naive built the long enough glyph sequence to reach the RD action.",
+      "why_loser_doesnt": "Cmplog's blocking seeds are short (21-126 bytes) and never take the true side (line 256 L T=0, all 15 hits are False), so the cmplog inputs lack the long multi-glyph Thai sequence; I2S substitution chases individual codepoint CMP operands rather than growing the glyph sequence, leaving cmplog blocked on the branch for 21.5h vs naive's 4.10h.",
+      "mechanism_attribution": "The winner is naive, which relies on its havoc + token byte-mutation stack (BytesExpand/Insert/Copy/Crossover) to grow the input into a long multi-glyph sequence that traverses the state machine to action==RD. The loser cmplog's only added technique (input-to-state CMP-operand substitution) does not help and is associated with the loser staying blocked: that substitution targets matched CMP operands at fixed offsets and does not build the longer glyph sequence the state machine needs, so naive's free sequence-growth havoc wins. The mechanism enabling the winner is havoc-only byte mutation."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of an action==RD test inside the Thai PUA shaping state-machine loop.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-shaper-thai.cc:256:9",
+      "exact_quote": "if (action == RD)"
+    },
+    {
+      "claim": "The action driving the branch is produced by the above/below state-machine edges, i.e. it depends on a traversed glyph sequence, not a single literal compare.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 247-253",
+      "exact_quote": "thai_action_t action = above_edge.action != NOP ? above_edge.action : below_edge.action;"
+    },
+    {
+      "claim": "The state-machine edges are indexed by the per-glyph mark type derived from the codepoint, so the action depends on a sequence of glyph codepoints across loop iterations.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 237 and 247",
+      "exact_quote": "thai_mark_type_t mt = get_mark_type (info[i].codepoint);"
+    },
+    {
+      "claim": "Under the winner seed set the true side fires and the line-257 reshape path is reached, marked W-only.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "line 257 [W]",
+      "exact_quote": "info[base].codepoint = thai_pua_shape (info[base].codepoint, action, font);"
+    },
+    {
+      "claim": "At the blocker line the winner takes the true side 11 times while the loser never does (T=0), so only the winner inputs reach action==RD.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 256",
+      "exact_quote": "d=1   L 256  T=11 F=26  T=0 F=15  if (action == RD)  <-- BLOCKER"
+    },
+    {
+      "claim": "Naive's winning seeds are large and were grown by sequence-building byte mutators rather than CMP substitution.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 4 id=b25527afd098ea61",
+      "exact_quote": "size=236 bytes, fuzzer=naive, trial=1, discovered_at=58585s, mutation_op=BytesSwapMutator,BytesRandSetMutator,ByteAddMutator,BytesInsertCopyMutator,BytesExpandMutator,BitFlipMutator,QwordAddMutator"
+    },
+    {
+      "claim": "Cmplog's blocking seeds are short, consistent with failure to grow the long multi-glyph sequence.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 id=37f8e71ac2ac9677",
+      "exact_quote": "size=21 bytes, fuzzer=cmplog, trial=1, discovered_at=163s, mutation_op=BytesInsertCopyMutator"
+    },
+    {
+      "claim": "The loser cmplog stays blocked far longer than the winner naive, despite cmplog adding I2S over naive.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 avg duration blocked",
+      "exact_quote": "avg duration blocked: winner=4.10h  loser=21.50h"
+    },
+    {
+      "claim": "The single technique difference between the loser cmplog and the winner naive is I2SRandReplace; naive has no I2S and uses only the havoc + token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "I2SRandReplace substitutes a CMP operand at matched offsets, a fixed-offset byte edit rather than sequence growth.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Lineage check not required: the decisive pair is naive>cmplog (I2S-anti), so the WINNER is naive, whose enabling mechanism is havoc-only byte mutation, not I2SRandReplace. I2SRandReplace is the loser cmplog's added technique here, so no winning-seed dash-row floor is expected or claimed."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating an action==RD-style outcome on a single fixed codepoint compare (rather than a multi-glyph sequence) where cmplog resolves it as fast as or faster than naive, showing the divergence is a CMP-operand gate that I2S solves rather than a sequence-length feature naive's havoc grows."
+  },
+  "weakest_evidence_point": "The claim that cmplog's short seeds reflect I2S over-fixating on codepoint compares rather than mere trial-to-trial variance rests on seed-size correlation, not direct lineage evidence of wasted I2S substitutions.",
+  "confidence": "medium"
+}

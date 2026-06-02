@@ -1,0 +1,75 @@
+{
+  "branch_id": 263,
+  "target": "curl",
+  "summary_one_line": "Input must contain a byte equal to a form-table escape character (0x22 '\"', 0x0D '\\r', or 0x0A '\\n') in the MIME part name/filename.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A byte in the escaped string (part name/filename) that equals one of the formtable first characters: '\"' (0x22), '\\r' (0x0D), or '\\n' (0x0A). Matching such a byte makes the inner loop find *p, leading the escape branch to be taken and the blocked false-exit of the table scan to be reached with a match.",
+      "why_winner_satisfies": "The winner-resolving vpc seed carries 0d (carriage return, a formtable key) at offset 0x20, and the winner reaches the escape path Curl_dyn_add(&db, *p + 1) at line 325 which is marked [W] (winner-only); on the blocker line 321 the winner takes the false side (F=2).",
+      "why_loser_doesnt": "The loser value_profile seeds are dominated by printable ASCII runs ('reee'/'rrrr'/'4444') with no 0x22/0x0D/0x0A escape characters, so the inner table scan always exhausts to *p==NULL and the escape branch (line 325) is never taken.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile's CMP_MAP; the byte comparison **p != *src is intercepted by cmplog, and I2SRandReplace substitutes the constant table operand (0x22/0x0D/0x0A) directly into the input position holding *src, planting the escape-trigger byte that value_profile's distance-bucket feedback cannot synthesize on its own."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the inner character-table scan comparing each form-table first character against the current source byte.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "mime.c:321",
+      "exact_quote": "for(p = table; *p && **p != *src; p++) <-- BLOCKER"
+    },
+    {
+      "claim": "The form table the scan iterates over holds the escape keys '\"', '\\r', '\\n'.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "mime.c:304-308",
+      "exact_quote": "static const char * const formtable[] = {\n[B]   305      \"\\\"%22\","
+    },
+    {
+      "claim": "The escape-add path at line 325 is reached only by the winner (winner-resolving only).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "mime.c:325",
+      "exact_quote": "[W]   325        result = Curl_dyn_add(&db, *p + 1);"
+    },
+    {
+      "claim": "On the blocker line 321 the winner takes the false branch side while it is otherwise globally blocked.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L321",
+      "exact_quote": "L 321  T=10 F=2  T=180 F=0  for(p = table; *p && **p != *src; p++)  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner-resolving seed contains byte 0x0d (carriage return, a formtable key) at offset 0x20.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0020",
+      "exact_quote": "0x0020  0d(.)x1                             34(4)x7 41(A)x2 40(@)x2 3f(?)x1 +3u  DIFFER"
+    },
+    {
+      "claim": "The loser value_profile seeds are dominated by printable-ASCII runs with no escape characters.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 57d10adc7ff1313d",
+      "exact_quote": "rrrro4044444444:"
+    },
+    {
+      "claim": "The winner value_profile_cmplog adds I2SRandReplace which the loser value_profile lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 263 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0a01b9b5d382aecb` and observed 1 I2S-floor dash row (mutation_op = -) at depth 8 of the 9-level ancestor chain, the floor signal for an unwrapped I2SRandReplace find under the current vpc build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the escape-trigger characters are removed from formtable (no constant operand to substitute) still shows value_profile_cmplog resolving the branch faster than value_profile, indicating the divergence is not driven by I2S substitution of the table constant."
+  },
+  "weakest_evidence_point": "The winner-resolving seed shows 0x0D (\\r) but not 0x22 or 0x0A at the differing offset, so the single concrete byte-level escape-trigger evidence rests on one match value rather than the full character set.",
+  "confidence": "medium"
+}

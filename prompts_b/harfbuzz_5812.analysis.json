@@ -1,0 +1,87 @@
+{
+  "branch_id": 5812,
+  "target": "harfbuzz",
+  "summary_one_line": "A glyph-category byte sequence forming a complete Indic vowel syllable that drives the Ragel state machine to the case-3 (vowel) reduction.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "Input bytes whose indic_category() values trace a long enough run through the syllable-machine transition table to reach the act=6 / case 3 vowel-syllable reduction (the te=p+1 then act=6 state followed by an EOF/transition that fires case 3). Requires a dense, mutation-friendly run of glyph-category bytes rather than a single exact magic operand.",
+      "why_winner_satisfies": "naive resolves 10/10 with avg hitcount 18 on the branch; its winning seeds are long (62-120 bytes) dense byte runs (e.g. repeated 0xcb, 0x19, 0x28 runs) produced by havoc/token stacks (CrossoverReplaceMutator, BytesCopyMutator, DwordAddMutator, TokenReplace, TokenInsert) that pile up category bytes and explore many syllable-machine states, hitting case 12 (act=6) and case 3 (W).",
+      "why_loser_doesnt": "cmplog resolves only 1/10 and is blocked 9/10 with avg hitcount 0; its blocking seeds are shorter (38-48 bytes) and its loser-blocking coverage never reaches case 12 / act=6 (L 590 T=0) nor case 3 (L 547 T=0), so the vowel-syllable reduction never fires. The I2S CMP-buffer substitution gives no purchase because the gate is a multi-byte state-machine traversal over a category table, not a single CMP operand to match-and-substitute.",
+      "mechanism_attribution": "This is an anti-I2S branch: the WINNER is naive, which has no comparison-solving. naive wins by plain havoc + token byte mutation (havoc-only) that lengthens and diversifies the category-byte run; cmplog's per-execution CMP interception and operand-substitution mutator add cost and steer mutation toward exact operand matches that do not help traverse the Ragel transition table, so cmplog spends 21.4h blocked vs naive's 2.8h."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is naive>cmplog with delta I2S; naive is the winner and cmplog the loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "naive resolves all 10 trials with a positive average hitcount on the branch while cmplog stays blocked with zero hitcount.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 stats",
+      "exact_quote": "avg hitcount on branch: winner=18  loser=0"
+    },
+    {
+      "claim": "cmplog is blocked far longer than naive, evidence of wasted effort rather than a benefit from I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 stats",
+      "exact_quote": "avg duration blocked: winner=2.80h  loser=21.40h"
+    },
+    {
+      "claim": "The blocker is case 3 of the Indic syllable-machine, the vowel-syllable reduction.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L547-549",
+      "exact_quote": "{{p = ((te))-1;}{ found_syllable (indic_vowel_syllable); }}"
+    },
+    {
+      "claim": "Resolving the branch requires the act=6 transition (case 12) which is hit only by the winner.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L590",
+      "exact_quote": "d=1   L 590  T=19 F=188  T=0 F=169  case 12:"
+    },
+    {
+      "claim": "The loser never takes the true side of the case-3 blocker branch.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L547",
+      "exact_quote": "d=1   L 547  T=14 F=193  T=0 F=169  case 3:  <-- BLOCKER"
+    },
+    {
+      "claim": "The winner seeds are long dense byte runs produced by havoc and token mutators with no I2S.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 4 id=4a133dac9a601ab6",
+      "exact_quote": "mutation_op=ByteIncMutator,WordInterestingMutator,DwordInterestingMutator,CrossoverReplaceMutator"
+    },
+    {
+      "claim": "Branch arming depends on the glyph indic_category() value being inside the per-state key span, a multi-byte table traversal not a single CMP operand.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L500-501",
+      "exact_quote": "_keys[0] <=( info[p].indic_category()) &&"
+    },
+    {
+      "claim": "naive has no I2S; its mutators are the havoc+token stack only.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a CMP operand at matching byte offsets, a mechanism suited to exact operand gates not state-machine traversal.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Winner is naive (delta I2S, ANTI direction), so claimed_mechanism is havoc-only, NOT I2SRandReplace; lineage I2S-floor verification does not apply because the winning fuzzer has no CMP buffer and no dash-row mutator. The hypothesis is that I2S actively hurts cmplog, so no I2S contribution is claimed for the winner."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the case-3 vowel-syllable reduction is reached only after an exact multi-byte magic operand compare: if cmplog then resolves it faster than naive, the I2S-anti story (state-machine traversal beats operand substitution) is refuted."
+  },
+  "weakest_evidence_point": "The exact byte-level path through the Ragel transition table that fires act=6 then case 3 is inferred from coverage counts, not directly decoded from the winning seed bytes.",
+  "confidence": "medium"
+}

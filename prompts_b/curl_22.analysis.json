@@ -1,0 +1,81 @@
+{
+  "branch_id": 22,
+  "target": "curl",
+  "summary_one_line": "A parseable URL with valid scheme/host/port so a real connection is opened and cached, making the connection-cache hash non-empty",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A structurally valid URL: leading length/type header bytes followed by a recognizable scheme and a host:port authority (e.g. a 'po...://...:9001/...' form) plus an 'HTTP/...' protocol token, so curl actually parses, connects, and stores a connectdata in connc->hash. Only then is he non-NULL at conncache.c:369 and the true (blocked) side taken.",
+      "why_winner_satisfies": "Winner-resolving seeds carry a coherent connect-able structure: bytes at the URL offsets are concentrated runs spelling a scheme/host/port ('po%.://12%/0((.1:9001/850') and a 'GHTTP/27.0' token, and the branch is hit 332 (vpc) / 45 (cmplog) times — a real connection was cached and the close-all loop iterated it.",
+      "why_loser_doesnt": "Loser-blocking seeds are short (32-36 byte) garbled runs of '+++++', '%%%%', 'AAAA' etc. that never form a valid URL authority; no connection is established, connc->hash stays empty, and he is NULL so only the false branch (return NULL) is taken (hitcount 13 / 1).",
+      "mechanism_attribution": "cmplog/vpc add I2SRandReplace, which reads the post-execution CmpLogObserver buffer and substitutes one CMP operand for the other at matching input offsets, solving the scheme/protocol comparison checkpoints in curl's URL parser so a connectable URL is synthesized; naive and value_profile lack I2SRandReplace and must hit those literal comparisons by chance, so they rarely build a cached connection."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is the while(he) loop guard in conncache_find_first_connection, which iterates the connection-cache hash.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "conncache.c:369",
+      "exact_quote": "while(he) {"
+    },
+    {
+      "claim": "Taking the true side requires he non-NULL, which only happens when the connection-cache hash holds a cached connection bundle.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "conncache.c:368-371",
+      "exact_quote": "bundle = he->ptr;"
+    },
+    {
+      "claim": "Winner-resolving seeds carry a coherent URL/protocol structure with scheme, host:port and an HTTP token.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 32d10b449c4075ee",
+      "exact_quote": "70 6f 25 00 3a 2f 2f 31 32 25"
+    },
+    {
+      "claim": "The winning seed contains an HTTP protocol token.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 32d10b449c4075ee offset 0x24",
+      "exact_quote": "47 48 54 54 50 2f 32 37 2e 30 2e 2f"
+    },
+    {
+      "claim": "The winner hits the branch far more often than the loser (332 vs 13 for the vpc pair), consistent with a connection actually being cached and iterated.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 hitcount",
+      "exact_quote": "avg hitcount on branch: winner=332  loser=13"
+    },
+    {
+      "claim": "Loser-blocking seeds are short garbled byte runs that do not form a valid URL.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00182ecc311b5f0b",
+      "exact_quote": "00 01 00 00 00 19 70 6b 2b 2b 2b 2b 2b 2a 2b 2b"
+    },
+    {
+      "claim": "At URL offsets the winner bytes are concentrated structural runs (e.g. '/' x14) while loser bytes are scattered '%'/'+' noise, evidence the dataflow into the parser differs.",
+      "cited_section": "BYTE DIFF (W vs L at common offsets)",
+      "cited_locator": "offset 0x0c",
+      "exact_quote": "2f(/)x14 39(9)x2 4a(J)x1            25(%)x5 2b(+)x3 2e(.)x3 45(E)x2 +7u  DIFFER"
+    },
+    {
+      "claim": "cmplog and vpc add the I2SRandReplace mutator that substitutes one intercepted CMP operand for the other at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive and value_profile do not have I2SRandReplace, so they cannot perform input-to-state substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 22 --role W --fuzzer cmplog --trial 1 --seed 32d10b449c4075ee`; the 25-level ancestor chain contains 2 I2S-floor dash rows (mutation_op = -) at depth 23 and 24, direct lower-bound evidence of an I2SRandReplace find in the winning seed's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose URL-parser CMP checkpoints are removed (or whose connection is cached regardless of input bytes) showing no cmplog/vpc advantage over naive/value_profile at the while(he) branch."
+  },
+  "weakest_evidence_point": "The exact CMP checkpoint(s) in curl's URL parser that I2S solves are inferred from seed structure and the call chain, not directly observed in the CMP buffer.",
+  "confidence": "medium"
+}

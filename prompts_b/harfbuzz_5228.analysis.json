@@ -1,0 +1,81 @@
+{
+  "branch_id": 5228,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry the 'GDEF' tag plus a recognized version (major 1 or 2) so the switch dispatches to a real LigCaretList instead of the Null default.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed GDEF table: the four ASCII bytes 'GDEF' at offset 0x0c-0x0f and a recognized major version (0x0001 at offset 0x00-0x01) routing the switch (u.version.major) to case 1 (or case 2), avoiding the default Null(LigCaretList) branch.",
+      "why_winner_satisfies": "All winner-resolving seeds carry 47 44 45 46 ('GDEF') at offsets 0x0c-0x0f and 00 01 at offsets 0x00-0x01, so the version-major switch hits case 1/case 2 (line 730 W shows T=17 F=3; line 732 W shows T=3 F=17) and the LigCaretList sanitize/dispatch path runs (W hits on OT::LigCaretList::sanitize = 35, L = 0).",
+      "why_loser_doesnt": "Loser-blocking seeds lack the 'GDEF' tag and the 00 01 version at those offsets (offset 0x0c L bytes are 00/01/20/2c..., offset 0x00 L bytes are 00/e0/05/87...), so the table is not recognized, the switch falls to default and returns Null (line 734 L shows T=20 F=0), and the GDEF sanitize functions are never invoked (L hits = 0 across all GDEF sanitize functions).",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver buffer from the tag/version comparisons in the GDEF sanitize path and substitutes the exact expected operands ('GDEF', 0x0001) into the input at the matching offsets; naive and value_profile lack I2SRandReplace and cannot guess the 6-byte tag+version constraint by havoc/gradient alone."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of a switch on the GDEF table major version, returning Null instead of a real LigCaretList.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L729-L734",
+      "exact_quote": "switch (u.version.major) {"
+    },
+    {
+      "claim": "The blocked default arm returns Null(LigCaretList).",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6",
+      "exact_quote": "default: return Null(LigCaretList);"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the ASCII 'GDEF' tag at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 2, offset 0x0c-0x0f",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 47 44 45 46   ......      GDEF"
+    },
+    {
+      "claim": "At offsets 0x0c-0x0f every winner has the 'GDEF' bytes while losers differ, a concentrated dataflow signal.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "Winners hold version 00 01 at offsets 0x00-0x01; losers do not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0000",
+      "exact_quote": "0x0000  00(.)x19 4f(O)x1                    00(.)x4 e0(.)x2 05(.)x2 87(.)x1 +11u  PARTIAL"
+    },
+    {
+      "claim": "When the switch is resolved, the GDEF/LigCaretList sanitize path executes for winners but never for losers.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "OT::LigCaretList::sanitize",
+      "exact_quote": "35         0  OT::LigCaretList::sanitize(hb_sanitize_context_t*) const"
+    },
+    {
+      "claim": "The loser takes the default arm (T=20) while the winner reaches case 1/case 2.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 734",
+      "exact_quote": "d=1   L 734  T=0 F=20  T=20 F=0  default: return Null(LigCaretList);  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which scans the input for a CMP operand and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "picks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace, so it cannot perform exact operand substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5228 --role W --fuzzer cmplog --trial 1 --seed 13b375b9eff5c760` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 10 and 11 of the ancestor chain, the lower-bound signal for an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on the 'GDEF'/version switch in which naive resolves the default-vs-case-1 branch at the same rate as cmplog, showing havoc alone can satisfy the tag+version constraint without I2S substitution."
+  },
+  "weakest_evidence_point": "The byte-diff evidence shows 'GDEF' and version 00 01 are present in winners but does not directly prove the CmpLogObserver intercepted those exact comparisons; the dash-row floor is a lower-bound, not a literal I2SRandReplace tag.",
+  "confidence": "high"
+}

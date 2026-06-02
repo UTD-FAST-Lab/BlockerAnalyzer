@@ -1,0 +1,69 @@
+{
+  "branch_id": 13320,
+  "target": "openthread",
+  "summary_one_line": "Input must encode the IPv6 next-header byte equal to kProtoFragment (0x2c) so the extension-header switch dispatches to the Fragment case.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A next-header field byte equal to kProtoFragment (44 = 0x2c) reaching the `switch (aNextHeader)` so the `case kProtoFragment:` true side at ip6.cpp:894 is taken; in the winner seeds this manifests as 0x2c at offset 0x07.",
+      "why_winner_satisfies": "Every cmplog winner seed carries 2c at offset 0x07 (9 of 10 winners), exactly the kProtoFragment switch literal, and the winners hit the blocker true side (T=19) while loser seeds never reach it (T=0).",
+      "why_loser_doesnt": "naive loser seeds carry 00 or fe at offset 0x07 (never 0x2c), so aNextHeader never equals kProtoFragment; the loser stays on the false side at line 894 (T=0 F=199) and instead spins the kProtoHopOpts case (T=179).",
+      "mechanism_attribution": "cmplog intercepts the integer compare `aNextHeader == kProtoFragment` via __sanitizer_cov_trace_cmp and records the constant 0x2c in the CmpLogObserver buffer; I2SRandReplace then substitutes 0x2c into the next-header offset, a discrete switch literal that naive's blind byte havoc rarely lands."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is the kProtoFragment case arm of the extension-header switch.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "ip6.cpp:894",
+      "exact_quote": "case kProtoFragment: <-- BLOCKER"
+    },
+    {
+      "claim": "The branch sits inside a switch dispatched on the aNextHeader value.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "ip6.cpp:888",
+      "exact_quote": "switch (aNextHeader)"
+    },
+    {
+      "claim": "Winner cmplog seeds carry byte 0x2c at offset 0x07 (kProtoFragment = 44), the loser seeds do not.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0007",
+      "exact_quote": "0x0007  2c(,)x9 00(.)x1                     00(.)x9 fe(.)x1                     PARTIAL"
+    },
+    {
+      "claim": "Winner seeds take the kProtoFragment true side while loser seeds never reach it.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L894",
+      "exact_quote": "d=1   L 894  T=19 F=76  T=0 F=199  case kProtoFragment:  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for a logged CMP operand and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mutator and only blind byte/token havoc.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog resolves the branch in all 10 trials while naive blocks in 8 of 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "subject 21",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 13320 --role W --fuzzer cmplog --trial 1 --seed 04bb4b2850dea584` and observed exactly one I2S-floor dash row (mutation_op = -) at depth 15 of the 16-level ancestor chain, the lower-bound signal of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose next-header switch literal is replaced by a value cmplog cannot intercept (e.g. computed at runtime) showing cmplog losing its advantage over naive, or naive resolving the kProtoFragment case as fast as cmplog despite the 0x2c literal compare being present."
+  },
+  "weakest_evidence_point": "The 0x2c-at-offset-0x07 mapping is inferred from the winner byte-diff concentration; the harness/header layout that fixes the next-header field at offset 0x07 is not directly shown in the prompt, so the exact offset of the kProtoFragment compare is the most uncertain claim.",
+  "confidence": "high"
+}

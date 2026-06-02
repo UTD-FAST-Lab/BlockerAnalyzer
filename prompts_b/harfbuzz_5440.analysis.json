@@ -1,0 +1,113 @@
+{
+  "branch_id": 5440,
+  "target": "harfbuzz",
+  "summary_one_line": "A valid SFNT font with parseable magic and a 'loca' table tag so glyf->get_extents resolves a glyph and returns true.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Multi-byte font/table magic literals at the input head (e.g. the 'loca' FOURCC table tag at offset 0x0c-0x0f and an SFNT version/magic at 0x00-0x03) that the parser compares verbatim before glyf->get_extents can read glyph outlines.",
+      "why_winner_satisfies": "The vpc winner-resolving seed carries 'loca' literally at 0x0c-0x0f (6c 6f 63 61) and 'typ1' at 0x00-0x03, exact byte runs that satisfy the equality comparisons gating the table parse, and its ancestor chain shows an I2S-floor dash row.",
+      "why_loser_doesnt": "value_profile seeds carry no I2S stage, so they never substitute a logged comparison operand into the input; at offset 0x0c the loser bytes are scattered (47(G), 00, 01, 2c) rather than the 'loca' tag, so the table comparison fails and glyf returns no extents.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer, finds the bytes matching one operand of the table-tag comparison, and substitutes the expected 'loca'/magic operand at that offset; value_profile lacks I2SRandReplace so it cannot land the multi-byte literal."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "The same concentrated magic/table-tag literals at offsets 0x00-0x0f, reached via a Hamming/prefix-distance gradient over the multi-byte comparison rather than by direct substitution.",
+      "why_winner_satisfies": "vpc adds the CMP_MAP gradient: a near-match input that gets the table-tag comparison closer than any seen pair adds a new CMP_MAP bucket and is preserved, ratcheting toward the 'loca'/magic literal that unlocks glyf->get_extents.",
+      "why_loser_doesnt": "plain cmplog has no CMP_MAP bucket feedback, so partial-prefix progress on the multi-byte comparison earns no coverage credit and is discarded; cmplog resolved only 1/10 trials versus vpc's 10/10.",
+      "mechanism_attribution": "value_profile's CMP_MAP records a matching-prefix-length bucket per comparison PC, rewarding inputs that approach the table-tag literal byte-by-byte; combined with I2S in vpc this gives a gradient cmplog alone lacks."
+    },
+    {
+      "covers_pairs": ["grimoire>cmplog (grimoire_structural)"],
+      "what_input_feature": "A structurally valid font header where the table-tag/magic token runs ('true', 'loca', 'ttcf') are preserved as generalised structural units while surrounding bytes vary.",
+      "why_winner_satisfies": "grimoire winner seeds repeatedly carry 'true' at 0x00-0x03 (74 72 75 65) plus 'loca' and a 'ttcf' TrueType-collection tag, consistent with GeneralizationStage gapping the variable bytes and Grimoire mutators splicing the preserved token runs to keep the parse path valid.",
+      "why_loser_doesnt": "cmplog has no GeneralizationStage or Grimoire structural mutators, so it cannot abstract the magic/tag tokens into reusable structural units and reassemble a valid header; it resolved only 1/10 trials.",
+      "mechanism_attribution": "grimoire's GeneralizationStage replaces concrete byte runs with <GAP> placeholders and the Grimoire structural mutators recombine these generalised token/gap structures, letting it rebuild a header that keeps the 'loca'/magic literals intact past the glyf gate."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the glyf->get_extents call whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6, L7",
+      "exact_quote": "if (ot_face->glyf->get_extents (font, glyph, extents)) return true;"
+    },
+    {
+      "claim": "vpc beats value_profile decisively with the I2S delta (10/10 vs 0/10).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "vpc beats cmplog decisively with the value_profile delta (10/10 vs 1/10).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "grimoire beats cmplog decisively with the grimoire_structural delta (9/10 vs 1/10).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 3",
+      "exact_quote": "Pair 3: grimoire > cmplog  [delta: grimoire_structural]"
+    },
+    {
+      "claim": "The vpc winner seed carries the 'loca' table tag and a 'typ1' header literal at the input head.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 (vpc), offset 0x00 and 0x0c",
+      "exact_quote": "74 79 70 31 00 02 20 20 00 01 00 01 6c 6f 63 61   typ1..  ....loca"
+    },
+    {
+      "claim": "W bytes are concentrated on the 'loca' tag at offset 0x0c-0x0f while L bytes are scattered.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  6c(l)x12                            47(G)x9 00(.)x2 01(.)x1 2c(,)x1 +7u  DIFFER"
+    },
+    {
+      "claim": "I2SRandReplace substitutes a logged CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace stage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile's CMP_MAP rewards inputs whose comparison operands get closer to matching, preserving them as corpus.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "cmplog lacks the CMP_MAP bucket feedback that value_profile and vpc add.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation",
+      "exact_quote": "each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance\nbucket)"
+    },
+    {
+      "claim": "grimoire's GeneralizationStage replaces concrete byte runs with gaps and structural mutators recombine them.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire Mutators / stages",
+      "exact_quote": "`GeneralizationStage`\nreplaces concrete byte runs in a corpus entry with `<GAP>` placeholders"
+    },
+    {
+      "claim": "grimoire winner seeds carry the 'true' literal at the input head.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 2 (grimoire), offset 0x00",
+      "exact_quote": "74 72 75 65 00 01 20 20 20 20 20 20 6c 6f 63 61   true..      loca"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5440 --role W --fuzzer value_profile_cmplog --trial 1 --seed d862f87dd0cadddf` and observed exactly 1 I2S-floor dash row (mutation_op = -) at depth 12 (ancestor e0a5b09f80625fb6) of the 13-level chain, confirming I2S contribution under the current logging-bug build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness that gates glyf->get_extents on the 'loca'/magic table-tag comparison where value_profile_cmplog and grimoire fail to resolve the branch above cmplog/value_profile rates, i.e. no decisive divergence appears at the multi-byte literal gate."
+  },
+  "weakest_evidence_point": "The grimoire_structural attribution rests on inferring GeneralizationStage behavior from preserved 'true'/'loca'/'ttcf' token runs in the seeds rather than from any direct generalization-stage trace in the prompt.",
+  "confidence": "medium"
+}

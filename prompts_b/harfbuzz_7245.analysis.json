@@ -1,0 +1,106 @@
+{
+  "branch_id": 7245,
+  "target": "harfbuzz",
+  "summary_one_line": "A well-formed TrueType font with valid glyf/loca tables so glyf->get_path succeeds, needing both CMP-solved table tags and gradient-guided offsets.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Exact byte literals identifying TrueType table tags / fixed sfnt header fields (e.g. the 'typ1'/'loca' tag bytes at offsets 0x00-0x0f) that string/integer CMPs in the table-directory parser compare against; these must match exactly before glyf->get_path can locate and walk a glyph outline and return true.",
+      "why_winner_satisfies": "Both winner-resolving seeds carry the ASCII run 'typ1' at offsets 0x00-0x03 and 'loca' at offsets 0x0c-0x0f, planted byte-for-byte, exactly the kind of operand that I2SRandReplace substitutes from the CMP buffer into the input.",
+      "why_loser_doesnt": "The value_profile loser-blocking seeds carry no such tag run at those offsets (zeros, 0xe0, 0x4c, 'G'/'P'/'O'/'S' fragments instead), and value_profile has no I2SRandReplace mutator to copy the compared tag bytes into place, so it stays on the blocked false side for all 10 trials.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer, finds the tag/header bytes the parser compared against, and substitutes them at the matching input offsets; value_profile lacks this mutator and cannot plant the exact tag literals, so only the vpc winner (which has I2S) clears the pair."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Multi-byte offset/length fields in the table directory and loca/glyf headers that must reach jointly-consistent values for the glyph parser to take the true branch; these are wide integer comparisons better solved by gradient-style progressive matching than by single-shot substitution.",
+      "why_winner_satisfies": "The winner seeds contain structured little-endian-looking dword fields (e.g. offsets 0x18-0x1f with 00 00 1f / 03) that a CMP_MAP Hamming-distance gradient can hill-climb toward, and vpc preserves each closer-matching intermediate as corpus.",
+      "why_loser_doesnt": "cmplog uses only edge-bucket feedback with no CMP_MAP gradient bucket, so partial progress on these wide multi-byte fields is not preserved as new coverage; cmplog stays blocked 10/10 with avg hitcount 0 on the branch.",
+      "mechanism_attribution": "value_profile's CMP_MAP records (PC, operand-distance bucket) and rewards inputs whose compared operands are closer to matching, giving a gradient over the wide offset/length fields; cmplog has no such gradient feedback, so vpc (which adds CMP_MAP) is needed to clear this pair over plain cmplog."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of glyf->get_path inside hb_ot_draw_glyph, i.e. a successful TrueType glyph outline parse.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-font.cc:467",
+      "exact_quote": "if (font->face->table.glyf->get_path (font, glyph, draw_session)) return;"
+    },
+    {
+      "claim": "vpc resolves while value_profile is the loser on the I2S-delta pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "vpc resolves while cmplog is the loser on the value_profile-delta pair.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the ASCII tag run 'typ1' and 'loca' in the opening bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 offsets 0x00-0x0f",
+      "exact_quote": "74 79 70 31 00 02 20 20 00 01 00 01 6c 6f 63 61   typ1..  ....loca"
+    },
+    {
+      "claim": "Loser-blocking seeds begin with unrelated bytes, not a TrueType tag run.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 offsets 0x00-0x0f",
+      "exact_quote": "fe ff ff ff f4 01 e0 e0 20 00 00 00 01 20 e0 6a   ........ .... .j"
+    },
+    {
+      "claim": "The opening offsets where the tag literals live differ between W and L with W concentrated on the tag bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  6c(l)x2                             47(G)x9 00(.)x2 01(.)x1 2c(,)x1 +7u  DIFFER"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes a compared operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile's CMP_MAP rewards inputs whose compared operands are closer to matching, giving a gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "cmplog uses the same edge-bucket signal as naive with the CMP buffer consumed by the mutator, not by feedback (no CMP_MAP gradient).",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Feedback",
+      "exact_quote": "The CMP buffer is\nconsumed by the mutator, not by feedback."
+    },
+    {
+      "claim": "cmplog stays blocked all 10 trials with zero hits on the branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 loser line",
+      "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "A winning vpc seed's ancestor chain contains an I2S-floor dash row.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 id=d862f87dd0cadddf",
+      "exact_quote": "Seed 1 (id=d862f87dd0cadddf, size=90 bytes, fuzzer=value_profile_cmplog, trial=1"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 7245 --role W --fuzzer value_profile_cmplog --trial 1 --seed d862f87dd0cadddf`; the chain has 13 ancestor levels and the tool reported the I2S-floor signal: 1 dash row (mutation_op = -) at depth 12, characteristic of an unwrapped I2SRandReplace find in vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the same glyf parse gate where value_profile alone (no I2S) resolves the true branch at the same rate as vpc, showing the exact tag-literal substitution by I2S is not necessary."
+  },
+  "weakest_evidence_point": "The split between the I2S axis (exact tag literals) and the VP axis (wide offset/length gradient) is inferred from byte structure and mechanism, not from a direct measurement isolating which field each fuzzer solves.",
+  "confidence": "medium"
+}

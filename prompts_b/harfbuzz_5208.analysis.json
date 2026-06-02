@@ -1,0 +1,69 @@
+{
+  "branch_id": 5208,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry the literal 'MATH' table-tag FOURCC at offset 0x0c so the OT MATH parser reaches Coverage::get_coverage with a valid format.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Bytes at offset 0x0c-0x0f must equal the ASCII FOURCC 'MATH' (0x4d 0x41 0x54 0x48), the table tag that routes the harness into the OT MATH table sanitize/parse path which constructs Coverage objects and calls Coverage::get_coverage; without this exact 4-byte tag the MATH table is never selected and the false branch (a successfully-parsed coverage format 1-4) is never reached.",
+      "why_winner_satisfies": "All five winner-resolving seeds carry 'MATH' verbatim at offset 0x0c-0x0f (e.g. seed 04299261480ace96 shows '4d 41 54 48  MATH'), and the byte-diff shows offsets 0x0c-0x0f concentrated on M/A/T/H in W versus scattered bytes in L; cmplog/vpc's I2S substitution copies the literal table-tag operand seen in the tag comparison into the input.",
+      "why_loser_doesnt": "Loser-blocking seeds lack the 'MATH' tag at 0x0c-0x0f (e.g. naive seed 003817559785f774 is only 6 bytes; value_profile seeds carry unrelated bytes there), so they never enter the MATH parse path and Coverage::get_coverage is hit only via the default switch taking the true (NOT_COVERED) side, never the false side.",
+      "mechanism_attribution": "cmplog/vpc intercept the 4-byte table-tag comparison, record the constant 'MATH' operand into the CmpLogObserver buffer, and I2SRandReplace substitutes that literal at the matching input offset; naive and value_profile have no I2S mutator and must stumble onto the exact 32-bit FOURCC by chance, which they fail to do across all 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of the switch on the coverage format, reached only after a valid MATH table coverage is parsed.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 / L58",
+      "exact_quote": "default:return NOT_COVERED;"
+    },
+    {
+      "claim": "The blocker is reached through the MATH variants get_glyph_construction caller, i.e. the OT MATH table path.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L62 / L69",
+      "exact_quote": "unsigned int index = (this+coverage).get_coverage (glyph); <-- CALL"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal 'MATH' FOURCC at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 04299261480ace96 offset 0x0c",
+      "exact_quote": "00 01 00 00 00 01 20 20 20 20 20 20 4d 41 54 48   ......      MATH"
+    },
+    {
+      "claim": "At offsets 0x0c-0x0f the winner bytes concentrate on M/A/T/H while the loser bytes are scattered, marking these offsets as the informative dataflow signal.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  4d(M)x19 47(G)x1                    00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "A loser-blocking seed lacks the MATH tag and is too short to contain it.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 003817559785f774",
+      "exact_quote": "Seed 1 (id=003817559785f774, size=6 bytes, fuzzer=naive, trial=1, discovered_at=0s, mutation_op=ByteDecMutator,WordAddMutator):"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a recorded CMP operand (such as the table tag) into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, so the only difference enabling vpc over vp at this branch is the I2S substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5208 --role W --fuzzer cmplog --trial 1 --seed 04299261480ace96` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 25 and 26 of the 27-level ancestor chain, the lower-bound signal of an I2SRandReplace find under the current cmplog/vpc build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating Coverage::get_coverage behind a 4-byte 'MATH' tag where cmplog/vpc fail to resolve the false branch while naive/vp succeed, or where naive/vp resolve it as fast as cmplog, would refute the I2S-tag-substitution mechanism."
+  },
+  "weakest_evidence_point": "The exact CMP whose operand is the 'MATH' tag is inferred from the FOURCC byte concentration and the caller path rather than directly observed in a CmpLog dump, so the specific comparison driving I2S is uncertain.",
+  "confidence": "high"
+}

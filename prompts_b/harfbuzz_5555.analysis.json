@@ -1,0 +1,87 @@
+{
+  "branch_id": 5555,
+  "target": "harfbuzz",
+  "summary_one_line": "A valid sfnt header (00 01 00 00) with a GPOS/GSUB table tag at offset 0x0c so layout parsing reaches get_feature_variations()",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Input must be a well-formed OpenType/sfnt font: 4-byte sfnt version magic 00 01 00 00 at offset 0x00, followed by a table-directory entry whose 4-byte tag at offset 0x0c is the ASCII FOURCC 'GPOS' or 'GSUB'. Only a structurally valid GSUB/GPOS table lets shaping descend through find_variations_index -> get_feature_variations and execute the default arm at line 4283.",
+      "why_winner_satisfies": "Every winner-resolving seed begins with the exact sfnt magic 00 01 00 00 (offsets 0x00-0x03 hold 00 01 00 00 in all 20 W samples) and carries an ASCII table tag GPOS or GSUB at offset 0x0c (W concentrates 47 'G' x20, 50 'P'/53 'S', 4f 'O', 53 'S'/42 'B'). These magic/tag bytes are CMP-gated equality comparisons against the literal table tags, satisfied by I2S substitution.",
+      "why_loser_doesnt": "Loser-blocking seeds are short and structurally invalid: offset 0x0c carries scattered bytes (00/01/20/2c, +11 unique) with no GPOS/GSUB FOURCC, and the sfnt magic offsets 0x00-0x03 hold heterogeneous bytes (e0/05/87/0e...). Without the magic+tag the parser never reaches the version switch, so the default branch stays unhit and L blocks 10/10.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver operands from the sfnt-magic and FOURCC tag-table equality comparisons and substitutes the exact required literals (00 01 00 00, 'GPOS'/'GSUB') at the matching offsets in one mutation, jumping a multi-byte equality wall that naive/value_profile havoc cannot guess; the dash-row I2S floor in the winning cmplog seed's lineage confirms I2S participation."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of a switch on the table version major, reached only via the feature-variations lookup call chain.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L4278-L4283",
+      "exact_quote": "switch (u.version.major) {"
+    },
+    {
+      "claim": "Reaching the blocker requires descending from find_variations_index into get_feature_variations.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L4321",
+      "exact_quote": "return get_feature_variations ().find_index (coords, num_coords, index); <-- CALL"
+    },
+    {
+      "claim": "Winner seeds begin with the sfnt version magic 00 01 00 00.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 002c9ad92acce91b offset 0x00",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53"
+    },
+    {
+      "claim": "Winner seeds carry an ASCII GPOS table tag in the header region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0046235e61b8f998 offset 0x0c",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 47 50 4f 53   ......      GPOS"
+    },
+    {
+      "claim": "A winner seed carries an ASCII GSUB table tag instead, both tags satisfy the same gate.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 001eeb5a047b00d0 offset 0x0c",
+      "exact_quote": "0000: 00 01 00 00 00 04 00 ff 00 30 00 20 47 53 55 42   .........0. GSUB"
+    },
+    {
+      "claim": "At offset 0x0c the winner bytes are concentrated on G/P/S (table-tag FOURCC) while loser bytes are scattered with no FOURCC.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds are short and lack the sfnt magic and table tags.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 003817559785f774 (6 bytes)",
+      "exact_quote": "0000: 87 0e 0d 0e 22 0e                                 ....\"."
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a matched CMP operand at the offsets where the other operand appears.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the vpc>vp pair isolates the same I2S substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs differ by the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5555 --role W --fuzzer cmplog --trial 1 --seed 002c9ad92acce91b` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 29 and 30 of the 31-level ancestor chain, lower-bound evidence of I2SRandReplace contribution under the current build"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating the default arm behind the sfnt magic + GPOS/GSUB FOURCC equality where naive/value_profile resolve it at the same rate as cmplog/vpc, showing the multi-byte tag wall is not what separates I2S from non-I2S."
+  },
+  "weakest_evidence_point": "Whether the FOURCC tag at offset 0x0c is itself the CMP-gated wall versus merely a downstream correlate of a deeper table-directory length/offset check that I2S actually solves.",
+  "confidence": "high"
+}

@@ -1,0 +1,100 @@
+{
+  "branch_id": 6858,
+  "target": "harfbuzz",
+  "summary_one_line": "A well-formed glyf/loca font with a valid in-range glyph id so gid < num_glyphs takes the false branch into get_points.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Input must carry valid font-table magic/tag bytes (e.g. a 'typ1' sfnt version word and a 'loca' table tag) so the loca/glyf tables parse and num_glyphs becomes large enough that a chosen gid is in range, letting gid >= num_glyphs evaluate false.",
+      "why_winner_satisfies": "The vpc winner seeds open with the literal bytes 74 79 70 31 ('typ1') and contain 6c 6f 63 61 ('loca') at offset 0x0c — exact table-identifier byte sequences that I2SRandReplace plants from intercepted CMP operands so the table directory parses and num_glyphs is populated.",
+      "why_loser_doesnt": "The value_profile loser lacks I2SRandReplace, so it never substitutes the exact 'typ1'/'loca' identifier bytes; its blocking seeds instead start with bytes like fe ff ff ff or e0 17 00 00 that do not form the table magic, leaving the glyph table unparsed and gid always >= num_glyphs (true branch).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer, finds where the parser compared the input against the 'typ1'/'loca' identifiers, and substitutes the exact matching operand bytes into the input — value_profile has no such substitution stage, so vpc's I2S half is the technique that distinguishes the winner from the value_profile loser."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Beyond the literal table tags, the input must drive the glyph-count / offset integer comparisons close enough to a valid in-range gid that the parser accepts the structure; this is the gradient-solvable numeric portion (num_glyphs and offset fields) rather than the exact-literal portion.",
+      "why_winner_satisfies": "The vpc winner additionally exercises the CMP_MAP gradient: its avg hitcount on the false-branch path is 2 vs 0 for the cmplog loser, and it reaches the in-range gid so get_points runs (W hits 2 on the enclosing function), indicating the Hamming/prefix-distance feedback steered the numeric fields toward a valid count.",
+      "why_loser_doesnt": "The cmplog loser has no CMP_MAP gradient feedback (it only buffers operands for I2S), so it cannot preserve inputs that get progressively closer on the num_glyphs/offset integer comparisons; it stays blocked 10/10 with avg hitcount 0 on the branch and never takes the false side.",
+      "mechanism_attribution": "value_profile's CMP_MAP writes a (PC, operand-distance bucket) entry per CMP and rewards inputs whose operands are closer to matching, giving a hill-climbing gradient on the numeric glyph-count/offset comparisons that plain cmplog (I2S substitution only, no distance feedback) lacks — so vpc's value_profile half is what distinguishes the winner from the cmplog loser."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is gid >= num_glyphs and the winner takes the false side to proceed into get_points.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "glyf.hh:195",
+      "exact_quote": "if (gid >= num_glyphs) return false;"
+    },
+    {
+      "claim": "Two decisive pairs exist: vpc beats value_profile on the I2S axis and beats cmplog on the value_profile axis.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26-L41",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "The value_profile axis pair is vpc > cmplog.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26",
+      "exact_quote": "--- Pair 1: value_profile_cmplog > cmplog  [delta: value_profile] ---"
+    },
+    {
+      "claim": "The vpc winner seeds carry the literal 'typ1' sfnt-version word at offset 0x00 and the 'loca' table tag at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed d862f87dd0cadddf offsets 0x00-0x0f",
+      "exact_quote": "74 79 70 31 00 02 20 20 00 01 00 01 6c 6f 63 61   typ1..  ....loca"
+    },
+    {
+      "claim": "The value_profile loser blocking seeds do not begin with the table magic, starting instead with fe ff ff ff.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 00546490999c9c0b offset 0x00",
+      "exact_quote": "fe ff ff ff f4 01 e0 e0 20 00 00 00 01 20 e0 6a"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes the other CMP operand at offsets where the input matches one operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "picks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so it cannot do operand substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile's CMP_MAP gives a distance-bucket gradient feedback that preserves inputs closer to matching a comparison.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "cmplog has no CMP_MAP gradient; its CMP buffer is consumed only by the mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Feedback",
+      "exact_quote": "The CMP buffer is\nconsumed by the mutator, not by feedback."
+    },
+    {
+      "claim": "The vpc winner reaches the false branch with avg hitcount 2 while the cmplog loser stays at 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L31 Pair 1",
+      "exact_quote": "avg hitcount on branch: winner=2  loser=0"
+    },
+    {
+      "claim": "At the blocker line the loser-blocking seeds take the true side (T=20) while the winner-resolving path takes the false side (F=2).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L195",
+      "exact_quote": "d=1   L 195  T=0 F=2  T=20 F=0  if (gid >= num_glyphs) return false;  <-- BLOCKER"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 6858 --role W --fuzzer value_profile_cmplog --trial 1 --seed d862f87dd0cadddf`; the chain has 13 levels and the tool reports one I2S-floor dash row (mutation_op = -) at depth 12 (ancestor e0a5b09f80625fb6), direct lower-bound evidence of an I2SRandReplace contribution in the winning seed's ancestry."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating get_points on a num_glyphs derived purely from numeric integer comparisons (no exact table-tag literals) where plain value_profile resolves the branch as fast as vpc, showing the I2S exact-literal axis is not necessary."
+  },
+  "weakest_evidence_point": "The split between the I2S exact-literal axis and the value_profile gradient axis is inferred from mechanism deltas; the seed bytes show the 'typ1'/'loca' literals clearly but do not directly evidence which specific numeric comparison the CMP_MAP gradient solved.",
+  "confidence": "medium"
+}

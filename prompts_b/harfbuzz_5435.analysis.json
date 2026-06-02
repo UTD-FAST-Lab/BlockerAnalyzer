@@ -1,0 +1,81 @@
+{
+  "branch_id": 5435,
+  "target": "harfbuzz",
+  "summary_one_line": "A well-formed sfnt/cmap font with a parseable cmap subtable so _cached_get returns a glyph and the loop body runs.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A structurally valid TrueType/sfnt blob: the 0x00010000 version magic at offset 0, the literal 4-byte FOURCC table tag 'cmap' (63 6d 61 70) at offsets 0x0c-0x0f, and a cmap subtable that parses so get_glyph_funcZ is non-null and _cached_get(*first_unicode,...) returns a glyph for at least one codepoint, letting the loop condition take its true branch.",
+      "why_winner_satisfies": "Winner seed fd117cd3 begins 00 01 00 00 (sfnt version) and carries the literal ASCII tag 'cmap' at 0x0c-0x0f plus a second 'ttlf' tag — a real font directory; in the cov overlay the winner alone executes lines 1939-1941 (loop body) and the get_glyph_from_symbol PUA-map functions fire (W=337, L=0), evidence the cmap parsed and produced glyphs.",
+      "why_loser_doesnt": "All loser-blocking seeds are tiny (13-68 byte) junk with no sfnt header or 'cmap' tag (e.g. e0 17 00 00 1a 20 ...), so the font directory never resolves; the blocker line's true branch is taken 0 times for value_profile (resolved=0/10, blocked=10) and avg hitcount on branch is 0.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which intercepts the CMP between the input's table-tag word and the literal constant 'cmap' (and the sfnt version) and substitutes the exact required operand into the input from the cmplog buffer, synthesizing the magic FOURCC that pure value_profile CMP_MAP distance feedback only nudges toward without ever landing exactly."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the loop condition gated on _cached_get returning a glyph, whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L1937, blocked side T",
+      "exact_quote": "done < count && _cached_get (*first_unicode, first_glyph, cache);"
+    },
+    {
+      "claim": "Only value_profile_cmplog resolves this branch; plain value_profile never does.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "The loser arm stays blocked across all trials with zero hits on the branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 avg hitcount",
+      "exact_quote": "avg hitcount on branch: winner=3439  loser=0"
+    },
+    {
+      "claim": "The winner seed carries the literal ASCII 'cmap' table tag and an sfnt-style header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed fd117cd3e66df32b offsets 0x00 and 0x0c",
+      "exact_quote": "00 01 00 00 00 0c 02 ff 00 30 00 1f 63 6d 61 70   .........0..cmap"
+    },
+    {
+      "claim": "The loser-blocking seeds are tiny non-font junk lacking any cmap tag or sfnt header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 0003cbd2b6f5fff8 (13 bytes)",
+      "exact_quote": "e0 17 00 00 1a 20 00 00 29 2b 29 29 2c            ..... ..)+)),"
+    },
+    {
+      "claim": "Only the winner enters the loop body that advances the unicode/glyph pointers.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1939-1941 marked [W]",
+      "exact_quote": "[W]  1940  \tfirst_unicode = &StructAtOffsetUnaligned<hb_codepoint_t> (first_unicode, unicode_stride);"
+    },
+    {
+      "claim": "The cmap symbol-PUA glyph path executes only for the winner, confirming the cmap subtable parsed and produced glyphs.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "get_glyph_from_symbol row W=337 L=0",
+      "exact_quote": "     337         0  hb-common.cc:bool OT::cmap::accelerator_t::get_glyph_from_symbol<OT::CmapSubtable, &OT::_hb_symbol_pua_map>(void const*, unsigned int, unsigned int*)  (/src/harfbuzz/src/hb-ot-cmap-table.hh:1993-2002)"
+    },
+    {
+      "claim": "value_profile_cmplog uniquely adds the I2SRandReplace mutator that the loser fuzzer lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "Plain value_profile has no I2SRandReplace and relies only on CMP_MAP distance buckets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5435 --role W --fuzzer value_profile_cmplog --trial 1 --seed fd117cd3e66df32b` and observed an I2S-floor dash row (mutation_op = -) at depth 47 of the 48-level ancestor chain (ancestor e0a5b09f80625fb6), confirming an unwrapped I2SRandReplace find characteristic of cmplog/vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on the same _cached_get/cmap-tag condition where plain value_profile resolves the branch as often as value_profile_cmplog within the same budget, showing CMP_MAP distance feedback alone suffices to synthesize the exact 'cmap' FOURCC without I2S substitution."
+  },
+  "weakest_evidence_point": "I attribute the winner's advantage to I2S substituting the exact 'cmap'/version literals, but the winner seed's recorded leaf mutation_op is havoc/crossover and the single dash row sits 47 ancestors back, so the decisive I2S event is inferred from the lineage floor rather than observed at the resolving step.",
+  "confidence": "medium"
+}

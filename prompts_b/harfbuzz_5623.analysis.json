@@ -1,0 +1,87 @@
+{
+  "branch_id": 5623,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must place the 32-bit codepoint 0x0E36 (bytes 36 0e 00 00) at a parsed codepoint field so the switch case is taken.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A 4-byte little-endian codepoint field holding exactly 0x0E36 (bytes 36 0e 00 00), so that recategorize_combining_class is called with u==0x0E36 and the switch dispatches to case 0x0E36u at line 51, taking the true side.",
+      "why_winner_satisfies": "value_profile resolves all 10 trials and the winner-resolving seeds embed the literal codepoint 36 0e at the parsed field (Seed 1 has 36 0e 00 00 at offset 0x0c; Seed 5 has 36 0e at offset 0x20); the byte-diff at offset 0x36 shows the value 36 concentrated on the W side. value_profile's CMP_MAP gradient rewards inputs whose comparison operand grows closer (Hamming/prefix bucket) to the constant 0x0E36, climbing the integer-equality gate without needing I2S substitution.",
+      "why_loser_doesnt": "value_profile_cmplog blocks all 10 trials with hitcount 0 on the branch; the loser-blocking seeds carry other codepoints (e.g. 37 0e, 31 0e, 32 0e, 35 0f) at the codepoint field and never place 0x0E36. Adding the extra input-to-state substitution mutator to value_profile diverts mutation effort/corpus budget away from the CMP_MAP gradient climb that value_profile uses to find 0x0E36, so vpc fails to match the exact constant.",
+      "mechanism_attribution": "The winner value_profile is enabled by its CMP_MAP gradient: each integer-CMP callback writes a (PC, operand-distance bucket) entry, so inputs that bring the codepoint operand closer to 0x0E36 register new buckets and are preserved, ratcheting toward the exact match. The loser vpc differs only by also carrying the extra input-to-state substitution stage; that extra technique does not help and the divergence is attributable to value_profile's CMP_MAP gradient-driven match."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the switch case 0x0E36u, an integer-equality gate on a Unicode codepoint, whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-shape-fallback.cc:51:2",
+      "exact_quote": "Source line: \tcase 0x0E36u:"
+    },
+    {
+      "claim": "The switch is keyed on the codepoint variable u inside recategorize_combining_class.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L46-L51",
+      "exact_quote": "switch (u)"
+    },
+    {
+      "claim": "value_profile resolves the branch in all 10 trials while value_profile_cmplog blocks it in all 10, with winner hitcount 75 vs loser 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "avg hitcount on branch: winner=75  loser=0"
+    },
+    {
+      "claim": "A winner-resolving seed embeds the literal codepoint 0x0E36 as bytes 36 0e at the parsed codepoint field.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1, offset 0x0c",
+      "exact_quote": "55 15 00 00 36 0e 00 00"
+    },
+    {
+      "claim": "A second winner seed also carries the 0x0E36 codepoint bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 5, offset 0x20",
+      "exact_quote": "36 0e"
+    },
+    {
+      "claim": "At offset 0x36 the byte value 36 is concentrated on the winner side and absent from the loser side.",
+      "cited_section": "BYTE DIFF (W vs L at common offsets)",
+      "cited_locator": "offset 0x0036",
+      "exact_quote": "00(.)x3 4c(L)x1 4f(O)x1 36(6)x1"
+    },
+    {
+      "claim": "Loser-blocking seeds carry other (non-0x0E36) codepoints at the field, e.g. 37 0e.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 5, offset 0x04",
+      "exact_quote": "ff 00 00 00 37 0e 00 00"
+    },
+    {
+      "claim": "value_profile's CMP_MAP gradient preserves inputs whose CMP operand pair is closer to matching than any previously seen pair.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile carries no I2SRandReplace mutator, so the winner's success cannot be attributed to I2S substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog differs from value_profile by adding the I2SRandReplace mutator, isolating the I2S technique as the delta.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient, not I2SRandReplace, so a lineage dash-row check is not mandatory. The winner is value_profile, which has no I2SRandReplace mutator (MECHANISM CONTEXT confirms 'No I2SRandReplace'); attribution rests on the CMP_MAP gradient climbing the integer-equality gate on 0x0E36, evidenced by winner seeds embedding 36 0e at the codepoint field. The pair is inverted (the I2S-carrying fuzzer is the loser), so I2S is the disabling delta, not the enabling mechanism."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on u==0x0E36 where value_profile_cmplog resolves at least as fast/often as value_profile, showing that adding I2S does not impede the CMP_MAP gradient climb toward the constant."
+  },
+  "weakest_evidence_point": "The mechanism for WHY adding I2S (vpc) hurts rather than helps is inferential — the prompt shows the divergence but does not directly demonstrate I2S diverting budget away from the CMP_MAP gradient.",
+  "confidence": "medium"
+}

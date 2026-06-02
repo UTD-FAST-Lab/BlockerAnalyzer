@@ -1,0 +1,93 @@
+{
+  "branch_id": 5576,
+  "target": "harfbuzz",
+  "summary_one_line": "Reaching the GPOS stage-pause check needs a parseable font that drives the shaping loop; no specific literal is gated, so plain havoc reaches it faster than I2S.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)", "naive>cmplog (I2S)"],
+      "what_input_feature": "A font blob structurally valid enough that hb_ot_map_t::apply<GPOSProxy> runs the stage loop and evaluates `if (stage->pause_func)` at line 1989. No specific magic literal or comparison operand gates this branch — it is reached by generic table/loop traversal, not by matching a CMP operand. The branch is therefore an I2S-ANTI branch: presence of I2SRandReplace in the loser fuzzers diverts mutation effort into expensive GPOS subtable sanitize/coverage paths (PairPosFormat1_3, MarkMarkPosFormat1_2, MarkLigPosFormat1_2) that the winners never enter, slowing or preventing the winner's fast havoc-driven arrival at the stage-pause check.",
+      "why_winner_satisfies": "Both winners lack I2SRandReplace (naive and value_profile run only the havoc+token stack). They reach the branch quickly (winner avg duration blocked 0.00h, resolved 10/10) via plain byte/word mutation that builds a parseable font driving the GSUB/GPOS apply loop. The winning seeds carry only havoc/token mutation_op chains (e.g. DwordAddMutator,BytesDeleteMutator,ByteInterestingMutator,TokenInsert...) and contain font-table-shaped bytes (e.g. ASCII tag fragments and 0x20-run filler) sufficient to enter apply<GPOSProxy>.",
+      "why_loser_doesnt": "Both losers (cmplog, value_profile_cmplog) add I2SRandReplace / CMP-buffer processing. Their seeds get pulled toward GPOS subtable code: the HIT-COUNT DIVERGENCE shows loser-only invocations of GPOSProxy::GPOSProxy (0 vs 189), PairPosFormat1_3::sanitize (0 vs 49) and the Mark*PosFormat1_2 sanitize/get_coverage functions, all W=0 / L>0. This off-chain divergence means the losers spend execution budget where the winners do not, and they block the stage-pause branch (loser avg duration blocked 24.00h/19.20h, resolved 0/10 and 2/10).",
+      "mechanism_attribution": "The technique enabling the WINNER is plain havoc/token coverage-guided exploration with no CMP introspection. The branch carries no comparison operand to solve, so the loser's input-to-state substitution stage gives no shortcut here; instead its per-execution cost and operand-driven substitution divert the loser into expensive GPOS sanitize paths, an anti effect. The winner reaches the branch by lucky havoc byte mutation building a parseable font, matching the havoc-only mechanism."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a presence test on a function pointer, not a value comparison against an input-derived operand.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-layout.cc:1989",
+      "exact_quote": "Source line:     if (stage->pause_func)"
+    },
+    {
+      "claim": "Both decisive pairs have the same I2S technique delta and the winner is the fuzzer that lacks I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 headers",
+      "exact_quote": "--- Pair 1: value_profile > value_profile_cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "The naive>cmplog pair is also an I2S-delta pair won by the non-I2S fuzzer.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 header",
+      "exact_quote": "--- Pair 2: naive > cmplog  [delta: I2S] ---"
+    },
+    {
+      "claim": "The winner reaches and resolves the branch quickly while the loser stays blocked the full campaign.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 durations",
+      "exact_quote": "avg duration blocked: winner=0.00h  loser=24.00h"
+    },
+    {
+      "claim": "Losers spend execution budget in GPOS subtable sanitize functions that winners never invoke.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "PairPosFormat1_3 sanitize row",
+      "exact_quote": "0        49  OT::Layout::GPOS_impl::PairPosFormat1_3<OT::Layout::SmallTypes>::sanitize(hb_sanitize_context_t*) const"
+    },
+    {
+      "claim": "The GPOSProxy constructor is invoked only on the loser side (W=0, L=189), showing the split is off the main chain.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "GPOSProxy constructor row",
+      "exact_quote": "0       189  GPOSProxy::GPOSProxy(hb_face_t*)  (/src/harfbuzz/src/hb-ot-layout.cc:1847-1848)"
+    },
+    {
+      "claim": "The divergence is off-chain (no divergent branch on the call chain itself).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "chain section",
+      "exact_quote": "(no divergent branches in chain functions; the split is off-chain)"
+    },
+    {
+      "claim": "The winner inputs were produced by havoc/token mutators with no I2S name in their chain.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving Seed 1",
+      "exact_quote": "fuzzer=value_profile, trial=1, discovered_at=13s, mutation_op=DwordAddMutator,BytesDeleteMutator,ByteInterestingMutator,TokenInsert,BytesCopyMutator,ByteNegMutator"
+    },
+    {
+      "claim": "naive runs only the havoc+token stack and has no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile also has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "I2SRandReplace works by matching one CMP operand in the input and substituting the other, which requires a comparison to solve.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "picks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5576 --role W --fuzzer value_profile --trial 1 --seed 00546490999c9c0b` and the naive seed 002edec370c771cf. Both chains are pure havoc/token (DwordAddMutator, BytesDeleteMutator, CrossoverInsertMutator, TokenReplace, etc.) with a single dash row only at the chain root (depth 5/6, shared ancestor e0a5b09f80625fb6). That root dash row is the imported corpus origin shared by both non-I2S winners, not an I2SRandReplace find: naive has no I2S at all, so its dash root must be the unmutated seed. The winner mechanism is therefore havoc-only, not I2SRandReplace; lineage confirms no I2S mutator on the winning path. claimed_mechanism is not I2SRandReplace so lineage was not required, but it corroborates the havoc-only attribution."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating line-1989 reachability on matching a specific multi-byte literal (a real CMP operand) would let cmplog/vpc resolve at least as fast as naive/value_profile, flipping the divergence direction and refuting the no-operand / I2S-anti hypothesis."
+  },
+  "weakest_evidence_point": "The causal claim that I2S diversion into GPOS sanitize paths (rather than some unmodeled scheduling difference) is what blocks the losers rests on the HIT-COUNT off-chain signal, which is correlational, not a direct demonstration that I2S caused the diversion.",
+  "confidence": "medium"
+}

@@ -1,0 +1,69 @@
+{
+  "branch_id": 5697,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must be a well-formed sfnt font carrying a GPOS table (FOURCC 'GPOS') so hb_ot_layout_has_positioning returns true.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A valid sfnt/TrueType font header (00 01 00 00 ... at offset 0, table directory) whose table directory contains a table tag equal to the 4-byte ASCII literal 'GPOS' (47 50 4f 53), so that hb_ot_layout_has_positioning(face) is true and has_gpos takes the true side.",
+      "why_winner_satisfies": "All winning seeds begin with the sfnt magic 00 01 00 00 00 01 and carry the exact 4-byte tag 'GPOS' (47 50 4f 53) at offset 0x0c-0x0f; the GPOS table presence makes the positioning lookup succeed and the blocker resolves (avg hitcount 3430 / 2345).",
+      "why_loser_doesnt": "Loser-blocking seeds are short, malformed, or lack a GPOS tag entirely (offsets 0x0c-0x0f hold scattered non-'GPOS' bytes), so hb_ot_layout_has_positioning returns false, has_gpos is false, and the branch stays blocked for all 24h.",
+      "mechanism_attribution": "cmplog/vpc intercept the 4-byte tag comparison against 'GPOS' and run I2SRandReplace, which reads the CmpLogObserver buffer and substitutes the constant operand 'GPOS' into the input at the table-tag offset; naive and value_profile lack I2SRandReplace and must stumble on the exact 32-bit FOURCC by chance, which never happens in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of has_gpos, gated on hb_ot_layout_has_positioning(face).",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L156",
+      "exact_quote": "bool has_gpos = !disable_gpos && hb_ot_layout_has_positioning (face);"
+    },
+    {
+      "claim": "The true branch is globally blocked and resolution requires reaching it.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "Winning seeds carry the exact ASCII 'GPOS' tag at offsets 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 002c9ad92acce91b offset 0x0c",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+    },
+    {
+      "claim": "Across winners, offsets 0x0c-0x0f are concentrated entirely on 47 50 4f 53 ('GPOS') while losers hold scattered other bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "Winners take has_gpos true (T=20) where losers take it false (F=35), and only winners reach the apply_gpos arm at L165.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L156 / L165",
+      "exact_quote": "else if (has_gpos)"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a CMP operand into the input at matching offsets, the technique enabling the winner.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, explaining why the vpc>value_profile pair is also an I2S delta.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5697 --role W --fuzzer cmplog --trial 1 --seed 002c9ad92acce91b` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 29 and 30 of the ancestor chain, the floor signal for an unwrapped I2SRandReplace find under the current cmplog build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on a 4-byte tag where cmplog and naive resolve at equal rates, i.e. naive reaching the true side without the exact 'GPOS' FOURCC ever being placed, would refute the I2S-substitution requirement."
+  },
+  "weakest_evidence_point": "I rely on the 'GPOS' FOURCC at offsets 0x0c-0x0f being the comparison I2S solves, but hb_ot_layout_has_positioning also depends on a structurally valid table directory whose other fields the byte diff does not pin down.",
+  "confidence": "high"
+}

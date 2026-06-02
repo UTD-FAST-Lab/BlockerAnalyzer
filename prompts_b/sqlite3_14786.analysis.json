@@ -1,0 +1,81 @@
+{
+  "branch_id": 14786,
+  "target": "sqlite3",
+  "summary_one_line": "Token must begin with a hex-integer literal: '0' followed by 'x'/'X' then a hex digit (the SQL 0x prefix) to take the true side.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "A token whose first bytes form the SQL hex-integer prefix: z[0]=='0' AND (z[1]=='x' OR z[1]=='X') AND z[2] is a hex digit, i.e. the literal '0x' (or '0X') immediately followed by [0-9a-fA-F].",
+      "why_winner_satisfies": "Every value_profile_cmplog winning seed contains an explicit '0x' hex prefix (e.g. 'SELECT-0x85E', 'SELECT -0x11CCC1', 'SELECT -0x111111', 'SELECT -0xC11180'), so z[0]=='0', z[1]=='x', z[2] hex digit all hold and the true (hex-integer) side of line 159595 is taken.",
+      "why_loser_doesnt": "The cmplog loser-blocking seeds carry decimal digit runs without an 'x'/'X' after a '0' (e.g. '00S', 'SELECT.5-5/55555', 'SELECT.5E1-55'); z[1] is never 'x'/'X', so the (z[1]=='x'||z[1]=='X') sub-condition at 159595:25 evaluates false and the true side is never reached.",
+      "mechanism_attribution": "Both involved fuzzers carry the same input-to-state substitution mutator; the decisive delta is value_profile. value_profile's CMP_MAP gradient buckets reward partial Hamming/prefix progress on the chained byte comparisons (z[0]=='0', z[1]=='x'/'X', isxdigit(z[2])), guiding the corpus to assemble the multi-byte '0x' prefix that pure cmplog (edge-bucket-only feedback) cannot reward incrementally."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker at line 159595 is the SQL hex-integer prefix test z[0]=='0' && (z[1]=='x'||z[1]=='X') && sqlite3Isxdigit(z[2]); its true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Location /src/sqlite3/bld/sqlite3.c:159595:25, blocked side T",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "The single decisive pair is value_profile_cmplog > cmplog with the technique delta being value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The winning value_profile_cmplog seeds contain an explicit hex prefix '0x' (the feature byte pattern).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving Seed 2, id=239da0d3632856b0",
+      "exact_quote": "53 45 4c 45 43 54 20 2d 30 78 31 31 43 43 43 31   SELECT -0x11CCC1"
+    },
+    {
+      "claim": "Another winning seed also carries the '0x' hex prefix, confirming the feature is consistent across winners.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner-resolving Seed 3, id=650510be349798df",
+      "exact_quote": "53 45 4c 45 43 54 20 2d 30 78 31 31 31 31 31 31   SELECT -0x111111"
+    },
+    {
+      "claim": "The loser-blocking cmplog seeds contain decimal/non-hex bytes (digit runs, no 'x'/'X' after a '0'), so they cannot satisfy the prefix test.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser-blocking Seed 4, id=0c1d027799a90a48",
+      "exact_quote": "53 45 4c 45 43 54 0d 35 2d 35 2f 35 35 35 35 35   SELECT.5-5/55555"
+    },
+    {
+      "claim": "At the blocker, the winner takes the true side while the loser does not (W T=10 F=4 vs L T=0 F=26 at 159595:25).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L159595 (second/middle row)",
+      "exact_quote": "d=1   L159595  T=10 F=4  T=0 F=26    <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog's feedback includes CMP_MAP gradient buckets in addition to edge buckets, the technique cmplog lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Feedback",
+      "exact_quote": "**Feedback**: edge-bucket + CMP_MAP-bucket signals."
+    },
+    {
+      "claim": "Plain cmplog's feedback is only the same edge-bucket signal as naive; the CMP buffer is consumed by the mutator, not feedback, so it cannot reward partial byte-match progress.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Feedback",
+      "exact_quote": "**Feedback**: same edge-bucket signal as naive. The CMP buffer is\nconsumed by the mutator, not by feedback."
+    },
+    {
+      "claim": "Both involved fuzzers carry I2SRandReplace, so I2S cannot be the differentiator; value_profile's CMP_MAP gradient is the added technique in the winner.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators / Instrumentation",
+      "exact_quote": "**Instrumentation**: union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Lineage on winning vpc seed 06e09a37e739e806 (trial 2) showed I2S-floor dash rows at depth 9 and 10, but I2S is present in BOTH involved fuzzers so it is not the decisive delta. The decisive delta is value_profile, whose CMP_MAP gradient feedback (absent from plain cmplog, whose feedback is edge-buckets only) rewards partial progress toward the chained 0x-prefix byte comparisons; CMP_MAP gradient is a feedback mechanism not recorded as a lineage mutator row, so it is not directly verifiable via db_query.py lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on the same 0x-hex-prefix comparison in which plain cmplog resolves the true side as fast as value_profile_cmplog (no value_profile advantage), showing the CMP_MAP gradient is not what enables the winner."
+  },
+  "weakest_evidence_point": "The byte-set overlap at offsets 0x06-0x09 between W and L is partial, so attributing the win specifically to forming the 'x'/'X' byte rather than to broader corpus quality from value_profile rests on the seed examples rather than an isolated single-byte diff.",
+  "confidence": "medium"
+}

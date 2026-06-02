@@ -1,0 +1,93 @@
+{
+  "branch_id": 459,
+  "target": "curl",
+  "summary_one_line": "Input must drive a protocol-completion transfer with a parsed Content-Length (k->size != -1) and a body bytecount short of that size.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A structured HTTP-protocol request: a scheme/URL prefix (e.g. pop:// or ://127.0.0.1:9001) plus an HTTP response carrying the literal tokens HTTP/ and a Content-Length-style header, so curl parses a non-(-1) k->size and then sees the connection close with k->bytecount != k->size, taking the true side of the line-1303 partial-file check.",
+      "why_winner_satisfies": "Winner-resolving seeds embed exact protocol literals — pop, ://, the host:port 127.0.0.1:9001/850, GHTTP/ and a Content header string — at fixed offsets, so curl advances through MSTATE_PERFORMING into the transfer-completion else-branch with a known size and a short body, hitting the blocker true side (W T=6 F=0 at L1303).",
+      "why_loser_doesnt": "Loser-blocking seeds are short (35-73 bytes) and dominated by repeated %, ., +, A filler with no coherent scheme/HTTP/Content-Length structure, so they never reach the completion path with a parsed size and stay on the false side (L T=0 F=20 at L1303).",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the per-execution CmpLogObserver buffer of operands compared at curl's protocol/header CMP sites and substitutes the expected literal (HTTP/, Content-Length, scheme tokens) at matching input offsets; naive and value_profile lack this mutator and cannot synthesize the multi-byte protocol literals by chance, so only the I2S-equipped arm of each pair resolves the branch."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side at transfer.c:1303 is the partial-file completion check guarded by k->size != -1.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "transfer.c:1303",
+      "exact_quote": "if(!(data->set.opt_no_body) && (k->size != -1) &&"
+    },
+    {
+      "claim": "Both decisive pairs have the I2S technique delta and the I2S-equipped fuzzer wins 10/10 while the loser blocks 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair is the value_profile_cmplog over value_profile I2S contrast.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner-resolving seeds carry coherent protocol literals: a scheme prefix, host:port, HTTP/, and a Content header string.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 3 id=f899171559e30e59",
+      "exact_quote": "....GHTTP/ mea.$"
+    },
+    {
+      "claim": "A winning seed embeds the host:port URL pattern 127.0.0.1:9001 used by curl's parser.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 id=529e44cdba094a04",
+      "exact_quote": ".0.0.1:9001/850."
+    },
+    {
+      "claim": "A winning seed carries the literal Content header token in its tail bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 4 id=b5881836c0b5a0bd offset 0x30",
+      "exact_quote": "ec.etre..Content"
+    },
+    {
+      "claim": "Loser-blocking seeds are short and dominated by repeated filler bytes with no protocol structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 3 id=00225bc4819174d2",
+      "exact_quote": "%%%%%%%%%%%%&%@."
+    },
+    {
+      "claim": "At L1303 the winner takes the true side while the loser stays on the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1303",
+      "exact_quote": "T=6 F=0  T=20 F=0  if(!(data->set.opt_no_body) && (k->size != -1) &&"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which scans the input for byte sequences matching one CMP operand and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mutator stage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 459 --role W --fuzzer cmplog --trial 1 --seed a608095a4d425f1c` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 28 and 29 of the 30-level ancestor chain — direct lower-bound evidence of an unwrapped I2SRandReplace find in this cmplog winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness reproducing the line-1303 size/bytecount-mismatch gate where cmplog and naive resolve the true side at statistically indistinguishable rates, showing the protocol literals are reachable without I2S substitution."
+  },
+  "weakest_evidence_point": "The exact CMP site whose operand I2S substitutes (HTTP/ version token vs Content-Length header vs scheme) is inferred from seed byte content, not directly tied to a named comparison in the source overlay.",
+  "confidence": "medium"
+}

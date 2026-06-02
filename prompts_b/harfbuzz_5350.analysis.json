@@ -1,0 +1,87 @@
+{
+  "branch_id": 5350,
+  "target": "harfbuzz",
+  "summary_one_line": "A 4-byte script tag matching HB_SCRIPT_OLD_UYGHUR ('Ougr') must reach the switch so the OLD_UYGHUR case arm fires.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "An input whose script-tag field is driven to the exact 4-byte FOURCC for HB_SCRIPT_OLD_UYGHUR so the switch ((hb_tag_t) script) at hb-common.cc:586 dispatches to the case HB_SCRIPT_OLD_UYGHUR arm at line 652 (true side), returning HB_DIRECTION_RTL.",
+      "why_winner_satisfies": "value_profile resolves the branch in all 10 trials (avg 52 hits) within 0.70h; its CMP_MAP distance-bucket feedback rewards inputs whose script-tag operand grows closer (matching-prefix length) to the OLD_UYGHUR constant, so havoc bytes that incrementally approach the FOURCC are retained as corpus and the tag is solved without the per-execution cost of the I2S/CmpLog stage.",
+      "why_loser_doesnt": "value_profile_cmplog blocks the branch in 9/10 trials (avg 0 hits, 22.10h blocked); it adds the per-execution CmpLog buffer + I2SRandReplace stage on top of value_profile, but that extra per-execution cost slows throughput on this deep call chain without delivering the tag, so it never drives the script field to the OLD_UYGHUR constant within budget.",
+      "mechanism_attribution": "The winner is value_profile, which has no input-to-state substitution mutator; its enabling technique is the CMP_MAP gradient (matching-prefix / Hamming-distance bucket feedback) that incrementally rewards script-tag bytes approaching the OLD_UYGHUR constant. Adding the I2S+CmpLog stage (the value_profile_cmplog loser) only adds per-execution overhead here, so the divergence is attributable to value_profile's CMP_MAP gradient working unencumbered, not to comparison substitution."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the case HB_SCRIPT_OLD_UYGHUR arm of a switch on the script tag, whose true side returns HB_DIRECTION_RTL.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "hb-common.cc:586 and :652-654",
+      "exact_quote": "case HB_SCRIPT_OLD_UYGHUR: <-- BLOCKER"
+    },
+    {
+      "claim": "Dispatch is a switch over the script tag cast to hb_tag_t (a 4-byte FOURCC compare).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "hb-common.cc:586",
+      "exact_quote": "switch ((hb_tag_t) script)"
+    },
+    {
+      "claim": "value_profile resolves the branch in all 10 trials while value_profile_cmplog blocks it in 9/10, with the winner hitting the branch and the loser never reaching it.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1, winner/loser counts and hits",
+      "exact_quote": "avg hitcount on branch: winner=52  loser=0"
+    },
+    {
+      "claim": "The winner resolves quickly while the loser stays blocked for the full budget.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 duration",
+      "exact_quote": "avg duration blocked: winner=0.70h  loser=22.10h"
+    },
+    {
+      "claim": "value_profile's CMP_MAP gradient rewards inputs whose CMP operands grow closer to matching, preserving them as corpus.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback paragraph",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "The CMP_MAP distance bucket encodes matching-prefix length for string/memory CMPs, which is the relevant signal for a multi-byte tag compare.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation paragraph",
+      "exact_quote": "matching-prefix\nlength for string/memory CMPs"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, so the winner does not rely on I2S substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators paragraph",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog (the loser) adds the I2SRandReplace mutator and a per-execution CMP buffer on top of value_profile.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators/cost paragraphs",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "The loser pays extra per-execution cost from the CMP buffer record on top of value_profile's CMP_MAP update.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Per-execution cost",
+      "exact_quote": "edge increment + CMP-buffer record + CMP_MAP\nupdate per intercepted CMP per execution"
+    },
+    {
+      "claim": "The winning seeds carry only havoc/value_profile mutation_ops, consistent with value_profile (no I2S) finding them.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1, fuzzer=value_profile",
+      "exact_quote": "fuzzer=value_profile, trial=1, discovered_at=28s, mutation_op=ByteAddMutator,BytesDeleteMutator,ByteNegMutator"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Not applicable: the winner is value_profile (no I2SRandReplace), so the enabling technique is the CMP_MAP gradient, not I2S. Lineage dash-row verification is only mandatory when claimed_mechanism=I2SRandReplace. The winner seeds explicitly carry value_profile provenance with havoc-only mutation_ops (e.g. ByteAddMutator/BytesDeleteMutator), and the prompt states value_profile has no I2SRandReplace, so no I2S floor signal is expected or required here."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a single 4-byte switch/compare against a fixed FOURCC where value_profile_cmplog resolves it as fast as or faster than value_profile (no I2S-overhead penalty), showing the CMP_MAP gradient is not the decisive winner mechanism."
+  },
+  "weakest_evidence_point": "The attribution that I2S+CmpLog per-execution overhead (rather than some other value_profile_cmplog-specific exploration difference) is what blocks the loser is inferred from the cost paragraphs, not directly measured at this branch.",
+  "confidence": "medium"
+}

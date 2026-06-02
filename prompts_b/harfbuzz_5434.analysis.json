@@ -1,0 +1,69 @@
+{
+  "branch_id": 5434,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must carry a parseable sfnt/cmap table structure so get_glyph_funcZ resolves a glyph (ret true) and the cache-set branch is taken.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A valid OpenType/sfnt container: sfnt version magic 00 01 00 00 at offset 0, a table directory naming the 'cmap' tag, and a well-formed cmap subtable whose get_glyph lookup returns a glyph for some unicode codepoint, so that this->get_glyph_funcZ produces ret=true at line 1913.",
+      "why_winner_satisfies": "The winning vpc seed begins 00 01 00 00 (sfnt version) and contains the literal ASCII tag 'cmap' plus a font-table tag region; this lets get_glyph_funcZ resolve glyphs (W enters the cache->set body and the per-arm hitcount on the branch is 21867), so cache && ret is true.",
+      "why_loser_doesnt": "The value_profile loser seeds are short (13-68 byte) random byte blobs with no sfnt magic and no 'cmap' tag, so get_glyph_funcZ never returns a glyph (ret stays false); the loser blocks on the false side with avg hitcount 0 on the branch.",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator, which copies CMP operands captured by the CmpLogObserver directly into the input at the comparison offset. The 4-byte table-tag / sfnt-version comparisons inside harfbuzz's OpenType parser are exactly the equality CMPs I2S substitution solves, planting 'cmap'/00010000 magic that plain value_profile (no I2SRandReplace, only CMP_MAP distance buckets) does not reproduce within budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of 'if (cache && ret)' inside _cached_get; ret comes from get_glyph_funcZ.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1911-1913",
+      "exact_quote": "bool ret  = this->get_glyph_funcZ (this->get_glyph_data, unicode, glyph);"
+    },
+    {
+      "claim": "The blocked side is the true branch and the line is the named blocker.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1913",
+      "exact_quote": "if (cache && ret) <-- BLOCKER"
+    },
+    {
+      "claim": "The winning seed begins with the sfnt version magic and contains the literal cmap table tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id fd117cd3e66df32b offset 0x00-0x0c",
+      "exact_quote": "00 01 00 00 00 0c 02 ff 00 30 00 1f 63 6d 61 70   .........0..cmap"
+    },
+    {
+      "claim": "The winner resolves all 10 trials and the loser blocks all 10 with zero hitcount on the branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 winner/loser counts",
+      "exact_quote": "avg hitcount on branch: winner=21867  loser=0"
+    },
+    {
+      "claim": "The loser-blocking seeds are short random byte blobs lacking font structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0003cbd2b6f5fff8 (13 bytes)",
+      "exact_quote": "Seed 1 (id=0003cbd2b6f5fff8, size=13 bytes, fuzzer=value_profile, trial=1, discovered_at=102s, mutation_op=BitFlipMutator,BytesDeleteMutator,WordAddMutator):"
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator that the winner uses to substitute CMP operands.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "The value_profile loser has no I2SRandReplace mutator, only CMP_MAP distance buckets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5434 --role W --fuzzer value_profile_cmplog --trial 1 --seed fd117cd3e66df32b`; the chain has 48 levels and the trailing I2S-floor signal reports 1 ancestor dash row (mutation_op = -, ParentInfo-only) at depth 47, the floor signal of an I2SRandReplace find in vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "value_profile resolving the true branch in a majority of trials within the same budget once given a corpus seed that already contains the sfnt magic and a valid cmap subtable, showing I2S substitution is not the limiting factor."
+  },
+  "weakest_evidence_point": "Only one winning seed is shown, so the inference that the 'cmap' tag and sfnt magic are I2S-planted rather than havoc-inserted rests on the single dash row at depth 47 plus the structural read of that one seed.",
+  "confidence": "high"
+}

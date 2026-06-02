@@ -1,0 +1,75 @@
+{
+  "branch_id": 5483,
+  "target": "harfbuzz",
+  "summary_one_line": "A ClassDef table whose 16-bit format selector equals 4, reachable via a valid GDEF table, is required to take the case-4 branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The ClassDef table's 16-bit big-endian 'format' field (the switch operand u.format) must equal the exact value 4, reached through a well-formed GDEF table containing a glyph-class ClassDef of format 4.",
+      "why_winner_satisfies": "The winning cmplog seed carries the literal 'GDEF' table tag and structured table bytes including a 00 04 word; it resolves the branch in all 10/10 trials with avg hitcount 162 and only this case-4 arm taken (L2000 T=54 F=0).",
+      "why_loser_doesnt": "The naive loser seeds are tiny (6-63 bytes) and random/zero-filled with no GDEF tag or format==4 selector; they never reach case 4 and instead fall through to the default arm (L2002 T=1620 F=0), blocked in all 10/10 trials.",
+      "mechanism_attribution": "cmplog intercepts the switch comparison against 4 via __sanitizer_cov_trace_cmp, logging the constant operand; I2SRandReplace then substitutes the literal 4 into the format-field offset of the input, which blind havoc byte mutation in naive cannot reliably hit at the exact 16-bit offset."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the case-4 arm of a switch on the ClassDef format field.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1995, L2000",
+      "exact_quote": "switch (u.format) {"
+    },
+    {
+      "claim": "The blocker source line is the case 4 dispatch into format4.get_class.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-layout-common.hh:2000",
+      "exact_quote": "case 4: return u.format4.get_class (glyph_id);"
+    },
+    {
+      "claim": "The winning seed contains the literal GDEF table tag plus a 00 04 word, satisfying the format-selector requirement.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 2b85cc197690055a, offsets 0x0c-0x1f",
+      "exact_quote": "47 44 45 46"
+    },
+    {
+      "claim": "The winner resolves the branch in all trials with high hitcount while the loser is blocked.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "avg hitcount on branch: winner=162  loser=0"
+    },
+    {
+      "claim": "The winner takes only the case-4 true arm while the loser only takes the default arm, never case 4.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2000, L2002",
+      "exact_quote": "d=1   L2000  T=54 F=0  T=0 F=1620  case 4: return u.format4.get_class (glyph_id);  <-- BLOCKER"
+    },
+    {
+      "claim": "The loser naive seeds are tiny and unstructured, lacking any GDEF table tag or format-4 selector.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 003817559785f774, size=6",
+      "exact_quote": "Seed 1 (id=003817559785f774, size=6 bytes, fuzzer=naive, trial=1, discovered_at=0s, mutation_op=ByteDecMutator,WordAddMutator):"
+    },
+    {
+      "claim": "cmplog intercepts integer comparisons and feeds operands to I2SRandReplace, which substitutes one CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S capability, only blind havoc and token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5483 --role W --fuzzer cmplog --trial 3 --seed 2b85cc197690055a` and observed exactly 1 I2S-floor dash row (mutation_op = -) at depth 26 of the 27-level ancestor chain (ancestor e0a5b09f80625fb6), confirming an unwrapped I2SRandReplace find in the winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the format selector is read but the case-4 arm is reached without any constant-4 comparison (e.g. format masked or computed) yet cmplog still resolves it far faster than naive — showing the divergence is not driven by I2S substitution of the literal 4."
+  },
+  "weakest_evidence_point": "The exact byte offset and width of the format selector inside the GDEF/ClassDef structure is inferred from harfbuzz table layout, not directly proven by the byte-diff section, so the precise offset of the I2S substitution is uncertain.",
+  "confidence": "high"
+}

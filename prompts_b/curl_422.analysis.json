@@ -1,0 +1,105 @@
+{
+  "branch_id": 422,
+  "target": "curl",
+  "summary_one_line": "Input must parse as a valid protocol/URL so curl fetches body bytes, making k->bytecount nonzero on the second loop iteration",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed protocol scheme + host:port + HTTP response prelude (e.g. the literal byte runs 'pop3'/'HTTP' at offsets 0x06-0x09, '127.0.0.1:9001' / ':900' region 0x0a-0x1f, and 'GHTTP/' at 0x24-0x29) so curl establishes a transfer, writes body bytes, and on the next read-loop iteration k->bytecount is already nonzero, taking the FALSE side of `if(!k->bytecount)`.",
+      "why_winner_satisfies": "Winner-resolving seeds carry intact literal protocol tokens — 'pop3'/'pop' and 'HTTP' magic at fixed offsets and a coherent host:port string — so curl actually downloads body content (k->bytecount += nread at line 776 is reached, marked [W]) and re-enters the loop with bytecount>0; the false branch is hit (T=20 F=23 on line 585 for W vs T=20 F=0 for L).",
+      "why_loser_doesnt": "Loser-blocking seeds are dominated by '%' filler bytes (0x25 repeated across offsets 0x06-0x3e) with no coherent scheme/host literals, so the parse never reaches the body-write path (the entire 0x599+ body-write region is L-blank), bytecount stays 0, and only the TRUE side of line 585 is ever taken.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver buffer of intercepted scheme/host/HTTP-prelude comparisons and substitutes the exact expected operands ('pop3', 'HTTP', port digits) into the input, synthesizing a parseable request in far fewer execs than blind havoc; naive and value_profile lack I2SRandReplace and cannot reconstruct these multi-byte literals, so they never advance to the body-write that increments bytecount."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "Both decisive pairs are the I2S technique delta and the winner resolves 10/10 while the loser blocks 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The second I2S pair (vpc vs vp) shows the same complete resolution divergence.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The blocker is the false side of an equality-to-zero test on the running byte counter.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "transfer.c:585",
+      "exact_quote": "if(!k->bytecount) {"
+    },
+    {
+      "claim": "The blocked side is the false branch (bytecount must be nonzero).",
+      "cited_section": "BLOCKER",
+      "cited_locator": "transfer.c:585",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Winner seeds carry intact protocol literals pop3/HTTP and a host:port string at fixed offsets.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 id=21cecf684c1b463d",
+      "exact_quote": "00 01 00 00 00 19 70 6f 70 33 4b 2f 2f 3f 32 37   ......pop3K//?27"
+    },
+    {
+      "claim": "Winner seed includes the host:port literal 127.0.0.1:9001 region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 offset 0x10",
+      "exact_quote": "2e 30 2e 30 2e 31 3a 39 30 30 31 ad 38 35 30 00   .0.0.1:9001.850."
+    },
+    {
+      "claim": "Winner reaches the body-accumulation line k->bytecount += nread, marked W-only.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "transfer.c:776",
+      "exact_quote": "[W]   776        k->bytecount += nread;"
+    },
+    {
+      "claim": "For the winner the false side of the blocker is taken (F=23) whereas for the loser it is never taken (F=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L585",
+      "exact_quote": "L 585  T=20 F=23  T=20 F=0  if(!k->bytecount) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser seeds are dominated by repeated '%' filler bytes with no coherent literals.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 3 id=00225bc4819174d2",
+      "exact_quote": "25 25 25 25 25 25 25 25 25 25 25 25 26 25 40 e8   %%%%%%%%%%%%&%@."
+    },
+    {
+      "claim": "At the magic offsets the winner bytes are concentrated protocol literals while the loser bytes are scattered '%' garbage.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0008",
+      "exact_quote": "0x0008  70(p)x19 54(T)x1                    43(C)x5 2e(.)x3 25(%)x3 41(A)x2 +7u  DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes the matched CMP operand into the input at the matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S stage so cannot reconstruct multi-byte CMP operands.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, only the havoc + token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 422 --role W --fuzzer value_profile_cmplog --trial 1 --seed 21cecf684c1b463d` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 10 and 11 of the 12-level ancestor chain, the lower-bound signal of an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where naive/value_profile reach the false side of `if(!k->bytecount)` (i.e. accumulate body bytes) about as fast as cmplog/vpc despite the scheme/host/HTTP-prelude being multi-byte exact-match literals — showing the body-write gate is not I2S-gated."
+  },
+  "weakest_evidence_point": "I attribute the bytecount increment to a clean protocol parse, but the path from input bytes to k->bytecount += nread spans many intermediate gates (scheme dispatch, header parsing) that the prompt does not byte-trace, so the precise literal that I2S must solve is inferred rather than pinpointed.",
+  "confidence": "medium"
+}

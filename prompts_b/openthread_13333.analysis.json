@@ -1,0 +1,75 @@
+{
+  "branch_id": 13333,
+  "target": "openthread",
+  "summary_one_line": "Input must carry the ICMPv6 next-header value 0x3a in the IPv6 protocol field so the switch dispatches to case kProtoIcmp6.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The IPv6 next-header / protocol byte fed to HandlePayload's switch (aIpProto) must equal kProtoIcmp6 (0x3a = 58). Only that exact value steers the second switch (line 953) to the blocked case at line 972; kProtoUdp and other values fall to the already-covered UDP/default arms.",
+      "why_winner_satisfies": "Winner cmplog seeds embed the literal byte 0x3a at the protocol position: seed 1 has '10 3a' at offsets 0x06-0x07 and seeds 2-5 carry '10 3a' / '3a' at the inner header (offset 0x29 shows 3a concentrated x8 in W). The DIVERGENT BRANCHES table shows W takes the true side of case kProtoIcmp6 (T=10 F=20) at L972 while never resolving UDP-only paths, matching an exact-match dispatch on 0x3a.",
+      "why_loser_doesnt": "Loser naive seeds never place 0x3a at the protocol field: the byte diff at the protocol-bearing offsets shows L bytes dominated by 0x44/0x30/0xff runs (e.g. offset 0x29 L = '00 29 30', no 3a), so the second switch always lands on the UDP/default arm and L records T=0 F=20 at case kProtoIcmp6 (line 972) — the true side is never reached in 8/10 trials.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer recording the switch comparison (aIpProto == kProtoIcmp6), then substitutes the constant operand 0x3a directly into the input at the matching offset, planting the exact protocol byte that naive's blind havoc/token stack only stumbles onto 2/10 times."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the kProtoIcmp6 case arm of a protocol switch in HandlePayload, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "ip6.cpp:972:5",
+      "exact_quote": "Source line:     case kProtoIcmp6:"
+    },
+    {
+      "claim": "The switch on aIpProto selects the ICMP6 arm only for that exact protocol value; the UDP/default arms are covered by both roles.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L953-L974",
+      "exact_quote": "case kProtoIcmp6: <-- BLOCKER"
+    },
+    {
+      "claim": "Winner seeds carry the literal ICMPv6 protocol byte 0x3a in the header region.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 4f1af37e9d5867a4 offsets 0x06-0x07",
+      "exact_quote": "77 66 20 11 00 00 10 3a 7f 02 b0 07 ff ff ff fc"
+    },
+    {
+      "claim": "At the protocol-bearing inner offset 0x29 the winner concentrates byte 0x3a (x8) while the loser never carries it.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0029",
+      "exact_quote": "0x0029  3a(:)x8 02(.)x1 24($)x1                     00(.)x7 29())x2 30(0)x1"
+    },
+    {
+      "claim": "The winner resolves the kProtoIcmp6 true side while the loser never does, per the divergent-branch table.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L972",
+      "exact_quote": "d=1   L 972  T=10 F=20  T=0 F=20  case kProtoIcmp6:  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has only the havoc + token stack with no I2S, so it must blindly produce 0x3a.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog resolves the branch 10/10 while naive blocks 8/10, a prob_div of 0.80.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog > naive",
+      "exact_quote": "prob_div=0.80  dur_div=21.70h  hit_div=11"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 13333 --role W --fuzzer cmplog --trial 1 --seed 4f1af37e9d5867a4` and observed one I2S-floor dash row (mutation_op = -) at depth 25 (ancestor 4578ba613b6d1a35). A second winning seed 3280d8d2781fbeb1 shares the same dash-row ancestor at depth 19, corroborating an I2S contribution in the winning lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose ICMP6 arm is reached when the protocol byte is any value other than 0x3a (e.g. a range/inequality test rather than an exact == kProtoIcmp6 dispatch) — that would show the divergence is not driven by exact-constant I2S substitution."
+  },
+  "weakest_evidence_point": "The exact input offset of the protocol byte consumed by HandlePayload's switch is inferred from byte-diff concentration of 0x3a rather than confirmed by a dataflow trace from the fuzz harness to aIpProto.",
+  "confidence": "high"
+}

@@ -1,0 +1,69 @@
+{
+  "branch_id": 416,
+  "target": "curl",
+  "summary_one_line": "Input must encode an HTTP/2 protocol marker so conn->httpversion parses to exactly 20, satisfying the integer equality gate.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A literal 'HTTP/2' version token in the request bytes so that curl's parser sets conn->httpversion to the integer 20, taking the true side of the (conn->httpversion == 20) equality at transfer.c:540.",
+      "why_winner_satisfies": "All winner-resolving seeds carry the literal ASCII run 'HTTP/2' at offsets 0x24-0x2a ('47 48 54 54 50 2f 32' = GHTTP/2), which the parser maps to httpversion==20; the blocker true side fires 316 times in W vs 0 in L.",
+      "why_loser_doesnt": "Loser-blocking seeds carry no HTTP/2 token at the corresponding offsets (e.g. 0x24 holds P/B/. bytes, not 'GHTTP/2'), so httpversion never equals 20 and the false side is taken 20/20.",
+      "mechanism_attribution": "cmplog/vpc intercept the integer CMP against the constant 20 and the strcmp/memcmp against the 'HTTP/2' literal, recording operands into the CmpLogObserver buffer; I2SRandReplace then substitutes the matched constant directly into the input, manufacturing the HTTP/2 marker that naive and value_profile must stumble onto by blind havoc."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is an exact integer equality test conn->httpversion == 20.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "transfer.c:540",
+      "exact_quote": "(conn->httpversion == 20));"
+    },
+    {
+      "claim": "The globally blocked side is the true branch, requiring httpversion to equal 20.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "transfer.c:540:22",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the literal HTTP/2 version token at offset 0x24.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 32d10b449c4075ee offset 0x20",
+      "exact_quote": "02 00 00 00 47 48 54 54 50 2f 32 37 2e 30 2e 2f   ....GHTTP/27.0./"
+    },
+    {
+      "claim": "At offset 0x24 the winner bytes are concentrated on 'G' (0x47) for all 16 W samples while the loser bytes are P/B/other.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0024",
+      "exact_quote": "0x0024  47(G)x16                            50(P)x2 42(B)x1 9e(.)x1 2e(.)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "The blocker true side fires 316 times in the winner set and 0 in the loser set.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L 540 BLOCKER",
+      "exact_quote": "L 540  T=316 F=6  T=0 F=20  (conn->httpversion == 20));  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans for one CMP operand and substitutes the other into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so only value_profile_cmplog gains the I2S substitution step.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 416 --role W --fuzzer cmplog --trial 1 --seed 32d10b449c4075ee` and observed I2S-floor dash rows (mutation_op = -) at depth 23 and 24 of the 25-level ancestor chain, the floor signal for an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on conn->httpversion==20 reached by parsing an HTTP/2 marker where naive resolves the branch as often as cmplog, showing the integer/string CMP confers no I2S advantage."
+  },
+  "weakest_evidence_point": "The mapping from the input 'HTTP/2' token to httpversion==20 is inferred from the source CMP and winner byte concentration, not from a direct trace of the parser assigning httpversion=20.",
+  "confidence": "high"
+}

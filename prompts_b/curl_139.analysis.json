@@ -1,0 +1,69 @@
+{
+  "branch_id": 139,
+  "target": "curl",
+  "summary_one_line": "Input must contain the literal ASCII string \"Content-Type\" so Curl_checkheaders returns non-NULL and cthdr passes the if-guard.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A request body containing the literal header name \"Content-Type\" (the 12-byte ASCII run C-o-n-t-e-n-t---T-y-p) so that Curl_checkheaders(data, STRCONST(\"Content-Type\")) returns a non-NULL pointer and the if(cthdr) guard at http.c:2380 takes its true side.",
+      "why_winner_satisfies": "All five winner-resolving seeds carry the exact ASCII bytes 47 43 6f 6e 74 65 6e 74 2d 54 79 70 (\"GContent-Typ\") at offsets 0x24-0x2f; the BYTE DIFF shows W is fully concentrated on these literal bytes (47(G)x20, 43(C)x20, 6f(o)x20, ...) while every L distribution at the same offsets is scattered, so the Content-Type token is present in W and absent in L.",
+      "why_loser_doesnt": "All loser-blocking seeds take the false branch (L2380 T=0 F=20) and at offsets 0x24-0x2c the L byte sets are dominated by zeros/dashes/garbage (00, 2e, fe, eb, ff) rather than the Content-Type literal, so Curl_checkheaders finds no matching header and returns NULL, blocking the true side.",
+      "mechanism_attribution": "cmplog/vpc intercept the strcmp/memcmp inside Curl_checkheaders comparing the input header against the constant \"Content-Type\", record both operands in the CmpLogObserver buffer, and I2SRandReplace substitutes the constant into the input at the matching offset; naive and value_profile lack I2SRandReplace and must reconstruct the 12-byte literal by chance, which they fail to do across 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the if(cthdr) guard at http.c:2380 whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "/src/curl/lib/http.c:2380:8",
+      "exact_quote": "Source line:     if(cthdr)"
+    },
+    {
+      "claim": "cthdr is the return value of Curl_checkheaders for the \"Content-Type\" header.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L2373",
+      "exact_quote": "const char *cthdr = Curl_checkheaders(data, STRCONST(\"Content-Type\"));"
+    },
+    {
+      "claim": "Winner seeds contain the literal ASCII Content-Type bytes; losers do not, with W concentrated and L scattered at those offsets.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x24",
+      "exact_quote": "0x0024  47(G)x20                            00(.)x9 47(G)x6 65(e)x2 01(.)x1 +2u  PARTIAL"
+    },
+    {
+      "claim": "Winner-resolving seeds physically carry the Content-Type header literal in their bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 3ada62fdafca01cd offsets 0x24-0x2f",
+      "exact_quote": "06 00 00 00 47 43 6f 6e 74 65 6e 74 2d 54 79 70   ....GContent-Typ"
+    },
+    {
+      "claim": "All winner trials take the true branch and all loser trials take the false branch at the blocker line.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2380",
+      "exact_quote": "d=1   L2380  T=20 F=0  T=0 F=20  if(cthdr)  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog and vpc gain I2SRandReplace which substitutes a recorded CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile (the loser of pair 2) has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 139 --role W --fuzzer cmplog --trial 1 --seed acb98175a6d3d5c3` and observed the I2S-floor signal: 2 ancestor dash rows (mutation_op = -) at depth 10 and 11 of the ancestor chain, exclusive to cmplog/vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on the presence of a fixed \"Content-Type\" literal where naive/value_profile resolve the branch at the same rate as cmplog/vpc, showing the literal is reachable without I2S substitution."
+  },
+  "weakest_evidence_point": "The exact byte offset where Curl_checkheaders matches the input against the constant is inferred from seed layout rather than confirmed from the parser, so the precise substitution site is uncertain.",
+  "confidence": "high"
+}

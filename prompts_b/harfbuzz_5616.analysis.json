@@ -1,0 +1,94 @@
+{
+  "branch_id": 5616,
+  "target": "harfbuzz",
+  "summary_one_line": "A post table whose version field equals exactly 0x00020000 with an in-bounds glyph index, so both clauses of the OR are false.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The 4-byte post-table version field must equal the exact magic 0x00020000; the winner seeds carry version 0x0002 (bytes 00 02) where the loser seeds carry other values.",
+      "why_winner_satisfies": "Every winner-resolving seed begins with the post-table header and shows the byte run 00 02 00 00 at the version offset (0x18 region: '00 02 00 00 00 0a'), so version != 0x00020000 is false and the OR short-circuit does not fire.",
+      "why_loser_doesnt": "value_profile seeds carry no I2S substitution stage, so they never copy the intercepted 0x00020000 comparison operand into the version offset; their byte sets at 0x18 are dominated by 00 and unrelated values, leaving version != 0x00020000 true.",
+      "mechanism_attribution": "cmplog's I2SRandReplace intercepts the version-vs-0x00020000 CMP, finds the input bytes matching one operand, and substitutes the literal 0x00020000 into the input; value_profile lacks this mutator (I2S delta)."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Beyond matching the version magic, the glyph index must be brought in bounds (glyph < glyphNameIndex->len), which requires the CMP_MAP gradient feedback to preserve near-matching length/index comparisons.",
+      "why_winner_satisfies": "The winner hits the false side 55089 times and proceeds into the array-indexing body (lines 258-272 marked [W]), indicating the glyph-vs-len bound was satisfied repeatedly under the combined CMP_MAP gradient signal.",
+      "why_loser_doesnt": "cmplog resolves only 2/10 with avg hitcount 1820 versus the winner's 55089; without value_profile's CMP_MAP bucket feedback it cannot retain inputs that incrementally close the glyph>=glyphNameIndex->len bound comparison.",
+      "mechanism_attribution": "value_profile's CMP_MAP records (PC, operand-distance bucket) so an input closer to matching the bound is preserved as corpus; cmplog lacks this gradient feedback (value_profile delta)."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is an OR whose false side requires version == 0x00020000 and glyph in bounds.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 / line 255",
+      "exact_quote": "if (version != 0x00020000 || glyph >= glyphNameIndex->len)"
+    },
+    {
+      "claim": "Pair 1 vpc>value_profile is decisive with the I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the post-table version 0x0002 at the version-field offset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 7253f27adf424cfd, offset 0x18",
+      "exact_quote": "00 00 00 18 00 02 00 00 00 0a 03 00"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes one CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "Pair 2 vpc>cmplog is decisive with the value_profile technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L34",
+      "exact_quote": "Pair 2: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "value_profile's CMP_MAP preserves inputs whose operands are closer to matching as new corpus.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "The winner hits the branch 55089 times while cmplog hits it only 1820 times.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L39 Pair 2",
+      "exact_quote": "avg hitcount on branch: winner=55089  loser=1820"
+    },
+    {
+      "claim": "Resolving the false branch proceeds into the array-indexing body lines 258-272 marked winner-only.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "lines 258-272",
+      "exact_quote": "[W]   258        unsigned int index = glyphNameIndex->arrayZ[glyph];"
+    },
+    {
+      "claim": "Winner resolves 10/10 while cmplog resolves only 2/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L37 Pair 2",
+      "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5616 --role W --fuzzer value_profile_cmplog --trial 1 --seed 7253f27adf424cfd`; the ancestor chain reported 'I2S-floor signal: 1 ancestor dash row(s) at depth 21', a ParentInfo-only (mutation_op = -) row exclusive to cmplog/vpc, confirming an I2S contribution in the winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on version==0x00020000 where value_profile (no I2S) resolves the branch as often as value_profile_cmplog, showing the exact-magic substitution is not what value_profile lacks."
+  },
+  "weakest_evidence_point": "The value_profile delta for the in-bounds glyph index (Pair 2) is inferred from hitcount/resolve gaps and CMP_MAP semantics; no seed-byte offset directly pins the glyph-index bound being closed by gradient feedback.",
+  "confidence": "medium"
+}

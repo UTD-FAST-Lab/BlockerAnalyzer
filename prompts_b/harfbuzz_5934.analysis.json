@@ -1,0 +1,75 @@
+{
+  "branch_id": 5934,
+  "target": "harfbuzz",
+  "summary_one_line": "A glyph buffer whose first three syllable slots decode to Myanmar categories Ra, As, H (the reph trigraph) at start.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "Font/text input that, after shaping, produces a syllable whose first three buffer slots carry myanmar_category Ra then As then H, with start+3<=end, so the reph-detection trigraph at line 190-192 fires its true side.",
+      "why_winner_satisfies": "naive resolves 10/10 with avg hitcount 6 on the branch; its winning seeds carry diverse high-byte content (long 0x38 runs, language-tag ASCII like 'np-hant-hk', 'carf', 'hak') that broaden the buffer category space until the Ra/As/H trigraph appears, taking the true side (DIVERGENT BRANCHES W=T4 F0 at line 190).",
+      "why_loser_doesnt": "cmplog resolves only 1/10 and is blocked 8/10 with hitcount 0; its blocking seeds are saturated with a repeating '72 10 00'/'8d 10 00' lexical pattern that never decodes to the Ra/As/H prefix, so line 190 only ever takes the false side (L=T0 F7).",
+      "mechanism_attribution": "naive's plain havoc/token byte mutation (ByteRand/WordAdd/BytesDelete etc.) freely explores the glyph-category space and stumbles into the rare Ra-As-H trigraph; the input-to-state comparison-substitution stage that cmplog adds gains nothing here because there is no integer/string CMP whose operand is the category sequence (categories are table-derived, not compared as literals), so cmplog wastes mutation energy on CMP-operand substitution and collapses onto a self-reinforcing repeated byte motif instead. The winning technique is naive's havoc breadth, not comparison-solving."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of the Myanmar reph trigraph test at line 190, requiring myanmar_category Ra at start.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-ot-shaper-myanmar.cc:190",
+      "exact_quote": "info[start  ].myanmar_category() == M_Cat(Ra) &&"
+    },
+    {
+      "claim": "The true side requires a three-slot trigraph Ra, As, H with start+3 <= end.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L189-192",
+      "exact_quote": "if (start + 3 <= end &&"
+    },
+    {
+      "claim": "naive is the decisive winner over cmplog on the I2S delta, resolving 10/10 with the branch hit avg 6 vs loser 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 naive > cmplog",
+      "exact_quote": "avg hitcount on branch: winner=6  loser=0"
+    },
+    {
+      "claim": "cmplog is blocked on the branch 8/10 and never takes the true side at line 190.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L190",
+      "exact_quote": "T=4 F=0  T=0 F=7  info[start  ].myanmar_category() == M_Cat(Ra) &&"
+    },
+    {
+      "claim": "naive winning seeds carry diverse content including long 0x38 runs and language-tag ASCII.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 2 id=c4d23fb4576498b7",
+      "exact_quote": "np-hant-hk"
+    },
+    {
+      "claim": "cmplog blocking seeds are saturated with a repeating 72 10 00 lexical motif.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1 id=d11753a48c6884e0",
+      "exact_quote": "72 10 00 00 72 10 00 00 72 10 00 00 72 10 00"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which substitutes CMP operands found in the post-execution CmpLogObserver buffer.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive uses only havoc + token mutation with no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "Decisive direction is naive > cmplog: the WINNER is naive, which has no I2S stage (MECHANISM CONTEXT: naive mutators are havoc + token only, 'No I2S'). The winning technique is therefore plain havoc byte mutation, not I2SRandReplace, so no I2S lineage check applies to the winner. cmplog's I2S is on the LOSING side here (anti-I2S subject), where I2S substitution onto a category-derived gate yields no advantage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where cmplog reliably resolves the Ra/As/H trigraph gate at parity-or-better than naive within the same execution budget, showing I2S substitution does drive the true side rather than havoc breadth."
+  },
+  "weakest_evidence_point": "The byte-level claim that the Ra/As/H category prefix is reachable by random havoc rests on font-table decoding I cannot see in the prompt; the seed bytes are pre-shaping input, not the post-shaping category sequence the gate tests.",
+  "confidence": "medium"
+}

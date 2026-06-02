@@ -1,0 +1,81 @@
+{
+  "branch_id": 6181,
+  "target": "harfbuzz",
+  "summary_one_line": "Font input whose resolved script tag is a Unicode-7.0+ complex script (GRANTHA et al.) routed to the shared USE-shaper tail.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["grimoire>cmplog (grimoire_structural)"],
+      "what_input_feature": "A structurally valid font whose planner->props.script resolves to one of the Unicode-7.0+ complex scripts in the case block at lines 331-387 (HB_SCRIPT_GRANTHA and siblings), so dispatch enters the case at 331 and falls through to the shared chosen_script test at 394-398. This requires building OpenType tables (cmap/GSUB/GPOS/GDEF) coherent enough that script detection assigns one of these tags rather than landing in the default arm.",
+      "why_winner_satisfies": "Grimoire winning seeds carry well-formed sfnt structure (sfnt version 00 01 00 00 at offset 0, table-directory tags like cmap/GDEF/GPOS, OTTO magic) plus filler/region bytes, exactly the deep structural shape grimoire's GeneralizationStage + structural mutators recombine; the W side reaches the GRANTHA case (line 331 tagged [B]) and runs the downstream USE shaper (W hits 20 vs L hits 6 on zero_mark_width/adjust_mark_offsets).",
+      "why_loser_doesnt": "Cmplog loser seeds are short, byte-scrambled fragments (72-218 bytes, ParentInfo havoc/I2S mutation chains like BytesDeleteMutator/ByteNegMutator) whose script resolution stalls at earlier Unicode-3.0..6.1 case labels (lines 278-330 tagged [L]) or the default arm; they never assemble a font that resolves to a Unicode-7.0+ script, so the blocker true side stays unhit (loser blocked 8/10).",
+      "mechanism_attribution": "grimoire adds GeneralizationStage (replaces byte runs with <GAP> placeholders, validated by re-execution) plus the Grimoire structural mutators that splice/recurse on generalized token/gap structures; this grammar-free structural recombination of whole table fragments builds the coherent multi-table font that drives script detection to a new high-Unicode script tag, whereas cmplog's I2S byte substitution (which grimoire also has) only fixes local CMP operands and cannot synthesize the structural skeleton."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The single decisive pair is grimoire over cmplog with the grimoire_structural delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: grimoire > cmplog  [delta: grimoire_structural]"
+    },
+    {
+      "claim": "The blocker is the GRANTHA case label, one of a large run of Unicode-7.0+ script case labels.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L331",
+      "exact_quote": "case HB_SCRIPT_GRANTHA: <-- BLOCKER"
+    },
+    {
+      "claim": "The GRANTHA case and its siblings fall through to a shared chosen_script test deciding default vs USE shaper.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L394-398",
+      "exact_quote": "if (planner->map.chosen_script[0] == HB_TAG ('D','F','L','T') ||"
+    },
+    {
+      "claim": "Winner seeds are well-formed fonts with sfnt structure and table-directory tags (cmap), exercising the true side.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 W (id=4559e66c54a51f83)",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 63 6d 61 70   ......      cmap"
+    },
+    {
+      "claim": "A winner seed carries the OTTO magic and a GPOS table tag, a deep coherent OpenType structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 5 W (id=2f65acf0bd58042a)",
+      "exact_quote": "0000: 4f 54 54 4f 00 01 20 20 20 20 20 20 47 50 4f 53   OTTO..      GPOS"
+    },
+    {
+      "claim": "Loser seeds are short byte-scrambled fragments produced by cmplog havoc/I2S mutation chains.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 L (id=001576b87ec39bdb, size=72)",
+      "exact_quote": "fuzzer=cmplog, trial=2, discovered_at=600s, mutation_op=DwordAddMutator,BytesDeleteMutator,ByteNegMutator"
+    },
+    {
+      "claim": "The winner runs the downstream shaper far more than the loser, evidence the true-side dispatch was reached.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "zero_mark_width",
+      "exact_quote": "20         6  hb-ot-shape.cc:zero_mark_width(hb_glyph_position_t*)"
+    },
+    {
+      "claim": "Grimoire adds a GeneralizationStage plus structural mutators on top of the full cmplog/I2S stack, which is the single-technique delta.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire baseline relationship",
+      "exact_quote": "it includes the `CmpLogObserver`, the `TracingStage`, and the\n`I2SRandReplace` (i2s) stage — and ADDS a `GeneralizationStage` plus\nGrimoire structural mutators"
+    },
+    {
+      "claim": "Grimoire's structural mutators splice and recurse on generalized token/gap structures (grammar-free structural mutation).",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire mutators/stages",
+      "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "grimoire structural",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is 'grimoire structural', not I2SRandReplace, so lineage I2S-floor verification is not mandatory. Both grimoire and cmplog already include the I2SRandReplace stage (per MECHANISM CONTEXT), so the divergence cannot be attributed to I2S; the dash-row signal is also non-I2S-exclusive for grimoire (LineageMutatorWrap with empty names list), making lineage uninformative for separating the technique here."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on a Unicode-7.0+ script case where cmplog (or naive) reaches the true side at the same rate as grimoire, showing structural recombination is not what supplies the required coherent font skeleton."
+  },
+  "weakest_evidence_point": "The seeds were stored by grimoire/cmplog generically and are not labeled by which decisive trial discovered them, so attributing the W structural coherence specifically to grimoire's GeneralizationStage rests on mechanism reasoning more than direct lineage evidence.",
+  "confidence": "medium"
+}

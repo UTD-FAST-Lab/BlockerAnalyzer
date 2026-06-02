@@ -1,0 +1,81 @@
+{
+  "branch_id": 5679,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must be a well-formed sfnt font (magic 00 01 00 00 + valid cmap/GSUB table tags) so get_nominal_glyph(a) succeeds and has_a is true.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A structurally-valid TrueType/sfnt container: the 4-byte version magic 00 01 00 00 at offset 0, followed by a sfnt header (00 07 ff 80) and ASCII 4-byte table tags ('cmap' at 0x0c-0x0f, 'GS..' / 'GSUN' at 0x1b-0x1f) at fixed offsets, so the font's cmap loads and font->get_nominal_glyph(a, &a_glyph) returns true, making has_a true at line 154.",
+      "why_winner_satisfies": "All five winner-resolving seeds begin with the identical 16-byte run 00 01 00 00 00 07 ff 80 20 3f 21 20 63 6d 61 70 ('....  ?! cmap') and carry stable table-tag ASCII ('cmap', 'GS') at offsets that survive across all five; this exact-literal layout is what cmap parsing requires, so the nominal-glyph lookup for 'a' succeeds and decompose reaches the has_a true side (W hits=8 T, 0 F at line 154).",
+      "why_loser_doesnt": "The loser-blocking seeds have scattered, non-magic leading bytes (offset 0 is fa/20/28, offset 5 is 20/00/0e, no 'cmap' run); the sfnt magic and table tags are absent, so cmap fails to load, get_nominal_glyph(a) returns false, has_a stays false and decompose returns 0 (L hits=0 T, 14 F at line 154).",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator over value_profile; I2S intercepts the CMP operands of the sfnt magic / table-tag comparisons in the font loader and substitutes the constant expected values (00 01 00 00, 'cmap', 'GSUB') directly into the input at the offset where they were read, synthesizing the multi-byte exact-match header that value_profile's CMP_MAP-gradient feedback alone cannot assemble for a 4-byte exact tag."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The only decisive pair is value_profile_cmplog beating value_profile with delta I2S.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "The blocked true side requires has_a, i.e. a successful nominal-glyph lookup for the decomposed character a.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L135 / L154",
+      "exact_quote": "bool has_a = (bool) font->get_nominal_glyph (a, &a_glyph);"
+    },
+    {
+      "claim": "Line 154 if(has_a) is the blocker whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7 / L154",
+      "exact_quote": "if (has_a) { <-- BLOCKER"
+    },
+    {
+      "claim": "All winner seeds share the identical sfnt magic + cmap tag leading run.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seeds 1-5 offset 0x00",
+      "exact_quote": "00 01 00 00 00 07 ff 80 20 3f 21 20 63 6d 61 70   ........ ?! cmap"
+    },
+    {
+      "claim": "Winner bytes at offsets 0x05-0x0f are concentrated to single values (07, ff, 80, 'cmap') while loser bytes are scattered.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x05-0x0f",
+      "exact_quote": "0x000c  63(c)x5                             20( )x2 ff(.)x1 28(()x1 9c(.)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "Winner takes the has_a true side at line 154 while loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L154",
+      "exact_quote": "d=1   L 154  T=8 F=0  T=0 F=14  if (has_a) {  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile lacks the I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog's I2S finds leave silent ParentInfo-only dash rows in lineage.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog mutation_op note",
+      "exact_quote": "silent ParentInfo-only entries (`mutation_op = -` in lineage) — same\nfloor signal as cmplog"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5679 --role W --fuzzer value_profile_cmplog --trial 2 --seed ccf94a75d15faf4a` and observed exactly one I2S-floor dash row (mutation_op = -) at depth 37 (ancestor e0a5b09f80625fb6) in the 38-level chain; tool reported 'I2S-floor signal: 1 ancestor dash row(s) at depth 37', confirming an unwrapped I2SRandReplace find exclusive to cmplog/vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose sfnt magic / cmap-tag bytes are read by an opaque non-CMP path (e.g. table-directory offset arithmetic with no integer comparison against the literal tag) where value_profile_cmplog still resolves the has_a branch as fast as value_profile would refute the I2S-substitution attribution."
+  },
+  "weakest_evidence_point": "That the has_a glyph lookup hinges on an exact-match CMP against the 'cmap'/magic literals (rather than a non-comparison structural parse) is inferred from byte concentration plus source, not from instruction-level evidence of the comparison sites.",
+  "confidence": "medium"
+}

@@ -1,0 +1,81 @@
+{
+  "branch_id": 5497,
+  "target": "harfbuzz",
+  "summary_one_line": "A MATH-table Device record whose format field equals 1/2/3 or 0x8000, so the switch routes away from default into a real get_y_delta path.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Bytes forming a valid MATH table (magic 'MATH' at offset 0x0c) plus a Device record whose 2-byte format field (u.b.format) holds one of the recognized constants {1,2,3,0x8000}; only then does the switch at line 3577 dispatch to a real get_y_delta case and take the false (non-default) side. Loser inputs leave the format field at an unrecognized value so the switch falls through to default and returns 0.",
+      "why_winner_satisfies": "All five winner-resolving seeds carry the ASCII tag 'MATH' at offsets 0x0c-0x0f and concentrated structural format bytes (e.g. 00 01 ... at the head, 0x8000-style format selectors), and the per-role overlay shows the winner set exercising case 1/2/3 (L3579) and case 0x8000 (L3584) which the loser never enters; DIVERGENT BRANCHES shows W taking the recognized cases (T>0) while L is T=0 on those lines.",
+      "why_loser_doesnt": "Loser-blocking seeds are short and unstructured (6/13/27/35/57 bytes) with no 'MATH' magic and arbitrary head bytes, so the Device format field never equals a recognized constant; the overlay shows L hits zero in MathValueRecord::sanitize, Device::sanitize and the whole MATH/Device sanitize chain, meaning the parser never even reaches a valid Device record and the switch always falls to default.",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes the recognized format constants (and the 'MATH' tag bytes compared during table dispatch/sanitize) directly into the input at the matching offsets, jumping the input straight to a recognized switch arm; naive and value_profile lack I2SRandReplace and must hit those exact multi-byte constants by chance, which they do not within budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of a switch on u.b.format; the globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L3577 / L3587",
+      "exact_quote": "switch (u.b.format)"
+    },
+    {
+      "claim": "The recognized switch arms are case 1/2/3 and case 0x8000; taking them avoids the default return-0.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L3579, L3584",
+      "exact_quote": "case 0x8000:"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the ASCII 'MATH' tag at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 2, offset 0x0c-0x0f",
+      "exact_quote": "00 01 00 00 00 01 20 00 20 20 20 20 4d 41 54 48   ...... .    MATH"
+    },
+    {
+      "claim": "The byte diff shows the 'MATH' magic offsets 0x0c-0x0f are concentrated 4d 41 54 48 across all winner seeds but absent in losers.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  4d(M)x20"
+    },
+    {
+      "claim": "Loser-blocking seeds are short and unstructured (e.g. 6 bytes) with no MATH magic.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1, id=003817559785f774",
+      "exact_quote": "Seed 1 (id=003817559785f774, size=6 bytes, fuzzer=naive, trial=1, discovered_at=0s, mutation_op=ByteDecMutator,WordAddMutator):"
+    },
+    {
+      "claim": "The winner set enters the recognized case 1/2/3 and case 0x8000 arms (T>0) while the loser never does (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L3584",
+      "exact_quote": "d=1   L3584  T=10 F=930  T=0 F=940  case 0x8000:"
+    },
+    {
+      "claim": "The loser never reaches the Device/MATH sanitize chain; W invokes Device::sanitize 1270 times, L zero times.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "OT::Device::sanitize",
+      "exact_quote": "1270         0  OT::Device::sanitize(hb_sanitize_context_t*) const"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for one CMP operand and substitutes the other at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the (value_profile_cmplog > value_profile) divergence is also an I2S delta.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5497 --role W --fuzzer cmplog --trial 1 --seed 20ac683177ab6348`; the ancestor chain has 30 levels and the trailing I2S-floor signal reports 2 dash rows (mutation_op = -) at depth 28 and 29, the lower-bound signal of an I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on a Device.format field equal to {1,2,3,0x8000} where naive/value_profile resolve the non-default arm as fast as cmplog/vpc would refute the I2S attribution, showing the format constant is reachable by plain havoc within budget."
+  },
+  "weakest_evidence_point": "I cannot directly confirm from the prompt that the exact format constants (1/2/3/0x8000) are the CMP operands I2SRandReplace substituted; the lineage dash rows establish an I2S find on the chain but not which compare it solved.",
+  "confidence": "high"
+}

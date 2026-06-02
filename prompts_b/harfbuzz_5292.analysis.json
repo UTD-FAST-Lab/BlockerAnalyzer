@@ -1,0 +1,87 @@
+{
+  "branch_id": 5292,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must be a well-formed OpenType font file: a valid sfnt header plus recognized 4-byte table tags so the array length reaches hb_min_size(OpenTypeFontFile).",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "An OpenType sfnt blob whose leading bytes match the expected sfnt-version magic and whose table-directory entries carry recognized 4-byte FOURCC tags (GSUB/GPOS/MATH/...), so the parsed array length is >= hb_min_size(OpenTypeFontFile) and the gate at hb-array.hh:252 takes its false branch (returning a real reinterpret_cast<const T*> rather than &Null(T)).",
+      "why_winner_satisfies": "Every winning seed begins with the sfnt version 00 01 00 00 and embeds literal OpenType table tags at offset 0x0c (GSUB, GPOS, MATH, GPO), giving the array enough length to clear hb_min_size and resolve the false branch; the branch is hit 12529 (cmplog) / 5642 (vpc) times.",
+      "why_loser_doesnt": "Loser-blocking seeds are short and lack the sfnt magic and table-tag structure (e.g. a 6-byte seed 87 0e 0d 0e 22 0e), so length stays below hb_min_size and only the true (Null) side is ever taken; loser hitcount on the branch is 0.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes the program's expected operands (the sfnt magic and FOURCC tag literals) directly into the input at the matching offsets, manufacturing the exact byte sequences the length/tag gate requires; naive and value_profile lack I2SRandReplace and must hit those multi-byte literals by chance, which they never do in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a length-vs-min-size gate that returns either a Null pointer or a real cast pointer.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "hb-array.hh:252:12",
+      "exact_quote": "{ return length < hb_min_size (T) ? &Null (T) : reinterpret_cast<const T *> (arrayZ); }"
+    },
+    {
+      "claim": "The globally blocked side is the false branch, i.e. the side reached only when length is large enough.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "Winning seeds begin with the OpenType sfnt version magic 00 01 00 00.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "W Seed 2 offset 0x0000",
+      "exact_quote": "0000: 00 01 00 00 00 01 ee ff 00 30 00 20 47 53 55 42   .........0. GSUB"
+    },
+    {
+      "claim": "Winning seeds embed literal OpenType table tags such as GPOS at offset 0x0c.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "W Seed 5 offset 0x0000",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 19 21 20 20 20 47 50 4f 53   ...... .!   GPOS"
+    },
+    {
+      "claim": "Offset 0x0c is concentrated on tag-letter bytes in W (G dominant) but not in L.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "0x000c",
+      "exact_quote": "0x000c  47(G)x19 4d(M)x1                    00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "The winner resolves the branch in all 10 trials with high hitcount while the loser stays blocked at hitcount 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "avg hitcount on branch: winner=12529  loser=0"
+    },
+    {
+      "claim": "The value_profile_cmplog pair shows the same all-resolved-vs-all-blocked split with the I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 value_profile_cmplog>value_profile",
+      "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+    },
+    {
+      "claim": "A loser-blocking seed is a tiny 6-byte blob lacking any sfnt header or tag structure.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "L Seed 1",
+      "exact_quote": "0000: 87 0e 0d 0e 22 0e                                 ....\"."
+    },
+    {
+      "claim": "I2SRandReplace substitutes the other CMP operand into the input at offsets matching one operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive and value_profile lack I2SRandReplace, so the dash signal's absence marks naive/value_profile finds.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 5292 --role W --fuzzer value_profile_cmplog --trial 1 --seed 002407bc92172463` and observed I2S-floor dash rows (mutation_op = -) at depths 11 and 12; corroborated with `--fuzzer cmplog --trial 1 --seed 000abe48ad9847bd` showing dash rows at depths 27 and 28. Both winning chains contain the I2S floor signal exclusive to cmplog/vpc in the canonical set."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on length < hb_min_size where naive or value_profile resolves the false branch as often as cmplog/vpc despite the required bytes being a multi-byte magic+tag literal — i.e. no I2S advantage at the length/tag gate."
+  },
+  "weakest_evidence_point": "The branch is a pure length comparison (length < hb_min_size), so attribution of the I2S win to FOURCC tag substitution rests on the seed-byte structure (sfnt magic + tags) rather than on a directly observed CMP on those literals at this line.",
+  "confidence": "high"
+}

@@ -1,0 +1,106 @@
+{
+  "branch_id": 5958,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must contain a codepoint byte run encoding U+0E0E or U+0E0F (e.g. 0f 0e) at a buffer-glyph offset so get_consonant_type returns DC.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)", "value_profile>value_profile_cmplog (I2S)"],
+      "what_input_feature": "A two-byte little-endian codepoint run equal to 0x0E0E or 0x0E0F (bytes 0e 0e or 0f 0e) positioned where the Thai shaper reads it as a glyph codepoint, so the exact-equality gate u == 0x0E0Eu || u == 0x0E0Fu takes its true branch and returns DC.",
+      "why_winner_satisfies": "The non-I2S winners (naive, value_profile) reach the branch via lucky havoc/token byte mutation that lands the literal codepoint bytes: winning seeds carry explicit 0f 0e 00 00 runs (Seed 1 fuzzer=value_profile, Seed 4/5 fuzzer=naive), and these fuzzers resolve in 10/10 trials.",
+      "why_loser_doesnt": "The I2S-equipped losers (cmplog, value_profile_cmplog) block in 9/10 and 8/10 trials with hitcount 0 on the branch; their I2SRandReplace stage substitutes CMP operands at matching offsets, which does not help here and apparently diverts mutation energy away from simply hitting the literal codepoint, so they take the false branch.",
+      "mechanism_attribution": "The winner needs no comparison introspection — the codepoint bytes arise from plain havoc/token byte mutation (havoc-only). Adding I2S (cmplog/vpc) is a regression at this branch (I2S-anti): the loser variants differ from winners ONLY by the I2SRandReplace stage, so the divergence is attributable to that stage being unhelpful/harmful, not to a feature it unlocks."
+    },
+    {
+      "covers_pairs": ["grimoire>cmplog (grimoire_structural)"],
+      "what_input_feature": "A structurally recombined input that places the 0x0E0E/0x0E0F codepoint run inside a generalized token/gap scaffold the Thai shaper parses as a glyph buffer, so the consonant-type gate's true branch is reached.",
+      "why_winner_satisfies": "grimoire resolves 9/10 trials; its winning seeds (Seed 2 fuzzer=grimoire, Seed 3 fuzzer=grimoire) are larger structured inputs embedding the 0f 0e codepoint run amid spliced token material (e.g. 6d 61 54 ff 0f 0e and ff 0f 0e 00), consistent with Grimoire's structural splice/recurse over generalized inputs.",
+      "why_loser_doesnt": "cmplog (same baseline plus I2S but WITHOUT the GeneralizationStage and Grimoire structural mutators) blocks 9/10 trials with hitcount 0; it lacks the structural recombination that assembles a buffer reaching the gate.",
+      "mechanism_attribution": "grimoire and cmplog share the full cmplog/I2S stack; grimoire's only delta is the GeneralizationStage plus Grimoire structural mutators that splice generalized token/gap structures (grimoire structural), which is what builds the input reaching the branch."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is an exact-equality gate on two Thai codepoints, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6-L7",
+      "exact_quote": "if (u == 0x0E0Eu || u == 0x0E0Fu)"
+    },
+    {
+      "claim": "naive beats cmplog with the I2S technique as the single delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 L26",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile beats value_profile_cmplog with I2S as the single delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 L34",
+      "exact_quote": "Pair 2: value_profile > value_profile_cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "A non-I2S winner (value_profile) seed carries the literal 0x0E0F codepoint bytes 0f 0e.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 id=5b2413d884cc2bab",
+      "exact_quote": "fuzzer=value_profile, trial=1, discovered_at=36s, mutation_op=BytesExpandMutator,BytesDeleteMutator,BytesExpandMutator,BytesDeleteMutator):\n  0000: 0f 0e 00 00 00 00 00"
+    },
+    {
+      "claim": "A naive winner seed also embeds the 0f 0e codepoint run.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 4 id=62e5ed8618b6203c",
+      "exact_quote": "0000: 98 cb 0d 4e 0d 0e 00 00 4b 0e 00 00 0f 0e 00 00   ...N....K......."
+    },
+    {
+      "claim": "The losers (I2S fuzzers) block the branch with zero hits while non-I2S winners resolve 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 L28-L32",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0"
+    },
+    {
+      "claim": "cmplog adds the I2SRandReplace operand-substitution stage on top of naive's havoc/token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators L196-L199",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "naive's mutators are havoc + token only, no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Mutators L285",
+      "exact_quote": "any of the above. No I2S."
+    },
+    {
+      "claim": "grimoire beats cmplog with grimoire_structural as the single delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 3 L42",
+      "exact_quote": "Pair 3: grimoire > cmplog  [delta: grimoire_structural]"
+    },
+    {
+      "claim": "grimoire shares the cmplog/I2S stack and adds only the GeneralizationStage plus Grimoire structural mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire Baseline relationship L235-L240",
+      "exact_quote": "both have I2S; grimoire adds generalization +"
+    },
+    {
+      "claim": "Grimoire structural mutators splice and recurse on generalized token/gap structures.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire Mutators/stages L251-L255",
+      "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+    },
+    {
+      "claim": "A grimoire winner seed embeds the 0f 0e codepoint run inside larger spliced token material.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 2 id=d50e787269a5c51d",
+      "exact_quote": "0000: 6d 61 54 ff 0f 0e 00 00 03 61 54 ff 0f 0e 00 00   maT......aT....."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "havoc-only",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is havoc-only (Pair1/Pair2 winners are naive and value_profile, neither of which has an I2S stage), so lineage I2S-floor verification is not applicable; the winner seeds carry the literal codepoint bytes 0f 0e directly and the winners' mutation_op lists contain only havoc/token operators (BytesExpand/BytesDelete on the value_profile seed, WordAdd/BytesSet/ByteFlip on naive)."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with an exact-equality codepoint gate where adding the I2SRandReplace stage (cmplog/vpc) resolves the gate at least as often as naive/value_profile — i.e. I2S is NOT a regression — would refute the I2S-anti hypothesis for Pair 1/2."
+  },
+  "weakest_evidence_point": "The mechanism by which adding I2S actively diverts energy and makes cmplog/vpc lose (rather than the win being random havoc variance) is inferred from the seed bytes and trial counts, not directly observed.",
+  "confidence": "medium"
+}

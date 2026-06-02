@@ -1,0 +1,94 @@
+{
+  "branch_id": 129,
+  "target": "curl",
+  "summary_one_line": "Input must contain a literal \"Host:\" custom header so Curl_checkheaders returns non-NULL ptr and the true branch is taken",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The input must embed the exact header-name literal \"Host:\" (bytes 47 48 6f 73 74 3a) so Curl_checkheaders(data, STRCONST(\"Host\")) finds it and returns a non-NULL ptr, satisfying the `ptr &&` condition of the blocker.",
+      "why_winner_satisfies": "Every winner-resolving seed carries the literal \"Host:\" at offsets 0x24-0x29 (47 48 6f 73 74 3a = \"GHost:\"), an exact string CMP target that I2SRandReplace substitutes from the CmpLogObserver buffer; the byte-diff shows W bytes at 0x25-0x29 are saturated to the \"Host:\" characters (48,6f,73,74,3a) while L is scattered.",
+      "why_loser_doesnt": "Loser-blocking seeds lack a clean \"Host:\" literal at the header offsets (e.g. seed 1 has 47 48 = \"GH\" then 2e \".\" rather than \"ost:\"; seed 3/4/5 are dominated by '%' and '+' filler), so Curl_checkheaders returns NULL, ptr is false, and the true branch is never taken.",
+      "mechanism_attribution": "cmplog/vpc run the I2SRandReplace mutator, which reads the post-execution CmpLogObserver buffer for the strcmp/memcmp of the \"Host\" header name and substitutes the matched operand into the input, planting the exact \"Host:\" literal that naive/value_profile must instead stumble onto by blind havoc; the lineage dash-row floor confirms an I2S find in the winner's ancestor chain."
+    },
+    {
+      "covers_pairs": ["fast>minimizer (aflfast_rarity)"],
+      "what_input_feature": "Same program-side requirement — a \"Host:\" header making ptr non-NULL — but reached purely by extra havoc/token mutation budget rather than CMP introspection, since both fast and minimizer lack I2S.",
+      "why_winner_satisfies": "fast resolves 8/10 vs minimizer 2/10 with hitcount 394 vs 75; fast's AFLFast FAST power schedule gives rarely-hit coverage buckets up to 4x energy, so the rare seeds that already contain a partial \"Host:\" header get many more havoc mutations and more often complete the literal.",
+      "why_loser_doesnt": "minimizer uses PowerSchedule None with energy from intrinsic calibration only, not weighted by region rarity, so the rare path to the \"Host:\"-bearing input gets no extra mutation budget and it blocks 8/10 with far lower hitcount (75).",
+      "mechanism_attribution": "The fast vs minimizer delta is purely the AFLFast `n_fuzz`-based rare-edge power schedule (FAST) which multiplies the mutation budget for rarely-exercised coverage buckets; neither fuzzer has CMP logging, so the win is extra havoc dosing on rare paths, not comparison-solving."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker true side requires ptr non-NULL, where ptr is set by Curl_checkheaders for the \"Host\" header.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L2156-L2157",
+      "exact_quote": "ptr = Curl_checkheaders(data, STRCONST(\"Host\"));"
+    },
+    {
+      "claim": "The blocker condition gates the true branch on ptr being non-NULL.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L2157",
+      "exact_quote": "if(ptr && (!data->state.this_is_a_follow ||"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal \"Host:\" bytes 47 48 6f 73 74 3a at offset 0x24.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 03a52d351064c850 offset 0x0020-0x0029",
+      "exact_quote": "0020: 06 00 00 00 47 48 6f 73 74 3a e8 6d 2d 40 36 6f   ....GHost:.m-@6o"
+    },
+    {
+      "claim": "Winner bytes at the header offsets are saturated to the \"Host:\" characters while loser bytes are scattered.",
+      "cited_section": "BYTE DIFF (W vs L at common offsets)",
+      "cited_locator": "offset 0x0025",
+      "exact_quote": "0x0025  48(H)x30                            25(%)x4 34(4)x3 2e(.)x3 41(A)x2 +3u  DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds lack a clean \"Host:\" literal at the header offsets.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 003e4994f2c65fcf offset 0x0000-0x000f",
+      "exact_quote": "0000: 00 01 00 00 00 19 30 49 2e 2e 51 2e 47 48 2e 2b   ......0I..Q.GH.+"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "The winner vpc seed's ancestor chain contains I2S-floor dash rows, direct lower-bound evidence of an I2S contribution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog dash-row floor",
+      "exact_quote": "their presence in a winning\nseed's ancestor chain is direct (lower-bound) evidence of I2S\ncontribution."
+    },
+    {
+      "claim": "The fast vs minimizer delta is the AFLFast rare-edge power schedule giving rare paths up to 4x energy.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "fast Mutators / stages",
+      "exact_quote": "Rarely-hit\npaths get up to 4× energy; saturated paths are damped to 0.4×."
+    },
+    {
+      "claim": "minimizer uses PowerSchedule None so energy is not weighted by region hit-frequency.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "minimizer Mutators / stages",
+      "exact_quote": "PowerSchedule is `None`, so the\nenergy uses ONLY intrinsic calibration and is NOT weighted by how often\na region has been hit."
+    },
+    {
+      "claim": "fast resolves more trials and has much higher branch hitcount than minimizer.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 3 fast > minimizer",
+      "exact_quote": "winner: resolved=8/10  blocked=2  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 129 --role W --fuzzer value_profile_cmplog --trial 1 --seed 03a52d351064c850` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 11 and 12 of the 13-level ancestor chain"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness that gates on a non-NULL Host-header lookup but whose header-name literal is supplied at runtime (not present as a constant CMP operand) showing cmplog/vpc with no advantage over naive/value_profile would refute the I2S-literal hypothesis."
+  },
+  "weakest_evidence_point": "Whether the fast>minimizer win is genuinely the AFLFast rarity schedule rather than noise — its subject-level p_AUC=0.1041 is not significant and prob_div is only 0.60.",
+  "confidence": "medium"
+}

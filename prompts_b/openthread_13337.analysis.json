@@ -1,0 +1,105 @@
+{
+  "branch_id": 13337,
+  "target": "openthread",
+  "summary_one_line": "A well-formed IPv6 datagram whose destination matches a configured unicast address, so receive==true and the non-reassembled receive path is taken.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "An IPv6 header whose destination address equals one of the node's configured unicast addresses so that HasUnicastAddress(header.GetDestination()) is true at L1223, setting receive=true and driving execution into the `if (receive)` block where the `if (!aIsReassembled)` blocker at L1267 is evaluated and its false (non-reassembled) side is taken. Concretely the winner inputs carry a concentrated, structurally-valid header prefix (e.g. bytes 78 66 10 ... and the ff ff fe fc / fd de ad 00 be ef address pattern) that the parser accepts and that matches a node address.",
+      "why_winner_satisfies": "Winner-resolving cmplog seeds share a tight 16-byte header prefix (0000: 78 66 10 ... ff ff fe fc, 0010: 03 a0 07 08 ... fd de ad 00 be ef) and at L1223 the winner takes the unicast-address-match side T=70 F=0, so receive becomes true and the blocker's false side is reached (resolved=10/10).",
+      "why_loser_doesnt": "Loser-blocking naive seeds carry a different, less-structured prefix (db 62 5c ... and long 44 44 44 / 30 30 runs) and at L1223 they only sometimes match (T=20 F=28), so on 28 executions receive stays false and the input falls into the forwarding branches (L1227-1234, L1286), never evaluating the blocker's false side — loser blocked=8/10.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer of intercepted integer/memory comparisons (the address-equality checks behind HasUnicastAddress and the header field parses) and substitutes the matching operand directly into the input at the right offset, synthesizing the exact destination-address / header bytes the node expects; naive lacks CMP interception and must hit those multi-byte constants by blind havoc, which it rarely completes."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of `if (!aIsReassembled)` at ip6.cpp:1267, inside the receive path.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "ip6.cpp:1267:13",
+      "exact_quote": "Source line:         if (!aIsReassembled)"
+    },
+    {
+      "claim": "The globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "ip6.cpp:1267",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "The blocker line 1267 is only reached when receive is true, since it is nested under `if (receive)` at L1257.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1257-1267",
+      "exact_quote": "if (receive)"
+    },
+    {
+      "claim": "receive is set true when the destination matches a configured unicast address at L1223.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1223-1225",
+      "exact_quote": "if (Get<ThreadNetif>().HasUnicastAddress(header.GetDestination()))"
+    },
+    {
+      "claim": "The winner always takes the unicast-address-match side at L1223 (T=70 F=0) while the loser diverges (T=20 F=28).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1223",
+      "exact_quote": "d=1   L1223  T=70 F=0  T=20 F=28  if (Get<ThreadNetif>().HasUnicastAddress(header.GetDestin..."
+    },
+    {
+      "claim": "Loser inputs that miss the unicast match fall into the forwarding branches L1227-1234 (loser-only coverage).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1227",
+      "exact_quote": "d=1   L1227  T=0 F=0  T=2 F=26  else if (!header.GetDestination().IsLinkLocal())"
+    },
+    {
+      "claim": "cmplog resolves the branch on all 10 trials while naive blocks on 8, with cmplog being the I2S winner over naive.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "The naive loser blocks the branch on 8 of 10 trials.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 loser",
+      "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+    },
+    {
+      "claim": "Winner-resolving seeds share a concentrated structured IPv6 header prefix.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 id=0a1686eddd03593d offset 0x00",
+      "exact_quote": "0000: 78 66 10 4c 4d 00 10 2c 00 00 b0 00 ff ff fe fc"
+    },
+    {
+      "claim": "Loser-blocking seeds carry a different prefix with long 44 / 30 byte runs, not the winner's structured header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 4 id=006f860b208405fe offset 0x00",
+      "exact_quote": "0000: db 62 5c 00 00 00 ff 00 64 78 44 44 44 44 44 44   .b\\.....dxDDDDDD"
+    },
+    {
+      "claim": "W and L diverge sharply at the early header offsets, with W concentrated on header bytes the L seeds lack.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0000",
+      "exact_quote": "0x0000  77(w)x6 78(x)x4                     db(.)x8 dc(.)x1 96(.)x1             DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for one CMP operand and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mutator and must hit constants by blind havoc.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 13337 --role W --fuzzer cmplog --trial 1 --seed 0a1686eddd03593d` and observed exactly 1 I2S-floor dash row (mutation_op = -, ParentInfo-only) at depth 18 of the 19-level ancestor chain; under the current LibAFL build that nameless row is the lower-bound signal of an unwrapped I2SRandReplace find, exclusive to cmplog/vpc in the canonical set."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where reaching the `!aIsReassembled` false side does NOT require any multi-byte address/header constant match (e.g. receive is forced true unconditionally) yet cmplog still resolves it on all trials while naive blocks — that would show the divergence is not driven by I2S substitution of a comparison operand."
+  },
+  "weakest_evidence_point": "The link from the byte-diff header prefix to the specific HasUnicastAddress comparison is inferred from source structure plus per-role branch counts, not from a logged I2SRandReplace operand at a named offset.",
+  "confidence": "medium"
+}

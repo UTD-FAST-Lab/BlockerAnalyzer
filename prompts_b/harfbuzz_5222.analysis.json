@@ -1,0 +1,81 @@
+{
+  "branch_id": 5222,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must be a GDEF table whose version.major equals 1 or 2 so has_glyph_classes() avoids the default false branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A GDEF table header whose 16-bit major-version field decodes to 1 or 2 (bytes 00 01 at the version offset) together with the 'GDEF' tag, so the switch in has_glyph_classes() dispatches to case 1 or case 2 instead of the default arm.",
+      "why_winner_satisfies": "Every winner-resolving seed begins 00 01 00 00 ... 47 44 45 46 ('GDEF'), giving version.major=1, so the source switch reaches case 1 (line 680, T=399) or case 2 (line 682) and the blocker default branch is taken False (W: line 684 F=468, never True).",
+      "why_loser_doesnt": "Loser-blocking seeds carry no valid GDEF version header (e.g. 87 0e 0d 0e, fe ff ff ff, e0 17 00 00) so version.major is neither 1 nor 2; the switch falls through to default: return false, taking the blocker True side (L: line 684 T=440).",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the CmpLogObserver operands from the version-major comparison and the 'GDEF' tag memcmp, then substitutes the exact constant (01 for major, the GDEF FOURCC) into the input at the matching offsets; naive/value_profile lack I2SRandReplace and cannot guess these exact multi-byte magic constants by havoc or Hamming-distance feedback alone."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of a switch on u.version.major in has_glyph_classes(); the winning side requires major 1 or 2.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "GDEF.hh:679-684",
+      "exact_quote": "switch (u.version.major) {"
+    },
+    {
+      "claim": "Case 1 reaches when major version is 1.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "GDEF.hh:680",
+      "exact_quote": "case 1: return u.version1.glyphClassDef != 0;"
+    },
+    {
+      "claim": "The blocked (loser) side is the default false return.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6",
+      "exact_quote": "default: return false;"
+    },
+    {
+      "claim": "Winners take case 1/case 2 while losers take the default branch, per per-role branch counts.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 684",
+      "exact_quote": "d=1   L 684  T=0 F=468  T=440 F=0  default: return false;  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner-resolving seeds begin with a GDEF version header 00 01 00 00 and the GDEF tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 13b375b9eff5c760",
+      "exact_quote": "0000: 00 01 00 00 00 01 20 20 20 20 20 20 47 44 45 46   ......      GDEF"
+    },
+    {
+      "claim": "The four bytes spelling GDEF are constant across all winner seeds and absent in losers (DIFFER tag at those offsets).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "0x000c  47(G)x20                            00(.)x3 01(.)x2 20( )x2 2c(,)x1 +11u  DIFFER"
+    },
+    {
+      "claim": "A loser-blocking seed carries no GDEF version header.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 003817559785f774",
+      "exact_quote": "0000: 87 0e 0d 0e 22 0e                                 ....\"."
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes the matching CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive and value_profile have no I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5222 --role W --fuzzer cmplog --trial 1 --seed 13b375b9eff5c760` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 10 and 11 of the 12-level ancestor chain, the lower-bound signal of an I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness switching on a 16-bit version field where naive/value_profile resolve the case-1/case-2 arms as fast as cmplog/vpc, showing the exact magic constant is reachable without I2S substitution."
+  },
+  "weakest_evidence_point": "The 'GDEF' tag and the version-major byte come from different comparison sites, so I cannot fully separate which exact CMP operand I2S substituted to flip the switch versus the tag match.",
+  "confidence": "high"
+}

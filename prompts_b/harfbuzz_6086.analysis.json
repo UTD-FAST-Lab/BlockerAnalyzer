@@ -1,0 +1,100 @@
+{
+  "branch_id": 6086,
+  "target": "harfbuzz",
+  "summary_one_line": "Font driving buffer to HB_SCRIPT_MALAYALAM with glyph codepoint 0x0D12 present; cmplog's I2S effort is wasted, so naive and vpc both beat it.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive>cmplog (I2S)"],
+      "what_input_feature": "A structured OpenType font whose parsed buffer reaches the HB_SCRIPT_MALAYALAM switch arm AND carries glyph codepoint 0x0D12 at the current position, so the inner switch hits case 0x0D12u (the true side at line 275).",
+      "why_winner_satisfies": "naive resolves the true side in 8/10 trials with avg hitcount 5; its plain havoc/token byte mutation perturbs the structured font tables (GSUB/GPOS tags) enough to land the MALAYALAM script and the 0x0D12 codepoint without any wasted CMP-substitution work.",
+      "why_loser_doesnt": "cmplog blocks in 8/10 trials with avg hitcount 0; its loser-blocking seeds are short, unstructured byte blobs that never drive the parser into the MALAYALAM arm, and the added I2SRandReplace stage spends mutation budget substituting CMP operands that do not advance toward this script/codepoint gate.",
+      "mechanism_attribution": "This is an anti-I2S divergence: naive (no I2S) is the winner over cmplog (I2S added). Plain havoc byte mutation finds the structured font faster than cmplog, whose I2SRandReplace substitutions misdirect effort here. The enabling winner mechanism is therefore lucky/structural havoc, not CMP introspection."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Same parsed-buffer requirement: HB_SCRIPT_MALAYALAM script with current glyph codepoint 0x0D12 (case 0x0D12u true side). The codepoint equality is the comparison that must be satisfied.",
+      "why_winner_satisfies": "value_profile_cmplog resolves 8/10 with hitcount 3; adding the CMP_MAP gradient (Hamming/prefix-distance feedback) over cmplog gives partial-credit feedback as the buffer codepoint approaches 0x0D12, letting it climb toward the MALAYALAM script and codepoint match its winning seeds (structured fonts with GSUB/GPOS/GSTB tags) satisfy.",
+      "why_loser_doesnt": "cmplog blocks 8/10 with hitcount 0; lacking the CMP_MAP gradient it gets no graded signal toward the codepoint comparison, and its I2S substitution alone does not steer the multi-stage script-then-codepoint dispatch, so the true side stays unhit.",
+      "mechanism_attribution": "The value_profile delta is the CMP_MAP gradient: vpc's Hamming/prefix-distance CMP_MAP buckets give graded feedback toward the codepoint==0x0D12 comparison, which cmplog (edge-bucket feedback only) lacks. This is CMP_MAP gradient, not I2S."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the MALAYALAM case 0x0D12u arm; reaching its true side requires the buffer codepoint to equal 0x0D12 inside the MALAYALAM script switch.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L263, L275",
+      "exact_quote": "case HB_SCRIPT_MALAYALAM:"
+    },
+    {
+      "claim": "The blocker line is the case 0x0D12u dispatch.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L275",
+      "exact_quote": "case 0x0D12u: <-- BLOCKER"
+    },
+    {
+      "claim": "naive is the winner over cmplog on the I2S-delta pair, resolving 8/10 with hitcount 5 while cmplog blocks 8/10 with hitcount 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 naive > cmplog",
+      "exact_quote": "avg hitcount on branch: winner=5  loser=0"
+    },
+    {
+      "claim": "The decisive pair 1 delta is I2S with naive as winner, meaning the I2S-added fuzzer (cmplog) is the loser.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 header",
+      "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+    },
+    {
+      "claim": "naive uses only havoc + token mutators with no I2S, so its win is lucky/structural havoc rather than CMP introspection.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive section",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which substitutes CMP operands into the input, an effort that does not advance this script/codepoint gate.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog section",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile_cmplog wins over cmplog on the value_profile-delta pair, resolving 8/10 with hitcount 3 vs cmplog blocking 8/10 with hitcount 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 value_profile_cmplog > cmplog",
+      "exact_quote": "avg hitcount on branch: winner=3  loser=0"
+    },
+    {
+      "claim": "The value_profile delta is the CMP_MAP gradient feedback that vpc adds over cmplog.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog section",
+      "exact_quote": "per-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    },
+    {
+      "claim": "Winner-resolving seeds are structured OpenType fonts carrying GSUB/GPOS/GSTB table tags.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 offset 0x0c",
+      "exact_quote": "20 3f 20 20 47 53 55 42   ......   ?  GSUB"
+    },
+    {
+      "claim": "Loser-blocking cmplog seeds are short unstructured byte blobs that never reach the MALAYALAM arm.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1 (38 bytes)",
+      "exact_quote": "Seed 1 (id=007e652bc601c59b, size=38 bytes, fuzzer=cmplog, trial=1, discovered_at=21s, mutation_op=TokenInsert,QwordAddMutator,BytesDeleteMutator):"
+    },
+    {
+      "claim": "At the blocker line the loser never takes the true side (W T=10 vs L T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L275",
+      "exact_quote": "case 0x0D12u:  <-- BLOCKER"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile delta), not I2SRandReplace, so the mandatory I2S lineage check does not apply. Note the I2S-delta pair here is ANTI-I2S (naive beats cmplog), so I2S is not the winning mechanism on either pair; the value_profile pair's winner (vpc) is driven by CMP_MAP gradient feedback over cmplog."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on script==MALAYALAM then codepoint==0x0D12 where cmplog resolves as fast as or faster than naive and value_profile_cmplog, showing I2S is not a hindrance and CMP_MAP gradient gives no advantage at this multi-stage codepoint dispatch."
+  },
+  "weakest_evidence_point": "The anti-I2S claim for pair 1 (naive>cmplog) is inferred from cmplog's hitcount=0 and mechanism description, not from direct lineage showing wasted I2S substitutions.",
+  "confidence": "medium"
+}

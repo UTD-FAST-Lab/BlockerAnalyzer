@@ -1,0 +1,87 @@
+{
+  "branch_id": 15242,
+  "target": "sqlite3",
+  "summary_one_line": "Input must contain a syntactically valid SQL expression using the >= (TK_GE) relational operator so resolveExprStep dispatches into the TK_GE switch arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "A well-formed SQL comparison expression whose operator parses to the TK_GE token (the two-character '>=' sequence) inside an expression that reaches resolveExprStep, so the switch( pExpr->op ) dispatches to the case TK_GE arm at line 98664.",
+      "why_winner_satisfies": "The value_profile winner-resolving seed is 'SELECT 11-013>=1 3=13...' — a dense, valid SQL expression that literally contains the '>=' (0x3e 0x3d) operator at offsets 0x0d-0x0e and is otherwise composed of digits, '-', '=', '<=', '/' that form parseable comparison expressions; the per-role overlay marks line 98664 [B]/[W] and DIVERGENT BRANCHES shows the winner takes case TK_GE T=1.",
+      "why_loser_doesnt": "The naive loser-blocking seeds contain comparison operators only sparsely and malformed ('SELECT ( 111111,...', 'SELECT+SE+...', 'SELECT ~~~~~44<4...'): they produce TK_LT ('<') or row-value parens/commas but never assemble a valid '>=' expression, so DIVERGENT BRANCHES shows the loser takes case TK_GE T=0 F=593 (never).",
+      "mechanism_attribution": "value_profile's integer-CMP interception writes a CMP_MAP bucket keyed by operand-distance: as the SQL tokenizer/parser compares input characters against operator-token codepoints and the parser state machine compares pExpr->op against TK_GE, value_profile's Hamming/prefix-distance feedback rewards inputs that get progressively closer to forming the '>=' token in a comparison context, giving a gradient that naive's plain edge-counter feedback cannot follow toward the rare TK_GE dispatch."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the TK_GE switch arm in resolveExprStep, the true side of which is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L98664",
+      "exact_quote": "Source line:     case TK_GE: {"
+    },
+    {
+      "claim": "The blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "The TK_GE arm is one case of a switch over pExpr->op selecting the expression operator.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L98323",
+      "exact_quote": "switch( pExpr->op ){"
+    },
+    {
+      "claim": "The winner-resolving seed is a valid SQL expression containing the '>=' operator.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0fadca0bde089a74 offset 0x00",
+      "exact_quote": "53 45 4c 45 43 54 20 31 31 2d 30 31 33 3e 3d 31   SELECT 11-013>=1"
+    },
+    {
+      "claim": "The winning seed was found by value_profile.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0fadca0bde089a74",
+      "exact_quote": "fuzzer=value_profile, trial=1"
+    },
+    {
+      "claim": "The winner takes case TK_GE (true side) while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L98664",
+      "exact_quote": "L98664  T=1 F=62  T=0 F=593  case TK_GE: {  <-- BLOCKER"
+    },
+    {
+      "claim": "The loser-blocking seeds are malformed SQL using '<' or row-value parens/commas, not a '>=' comparison.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0f02c718fc2a1433 offset 0x00",
+      "exact_quote": "53 45 4c 45 43 54 20 7e 7e 7e 7e 7e 34 34 3c 34   SELECT ~~~~~44<4"
+    },
+    {
+      "claim": "A loser-blocking seed parses into row-value parenthesis/comma form rather than a binary comparison.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0309346abe9d1764 offset 0x00",
+      "exact_quote": "53 45 4c 45 43 54 20 28 20 31 31 31 31 31 31 2c   SELECT ( 111111,"
+    },
+    {
+      "claim": "value_profile's CMP_MAP encodes operand closeness as a distance bucket, providing a matching gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Instrumentation",
+      "exact_quote": "The distance bucket is a coarse encoding of how close the two\noperands were (Hamming distance bucket for `trace_cmp*`; matching-prefix\nlength for string/memory CMPs)."
+    },
+    {
+      "claim": "An input getting closer to matching a CMP operand pair is preserved as corpus, which is the gradient naive lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Decisive pair delta is value_profile (CMP_MAP gradient), not I2SRandReplace, so lineage/dash-row verification is not mandated; the loser is naive and the winner adds no I2S mutator. Attribution rests on the value_profile MECHANISM CONTEXT (Hamming/prefix-distance CMP_MAP feedback) plus the seed-byte evidence that the winner forms a valid '>=' comparison the naive loser never assembles."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on the TK_GE/'>=' comparison arm in which value_profile shows no resolution advantage over naive (equal time-to-resolve across trials), indicating the CMP_MAP distance gradient does not drive reaching the comparison-operator dispatch."
+  },
+  "weakest_evidence_point": "Only one winner-resolving seed is available, so the claim that the '>=' token specifically (rather than general valid-comparison-expression density) is the decisive feature rests on a single example.",
+  "confidence": "medium"
+}

@@ -1,0 +1,81 @@
+{
+  "branch_id": 5730,
+  "target": "harfbuzz",
+  "summary_one_line": "Input must be a valid sfnt font carrying a 'morx' AAT table tag but no GPOS table, so apply_morx && !apply_gpos holds.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A font blob whose sfnt header (magic OTTO/0x00010000) and table directory contain the 4-byte AAT tag 'morx' (6d 6f 72 78) while NOT carrying a usable 'GPOS' table, so the shape plan sets apply_morx=true and apply_gpos=false, taking the true branch at line 940.",
+      "why_winner_satisfies": "Winner seed 1 begins with the sfnt magic 'OTTO' at 0x00 and embeds the literal 'morx' at 0x0c-0x0f; winner seed 2 embeds 'GPOS'/'mort' table tags. The I2S-substituted exact 4-byte tag literals let the harfbuzz table-lookup CMPs match, populating apply_morx and reaching the blocked true side (W shows T=42 at line 940).",
+      "why_loser_doesnt": "Loser-blocking seeds carry no sfnt magic and no 'morx' tag at the tag offsets (e.g. seed 1 starts fe ff ff ff..., seed 2 e0 17 00 00...); the plan never sets apply_morx, so the branch stays false (L shows T=0 F=190 at line 940) for all 10 trials.",
+      "mechanism_attribution": "value_profile_cmplog adds the I2SRandReplace mutator, which copies the exact comparison operand (the 4-byte 'morx' tag the sfnt table-tag CMP demands) directly into the input at the right offset. value_profile only has CMP_MAP Hamming/prefix-distance feedback and naive havoc, which cannot synthesize the exact 4-byte tag, so it never sets apply_morx."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch tests apply_morx true and apply_gpos false; true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L940",
+      "exact_quote": "if (c->plan->apply_morx && !c->plan->apply_gpos)"
+    },
+    {
+      "claim": "The blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "Winner seed 1 contains the sfnt magic OTTO and the literal morx tag.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id ae73a8c9233c3cb8, offsets 0x00 and 0x0c",
+      "exact_quote": "4f 54 54 4f 00 01 20 20 21 21 20 20 6d 6f 72 78   OTTO..  !!  morx"
+    },
+    {
+      "claim": "Winner seed 2 embeds GPOS and mort font table tags.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 47909b1df33a210f, offsets 0x0c and 0x1c",
+      "exact_quote": "20 28 20 03 00 00 00 00 ff ff 00 ec 6d 6f 72 74    ( .........mort"
+    },
+    {
+      "claim": "Loser-blocking seeds carry no sfnt magic at offset 0.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00546490999c9c0b, offset 0x00",
+      "exact_quote": "fe ff ff ff f4 01 e0 e0 20 00 00 00 01 20 e0 6a   ........ .... .j"
+    },
+    {
+      "claim": "At the blocker, the winner takes the true side 42 times while the loser never does (T=0 F=190).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L940",
+      "exact_quote": "d=1   L 940  T=42 F=0  T=0 F=190  if (c->plan->apply_morx && !c->plan->apply_gpos)  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog includes the I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and relies only on CMP_MAP distance feedback plus havoc/token.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile_cmplog resolved the branch in 8/10 trials while value_profile resolved 0/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=8/10  blocked=2  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 5730 --role W --fuzzer value_profile_cmplog --trial 1 --seed ae73a8c9233c3cb8` and observed exactly 1 I2S-floor dash row (mutation_op = -) at depth 18 of the 19-level ancestor chain, the floor signal for an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on apply_morx==true && apply_gpos==false where value_profile reaches the true branch as often as value_profile_cmplog, showing CMP_MAP distance feedback alone solves the 4-byte tag without I2S substitution."
+  },
+  "weakest_evidence_point": "The mapping from the 'morx'/'GPOS' tag literals in the winner bytes to the apply_morx/apply_gpos plan flags is inferred from source semantics, not directly traced through the table-parsing CMPs.",
+  "confidence": "high"
+}

@@ -1,0 +1,99 @@
+{
+  "branch_id": 21,
+  "target": "curl",
+  "summary_one_line": "Winner must produce a well-formed URL/protocol header whose parsed fields populate the connection cache so the hash iterator has >=1 element.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "Input bytes forming a recognizable URL/scheme + HTTP-version token (e.g. 'po%' scheme prefix at 0x06, '://' separator, and the 'HTTP/' literal at offset 0x24) so curl actually parses a connection and inserts a connectbundle into connc->hash; only then is he non-NULL and while(he) takes the true branch.",
+      "why_winner_satisfies": "Winning seeds carry a stable structured prefix: 'po' (70 6f) at 0x06-0x07, '://' and digits forming a host:port, and the 'HTTP/27.0' literal (47 48 54 54 50 2f at 0x24) which is concentrated across winners; this drives connection-cache population so Curl_conncache_size and close_connect_only fire only under W.",
+      "why_loser_doesnt": "Loser-blocking seeds are short (35-73 bytes) and lack the coherent scheme/host/HTTP-literal structure (offsets fill with '%','+','A','.' filler), so no connection is cached, the hash is empty, he is NULL, and while(he) stays false.",
+      "mechanism_attribution": "cmplog/vpc's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes the exact comparison operands (scheme/HTTP-version literals) into the input at matching offsets, synthesizing the structured tokens that drive cache population; naive and value_profile lack I2SRandReplace and must stumble on these multi-byte literals by chance."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the while(he) loop guard in Curl_conncache_foreach, with the true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "conncache.c:330",
+      "exact_quote": "Source line:   while(he) {"
+    },
+    {
+      "claim": "Taking the true branch requires the hash iterator to return a non-NULL element, i.e. the connection cache must contain a connectbundle.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "conncache.c:333",
+      "exact_quote": "bundle = he->ptr;"
+    },
+    {
+      "claim": "Winning seeds carry the 'HTTP/27.0' literal anchored at offset 0x24 with 'HTTP/' bytes 47 48 54 54 50 2f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 32d10b449c4075ee offset 0x20",
+      "exact_quote": "0020: 02 00 00 00 47 48 54 54 50 2f 32 37 2e 30 2e 2f   ....GHTTP/27.0./"
+    },
+    {
+      "claim": "The 'G'/'H' literal at offset 0x24 is concentrated in winners (47(G)x16 48(H)x1) and absent in losers.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0024",
+      "exact_quote": "0x0024  47(G)x16 48(H)x1                    50(P)x2 42(B)x1 9e(.)x1 2e(.)x1 +5u  DIFFER"
+    },
+    {
+      "claim": "Winning seeds carry the 'po' scheme bytes at offsets 0x06-0x07 (70 6f).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 32d10b449c4075ee offset 0x00",
+      "exact_quote": "0000: 00 01 00 00 00 19 70 6f 25 00 3a 2f 2f 31 32 25   ......po%.://12%"
+    },
+    {
+      "claim": "Loser-blocking seeds are short (35 bytes) and lack the structured scheme/HTTP prefix, filled with '%' and filler bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0024e5972fc0b2e0 size 35",
+      "exact_quote": "Seed 2 (id=0024e5972fc0b2e0, size=35 bytes, fuzzer=naive, trial=1, discovered_at=88s, mutation_op=WordAddMutator):"
+    },
+    {
+      "claim": "Under W the while(he) true side is taken (T=17) while under L it is never taken (T=0), confirming the cache-population gate.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "conncache.c:330",
+      "exact_quote": "d=1   L 330  T=17 F=17  T=0 F=20  while(he) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Connection-cache functions Curl_conncache_size fire only under the winner (17 W hits, 0 L hits).",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "conncache.c:167-173",
+      "exact_quote": "17         0  Curl_conncache_size  (/src/curl/lib/conncache.c:167-173)"
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace which substitutes intercepted CMP operands into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive lacks I2S, having only the havoc + token stack.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive mutators",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs share the I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "--- Pair 2: cmplog > naive  [delta: I2S] ---"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 21 --role W --fuzzer cmplog --trial 1 --seed 32d10b449c4075ee` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 23 and 24 of the ancestor chain (ParentInfo-only, no LogMutationMetadata), the lower-bound signal of an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating while(he) on connection-cache population would show naive/value_profile resolving the branch as fast as cmplog/vpc when the required structured token is a single byte rather than a multi-byte literal, indicating I2S substitution is not what drives the divergence."
+  },
+  "weakest_evidence_point": "Whether the specific 'HTTP/' multi-byte literal (vs the 'po' scheme prefix) is the operand I2S substitutes is inferred from byte concentration, not directly traced through a CMP-operand match in the lineage.",
+  "confidence": "medium"
+}
