@@ -1,0 +1,75 @@
+{
+  "branch_id": 6268,
+  "target": "libxml2",
+  "summary_one_line": "An attribute whose prefix is exactly 'xml' and whose local name is exactly 'id' (the xml:id attribute), so prefix==ctxt->str_xml.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "An XML element bearing an attribute literally named 'xml:id' (prefix bytes 'xml', local-name bytes 'id' followed by NUL), so the interned prefix pointer equals ctxt->str_xml and localname[0..2]=='i','d',0 at SAX2.c:2173-2175.",
+      "why_winner_satisfies": "value_profile_cmplog winner seeds contain the literal 'xml:id=\"' attribute token (Seed 2 bytes at 0x0e-0x15: 78 6d / 6c 3a 69 64 3d 22 = 'xm','l:id=\"'), exercising the xml:id true branch; the winner takes the true side T=13 F=0 at L2173 and reaches the xmlValidateNCName / xmlAddID body (lines 2181-2190 marked [W]).",
+      "why_loser_doesnt": "cmplog loser seeds carry DTD/ATTLIST and xmlns:xlink tokens (Seed 2/4: 'ATTLIST b xmlns:xlink', 'SYSTEM \"dtds') but never the 'xml:id' attribute name, so at L2173 the loser is T=0 F=39 and falls through into the xmlIsID / xmlIsRef else-arms (L2191/L2193 [L]).",
+      "mechanism_attribution": "Both involved fuzzers share the same input-to-state substitution stage, so the single-technique delta is value_profile's CMP_MAP gradient. value_profile_cmplog gets Hamming/prefix-distance feedback on the byte comparisons that build the 'xml:id' attribute name (the prefix-interning string match and the localname[0]=='i', [1]=='d', [2]==0 char chain), rewarding partial-match intermediate inputs and climbing toward the exact xml:id token; plain cmplog lacks this gradient and must hit the multi-byte token by substitution / havoc alone, which it rarely completes within budget."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the xml:id attribute gate: prefix must equal the interned 'xml' string.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "SAX2.c:2173:13",
+      "exact_quote": "if ((prefix == ctxt->str_xml) &&"
+    },
+    {
+      "claim": "The full gate additionally requires the local name to be exactly 'id' (i, d, NUL terminator).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L2174-2175",
+      "exact_quote": "(localname[0] == 'i') && (localname[1] == 'd') &&"
+    },
+    {
+      "claim": "A value_profile_cmplog winner seed contains the literal xml:id attribute token.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 31a0f4cf800d3991 offsets 0x12-0x15",
+      "exact_quote": "6c 3a 69 64 3d 22 20 3a 69 64 3d 22 26 26 73 69   l:id=\" :id=\"&&si"
+    },
+    {
+      "claim": "That winner seed was discovered by value_profile_cmplog.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 31a0f4cf800d3991",
+      "exact_quote": "fuzzer=value_profile_cmplog, trial=1, discovered_at=53377s"
+    },
+    {
+      "claim": "The winner takes the xml:id true branch while the loser never does (T=13 F=0 vs T=0 F=39 at L2173).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L2173",
+      "exact_quote": "d=1   L2173  T=13 F=0  T=0 F=39  if ((prefix == ctxt->str_xml) &&  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser-blocking seeds carry DTD/ATTLIST and xmlns:xlink tokens, not an xml:id attribute.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 077f724a2edd0f02 offsets 0x00-0x0f",
+      "exact_quote": "41 54 54 4c 49 53 54 20 62 20 78 6d 6c 6e 73 3a   ATTLIST b xmlns:"
+    },
+    {
+      "claim": "The only technique difference between winner value_profile_cmplog and loser cmplog is value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "value_profile_cmplog feedback adds CMP_MAP gradient buckets on top of cmplog's edge + CMP buffer signals.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Instrumentation",
+      "exact_quote": "per-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Lineage (I2S-floor dash-row) verification is not the decisive signal here: the decisive delta is value_profile (CMP_MAP gradient), and BOTH involved fuzzers (cmplog loser, value_profile_cmplog winner) already carry I2SRandReplace, so an I2S-floor row would appear in both arms and cannot explain the divergence. The mechanism attributed is value_profile's CMP_MAP Hamming/prefix-distance gradient over the multi-byte xml:id token comparisons, which value_profile_cmplog has and cmplog lacks; this is not an I2SRandReplace claim so lineage dash-rows were not used to verify it."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on an exact multi-byte 'xml:id' token where value_profile_cmplog shows no resolution advantage over cmplog (both resolve at the same rate), which would show the CMP_MAP gradient is not what climbs the token comparison."
+  },
+  "weakest_evidence_point": "The attribution rests on inferring that value_profile's gradient (not corpus/scheduling luck) is what lets vpc complete the multi-byte xml:id token, since both involved fuzzers share I2S and havoc and only an indirect CMP_MAP rationale separates them.",
+  "confidence": "medium"
+}

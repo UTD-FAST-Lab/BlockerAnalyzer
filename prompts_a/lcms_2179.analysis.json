@@ -1,0 +1,81 @@
+{
+  "branch_id": 2179,
+  "target": "lcms",
+  "summary_one_line": "Profile PCS FOURCC at offset 0x14 must equal 'Lab ' (cmsSigLabData) so the Lab-trilinear path calls ChangeInterpolationToTrilinear and reaches the false-side CLUT check.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The 4-byte profile-connection-space (PCS) FOURCC at input offsets 0x14-0x17 must be the literal 'Lab ' (0x4c 0x61 0x62 0x20). cmsGetPCS returns cmsSigLabData only for that exact tag, gating the call to ChangeInterpolationToTrilinear at cmsio1.c:776/624, which is the only path that executes the blocker line 526.",
+      "why_winner_satisfies": "Every winner-resolving seed carries 'Lab' at offsets 0x14-0x16 (4c 61 62), supplied by the value_profile_cmplog winner; the BYTE DIFF shows these three offsets are concentrated to a single W value distinct from the L value, exactly the exact-equality FOURCC the cmsGetPCS==cmsSigLabData gate requires.",
+      "why_loser_doesnt": "The loser-blocking seeds (value_profile) hold 'XYZ' (58 59 5a) at offsets 0x14-0x16, so cmsGetPCS returns cmsSigXYZData, line 775's equality fails, ChangeInterpolationToTrilinear is never called, and the blocker false side at line 526 is never reached (loser resolved=0/10, blocked=10).",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile. The cmsGetPCS check compares the input's 0x14-0x17 word against the constant cmsSigLabData ('Lab '); cmplog logs that comparison and I2SRandReplace splices the logged 'Lab ' literal directly into the input bytes, flipping 'XYZ'->'Lab ' in one step. value_profile's CMP_MAP only buckets Hamming distance and cannot synthesize the exact 4-byte FOURCC, so it stays blocked."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of the CLUT-type check, reached only inside ChangeInterpolationToTrilinear.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsio1.c:526:17",
+      "exact_quote": "if (cmsStageType(Stage) == cmsSigCLutElemType) {"
+    },
+    {
+      "claim": "ChangeInterpolationToTrilinear is only called when the profile PCS equals cmsSigLabData.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L775-776",
+      "exact_quote": "if (cmsGetPCS(hProfile) == cmsSigLabData)\n[B]   776          ChangeInterpolationToTrilinear(Lut); <-- CALL"
+    },
+    {
+      "claim": "Winner seeds carry 'Lab' at offsets 0x14-0x16 while loser seeds carry 'XYZ'.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x14-0x16",
+      "exact_quote": "0x0014  4c(L)x12                            58(X)x10                            DIFFER"
+    },
+    {
+      "claim": "The 0x15 and 0x16 offsets confirm the 'ab' vs 'YZ' split completing 'Lab ' vs 'XYZ '.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x15-0x16",
+      "exact_quote": "0x0015  61(a)x12                            59(Y)x10                            DIFFER"
+    },
+    {
+      "claim": "A winner-resolving seed contains the ASCII 'Lab ' string at the PCS offset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 143a446d794db4ae, offset 0x10",
+      "exact_quote": "4c 61 62 20 4c 61 62 20 07 d9 00 0c 00 17 00 16   Lab Lab ........"
+    },
+    {
+      "claim": "A loser-blocking seed contains 'XYZ' at the PCS offset and is RGB->XYZ.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0313315f3b972394, offset 0x10",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "value_profile_cmplog adds I2SRandReplace while value_profile does not.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, only Hamming/prefix CMP_MAP feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "The winner resolves 9/10 trials while the loser is blocked in all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2179 --role W --fuzzer value_profile_cmplog --trial 1 --seed 25df1685ae4b07fe` and observed 1 I2S-floor dash row (mutation_op = -) at depth 16 of the 17-level ancestor chain — the ParentInfo-only signal characteristic of an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating a downstream branch on an exact 4-byte FOURCC equality where value_profile resolves it as often as value_profile_cmplog within the same time budget, showing CMP_MAP Hamming feedback alone suffices and I2S substitution is not the differentiator."
+  },
+  "weakest_evidence_point": "The attribution assumes value_profile's CMP_MAP cannot incrementally climb the 4-byte 'Lab ' FOURCC via Hamming buckets, but a slow gradient climb (rather than a hard inability) could also explain the 9-vs-0 gap within the time budget.",
+  "confidence": "high"
+}

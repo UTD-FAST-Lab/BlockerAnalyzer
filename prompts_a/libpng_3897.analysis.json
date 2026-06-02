@@ -1,0 +1,69 @@
+{
+  "branch_id": 3897,
+  "target": "libpng",
+  "summary_one_line": "Input must contain a chunk whose 4-byte FOURCC name equals the PLTE tag so chunk_name==png_PLTE is true.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A PNG chunk header whose 4-byte type field equals the ASCII FOURCC 'PLTE'; png_read_chunk_header parses this into png_ptr->chunk_name, and the blocker at line 838 compares it against the png_PLTE 32-bit constant.",
+      "why_winner_satisfies": "cmplog resolves the branch in 9/10 trials and hits the true side 12 times (W T=12), meaning its inputs present a chunk-name word equal to the PLTE constant; the CMP interception logs the parsed chunk_name vs png_PLTE comparison and I2SRandReplace splices the constant into the input bytes, and the winning seed's lineage carries I2S-floor dash rows.",
+      "why_loser_doesnt": "naive blocks the branch in all 10 trials and never takes the true side (L T=0 at line 838); without I2S it cannot place the exact 4-byte PLTE FOURCC at the chunk-name offset by chance, so the equality compare against png_PLTE stays false.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver entry for the chunk_name==png_PLTE integer compare and substitutes the png_PLTE operand into the input at the offset matching the other operand, manufacturing the exact FOURCC that naive's havoc mutators cannot guess."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the equality test chunk_name == png_PLTE at pngread.c:838, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "pngread.c:838:16",
+      "exact_quote": "else if (chunk_name == png_PLTE)"
+    },
+    {
+      "claim": "chunk_name is parsed from the chunk header read each loop iteration, establishing it as an input-derived value.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L794-795",
+      "exact_quote": "png_uint_32 chunk_name = png_ptr->chunk_name;"
+    },
+    {
+      "claim": "cmplog (winner) takes the PLTE true side while naive (loser) never does at the blocker line.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L838",
+      "exact_quote": "else if (chunk_name == png_PLTE)  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog resolves the branch in 9 of 10 trials while naive blocks in all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 winner/loser counts",
+      "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+    },
+    {
+      "claim": "naive loser resolves zero of ten trials at this branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 loser counts",
+      "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace scans the input for a matching operand and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "picks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mutator, so it cannot perform input-to-state substitution of the PLTE constant.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 3897 --role W --fuzzer cmplog --trial 1 --seed f675a9b2ee4cf006` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 5 and 6 of the ancestor chain, the lower-bound signal of an unwrapped I2SRandReplace find under the current cmplog build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on an exact 4-byte FOURCC equality compare in which cmplog and naive resolve the branch at statistically indistinguishable rates would refute the I2S attribution."
+  },
+  "weakest_evidence_point": "The byte-diff offsets shown (0x13-0x2e) are in the IHDR region, not the PLTE chunk-name offset, so direct byte-level evidence that I2S placed the literal PLTE FOURCC is inferred rather than visible in the diff.",
+  "confidence": "medium"
+}

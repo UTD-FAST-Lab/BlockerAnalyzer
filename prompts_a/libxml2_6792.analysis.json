@@ -1,0 +1,75 @@
+{
+  "branch_id": 6792,
+  "target": "libxml2",
+  "summary_one_line": "Input must drive the internal-subset scanner into state==']' (a DOCTYPE ']'-then-close), reached only via value_profile comparison-gradient feedback.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "A DOCTYPE internal-subset body whose unescaped scan reaches a ']' character (setting the scanner state machine to state==']') and then a following '>' / blank, i.e. a `]` closing sequence inside the parsed DTD section. Reaching the BLOCKER true side at parser.c:11261 requires the byte stream to advance the state machine through '<' / quote / ']' transitions until state holds ']'.",
+      "why_winner_satisfies": "The value_profile_cmplog winner resolves 9/10 and actually enters state==']' (W shows T=4 at L11261 and downstream W-only execution of the `if (*cur == '>')`, `IS_BLANK_CH`, and state==' ' arms at 11262-11286). Its CMP_MAP gradient feedback rewards inputs that incrementally match the multi-byte DTD structure, so the scanner state machine is steered into the ']' state.",
+      "why_loser_doesnt": "The cmplog loser blocks 8/10 and never sets state==']' — L shows T=0 at L11261 and never executes the 11262-11286 W-only arms; its scan stalls in the generic state-tracking arms (state!=0, '<', quote) without reaching the ']' close. Lacking CMP_MAP gradient, it gets no partial-progress credit for assembling the ']'-bearing internal subset.",
+      "mechanism_attribution": "value_profile adds CMP_MAP gradient buckets: each intercepted comparison contributes Hamming/prefix-distance feedback so inputs that partially match the multi-byte DTD ']'-close structure are retained and refined. cmplog (I2S only, no CMP_MAP) gets no such gradient credit, so it cannot incrementally walk the scanner state machine into state==']'. The delta between the two involved fuzzers is exactly value_profile, so the winning mechanism is CMP_MAP gradient."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The single decisive pair is value_profile_cmplog beating cmplog, and the technique delta between them is value_profile.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > cmplog  [delta: value_profile]"
+    },
+    {
+      "claim": "The winner resolves 9/10 while the loser blocks 8/10 at this branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 counts",
+      "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+    },
+    {
+      "claim": "The blocker is the state==']' arm of the internal-subset scanner state machine.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "parser.c:11261",
+      "exact_quote": "else if (state == ']') {"
+    },
+    {
+      "claim": "The scanner state is set to ']' when the current character is a quote or a ']' literal.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L11304-11305",
+      "exact_quote": "else if ((*cur == '\"') || (*cur == '\\'') || (*cur == ']')) {"
+    },
+    {
+      "claim": "The winner actually enters state==']' (T=4) at the blocker while the loser never does (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L11261",
+      "exact_quote": "d=1   L11261  T=4 F=397  T=0 F=166  else if (state == ']') {  <-- BLOCKER"
+    },
+    {
+      "claim": "Only the winner executes the downstream ']'-state arms (the '>' close and IS_BLANK_CH transitions).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L11262, L11267",
+      "exact_quote": "[W] 11262              if (*cur == '>') {"
+    },
+    {
+      "claim": "value_profile_cmplog feedback includes CMP_MAP gradient buckets in addition to edge and CMP-buffer signals.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Feedback",
+      "exact_quote": "**Feedback**: edge-bucket + CMP_MAP-bucket signals."
+    },
+    {
+      "claim": "Both inputs carry a well-formed XML prolog and a DOCTYPE prefix, so the structural difference is downstream scanner progress, not the prolog.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 81e56072f992fc6e",
+      "exact_quote": "69 6f 6e 3d 22 31 2e 30 22 3f 3e 0a 3c 21 44 4f   ion=\"1.0\"?>.<!DO"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile delta), not I2SRandReplace, so the mandatory I2S lineage check does not apply. Both involved fuzzers (cmplog, value_profile_cmplog) already carry I2SRandReplace, so I2S cannot be the discriminating technique; the only difference is value_profile's CMP_MAP gradient feedback. Lineage dash-row evidence would be uninformative here because it is present in both fuzzers and does not separate winner from loser."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose gate requires reaching the scanner state==']' shows no resolution-rate advantage for value_profile/value_profile_cmplog over cmplog/naive — i.e. CMP_MAP gradient feedback gives no measurable lift in reaching the ']'-close state."
+  },
+  "weakest_evidence_point": "The causal link from CMP_MAP gradient to incrementally building the multi-byte ']'-close is inferred from the state==']' coverage divergence; I have no direct seed-byte evidence of a gradient-driven refinement chain producing the ']'.",
+  "confidence": "medium"
+}

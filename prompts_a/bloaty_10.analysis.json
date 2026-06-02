@@ -1,0 +1,76 @@
+{
+  "branch_id": 10,
+  "target": "bloaty",
+  "summary_one_line": "ELF header fields encoding a vm range that falls outside the base map's covered region, so CoversRange returns false",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A structurally coherent ELF input whose program/section-header offset and size fields (vmaddr/vmsize at the dword-aligned header slots, e.g. bytes around 0x10-0x27) decode to a vm range that is NOT covered by translator_->vm_map, driving the !CoversRange(vmaddr, vmsize) TRUE side at bloaty.cc:1331.",
+      "why_winner_satisfies": "Winner cmplog seeds carry a valid ELF magic plus structured 4-byte header values (e.g. 00 00 00 10 / 00 00 00 10 at 0x20-0x27, 50 55 markers at 0x18-0x19) so AddRange is invoked with concrete vmaddr/vmsize that I2S has tuned to land outside the base map, hitting the THROW true side 26 times.",
+      "why_loser_doesnt": "Naive loser seeds fill the header region with padding (long runs of 0x20 spaces and 0x00) rather than the precise dword values that decode to an out-of-range vm range; they reach line 1331 only on the FALSE side (L1331 T=0 F=550000) and never satisfy the TRUE condition.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer for the CoversRange / range-comparison CMP operands and substitutes the parsed comparand back into the matching input header offsets, letting cmplog land precise vmaddr/vmsize values that naive's blind havoc byte mutation cannot synthesize."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the TRUE side of a CoversRange check on vmaddr/vmsize inside RangeSink::AddRange.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "bloaty.cc:1331",
+      "exact_quote": "if (!translator_->vm_map.CoversRange(vmaddr, vmsize) ||"
+    },
+    {
+      "claim": "The globally blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "Globally blocked side",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "cmplog resolved this branch in all 10 trials while naive was blocked in all 10, hitting it 26 times on average.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "avg hitcount on branch: winner=26  loser=0"
+    },
+    {
+      "claim": "Winner seeds are coherent ELF inputs with structured header dword fields at the offsets that feed vmaddr/vmsize.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 05a56c847ffbf4de offsets 0x18-0x27",
+      "exact_quote": "00 00 00 10 00 00 00 10 00 00 00 00 00 00 00 00"
+    },
+    {
+      "claim": "Winner seeds carry the 50 55 marker bytes in the header region distinguishing them from loser padding.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x18-0x19",
+      "exact_quote": "   0x0018  50(P)x2                             20( )x10 9c(.)x8 ae(.)x1 35(5)x1    DIFFER"
+    },
+    {
+      "claim": "Loser naive seeds fill the header region with runs of space (0x20) padding instead of precise dword values.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed 43b1a3ff84794b7e offset 0x10-0x1f",
+      "exact_quote": "00 00 00 00 00 00 20 20 20 20 20 20 ff 3c ff ff"
+    },
+    {
+      "claim": "On the loser, line 1331 is reached only on the FALSE side and never the TRUE side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1331",
+      "exact_quote": "d=1   L1331  T=6 F=0  T=0 F=550000  if (!translator_->vm_map.CoversRange(vmaddr, vmsize) ||  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand back into matching input byte offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 10 --role W --fuzzer cmplog --trial 2 --seed 05a56c847ffbf4de` and a second seed bf6ba209e9cab437; both ancestor chains contain I2S-floor dash rows (mutation_op = -) at depths 34,35 and 35,36 respectively, the cmplog/vpc-exclusive lower-bound signal of an unwrapped I2SRandReplace find.",
+    "verified_note": "Against naive (the loser in this pair) the dash-row signal is clean and I2S-exclusive, so the floor rows are valid evidence here."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic ELF harness gating an out-of-range CoversRange check on input header dwords where cmplog and naive resolve the TRUE side at statistically indistinguishable rates would refute the I2S-substitution attribution."
+  },
+  "weakest_evidence_point": "The exact input offsets that decode into vmaddr/vmsize are inferred from ELF structure and the winner/loser byte concentration, not directly traced through bloaty's ELF parser to line 1331.",
+  "confidence": "medium"
+}

@@ -1,0 +1,88 @@
+{
+  "branch_id": 6467,
+  "target": "libxml2",
+  "summary_one_line": "Take true side requires a decimal char-ref (&#) whose digit run drives the count++ loop past 20 iterations.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "A decimal character reference (`&#` followed by many ASCII digits, no terminating `;` early) so the `while (RAW != ';')` loop in xmlParseCharRef iterates more than 20 times and the count++>20 reset branch becomes a distinct (call-context, edge) coverage event.",
+      "why_winner_satisfies": "naive_ctx winner-resolving seeds drive the loop deeply: the loop header L2352 is taken True 111 times and the blocker L2353 True 9 times under W, with an average branch hitcount of 57, so the count overflow side is exercised. Context-sensitive indexing records each call path into this loop as fresh coverage, keeping such seeds in the corpus.",
+      "why_loser_doesnt": "naive's loser-blocking seeds enter the loop only 4 times (L2352 T=4) and never reach the count overflow (L2353 T=0), with average hitcount 1; bare edge feedback already saturates the loop edges after a few iterations so naive has no coverage incentive to keep growing the digit run.",
+      "mechanism_attribution": "naive_ctx's CtxHook folds the caller chain into the edge-map index, so the same loop-body edge inside xmlParseCharRef is a new bucket per call context. This rewards seeds that re-enter the digit loop along new paths, pushing the iteration count up until count++>20 fires — a feedback-granularity effect, not comparison solving."
+    },
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "A decimal character reference (`&#` then a long ASCII-digit run) where each digit satisfies the `(RAW >= '0') && (RAW <= '9')` range comparison, so the loop keeps advancing through enough digits to push count past 20.",
+      "why_winner_satisfies": "The loop body compares each byte against the '0'..'9' range at L2359; value_profile's CMP_MAP records how close each byte is to those bounds, so inputs whose bytes approach valid digits are preserved and extended, lengthening the digit run. The value_profile pair resolves 9/10 with branch hitcount 8 versus the loser's 1.",
+      "why_loser_doesnt": "naive's loser seeds reach the loop only 4 times (L2352 T=4) and average hitcount 1 on the branch; without CMP-distance feedback naive gets no gradient toward filling the run with in-range digit bytes, so the loop exits early via the invalid-char break before count exceeds 20.",
+      "mechanism_attribution": "value_profile adds per-CMP CMP_MAP distance buckets on the digit-range comparisons at L2359, giving a Hamming/prefix gradient that rewards bytes closer to valid decimal digits. This drives progressively longer digit runs that eventually trip the count++>20 reset branch — a CMP_MAP gradient effect."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the count overflow guard inside the decimal char-ref loop, and its true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "parser.c:2353:10",
+      "exact_quote": "Source line: \t    if (count++ > 20) {\nGlobally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "The blocker sits inside the decimal-branch while loop reached when input is `&#` without `x`.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L2349-L2353",
+      "exact_quote": "} else if  ((RAW == '&') && (NXT(1) == '#')) {"
+    },
+    {
+      "claim": "naive_ctx winner drives the loop header True 111 times while the naive loser reaches it only 4 times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L2352",
+      "exact_quote": "d=1   L2352  T=111 F=0  T=4 F=0  while (RAW != ';')"
+    },
+    {
+      "claim": "The winner takes the count-overflow true side 9 times while the loser takes it 0 times.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L2353",
+      "exact_quote": "d=1   L2353  T=9 F=102  T=0 F=4  if (count++ > 20) {  <-- BLOCKER"
+    },
+    {
+      "claim": "The naive_ctx pair resolves 10/10 vs naive 2/10 with a large branch hitcount gap.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 subject 35",
+      "exact_quote": "avg hitcount on branch: winner=57  loser=1"
+    },
+    {
+      "claim": "naive_ctx's mechanism makes each (call-context, edge) pair a distinct coverage event.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx",
+      "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge"
+    },
+    {
+      "claim": "The loop compares each byte against the decimal-digit range, the comparison value_profile rewards approaching.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L2359",
+      "exact_quote": "if ((RAW >= '0') && (RAW <= '9'))"
+    },
+    {
+      "claim": "The value_profile pair resolves 9/10 vs naive 2/10 with hitcount 8 vs 1.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 subject 32",
+      "exact_quote": "avg hitcount on branch: winner=8  loser=1"
+    },
+    {
+      "claim": "value_profile records a coarse operand-distance bucket per CMP, preserving inputs whose operands approach matching.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "context-sensitive coverage",
+    "verified_in_lineage": false,
+    "verification_method": "Multi-feature branch: the two decisive pairs invoke distinct techniques (naive_ctx>naive = context-sensitive coverage; value_profile>naive = CMP_MAP gradient). Neither winner is cmplog/vpc, so no I2SRandReplace claim is made and a lineage dash-row check is not applicable; the per-role hitcount divergence at L2352/L2353 is the supporting evidence instead."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the same count++>20 decimal-loop where naive resolves the true side as often as naive_ctx and value_profile across trials, showing neither context-sensitive coverage nor CMP_MAP gradient is needed to grow the digit run past 20 iterations."
+  },
+  "weakest_evidence_point": "The byte-diff seeds are single-provenance (naive_ctx/naive) so the value_profile hypothesis leans on the loop's digit-range comparison plus hitcount divergence rather than on a value_profile-stored seed.",
+  "confidence": "medium"
+}

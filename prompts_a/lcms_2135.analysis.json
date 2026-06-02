@@ -1,0 +1,87 @@
+{
+  "branch_id": 2135,
+  "target": "lcms",
+  "summary_one_line": "An ICC profile header (esp. device-class field at 0x0c) whose parsed tag table demands a seek offset exceeding the small data buffer.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A small, structurally-valid ICC profile header where parsing reaches MemorySeek with an offset greater than ResData->Size. The winner seeds carry the device-class signature 'link' (6c 69 6e 6b) at offset 0x0c and a profile flags byte 0x01 at 0x2d, and are tiny (523-538 bytes) so a parsed tag/element offset readily exceeds the buffer Size, taking the TRUE 'Too few data; probably corrupted profile' branch.",
+      "why_winner_satisfies": "Winner-resolving seeds are 523-538 bytes with device class 'link' (DeviceLink) at 0x0c-0x0f and profile flags byte 01 at 0x2d; with such a small data buffer a tag/element offset parsed from the header overruns ResData->Size, so MemorySeek takes the blocked TRUE side (W shows T=7).",
+      "why_loser_doesnt": "Loser-blocking seeds are large (9321-25244 bytes) with device class 'mntr' (6d 6e 74 72) at 0x0c-0x0f and flags byte 00 at 0x2d; the large buffer comfortably contains every parsed offset, so MemorySeek always falls through to the FALSE branch (L shows T=0 F=69) and never resolves the blocker.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile's CMP_MAP feedback. The cmplog CMP buffer logs the magic/header comparand bytes (e.g. the device-class and signature fields the parser compares against ICC constants), and I2SRandReplace splices those exact bytes into the input at the matching offsets, letting vpc assemble a well-formed small-buffer header that drives parsing to an out-of-bounds seek. Plain value_profile has only Hamming-distance comparison feedback and no substitution mutator, so it cannot reliably place the header bytes that funnel into the over-size seek."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked TRUE side of MemorySeek fires when the seek offset exceeds the buffer Size.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsio0.c:174",
+      "exact_quote": "if (offset > ResData ->Size) {"
+    },
+    {
+      "claim": "The winner resolves the blocker 9/10 trials while the loser is blocked 10/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+    },
+    {
+      "claim": "The loser never resolves the branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "Winner seeds carry the device-class bytes 'link' at offset 0x0c-0x0f whereas loser seeds carry 'mntr'.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "   0x000c  6c(l)x7                             6d(m)x10                            DIFFER"
+    },
+    {
+      "claim": "Winner seeds are small (523 bytes) while loser seeds are large (tens of KB).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "W seed 1 vs L seed 1",
+      "exact_quote": "Seed 1 (id=0551798f555a68d1, size=523 bytes, fuzzer=value_profile_cmplog"
+    },
+    {
+      "claim": "A loser-blocking seed is 25244 bytes, far larger than the winner's buffer.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "L seed 1",
+      "exact_quote": "Seed 1 (id=0313315f3b972394, size=25244 bytes, fuzzer=value_profile, trial=1"
+    },
+    {
+      "claim": "Winner seeds have profile flags byte 01 at 0x2d while loser seeds have 00.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x2d",
+      "exact_quote": "   0x002d  01(.)x7                             00(.)x10                            DIFFER"
+    },
+    {
+      "claim": "In MemorySeek the winner takes the TRUE side (T=7) but the loser never does (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L174",
+      "exact_quote": "d=1   L 174  T=7 F=9  T=0 F=69  if (offset > ResData ->Size) {"
+    },
+    {
+      "claim": "value_profile_cmplog uniquely adds the I2SRandReplace substitution mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "Plain value_profile has only CMP_MAP feedback and lacks I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2135 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0551798f555a68d1`; the ancestor chain (8 levels) contains 1 I2S-floor dash row (mutation_op = -) at depth 7, the ParentInfo-only signature characteristic of an unwrapped I2SRandReplace find in cmplog/vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile resolves MemorySeek's TRUE side at the same rate as value_profile_cmplog despite the header device-class/signature fields being CMP-gated, showing the substitution mutator confers no advantage."
+  },
+  "weakest_evidence_point": "The causal link from the device-class 'link' header byte to a seek offset exceeding Size is inferred from seed size and source structure, not directly observed in the byte dataflow into the MemorySeek offset argument.",
+  "confidence": "medium"
+}

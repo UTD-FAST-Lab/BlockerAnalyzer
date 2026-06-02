@@ -1,0 +1,75 @@
+{
+  "branch_id": 2097,
+  "target": "lcms",
+  "summary_one_line": "Profile colorspace-signature FOURCC at the header must be neither 'XYZ ' nor 'Lab ' so lIsInput becomes TRUE.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The colorspace-signature FOURCC bytes that drive CurrentColorSpace (the data/PCS signatures around offsets 0x10-0x16 of the ICC header) must equal a value distinct from both cmsSigXYZData ('XYZ ' = 58 59 5A 20) and cmsSigLabData ('Lab ' = 4C 61 62 20). Only then does line 551 evaluate (CurrentColorSpace != cmsSigXYZData) && (CurrentColorSpace != cmsSigLabData) to TRUE.",
+      "why_winner_satisfies": "Winner-resolving seeds carry varied colorspace FOURCCs at 0x10-0x16 (RGB/CMYK/link, and notably Lab Lab and XYZ Lab combinations) instead of the single fixed RGB/XYZ layout; the byte diff shows W spreading over many distinct values at 0x10-0x16 (e.g. 4c(L)/52(R)/43(C)/4d(M)) while L is locked to one value, which lets some loop iterations reach a CurrentColorSpace that is neither XYZ nor Lab and take the true side (line 551 W=T=12).",
+      "why_loser_doesnt": "Loser-blocking seeds are uniformly the same header (mntr / RGB  / XYZ ) at every trial, so CurrentColorSpace at line 551 is always XYZ or Lab and the true side is never taken (line 551 L=T=0 F=30).",
+      "mechanism_attribution": "cmplog intercepts the integer equality CMPs (CurrentColorSpace != cmsSigXYZData / != cmsSigLabData) and records both operands; I2SRandReplace scans the input for the matching FOURCC bytes and substitutes the logged comparand, directly producing a colorspace signature that satisfies both inequalities — naive must hit this 4-byte FOURCC by blind havoc and never does in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the equality gate on CurrentColorSpace at line 551, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmscnvrt.c:551",
+      "exact_quote": "lIsInput      = (CurrentColorSpace != cmsSigXYZData) &&"
+    },
+    {
+      "claim": "The second clause of the gate compares CurrentColorSpace against cmsSigLabData, so the true side requires the signature to be neither XYZ nor Lab.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L552",
+      "exact_quote": "(CurrentColorSpace != cmsSigLabData);"
+    },
+    {
+      "claim": "CurrentColorSpace is initialized from the colorspace of the first profile, i.e. from header FOURCC bytes in the input.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L535",
+      "exact_quote": "CurrentColorSpace = cmsGetColorSpace(hProfiles[0]);"
+    },
+    {
+      "claim": "Winner seeds carry varied colorspace FOURCCs at offsets 0x10-0x16, including Lab and XYZ combinations, unlike the fixed loser layout.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0136ec83a2860351 offset 0x10-0x16",
+      "exact_quote": "58 59 5a 20 4c 61 62 20 07 d9 00 0c 00 17 00 16   XYZ Lab ........"
+    },
+    {
+      "claim": "The byte diff shows W spread over many distinct values at 0x10 while L is locked to a single value (RGB).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0010",
+      "exact_quote": "0x0010  4c(L)x3 52(R)x2 43(C)x2 4d(M)x2 +1u  52(R)x10                            PARTIAL"
+    },
+    {
+      "claim": "On the loser side line 551 never takes the true branch (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L551",
+      "exact_quote": "d=1   L 551  T=12 F=5  T=0 F=30  lIsInput      = (CurrentColorSpace != cmsSigXYZData) &&  <-- BLOCKER"
+    },
+    {
+      "claim": "Loser-blocking seeds are uniformly the mntr/RGB /XYZ header at every trial.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser seed_id 0b15b184dfa9d1c7 offset 0x10-0x16",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "cmplog records both operands of intercepted integer CMPs and I2SRandReplace substitutes one operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2097 --role W --fuzzer cmplog --trial 1 --seed 022bbf04b2e0cbc2` and observed 1 I2S-floor dash row (mutation_op = -) at depth 7 of the ancestor chain; cmplog is an involved fuzzer (not mopt/grimoire), so the dash signal is I2S-exclusive lower-bound evidence here."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on a 4-byte colorspace FOURCC inequality where cmplog does NOT resolve the true side faster than naive (no cmplog>naive separation), which would show I2S substitution is not what flips this gate."
+  },
+  "weakest_evidence_point": "The exact input offset whose bytes flow into CurrentColorSpace at the resolving iteration is inferred from the header FOURCC layout, not pinned to one offset, since CurrentColorSpace is reassigned to ColorSpaceOut each loop iteration.",
+  "confidence": "medium"
+}

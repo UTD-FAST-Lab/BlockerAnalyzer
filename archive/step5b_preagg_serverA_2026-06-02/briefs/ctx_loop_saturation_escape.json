@@ -1,0 +1,551 @@
+{
+  "feature_id": "ctx_loop_saturation_escape",
+  "mechanism_family": "ctx_coverage_pro",
+  "mechanism_label": "context_indexed_loop_depth_reward",
+  "definition": "Context-sensitive coverage prevents loop-edge saturation by recording the same loop-body or state-machine edge as new coverage under each distinct call-context, rewarding seeds that iterate progressively deeper through a multi-step sequence that bare-edge naive's flat map saturates after the first few iterations.",
+  "n_members": 5,
+  "involved_fuzzers": [
+    "naive",
+    "naive_ctx"
+  ],
+  "techniques_seen": [
+    "ctx_coverage"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "ctx_coverage",
+    "has_axis": [
+      "naive_ctx"
+    ],
+    "lacks_axis": [
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libpng_3872",
+      "target": "libpng",
+      "branch_id": 3872,
+      "analysis_path": "prompts/libpng_3872.analysis.json",
+      "file": "/src/libpng/png.c",
+      "function": "OSS_FUZZ_png_check_fp_number",
+      "line": "2751",
+      "source_line": "         if ((state & PNG_FP_SAW_DOT) != 0) /* two dots */",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "derived_integer",
+        "operand_literal": "PNG_FP_SAW_DOT",
+        "operand_width_bytes": null,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "CtxHook splits the FP-parser state-machine edges by call context, so each distinct caller path through png_check_fp_number is a new bucket; this retains intermediate parse-state seeds (sign, digit, first-dot) and lets havoc eventually emit the second dot needed to hit the two-dot true branch.",
+        "one_line": "context-indexed edges retain FP-parser intermediate states, enabling rare second-dot true branch"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A floating-point text field reaching png_check_fp_number whose digit/dot stream contains a second dot while PNG_FP_SAW_DOT is already set (two dots).",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "A parsed numeric-string field (the FP-number scanner walks string[i] through a state machine) that feeds png_check_fp_number a character sequence which puts the parser in the PNG_FP_INTEGER state with PNG_FP_SAW_DOT already set, then supplies a second '.' (byte 0x2e) so that case PNG_FP_INTEGER + PNG_FP_SAW_DOT is hit while (state & PNG_FP_SAW_DOT) != 0 \u2014 the 'two dots' true side at L2751.",
+            "why_winner_satisfies": "naive_ctx resolves the branch in all 10/10 trials with 30 hits on the branch and reaches the L2752 goto-end true arm ([W] 2752); per-role counts show the winner-resolving set takes the true side (L2751 W T=28 F=28) whereas no path to a second dot is retained by the loser. The CtxHook splits the edge map by call context, so each distinct caller that drives the FP-number scanner records the same parser edges at separate map slots; this keeps intermediate FP-parser progress (sign/digit/first-dot states) as separately-rewarded corpus entries, so the rare second-dot continuation is reachable from a retained mid-parse seed rather than requiring it to be found in one shot.",
+            "why_loser_doesnt": "plain naive blocks all 10/10 trials with 0 hits on the branch; its per-role counts show the loser never takes the L2751 true side (L T=0 F=21) \u2014 it explores PNG_FP_FRACTION arms (L2784/L2788 fire only in L) but never re-enters the PNG_FP_INTEGER+SAW_DOT case with SAW_DOT already set. Without context-indexed edges, naive collapses every call path through png_check_fp_number into the same edge slots, so once the bare edges are bucketed it stops rewarding deeper distinct-context FP-parser states and never accumulates the prefix that yields a two-dot string.",
+            "mechanism_attribution": "Context-sensitive coverage feedback (naive_ctx CtxHook), not a CMP/I2S technique. naive and naive_ctx share the identical havoc+token mutator stack and SanitizerCoverage edge counters; the ONLY differing technique is naive_ctx folding a call-context hash into the edge-map index (MaxMapFeedback over a (call-context, edge) map). This finer feedback retains more distinct intermediate FP-parser states in the corpus, raising the probability that havoc mutation eventually emits a second dot. There is no comparison-logging or value-profile component to this win."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is the 'two dots' check guarding the goto-end true arm at L2751.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "/src/libpng/png.c:2751:14",
+            "exact_quote": "if ((state & PNG_FP_SAW_DOT) != 0) /* two dots */"
+          },
+          {
+            "claim": "The branch sits inside a switch state machine that scans characters of a floating-point string and transitions on the SAW_DOT / SAW_DIGIT bits.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2749-L2752",
+            "exact_quote": "case PNG_FP_INTEGER + PNG_FP_SAW_DOT:"
+          },
+          {
+            "claim": "naive_ctx resolves the branch in every trial while naive blocks it in every trial; this is the lone decisive pair and its technique delta is ctx_coverage.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1: naive_ctx > naive",
+            "exact_quote": "--- Pair 1: naive_ctx > naive  [delta: ctx_coverage] ---"
+          },
+          {
+            "claim": "The winner takes the true side many times while the loser never takes the true side at the blocker line.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L2751",
+            "exact_quote": "L2751  T=28 F=28  T=0 F=21  if ((state & PNG_FP_SAW_DOT) != 0) /* two dots */  <-- BLOCKER"
+          },
+          {
+            "claim": "Only the winner-resolving set reaches the goto-end true arm following the two-dot check.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2752",
+            "exact_quote": "[W]  2752              goto PNG_FP_End;"
+          },
+          {
+            "claim": "The loser instead exercises the PNG_FP_FRACTION arms that the winner does not, showing it walks the FP scanner down a different (single-dot) path.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2784/L2788",
+            "exact_quote": "[L]  2784        case PNG_FP_FRACTION + PNG_FP_SAW_DIGIT:"
+          },
+          {
+            "claim": "naive_ctx differs from naive only by installing a CtxHook that folds the call-context hash into the edge-map index, so the same edge is recorded at different map slots per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Instrumentation",
+            "exact_quote": "the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "naive_ctx uses the same havoc+token mutators as naive with no I2S or CMP_MAP component, so the divergence is attributable to the context-indexed feedback, not a comparison technique.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+          },
+          {
+            "claim": "Plain naive's feedback is a bare per-edge hit-count bucket with no context indexing, so distinct call paths through the FP scanner collapse to the same slots.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Feedback",
+            "exact_quote": "per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose only difference is context-indexed vs bare edge coverage, fed the same FP-number state machine: if naive_ctx fails to out-resolve naive on the two-dot branch (no separation), the context-indexing-retains-intermediate-states mechanism is refuted."
+        },
+        "weakest_evidence_point": "The causal link from context-indexed feedback to retaining mid-parse FP-scanner states is inferred from mechanism descriptions plus the per-role divergence; the seed bytes do not directly show a two-dot ('2e 2e') string at a fixed offset, so the exact byte-level realization of the winning second dot is unconfirmed.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3874",
+      "target": "libpng",
+      "branch_id": 3874,
+      "analysis_path": "prompts/libpng_3874.analysis.json",
+      "file": "/src/libpng/png.c",
+      "function": "OSS_FUZZ_png_check_fp_number",
+      "line": "2801",
+      "source_line": "         if ((state & PNG_FP_SAW_ANY) != 0)",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "derived_integer",
+        "operand_literal": "PNG_FP_SAW_ANY",
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "CtxHook makes the same FP-case-ladder edges new coverage under each distinct call context, rewarding progressively deeper traversal of digits-E-sign sequence that bare per-edge feedback saturates on, allowing accumulation of the multi-character state chain reaching the exponent-plus-sign arm.",
+        "one_line": "context-indexed edges reward deeper exponent-sign parser state sequence naive's flat map saturates"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A floating-point string reaching PNG_FP_EXPONENT state then a sign char while PNG_FP_SAW_ANY is already set, e.g. an 'e+'/'E-' exponent after digits.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "An ASCII numeric string parsed by png_check_fp_number that drives the state machine all the way to PNG_FP_EXPONENT and then encounters a sign character ('+' 0x2b or '-' 0x2d) while PNG_FP_SAW_ANY is non-zero \u2014 i.e. a deep, well-formed exponent prefix like a digit run, 'E'/'e', then a sign, reaching the 'case PNG_FP_EXPONENT + PNG_FP_SAW_SIGN' arm at line 2800 with prior state bits set.",
+            "why_winner_satisfies": "naive_ctx corpus seeds drive the parser deep into the case ladder: the per-role overlay marks line 2801 as [B] and line 2802 'goto PNG_FP_End' as [W] (winner-only), and the DIVERGENT BRANCHES table shows the winner takes the blocker true side T=29 while the loser never does (T=0). Reaching PNG_FP_EXPONENT+PNG_FP_SAW_SIGN with PNG_FP_SAW_ANY set requires having already consumed a sign and an exponent marker, a multi-character chain naive_ctx's context-indexed feedback rewards each step of.",
+            "why_loser_doesnt": "naive seeds never reach the true side: the DIVERGENT BRANCHES table shows the loser at the blocker as T=0 F=20, so it only ever enters the case arm with PNG_FP_SAW_ANY clear (or not at all). naive uses the identical mutator stack but a bare per-edge bucket feedback, so it gets no new-coverage credit for the intermediate parser states needed to assemble the deep exponent-plus-sign sequence and stalls (blocked 24.00h, hitcount 0).",
+            "mechanism_attribution": "naive_ctx installs a CtxHook that folds the call-context hash into the edge-map index, so the same png_check_fp_number basic-block edges count as new coverage under each distinct caller chain. This rewards progressively deeper exploration of the floating-point case ladder that naive's bare per-edge map saturates on, letting naive_ctx accumulate the multi-character state sequence (digits -> E -> sign) that reaches the PNG_FP_EXPONENT+PNG_FP_SAW_SIGN arm with PNG_FP_SAW_ANY set. Both fuzzers share havoc/token mutators with no I2S or CMP_MAP, so the divergence is purely the coverage-granularity feedback dimension."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The decisive pair is naive_ctx over naive with delta ctx_coverage, prob_div 1.00.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "The blocker is the PNG_FP_EXPONENT + PNG_FP_SAW_SIGN arm guarded by a PNG_FP_SAW_ANY test.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2800-2801",
+            "exact_quote": "case PNG_FP_EXPONENT + PNG_FP_SAW_SIGN:"
+          },
+          {
+            "claim": "The blocked side requires PNG_FP_SAW_ANY to be non-zero at the blocker line.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2801",
+            "exact_quote": "if ((state & PNG_FP_SAW_ANY) != 0) <-- BLOCKER"
+          },
+          {
+            "claim": "The winner takes the blocker true side (T=29) while the loser never does (T=0).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L2801",
+            "exact_quote": "d=1   L2801  T=29 F=22  T=0 F=20  if ((state & PNG_FP_SAW_ANY) != 0)  <-- BLOCKER"
+          },
+          {
+            "claim": "The winner resolves the branch in all 10 trials while the loser is blocked all 10, with the loser spending 24h blocked and zero hits.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 counts",
+            "exact_quote": "avg duration blocked: winner=0.20h  loser=24.00h"
+          },
+          {
+            "claim": "naive_ctx folds call-context into the edge-map index so the same edge is new coverage per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Instrumentation",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "naive_ctx uses naive's havoc plus token mutators with no I2S and no CMP_MAP, so mutation is identical to the loser.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+          },
+          {
+            "claim": "naive's feedback is a bare per-edge hit-count bucket with no I2S in its mutation metadata.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Feedback",
+            "exact_quote": "per-edge hit-count bucket; a new bucket triggers a\ncorpus-add"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "If, in a synthetic harness with the same png_check_fp_number-style case ladder, naive resolved the PNG_FP_EXPONENT+PNG_FP_SAW_SIGN arm in similar time to naive_ctx (no significant divergence), the context-sensitive-coverage attribution would be refuted."
+        },
+        "weakest_evidence_point": "I infer the precise input string shape (digits then E then sign) from the source state machine and the per-role overlay rather than from a winning seed that visibly contains an exponent substring, since the byte-diff signal sits in the IHDR/header region rather than at a parsed FP-number offset.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_4055_h1",
+      "target": "libpng",
+      "branch_id": 4055,
+      "analysis_path": "prompts/libpng_4055.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_iTXt",
+      "line": "2796",
+      "source_line": "      for (; prefix_length < length && buffer[prefix_length] != 0;",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "CtxHook makes the iTXt-handler loop edges count as new coverage when reached via the chunk-dispatch call path, preserving intermediate iTXt seeds that naive's context-blind map prunes as already-covered.",
+        "one_line": "Context credit for iTXt loop edges retains seeds naive discards"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A well-formed iTXt chunk whose translated-keyword field starts with a non-zero byte before length-end, so the L2796 NUL-scan loop runs and exits false.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "The same structurally-valid iTXt chunk that reaches the L2796 translated-keyword NUL-scan loop and exits it on the false side; no comparison-solving is required, only that the input region around the translated-keyword offset contains a non-zero byte before `length`.",
+            "why_winner_satisfies": "naive_ctx resolves 9/10 (avg hitcount on branch winner=6); its CtxHook indexes each edge by call-context, so the iTXt-handler edges reached via the chunk-dispatch path register as new (call-context, edge) coverage, retaining intermediate iTXt seeds that naive discards and giving energy to mutants that progress through the prefix loops to L2796.",
+            "why_loser_doesnt": "naive resolves only 1/10 and stays blocked 9/10 (avg duration blocked loser=21.80h); its plain edge-bucket feedback already saw the iTXt loop edges from shallower chunks, so context-blind coverage gives no new-bucket reward for partially-advanced iTXt seeds and they are not retained long enough to mutate to the L2796 exit.",
+            "mechanism_attribution": "naive_ctx's context-sensitive coverage (CtxHook folding the caller chain into the edge-map index) creates fresh coverage credit for the iTXt loop edges reached via the chunk dispatcher, preserving and energizing the intermediate seeds needed to walk prefix_length past the translated-keyword field; naive's bare-edge feedback offers no such credit."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the false (loop-exit) side of the third NUL-scan loop over the translated-keyword field at pngrutil.c:2796.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L2796",
+            "exact_quote": "for (; prefix_length < length && buffer[prefix_length] != 0;"
+          },
+          {
+            "claim": "Reaching L2796 requires passing the compression-info gate that compares buffer[prefix_length+2] against PNG_COMPRESSION_TYPE_BASE.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2777-2779",
+            "exact_quote": "buffer[prefix_length+2] == PNG_COMPRESSION_TYPE_BASE))"
+          },
+          {
+            "claim": "Inputs that fail the compression-info gate divert to the bad-compression-info else and never reach L2796.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2853",
+            "exact_quote": "errmsg = \"bad compression info\";"
+          },
+          {
+            "claim": "cmplog wins over naive at this branch with prob_div 0.90 and a large hitcount divergence on the branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog>naive",
+            "exact_quote": "avg hitcount on branch: winner=23  loser=0"
+          },
+          {
+            "claim": "naive resolves only 1/10 and stays blocked 9/10 at this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 loser line",
+            "exact_quote": "loser:  resolved=1/10  blocked=9  unreached=0"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace reads the CMP buffer and substitutes one operand at input offsets matching the other operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive_ctx wins over naive at this branch via the ctx_coverage technique with prob_div 0.80.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 naive_ctx>naive",
+            "exact_quote": "Pair 2: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "naive_ctx folds the call context into the edge-map index so a new (call-context, edge) pair counts as new coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Feedback",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+          },
+          {
+            "claim": "naive_ctx resolves 9/10 at this branch with positive on-branch hitcount.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 winner line",
+            "exact_quote": "avg hitcount on branch: winner=6  loser=0"
+          },
+          {
+            "claim": "naive's feedback is a bare per-edge hit-count bucket with no context indexing and no I2S.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Feedback/Mutators",
+            "exact_quote": "Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic iTXt-handler harness where the compression-info gate byte is fixed/constant (no input-derived equality CMP) shows cmplog NOT outperforming naive at reaching the L2796 loop-exit, indicating I2S substitution was not the enabling factor."
+        },
+        "weakest_evidence_point": "The claim that the L2777-2779 compression-info equality is the specific CMP that I2SRandReplace solves is inferred from source structure; the lineage dash row confirms an I2S find in the chain but does not prove it targeted that exact comparand.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6467_h0",
+      "target": "libxml2",
+      "branch_id": 6467,
+      "analysis_path": "prompts/libxml2_6467.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "xmlParseCharRef",
+      "line": "2353",
+      "source_line": "\t    if (count++ > 20) {",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "derived_integer",
+        "operand_literal": "20",
+        "operand_width_bytes": 4,
+        "byte_signature": "length_field",
+        "mechanism_summary": "CtxHook makes the loop-body edge in xmlParseCharRef a new bucket per call context, rewarding seeds that grow the digit run until the count++>20 reset fires; bare-edge naive saturates the loop after a few iterations.",
+        "one_line": "Context credit for loop edges rewards growing digit run past count 20"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Take true side requires a decimal char-ref (&#) whose digit run drives the count++ loop past 20 iterations.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "A decimal character reference (`&#` followed by many ASCII digits, no terminating `;` early) so the `while (RAW != ';')` loop in xmlParseCharRef iterates more than 20 times and the count++>20 reset branch becomes a distinct (call-context, edge) coverage event.",
+            "why_winner_satisfies": "naive_ctx winner-resolving seeds drive the loop deeply: the loop header L2352 is taken True 111 times and the blocker L2353 True 9 times under W, with an average branch hitcount of 57, so the count overflow side is exercised. Context-sensitive indexing records each call path into this loop as fresh coverage, keeping such seeds in the corpus.",
+            "why_loser_doesnt": "naive's loser-blocking seeds enter the loop only 4 times (L2352 T=4) and never reach the count overflow (L2353 T=0), with average hitcount 1; bare edge feedback already saturates the loop edges after a few iterations so naive has no coverage incentive to keep growing the digit run.",
+            "mechanism_attribution": "naive_ctx's CtxHook folds the caller chain into the edge-map index, so the same loop-body edge inside xmlParseCharRef is a new bucket per call context. This rewards seeds that re-enter the digit loop along new paths, pushing the iteration count up until count++>20 fires \u2014 a feedback-granularity effect, not comparison solving."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the count overflow guard inside the decimal char-ref loop, and its true side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "parser.c:2353:10",
+            "exact_quote": "Source line: \t    if (count++ > 20) {\nGlobally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "The blocker sits inside the decimal-branch while loop reached when input is `&#` without `x`.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2349-L2353",
+            "exact_quote": "} else if  ((RAW == '&') && (NXT(1) == '#')) {"
+          },
+          {
+            "claim": "naive_ctx winner drives the loop header True 111 times while the naive loser reaches it only 4 times.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L2352",
+            "exact_quote": "d=1   L2352  T=111 F=0  T=4 F=0  while (RAW != ';')"
+          },
+          {
+            "claim": "The winner takes the count-overflow true side 9 times while the loser takes it 0 times.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L2353",
+            "exact_quote": "d=1   L2353  T=9 F=102  T=0 F=4  if (count++ > 20) {  <-- BLOCKER"
+          },
+          {
+            "claim": "The naive_ctx pair resolves 10/10 vs naive 2/10 with a large branch hitcount gap.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 subject 35",
+            "exact_quote": "avg hitcount on branch: winner=57  loser=1"
+          },
+          {
+            "claim": "naive_ctx's mechanism makes each (call-context, edge) pair a distinct coverage event.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge"
+          },
+          {
+            "claim": "The loop compares each byte against the decimal-digit range, the comparison value_profile rewards approaching.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2359",
+            "exact_quote": "if ((RAW >= '0') && (RAW <= '9'))"
+          },
+          {
+            "claim": "The value_profile pair resolves 9/10 vs naive 2/10 with hitcount 8 vs 1.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 subject 32",
+            "exact_quote": "avg hitcount on branch: winner=8  loser=1"
+          },
+          {
+            "claim": "value_profile records a coarse operand-distance bucket per CMP, preserving inputs whose operands approach matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the same count++>20 decimal-loop where naive resolves the true side as often as naive_ctx and value_profile across trials, showing neither context-sensitive coverage nor CMP_MAP gradient is needed to grow the digit run past 20 iterations."
+        },
+        "weakest_evidence_point": "The byte-diff seeds are single-provenance (naive_ctx/naive) so the value_profile hypothesis leans on the loop's digit-range comparison plus hitcount divergence rather than on a value_profile-stored seed.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_6483",
+      "target": "libxml2",
+      "branch_id": 6483,
+      "analysis_path": "prompts/libxml2_6483.analysis.json",
+      "file": "/src/libxml2/parser.c",
+      "function": "xmlSplitQName",
+      "line": "3013",
+      "source_line": "\twhile ((c != 0) && (c != ':')) { /* tested bigname.xml */",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "CtxHook gives each SAX2 call path into xmlSplitQName its own edge-map slot, retaining intermediate seeds that build a longer oversized prefix through entity/attribute processing states that naive prunes as already-covered.",
+        "one_line": "Context-indexed QName loop edges retain intermediate seeds building oversized prefix"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive_ctx",
+          "loser": "naive",
+          "technique": "ctx_coverage",
+          "axis": "ctx_coverage"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A long-prefix QName (len>=XML_MAX_NAMELEN) terminated so the huge-name copy loop at 3013 exits via its false side after a colon",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive_ctx>naive (ctx_coverage)"
+            ],
+            "what_input_feature": "An XML element/attribute QName whose prefix exceeds XML_MAX_NAMELEN so the dynamic-buffer copy loop at parser.c:3013 is entered, and which is terminated (by 0 or ':') so the loop takes its false exit rather than spinning forever on more name bytes; this is reached only through deep, well-formed enough SAX element/attribute parsing (entity refs, references, attribute processing).",
+            "why_winner_satisfies": "naive_ctx seeds carry a recognizable XML skeleton (`\\n<ml v...`, `<?xml version=`, `<ISO-10646-UCS-2`) and runs of repeated bytes (0xc0, 0xb2, 0xb5, 'x') that form an oversized name; the winner's hit-count profile shows it drives the deeper parser states the false-exit path requires (xmlParseEntityRef W=72 vs L=0, xmlParseReference W=54 vs L=0), and the blocker's false side is actually taken in the W role (L3013 F=36/F=6 with buffer present).",
+            "why_loser_doesnt": "naive seeds are dominated by '.' fill (0x2e) and a `\\n<Rxul...` skeleton that never builds an oversized terminated prefix and never reaches the entity/reference parsing depth (xmlParseEntityRef/xmlParseReference L hits = 0); the loser blocks the false side because the surrounding parse states are never explored, not because of any single comparand byte.",
+            "mechanism_attribution": "Both fuzzers share the identical havoc+token mutator stack with no I2S and no CMP_MAP, so the divergence is not comparison-solving. naive_ctx's CtxHook folds the caller call-context hash into the edge-map index, so an edge inside xmlSplitQName reached via a NEW SAX2 call path (e.g. through xmlSAX2AttributeInternal vs xmlSAX2StartElement) registers as new coverage. That extra granularity rewards and retains the intermediate seeds that progressively build a longer prefix and deeper parse state, letting the context-sensitive arm climb to the loop's false-exit state that the bare-edge naive arm prunes as already-covered."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The decisive pair is naive_ctx > naive with delta ctx_coverage, the only divergence being coverage granularity.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "The blocker is the false (loop-exit) side of the huge-name copy loop at parser.c:3013 inside xmlSplitQName.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "parser.c:3013",
+            "exact_quote": "while ((c != 0) && (c != ':')) { /* tested bigname.xml */ <-- BLOCKER"
+          },
+          {
+            "claim": "The blocker loop at 3013 is only entered after the len>=max huge-name branch, i.e. a prefix exceeding XML_MAX_NAMELEN.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "parser.c:3000",
+            "exact_quote": "if (len >= max) {"
+          },
+          {
+            "claim": "Winner seeds carry an XML skeleton with long runs of repeated bytes that form an oversized name.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 1 id=03e5576b2c37e929",
+            "exact_quote": "c0 c0 c0 c0 c0 c0 78 78 d7 ff ff ff ff ff ff ff"
+          },
+          {
+            "claim": "Winner seeds contain well-formed XML declaration / encoding markers indicating deeper valid parse states.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner seed 4 id=f4de14c0bb25be46",
+            "exact_quote": "37 37 f4 2d 78 6d 6c 5c 0a 3c 49 53 4f 2d 31 30   77.-xml\\.<ISO-10"
+          },
+          {
+            "claim": "The winner drives deep reference/entity parsing the loser never reaches (W=72/54 vs L=0).",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "xmlParseEntityRef / xmlParseReference",
+            "exact_quote": "72         0  xmlParseEntityRef"
+          },
+          {
+            "claim": "Loser seeds are dominated by '.' fill and a shallow skeleton that never builds an oversized terminated prefix.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser seed 1 id=1a3a3db8872967a2",
+            "exact_quote": "2e 2e 2e 2e 2e 2e 20 28 73 69 93 20 6f 6c 65 29   ...... (si. ole)"
+          },
+          {
+            "claim": "naive_ctx uses the same havoc/token mutators as naive with no I2S and no CMP_MAP; divergence is the context-indexed edge map.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx",
+            "exact_quote": "the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "A new bucket for naive_ctx is a new (call-context, edge) pair rather than a bare edge.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Feedback",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+          },
+          {
+            "claim": "The blocker false side is actually taken in the winner role with a populated buffer.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L3013",
+            "exact_quote": "L3013  T=889 F=3  T=1840 F=36"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating only on the xmlSplitQName huge-name loop false-exit, where naive and naive_ctx resolve the branch at statistically indistinguishable rates (no context-granularity advantage), would refute the claim that context-sensitive coverage is the enabling mechanism."
+        },
+        "weakest_evidence_point": "Whether the context-indexed coverage (distinct SAX2 call paths into xmlSplitQName) is the actual driver versus the winner simply finding deeper parse states by luck, since seeds are stored under naive_ctx but no per-edge context-slot count is shown directly.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

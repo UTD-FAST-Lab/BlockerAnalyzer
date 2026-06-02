@@ -1,0 +1,88 @@
+{
+  "branch_id": 2300,
+  "target": "lcms",
+  "summary_one_line": "ICC profile colorspace signature field must equal the 4-byte FOURCC 'CMYK' at offset 0x10 to take the 4-channel case arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "The 4-byte colorspace signature in the ICC profile header at offsets 0x10-0x13 must hold the exact magic value 'CMYK' (43 4D 59 4B). cmsChannelsOfColorSpace switches on this signature; only cmsSigCmykData (='CMYK') reaches case line 901, the blocked true side.",
+      "why_winner_satisfies": "Every winner-resolving seed carries bytes 43 4D 59 4B ('CMYK') at offsets 0x10-0x13; the BYTE DIFF shows offset 0x10 is 43(C) for all 22 winner samples while losers are dominated by 52(R). This exact FOURCC drives the switch to the case cmsSigCmykData arm.",
+      "why_loser_doesnt": "Loser-blocking seeds carry 52 47 42 20 ('RGB ') at offsets 0x10-0x13, i.e. cmsSigRgbData, which dispatches to the 3-channel arm (line 893) and never reaches line 901; the L overlay only ever hits the default/return-3 arms.",
+      "mechanism_attribution": "I2SRandReplace (cmplog and value_profile_cmplog) intercepts the integer/string CMP that compares the parsed colorspace signature against the cmsSigCmykData literal, logs the constant, and substitutes 'CMYK' into the input bytes. naive and value_profile lack I2SRandReplace and must stumble onto the exact 4-byte FOURCC by chance, which they fail to do (loser blocked in 9-10/10 trials)."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the cmsSigCmykData case arm of cmsChannelsOfColorSpace, a switch on the colorspace signature, with the true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmspcs.c:901:5",
+      "exact_quote": "Source line:     case cmsSigCmykData:"
+    },
+    {
+      "claim": "The switch dispatches on ColorSpace and only the Cmyk/MCH4/4color arm returns 4 channels, distinct from the 3-channel RGB arm.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmspcs.c:879-903",
+      "exact_quote": "switch (ColorSpace) {"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the literal CMYK FOURCC at offset 0x10.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed offsets 0x10-0x17",
+      "exact_quote": "43 4d 59 4b 4c 61 62 20 07 d9 00 0c 00 17 00 16   CMYKLab ........"
+    },
+    {
+      "claim": "Loser-blocking seeds carry RGB (not CMYK) at the same colorspace-signature offsets.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed offsets 0x10-0x17",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "Offset 0x10 is uniformly 43(C) across all winner samples but dominated by 52(R) in losers, marking it as the decisive dataflow byte.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0010",
+      "exact_quote": "0x0010  43(C)x22                            52(R)x15 49(I)x2 b7(.)x1 4d(M)x1 +1u  DIFFER"
+    },
+    {
+      "claim": "Offset 0x13 (the 4th FOURCC byte) is uniformly 4B(K) in winners but space/other in losers, confirming the full CMYK token boundary.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0013",
+      "exact_quote": "0x0013  4b(K)x22                            20( )x15 00(.)x1 55(U)x1 41(A)x1 +2u  DIFFER"
+    },
+    {
+      "claim": "On the call chain, the blocker true side has W hits but L is 0/100 true, while losers explore only the default arm.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L901 blocker",
+      "exact_quote": "d=1   L 901  T=72 F=70  T=0 F=100  case cmsSigCmykData:  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog and value_profile_cmplog add I2SRandReplace which scans the input for an operand and substitutes the other CMP operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive (the loser of pair 2) has no I2S substitution mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile (the loser of pair 1) has no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2300 --role W --fuzzer cmplog --trial 1 --seed 0102173191ba1d0a` and observed an I2S-floor dash row (mutation_op = -) at depth 9 (ancestor 5441efb6193a1a03). Also ran lineage on the value_profile_cmplog winner 00daa28620d77324 (trial 1) which shows an I2S-floor dash row at depth 6 (same ancestor 5441efb6193a1a03). Both winning chains contain the cmplog/vpc-exclusive ParentInfo-only row that is the current build's lower-bound I2S signal.",
+    "_note": "TODO(i2s-logging-bug): literal I2SRandReplace string is not logged; dash-row floor is the verification signal under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on a 4-byte 'CMYK' FOURCC equality where naive/value_profile resolve the branch at the same rate as cmplog/value_profile_cmplog (no I2S advantage) would refute the I2S-magic-FOURCC attribution."
+  },
+  "weakest_evidence_point": "The dash-row I2S signal is a lower bound and shared ancestor 5441efb6193a1a03 appears in both chains at shallow depth, so the exact mutation that first inserted 'CMYK' is not directly named, only inferred from the I2S-floor heuristic.",
+  "confidence": "high"
+}

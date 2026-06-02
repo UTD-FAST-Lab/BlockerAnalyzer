@@ -1,0 +1,81 @@
+{
+  "branch_id": 2103,
+  "target": "lcms",
+  "summary_one_line": "Profile deviceClass field at offset 0x0c must equal FOURCC 'abst' (cmsSigAbstractClass) to enter the devicelink block and reach line 583.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The 4-byte profile deviceClass signature at input offset 0x0c-0x0f must be the FOURCC 'abst' (0x61627374, cmsSigAbstractClass). This makes lIsDeviceLink TRUE at line 543, gates entry into the devicelink block at line 576, and is the literal compared at the blocker line 583 (ClassSig == cmsSigAbstractClass).",
+      "why_winner_satisfies": "All winner-resolving seeds carry bytes 61 62 73 74 ('abst') at offset 0x0c-0x0f. With ClassSig == cmsSigAbstractClass the loop reaches line 583; with the abstract profile at i==0 the AND condition (i > 0) is false, so the globally-blocked FALSE side is taken and lines 586-589 execute (marked [W]).",
+      "why_loser_doesnt": "All loser-blocking seeds carry bytes 6d 6e 74 72 ('mntr', a monitor/display class) at offset 0x0c-0x0f. ClassSig is not link/abstract, so lIsDeviceLink is FALSE, line 576 fails, control takes the else branch at line 595, and line 583 is never evaluated.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace, which buffers the runtime comparison ClassSig == cmsSigAbstractClass via CmpLogObserver, captures the constant operand 'abst' (0x61627374), and splices it directly onto the input bytes wherever the loser's deviceClass FOURCC appears. value_profile lacks I2SRandReplace and only gets a coarse CMP_MAP prefix-distance bucket, so it cannot place the exact 4-byte literal."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker condition at line 583 compares ClassSig against cmsSigAbstractClass and additionally requires i > 0.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmscnvrt.c:583",
+      "exact_quote": "if (ClassSig == cmsSigAbstractClass && i > 0) {"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the FOURCC 'abst' at offset 0x0c-0x0f while loser-blocking seeds contain 'mntr'.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "0x000c  61(a)x5                             6d(m)x10                            DIFFER"
+    },
+    {
+      "claim": "Reaching the devicelink block requires lIsDeviceLink, which is true when ClassSig is link or abstract class.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmscnvrt.c:543",
+      "exact_quote": "lIsDeviceLink = (ClassSig == cmsSigLinkClass || ClassSig == cmsSigAbstractClass );"
+    },
+    {
+      "claim": "The winner takes the else branch at lines 586-589 (marked [W]) which is the globally-blocked FALSE side of line 583.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmscnvrt.c:586-588",
+      "exact_quote": "[W]   586               else {"
+    },
+    {
+      "claim": "The winner reaches the FALSE side of line 583 (F nonzero) whereas the loser-blocking divergence shows the F side blocked.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "cmscnvrt.c:583",
+      "exact_quote": "d=1   L 583  T=5 F=5  T=20 F=0  if (ClassSig == cmsSigAbstractClass && i > 0) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner-resolving seeds were discovered by value_profile_cmplog and carry the 'abst' deviceClass FOURCC.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed c60530ec495eaaed offset 0x0c",
+      "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 61 62 73 74   ..b.lcms.@..abst"
+    },
+    {
+      "claim": "Loser-blocking seeds were discovered by value_profile and carry the 'mntr' deviceClass FOURCC.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0313315f3b972394 offset 0x0c",
+      "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 6d 6e 74 72   ..b.lcms.@..mntr"
+    },
+    {
+      "claim": "value_profile_cmplog provides I2SRandReplace while value_profile does not.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog / value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace and only writes coarse distance buckets into CMP_MAP.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2103 --role W --fuzzer value_profile_cmplog --trial 1 --seed c60530ec495eaaed` and observed 1 I2S-floor row (mutation_op = -) at depth 14 of the 15-level ancestor chain, the dash-row lower-bound signal for an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on ClassSig == cmsSigAbstractClass where value_profile resolves the branch as often as value_profile_cmplog, showing the exact 4-byte 'abst' literal is not required and CMP_MAP gradient alone suffices."
+  },
+  "weakest_evidence_point": "The i > 0 sub-condition: the winner appears to satisfy the FALSE side via i == 0 (single abstract profile), but the seeds do not directly evidence nProfiles, so the FALSE-side path could instead arise from a non-abstract ClassSig at a later iteration.",
+  "confidence": "high"
+}

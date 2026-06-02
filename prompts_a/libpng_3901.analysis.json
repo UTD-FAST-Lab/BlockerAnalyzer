@@ -1,0 +1,106 @@
+{
+  "branch_id": 3901,
+  "target": "libpng",
+  "summary_one_line": "Input must contain a PNG chunk whose 4-byte chunk-name FOURCC equals 'sPLT' so chunk_name == png_sPLT is true.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A chunk header whose 4-byte chunk-name field is the literal FOURCC 'sPLT' (0x73 0x50 0x4C 0x54), so the 32-bit equality test chunk_name == png_sPLT resolves true at the else-if chain at pngread.c:902.",
+      "why_winner_satisfies": "cmplog intercepts the chunk_name == png_sPLT integer comparison, logs the constant png_sPLT operand into the CmpLogObserver buffer, and I2SRandReplace splices that 4-byte constant into a chunk-name offset of the input; the cmplog winner resolves the branch 9/10 with hitcount 21 vs the naive loser's 0, and its ancestor chain contains I2S-floor dash rows.",
+      "why_loser_doesnt": "naive has only havoc/token mutation and must blindly produce the exact 4-byte 'sPLT' magic by chance; it never resolves the branch (resolved=0/10, blocked=10/10) and its branch hitcount stays 0.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver entry for the chunk_name comparison and substitutes the logged png_sPLT constant directly into the input chunk-name bytes, which naive (havoc/token only, no CMP introspection) cannot do."
+    },
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "A chunk header whose 4-byte chunk-name field is the literal FOURCC 'sPLT' (0x73 0x50 0x4C 0x54), reached by incrementally matching more bytes of the png_sPLT constant in the chunk_name == png_sPLT comparison.",
+      "why_winner_satisfies": "value_profile records the chunk_name vs png_sPLT comparison into CMP_MAP keyed by operand-distance bucket; each input that matches more prefix bytes of png_sPLT adds a new bucket and is retained as corpus, giving a gradient that climbs to the full 4-byte match; the value_profile winner resolves 10/10 with branch hitcount 3 vs the naive loser's 0.",
+      "why_loser_doesnt": "naive's edge-only feedback gives no signal for partial chunk-name matches, so it has no gradient toward the 'sPLT' FOURCC and never resolves the branch (resolved=0/10, blocked=10/10).",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs whose chunk_name is closer (more matching bytes) to the png_sPLT constant, preserving partial-match seeds as stepping stones; naive lacks this distance feedback."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the equality test chunk_name == png_sPLT at pngread.c:902, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "pngread.c:902",
+      "exact_quote": "Source line:       else if (chunk_name == png_sPLT)"
+    },
+    {
+      "claim": "Globally blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L7",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "Taking the true side dispatches to png_handle_sPLT, the winner-only resolved line.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L903",
+      "exact_quote": "[W]   903           png_handle_sPLT(png_ptr, info_ptr, length);"
+    },
+    {
+      "claim": "cmplog wins over naive on this branch with the I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "--- Pair 2: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "The cmplog winner resolves 9/10 with branch hitcount 21 while the naive loser stays at 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "avg hitcount on branch: winner=21  loser=0"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which scans the input for an operand match and substitutes the other operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S mutator and relies on havoc/token only.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "value_profile wins over naive on this branch with the value_profile technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "--- Pair 1: value_profile > naive  [delta: value_profile] ---"
+    },
+    {
+      "claim": "The value_profile winner resolves 10/10 with branch hitcount 3 while the naive loser stays at 0.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "avg hitcount on branch: winner=3  loser=0"
+    },
+    {
+      "claim": "value_profile retains inputs whose CMP operands are closer to matching as new CMP_MAP buckets, giving a distance gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace, so its advantage comes from CMP_MAP feedback not substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "naive never resolves the branch across all 10 trials in both pairs.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive row",
+      "exact_quote": "naive                            0       10          0  loser (value_profile vs value_profile); loser (I2S vs cmplog)"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 3901 --role W --fuzzer cmplog --trial 1 --seed 47d7e6a67984ab85` and observed I2S-floor dash rows (mutation_op = -) at depths 6 and 7 of the ancestor chain; the tool reports '2 ancestor dash row(s) at depth 6, 7', direct lower-bound evidence of an I2SRandReplace find in this cmplog winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on chunk_name == png_sPLT in which cmplog shows no advantage over naive (equal resolve rate) would refute the I2S hypothesis; if value_profile also fails to resolve when only partial-prefix CMP_MAP gradient is available, the gradient hypothesis is refuted."
+  },
+  "weakest_evidence_point": "The byte-diff section concentrates on IHDR-region offsets (0x13-0x2e) not the sPLT chunk-name bytes themselves, so the seeds shown do not directly display the 'sPLT' FOURCC offset, leaving the exact substitution site inferred from source rather than observed in the dump.",
+  "confidence": "medium"
+}

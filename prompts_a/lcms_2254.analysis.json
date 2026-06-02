@@ -1,0 +1,87 @@
+{
+  "branch_id": 2254,
+  "target": "lcms",
+  "summary_one_line": "Input must carry the 4-byte colorspace signature '1CLR' (cmsSig1colorData) at the FOURCC field offset 0x10-0x13, not the common 'RGB '.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "The profile colorspace signature field (FOURCC at input offsets 0x10-0x13) must equal the 4-byte literal '1CLR' (31 43 4c 52) so the switch over ProfileSpace dispatches to the case cmsSig1colorData arm; the common 'RGB ' (52 47 42 20) FOURCC instead falls to case cmsSigRgbData.",
+      "why_winner_satisfies": "Winner-resolving Seed 1 carries 31 43 4c 52 ('1CLR') at offsets 0x10-0x13, and the byte-diff shows the winning offsets 0x10-0x12 hold non-RGB values (e.g. 31/43/4c) while losers are uniformly R/G/B; value_profile's CMP_MAP distance buckets reward inputs whose signature operand moves progressively closer to the 1CLR constant, so the matching FOURCC is assembled and the true case-arm is taken (case cmsSig1colorData is hit only in W).",
+      "why_loser_doesnt": "All loser-blocking seeds hold the fixed FOURCC 'RGB ' (52 47 42 20) at offsets 0x10-0x13, which dispatches to case cmsSigRgbData; naive has only edge-count feedback and no comparison-distance gradient, so random havoc never assembles the exact 1CLR signature and the blocker case stays unreached (L: T=0 at line 827).",
+      "mechanism_attribution": "value_profile augments naive's edge counters with CMP_MAP buckets keyed by operand-distance; the switch on the colorspace signature compiles to integer comparisons against the case constants, so value_profile receives a Hamming/prefix-distance gradient guiding the FOURCC field toward the cmsSig1colorData constant, whereas naive (random byte mutation, no CMP introspection) cannot. This is a CMP_MAP gradient effect, not input-to-state substitution (value_profile has no I2S mutator)."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a switch case-arm on the colorspace signature requiring the cmsSig1colorData value.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L827",
+      "exact_quote": "case cmsSig1colorData: <-- BLOCKER"
+    },
+    {
+      "claim": "Dispatch is a switch over the profile colorspace signature.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L812",
+      "exact_quote": "switch (ProfileSpace) {"
+    },
+    {
+      "claim": "A winner-resolving seed carries the FOURCC '1CLR' (31 43 4c 52) at offsets 0x10-0x13.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed a19672ff31bb83ac offsets 0x10-0x13",
+      "exact_quote": "31 43 4c 52 58 59 5a 00 07 d9 00 0c 00 17 00 16   1CLRXYZ"
+    },
+    {
+      "claim": "Loser-blocking seeds hold the fixed FOURCC 'RGB ' (52 47 42 20) at offsets 0x10-0x13.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 05c646cb9928d9d9 offsets 0x10-0x13",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ"
+    },
+    {
+      "claim": "At the signature offsets W and L bytes differ, with losers uniformly R/G/B.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0010-0x0012",
+      "exact_quote": "0x0010  63(c)x2 31(1)x1                     52(R)x10                            DIFFER"
+    },
+    {
+      "claim": "The winner takes the blocker true side while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L827",
+      "exact_quote": "d=1   L 827  T=3 F=3  T=0 F=62  case cmsSig1colorData:  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile resolves the branch in all 10 trials while naive blocks in all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "value_profile feeds new-CMP_MAP-bucket signal so an input closer to matching a CMP operand pair is preserved.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "naive has only per-edge hit-count feedback and no CMP introspection.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Feedback",
+      "exact_quote": "per-edge hit-count bucket; a new bucket triggers a"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace mutator, so the mechanism is CMP-distance feedback not I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is CMP_MAP gradient (value_profile), not I2SRandReplace, so the mandatory I2S lineage check does not apply; the winner is value_profile which the prompt's MECHANISM CONTEXT states has no I2SRandReplace mutator, and the CMP_MAP bucket feedback is documented in the same section as the operative gradient signal."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating a switch case on an exact 4-byte signature constant where value_profile fails to out-resolve naive (no dose-response as the matched-prefix difficulty varies), indicating the CMP_MAP distance gradient does not drive assembly of the FOURCC."
+  },
+  "weakest_evidence_point": "Only one of the three winner seeds shows the literal '1CLR' FOURCC; the other two winners hold different signatures, so it is uncertain whether 1CLR specifically or any non-RGB colorData FOURCC is the resolving feature.",
+  "confidence": "medium"
+}

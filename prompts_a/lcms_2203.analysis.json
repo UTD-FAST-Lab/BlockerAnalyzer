@@ -1,0 +1,75 @@
+{
+  "branch_id": 2203,
+  "target": "lcms",
+  "summary_one_line": "Input must be a valid ICC profile whose PCS field (offset 0x14-0x16) is 'Lab', yielding a pipeline MPE stage with a NULL DupElemPtr.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A valid ICC profile header (lcms/acsp magic) whose 4-byte profile-connection-space (PCS) signature at offset 0x14-0x16 spells 'Lab' rather than 'XYZ'. The Lab PCS routes lcms to build a pipeline that contains an MPE stage whose DupElemPtr function pointer is NULL, so cmsStageDup at cmslut.c:1258 takes the (globally-blocked) false branch and executes NewMPE->Data = NULL.",
+      "why_winner_satisfies": "All five winner-resolving seeds carry the bytes 4c 61 62 ('Lab') at offsets 0x14-0x16 and the false-branch-only lines 1270-1271 (NewMPE->Data = NULL) are marked [W]; the winner resolves the branch in 10/10 trials with hitcount 82 on the branch.",
+      "why_loser_doesnt": "All five loser-blocking seeds carry 58 59 5a ('XYZ') at offsets 0x14-0x16, an XYZ PCS that builds only stages whose DupElemPtr is non-NULL; the loser blocks 10/10 trials with hitcount 0 and never reaches line 1270.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the per-execution CmpLogObserver buffer where lcms's signature-field comparison logged the operands, then substitutes the matching operand bytes (the 'Lab' PCS string) into the input at the offset where the seed already held the comparand. naive and value_profile lack I2SRandReplace, so they must stumble on the exact 4-byte 'Lab' substitution by blind havoc byte mutation alone, which never lands in 24h."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked false side of the DupElemPtr test sits in cmsStageDup and gates NewMPE->Data = NULL.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1258, L1270-1271",
+      "exact_quote": "[B]  1258      if (mpe ->DupElemPtr) { <-- BLOCKER"
+    },
+    {
+      "claim": "Only the winner's seeds drive the false-branch body (line 1270 NewMPE->Data = NULL is W-only).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1270",
+      "exact_quote": "[W]  1270          NewMPE ->Data       = NULL;"
+    },
+    {
+      "claim": "Winner-resolving seeds carry 'Lab' (4c 61 62) at offsets 0x14-0x16 while loser-blocking seeds carry 'XYZ' (58 59 5a) at the same offsets.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x14-0x16",
+      "exact_quote": "   0x0014  4c(L)x20                            58(X)x20                            DIFFER"
+    },
+    {
+      "claim": "The winner inputs are ICC profiles whose header at offset 0x14 reads 'Lab '.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 144b12f16838dfe5",
+      "exact_quote": "4c 61 62 20 4c 61 62 20 07 d9 00 0c 00 17 00 16   Lab Lab ........"
+    },
+    {
+      "claim": "The loser inputs are ICC profiles whose PCS field at offset 0x14 reads 'XYZ '.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0313315f3b972394",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "The winner resolves the branch in all 10 trials while the loser blocks all 10, with the divergence attributed to the I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 cmplog>naive",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes one logged CMP operand into the input where the other operand appears.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so it cannot perform input-to-state substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2203 --role W --fuzzer cmplog --trial 1 --seed 12a22fd23d13237c` and observed 1 I2S-floor dash row (mutation_op = -) at depth 4; corroborated on the vpc winner 144b12f16838dfe5 which showed 2 dash rows at depths 11 and 12. Dash rows are cmplog/vpc-exclusive in the canonical 4-fuzzer set and are the I2S-floor signal under the current logging build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where flipping the PCS field from 'XYZ' to 'Lab' does NOT make any pipeline MPE stage carry a NULL DupElemPtr (so the false branch is unreachable regardless of PCS), or where naive solves the branch as fast as cmplog despite no I2S substitution."
+  },
+  "weakest_evidence_point": "The causal link from PCS='Lab' to a pipeline MPE stage with a NULL DupElemPtr is inferred from byte-diff plus source flow, not directly observed in lcms's stage-construction code, which is off the shown call chain.",
+  "confidence": "high"
+}

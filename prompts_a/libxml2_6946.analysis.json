@@ -1,0 +1,69 @@
+{
+  "branch_id": 6946,
+  "target": "libxml2",
+  "summary_one_line": "An attribute/element namespace prefix whose bytes equal the literal string \"xml\", so xmlStrEqual(nameSpace, \"xml\") returns true.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A namespace prefix passed to xmlSearchNs whose 3 bytes are exactly 0x78 0x6d 0x6c (\"xml\"), satisfying the string compare xmlStrEqual(nameSpace, (const xmlChar *)\"xml\") at tree.c:6141 and thereby taking the true branch.",
+      "why_winner_satisfies": "The winner cmplog seeds carry literal \"xml\" runs in their bytes (e.g. 78 6d 6c rendered as 'xml' inside '<?xml' and in 'x.xml' substrings), and the per-role overlay shows the winner alone reaching the true-branch body (lines 6142/6161/6169 tagged [W]); the blocker counts T=12 F=6 for W vs T=0 F=53 for L confirm only W ever takes the true side.",
+      "why_loser_doesnt": "The loser naive seeds have the surrounding XML structure but never present a prefix string equal to \"xml\" at the compare; the blocker line for L is T=0 F=53, so naive's prefixes always mismatch and fall through to the namespace-list walk (lines 6182-6189 tagged [L]).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver entry recording the program's constant operand \"xml\" from the xmlStrEqual call, scans the input for the matching operand, and substitutes \"xml\" at the prefix offset; naive has no CMP introspection and must hit the exact 3-byte string by chance, which it effectively never does."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true branch is gated by a string equality against the literal \"xml\".",
+      "cited_section": "BLOCKER",
+      "cited_locator": "tree.c:6141",
+      "exact_quote": "(xmlStrEqual(nameSpace, (const xmlChar *)\"xml\"))) {"
+    },
+    {
+      "claim": "Only the winner ever takes the true side of the blocker; the loser is always false.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L6141",
+      "exact_quote": "d=1   L6141  T=12 F=6  T=0 F=53  (xmlStrEqual(nameSpace, (const xmlChar *)\"xml\"))) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner-resolving cmplog seeds contain literal \"xml\" byte runs.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 51fd9b36079604e3 offset 0x0b-0x0d",
+      "exact_quote": "78 6d 6c 5c 0a   ....12.772.xml\\."
+    },
+    {
+      "claim": "The winner-only true-branch body is reached exclusively by the winning seed set.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L6142",
+      "exact_quote": "[W]  6142  \tif ((doc == NULL) && (node->type == XML_ELEMENT_NODE)) {"
+    },
+    {
+      "claim": "The loser instead falls through to the namespace-list prefix walk.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L6185",
+      "exact_quote": "[L]  6185  \t\tif ((cur->prefix != NULL) && (nameSpace != NULL) &&"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which substitutes a logged CMP operand at matching input offsets, while naive has no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive's mutator stack contains no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 6946 --role W --fuzzer cmplog --trial 1 --seed 51fd9b36079604e3` and observed the I2S-floor signal: 2 ancestor dash rows (mutation_op = -) at depths 3 and 4, characteristic of an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on xmlStrEqual(prefix, \"xml\") in which cmplog shows no resolve advantage over naive (both resolve or both block at the same rate), indicating the 3-byte literal compare is not what I2S substitution unlocks."
+  },
+  "weakest_evidence_point": "The winning prefix bytes \"xml\" co-occur with the unrelated '<?xml' processing-instruction literal in the same seeds, so the exact_quote bytes may evidence the PI rather than the namespace-prefix operand the blocker compares.",
+  "confidence": "medium"
+}

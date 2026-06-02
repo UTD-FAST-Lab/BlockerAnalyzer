@@ -1,0 +1,75 @@
+{
+  "branch_id": 8630,
+  "target": "libxml2",
+  "summary_one_line": "DTD with a non-empty subset body (at least one of entities/elements/attributes/notations/pentities populated), forcing the ' [' content path.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "An XML input whose <!DOCTYPE ...> internal subset declares at least one DTD member (element decl, attribute decl, entity, notation, or parameter entity), so dtd->elements (etc.) is non-NULL and the line-686 conjunction is false, taking the ' [\\n' body-dump branch rather than the bare '>' close.",
+      "why_winner_satisfies": "naive_ctx winning seeds carry DOCTYPE-with-content structure: seed 2/3 contain '<!DOCTYPE a S[<!ELEMENT' and the W role uniquely executes xmlBufDumpElementDecl (W=10, L=0), i.e. an element declaration was parsed into dtd->elements; on the blocker the winner takes the false (body) side (L686 W: T=0 F=10) and proceeds into the children loop (L706 W: T=12 F=10).",
+      "why_loser_doesnt": "naive loser seeds reach the DTD node but stay on the empty-DTD true side (L686 L: T=10 F=0) and never enter the body; the loser never invokes xmlBufDumpElementDecl (L=0) and instead exercises the SYSTEM-id path / escaping functions, meaning its parsed DTD has all five member tables NULL.",
+      "mechanism_attribution": "Both fuzzers share the identical havoc+token mutator stack with no I2S and no CMP_MAP; the only difference is naive_ctx's CtxHook, which folds the caller chain into the edge-map index so that reaching the line-686 edge via the XML_DTD_NODE dispatch in xmlNodeDumpOutputInternal is recorded as a NEW (call-context, edge) bucket. This context-sensitive coverage rewards the intermediate states along the DTD-population path, giving the corpus the structural stepping-stones to build a non-empty-subset DOCTYPE, whereas bare-edge naive collapses those distinct contexts onto already-covered edges and gets no new-coverage signal to retain them."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of a five-way AND testing all DTD member tables for NULL; taking it requires at least one table non-NULL (a non-empty DTD subset).",
+      "cited_section": "BLOCKER",
+      "cited_locator": "xmlsave.c:686",
+      "exact_quote": "if ((dtd->entities == NULL) && (dtd->elements == NULL) &&"
+    },
+    {
+      "claim": "The winner enters the DTD body-dump path (' [') and the children loop, which only happens on the false side.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L692, L706",
+      "exact_quote": "[W]   692      xmlOutputBufferWrite(buf, 3, \" [\\n\");"
+    },
+    {
+      "claim": "The winner uniquely executes element-declaration dumping, evidence that dtd->elements was populated.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "xmlBufDumpElementDecl",
+      "exact_quote": "10         0  xmlsave.c:xmlBufDumpElementDecl  (/src/libxml2/xmlsave.c:449-462)"
+    },
+    {
+      "claim": "Winner seeds contain DOCTYPE structure with an element declaration in the internal subset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 34f2310e21fd75b1 offset 0x30",
+      "exact_quote": "PE a S[<!ELEMENT"
+    },
+    {
+      "claim": "On the blocker branch the loser always takes the true (empty-DTD) side and never the false body side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L686",
+      "exact_quote": "d=1   L 686  T=0 F=10  T=10 F=0  if ((dtd->entities == NULL) && (dtd->elements == NULL) &&  <-- BLOCKER"
+    },
+    {
+      "claim": "Both involved fuzzers use the same havoc/token mutators with no I2S or CMP_MAP; only the context-indexing differs.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+    },
+    {
+      "claim": "The naive_ctx CtxHook folds the call context into the edge-map index so the same edge is a new bucket under a different call path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Instrumentation",
+      "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "The decisive pair is naive_ctx beating naive on the ctx_coverage technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "context-sensitive coverage",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is context-sensitive coverage (naive_ctx CtxHook), not I2SRandReplace, so lineage dash-row verification is not applicable. The MECHANISM CONTEXT section confirms naive_ctx has no I2SRandReplace and no CMP_MAP and emits only havoc/token mutation_op names with no ParentInfo-only/dash rows, so an I2S-floor lineage check is not the relevant signal here."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the DTD-body path edge is reached through a single call context (no caller-chain ambiguity) shows naive and naive_ctx resolving the false branch at equal rates, indicating context-indexing gave no stepping-stone advantage."
+  },
+  "weakest_evidence_point": "The causal link from context-indexed new-coverage buckets to actually retaining the intermediate DTD-population seeds is inferred from mechanism description plus the W-only xmlBufDumpElementDecl hit, not directly observed in lineage.",
+  "confidence": "medium"
+}

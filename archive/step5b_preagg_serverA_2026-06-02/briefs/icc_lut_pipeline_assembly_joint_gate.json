@@ -1,0 +1,714 @@
+{
+  "feature_id": "icc_lut_pipeline_assembly_joint_gate",
+  "mechanism_family": "synergy",
+  "mechanism_label": "icc_lut_pipeline_assembly_joint_gate",
+  "definition": "ICC profile-class and colorspace FOURCC tags at header offsets gate LUT pipeline construction operations (cmsPipelineAlloc, cmsPipelineCat stage-dup, MatrixElemDup Offset payload); VP gradient walks matching-prefix length on FOURCC comparisons while I2S substitutes the exact pipeline-routing class tags, with neither alone reaching the blocked pipeline operation.",
+  "n_members": 6,
+  "involved_fuzzers": [
+    "cmplog",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S",
+    "value_profile"
+  ],
+  "suggested_axis_partition": {},
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "lcms_2196_h0",
+      "target": "lcms",
+      "branch_id": 2196,
+      "analysis_path": "prompts/lcms_2196.analysis.json",
+      "file": "/src/Little-CMS/src/cmslut.c",
+      "function": "cmslut.c:MatrixElemDup",
+      "line": "354",
+      "source_line": "    if (Data ->Offset)",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace substitutes ICC magic/signature operands into the right header offsets, clearing upstream equality gates that gate construction of an offset-bearing matrix stage; VP cannot place those operands and the Offset pointer stays NULL.",
+        "one_line": "I2S clears header equality gates enabling non-NULL matrix stage Offset construction"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "ICC profile parsed into a matrix stage carrying a non-NULL Offset vector, so MatrixElemDup duplicates the offset row.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "Bytes that survive ICC header signature/colour-space checks and place a non-zero offset payload so the matrix stage's Data->Offset pointer is non-NULL; W seeds carry the 'lams'/'link' profile class and non-zero bytes at offsets 0x2d (01) and 0x38 (16) where the loser holds zero.",
+            "why_winner_satisfies": "value_profile_cmplog seeds reach the true side: avg hitcount on branch winner=29, loser=0, and the byte diff shows winner-only 01 at 0x2d and 16 at 0x38 (loser is 00 at both), the dataflow that yields a populated Offset.",
+            "why_loser_doesnt": "value_profile never resolves (resolved=0/10, blocked=10); its seeds hold 00 at 0x2d and 0x38 and the 'lcms'/'mntr' header bytes, so the matrix stage is built without an Offset and the true branch is never taken.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the per-execution CmpLogObserver buffer and substitutes the matching ICC magic/signature operands into the input at the right offsets, letting value_profile_cmplog clear the header CMPs that gate construction of an offset-bearing matrix stage; value_profile lacks I2SRandReplace and cannot place those operands."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true side of `if (Data ->Offset)` in MatrixElemDup, taken only when the matrix stage carries a non-NULL Offset.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmslut.c:354",
+            "exact_quote": "Source line:     if (Data ->Offset)"
+          },
+          {
+            "claim": "On the true side the winner-only lines duplicate the offset vector.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L355-356",
+            "exact_quote": "[W]   355          NewElem ->Offset = (cmsFloat64Number*) _cmsDupMem(mpe ->ContextID,"
+          },
+          {
+            "claim": "Winner-resolving seeds carry non-zero bytes at offsets 0x2d and 0x38 where the loser-blocking seeds are all zero.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x2d, 0x38",
+            "exact_quote": "   0x002d  01(.)x10                            00(.)x20                            DIFFER"
+          },
+          {
+            "claim": "Winner-only byte at offset 0x38 is 16 versus loser 00.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x38",
+            "exact_quote": "   0x0038  16(.)x10                            00(.)x20                            DIFFER"
+          },
+          {
+            "claim": "value_profile_cmplog hits the branch 29 times on average while value_profile never does.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "avg hitcount on branch: winner=29  loser=0"
+          },
+          {
+            "claim": "value_profile resolves the branch in 0 of 10 trials.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "value_profile row",
+            "exact_quote": "value_profile                    0       10          0  loser (I2S vs value_profile_cmplog)"
+          },
+          {
+            "claim": "cmplog and value_profile_cmplog differ on the value_profile technique; winner hits 29 vs loser 13.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "avg hitcount on branch: winner=29  loser=13"
+          },
+          {
+            "claim": "cmplog blocks the branch in 8 of 10 trials.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 loser",
+            "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+          },
+          {
+            "claim": "I2SRandReplace substitutes one CMP operand into the input at offsets matching the other operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile uses a CMP_MAP distance bucket as gradient feedback and preserves inputs closer to matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "cmplog header signature bytes differ from the winner's at offset 0x05.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x05",
+            "exact_quote": "   0x0005  61(a)x10                            63(c)x20                            DIFFER"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating only `if (Offset)` behind an exact ICC signature CMP where value_profile_cmplog and value_profile resolve at equal rates would refute the I2S hypothesis; equal resolution between value_profile_cmplog and cmplog would refute the value_profile hypothesis."
+        },
+        "weakest_evidence_point": "The link from the non-zero bytes at 0x2d/0x38 to the runtime population of Data->Offset is inferred from the byte diff, not traced through the ICC matrix-stage parser source.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2196_h1",
+      "target": "lcms",
+      "branch_id": 2196,
+      "analysis_path": "prompts/lcms_2196.analysis.json",
+      "file": "/src/Little-CMS/src/cmslut.c",
+      "function": "cmslut.c:MatrixElemDup",
+      "line": "354",
+      "source_line": "    if (Data ->Offset)",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "VP's CMP_MAP records a Hamming/prefix-distance bucket per comparison and retains any input that brings a comparand pair closer to matching; this gradient on the ICC header/signature bytes drives vpc past the multi-field signature gates that cmplog's edge-bucket-only feedback cannot incrementally solve.",
+        "one_line": "VP Hamming gradient on ICC header CMPs drives past multi-field signature gates"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "ICC profile parsed into a matrix stage carrying a non-NULL Offset vector, so MatrixElemDup duplicates the offset row.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "Same offset-bearing matrix-stage requirement, but reached by gradually closing the distance on the ICC header/signature comparisons rather than by exact substitution.",
+            "why_winner_satisfies": "value_profile_cmplog resolves 8/10 vs cmplog 2/10, with branch hitcount winner=29 vs loser=13; the CMP_MAP gradient buckets let it ratchet toward the signature/colour-space bytes (0x05, 0x0c-0x0f) that select an offset-bearing stage.",
+            "why_loser_doesnt": "cmplog blocks 8/10 and stays at hitcount 13 with avg blocked duration 20.20h; without CMP_MAP Hamming/prefix-distance feedback it has no gradient to preserve near-miss inputs and rarely assembles the offset payload.",
+            "mechanism_attribution": "value_profile's CMP_MAP records a Hamming/prefix-distance bucket per CMP and preserves any input that gets a comparand pair closer to matching; this gradient feedback, present only in value_profile_cmplog within this pair, drives the winner past the header gates that cmplog (edge-bucket only) cannot incrementally solve."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true side of `if (Data ->Offset)` in MatrixElemDup, taken only when the matrix stage carries a non-NULL Offset.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmslut.c:354",
+            "exact_quote": "Source line:     if (Data ->Offset)"
+          },
+          {
+            "claim": "On the true side the winner-only lines duplicate the offset vector.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L355-356",
+            "exact_quote": "[W]   355          NewElem ->Offset = (cmsFloat64Number*) _cmsDupMem(mpe ->ContextID,"
+          },
+          {
+            "claim": "Winner-resolving seeds carry non-zero bytes at offsets 0x2d and 0x38 where the loser-blocking seeds are all zero.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x2d, 0x38",
+            "exact_quote": "   0x002d  01(.)x10                            00(.)x20                            DIFFER"
+          },
+          {
+            "claim": "Winner-only byte at offset 0x38 is 16 versus loser 00.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x38",
+            "exact_quote": "   0x0038  16(.)x10                            00(.)x20                            DIFFER"
+          },
+          {
+            "claim": "value_profile_cmplog hits the branch 29 times on average while value_profile never does.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "avg hitcount on branch: winner=29  loser=0"
+          },
+          {
+            "claim": "value_profile resolves the branch in 0 of 10 trials.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "value_profile row",
+            "exact_quote": "value_profile                    0       10          0  loser (I2S vs value_profile_cmplog)"
+          },
+          {
+            "claim": "cmplog and value_profile_cmplog differ on the value_profile technique; winner hits 29 vs loser 13.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "avg hitcount on branch: winner=29  loser=13"
+          },
+          {
+            "claim": "cmplog blocks the branch in 8 of 10 trials.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 loser",
+            "exact_quote": "loser:  resolved=2/10  blocked=8  unreached=0"
+          },
+          {
+            "claim": "I2SRandReplace substitutes one CMP operand into the input at offsets matching the other operand.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile uses a CMP_MAP distance bucket as gradient feedback and preserves inputs closer to matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "cmplog header signature bytes differ from the winner's at offset 0x05.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x05",
+            "exact_quote": "   0x0005  61(a)x10                            63(c)x20                            DIFFER"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating only `if (Offset)` behind an exact ICC signature CMP where value_profile_cmplog and value_profile resolve at equal rates would refute the I2S hypothesis; equal resolution between value_profile_cmplog and cmplog would refute the value_profile hypothesis."
+        },
+        "weakest_evidence_point": "The link from the non-zero bytes at 0x2d/0x38 to the runtime population of Data->Offset is inferred from the byte diff, not traced through the ICC matrix-stage parser source.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2209_h0",
+      "target": "lcms",
+      "branch_id": 2209,
+      "analysis_path": "prompts/lcms_2209.analysis.json",
+      "file": "/src/Little-CMS/src/cmslut.c",
+      "function": "cmsPipelineCat",
+      "line": "1620",
+      "source_line": "            if (!cmsPipelineInsertStage(l1, cmsAT_END, cmsStageDup(mpe)))",
+      "signature": {
+        "gate_structure": "other:insertion_return_check",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": null,
+        "operand_width_bytes": 4,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2SRandReplace substitutes logged CMP operands for the profile-class FOURCC check into the matching input offsets, producing a non-empty pipeline whose stages cmsPipelineCat attempts to dup, reaching the InsertStage true branch; VP without I2S never substitutes the alternate profile-class operands.",
+        "one_line": "I2S substitutes profile-class FOURCC enabling non-empty pipeline stage-dup insertion path"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A multi-profile ICC input whose profile-class/colorspace FOURCC fields build a non-empty Lut pipeline that cmsPipelineCat dups stage-by-stage.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A valid 4-byte ICC profile-class FOURCC at offset 0x0c (e.g. 'link','prtr','spac','lcms') plus a recognized device/colorspace tag, so DefaultICCintents builds a non-empty Lut whose stages cmsPipelineCat then dups into l1 via cmsPipelineInsertStage.",
+            "why_winner_satisfies": "Winner-resolving seeds carry varied non-default profile-class signatures at 0x0c-0x0f ('lcms','link','prtr','spac','MCH1'), and the vpc winner's lineage contains an I2S-floor dash row that splices logged CMP operands into these FOURCC offsets, producing inputs that traverse the stage-dup loop and take the blocked true side.",
+            "why_loser_doesnt": "value_profile lacks I2SRandReplace; its loser-blocking seeds are uniformly 'mntr' at 0x0c-0x0f (6d 6e 74 72) and never substitute the alternate profile-class operands needed, so the pipeline stays in a shape that does not reach the InsertStage true branch (0/10 resolved).",
+            "mechanism_attribution": "value_profile_cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes the logged comparand for the profile-class FOURCC check at the input offset, which value_profile (no I2S stage) cannot perform."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true side of an InsertStage check inside the per-stage dup loop of cmsPipelineCat.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmslut.c:1620",
+            "exact_quote": "if (!cmsPipelineInsertStage(l1, cmsAT_END, cmsStageDup(mpe)))"
+          },
+          {
+            "claim": "The winner takes the loop/insert path while the blocked true side is the global blocker.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "blocked side",
+            "exact_quote": "Globally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "Winner seeds carry varied profile-class FOURCC fields at offsets 0x0c-0x0f distinct from the loser's uniform 'mntr'.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x000c-0x000d",
+            "exact_quote": "0x000c  6c(l)x4 70(p)x4 73(s)x2             6d(m)x20                            DIFFER"
+          },
+          {
+            "claim": "Loser-blocking seeds are uniformly 'mntr' at the profile-class offset.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 1 offset 0x000c",
+            "exact_quote": "..b.lcms.@..mntr"
+          },
+          {
+            "claim": "Winner-resolving seeds carry alternate profile-class signatures such as 'link' and 'spac'.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1 / Seed 3 offset 0x000c",
+            "exact_quote": "..b.lcms.@..link"
+          },
+          {
+            "claim": "value_profile_cmplog provides I2SRandReplace whereas value_profile does not.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "I2SRandReplace substitutes a logged operand at the input offset where the other operand matched.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile adds CMP_MAP distance-bucket feedback that rewards near-matching operands.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "cmplog (the Pair 2 loser) has no CMP_MAP gradient feedback.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Feedback",
+            "exact_quote": "same edge-bucket signal as naive. The CMP buffer is\nconsumed by the mutator, not by feedback."
+          },
+          {
+            "claim": "vpc resolves the branch with far more hits than cmplog, showing accumulated progress.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 hitcount",
+            "exact_quote": "avg hitcount on branch: winner=50  loser=5"
+          },
+          {
+            "claim": "Pair 1 winner resolves 9/10 while the value_profile loser resolves 0/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 counts",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the profile-class FOURCC field present but a fixed/zeroed stage list (so cmsPipelineCat's l2->Elements is always NULL) on which value_profile_cmplog and value_profile resolve at equal rates, showing the FOURCC substitution is not what gates the stage-dup branch."
+        },
+        "weakest_evidence_point": "The byte diff localizes the gating field to the 0x0c-0x0f profile-class FOURCC, but the actual CMP that I2S solves is inferred from source-region structure rather than observed CMP operand logs.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2209_h1",
+      "target": "lcms",
+      "branch_id": 2209,
+      "analysis_path": "prompts/lcms_2209.analysis.json",
+      "file": "/src/Little-CMS/src/cmslut.c",
+      "function": "cmsPipelineCat",
+      "line": "1620",
+      "source_line": "            if (!cmsPipelineInsertStage(l1, cmsAT_END, cmsStageDup(mpe)))",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "VP's CMP_MAP Hamming/prefix-distance buckets reward inputs that bring the profile-class/colorspace FOURCC comparands closer to matching, retaining partial-match corpus entries that cmplog's edge-only feedback discards, enabling vpc to resolve the multi-field gate reliably.",
+        "one_line": "VP distance buckets reward partial FOURCC/colorspace progress cmplog discards"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A multi-profile ICC input whose profile-class/colorspace FOURCC fields build a non-empty Lut pipeline that cmsPipelineCat dups stage-by-stage.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "The same multi-profile FOURCC/colorspace fields, but reached via incremental Hamming-distance progress on the profile-class and colorspace CMP operands rather than a single exact substitution.",
+            "why_winner_satisfies": "value_profile_cmplog adds the CMP_MAP gradient on top of I2S, so partial matches on the 0x0c-0x16 tag bytes earn new CMP_MAP buckets and are retained as corpus, letting it resolve 9/10 with 50 hits versus cmplog's 5 hits.",
+            "why_loser_doesnt": "plain cmplog has no CMP_MAP feedback; without per-bucket distance credit it cannot accumulate the partial FOURCC/colorspace progress and resolves only 2/10 trials (loser blocked=8).",
+            "mechanism_attribution": "value_profile_cmplog's CMP_MAP gradient (Hamming/prefix-distance buckets) rewards inputs that bring the profile-class/colorspace comparands closer to matching, a feedback signal cmplog lacks."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true side of an InsertStage check inside the per-stage dup loop of cmsPipelineCat.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmslut.c:1620",
+            "exact_quote": "if (!cmsPipelineInsertStage(l1, cmsAT_END, cmsStageDup(mpe)))"
+          },
+          {
+            "claim": "The winner takes the loop/insert path while the blocked true side is the global blocker.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "blocked side",
+            "exact_quote": "Globally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "Winner seeds carry varied profile-class FOURCC fields at offsets 0x0c-0x0f distinct from the loser's uniform 'mntr'.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x000c-0x000d",
+            "exact_quote": "0x000c  6c(l)x4 70(p)x4 73(s)x2             6d(m)x20                            DIFFER"
+          },
+          {
+            "claim": "Loser-blocking seeds are uniformly 'mntr' at the profile-class offset.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 1 offset 0x000c",
+            "exact_quote": "..b.lcms.@..mntr"
+          },
+          {
+            "claim": "Winner-resolving seeds carry alternate profile-class signatures such as 'link' and 'spac'.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner Seed 1 / Seed 3 offset 0x000c",
+            "exact_quote": "..b.lcms.@..link"
+          },
+          {
+            "claim": "value_profile_cmplog provides I2SRandReplace whereas value_profile does not.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "I2SRandReplace substitutes a logged operand at the input offset where the other operand matched.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile adds CMP_MAP distance-bucket feedback that rewards near-matching operands.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "cmplog (the Pair 2 loser) has no CMP_MAP gradient feedback.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Feedback",
+            "exact_quote": "same edge-bucket signal as naive. The CMP buffer is\nconsumed by the mutator, not by feedback."
+          },
+          {
+            "claim": "vpc resolves the branch with far more hits than cmplog, showing accumulated progress.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 hitcount",
+            "exact_quote": "avg hitcount on branch: winner=50  loser=5"
+          },
+          {
+            "claim": "Pair 1 winner resolves 9/10 while the value_profile loser resolves 0/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 counts",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the profile-class FOURCC field present but a fixed/zeroed stage list (so cmsPipelineCat's l2->Elements is always NULL) on which value_profile_cmplog and value_profile resolve at equal rates, showing the FOURCC substitution is not what gates the stage-dup branch."
+        },
+        "weakest_evidence_point": "The byte diff localizes the gating field to the 0x0c-0x0f profile-class FOURCC, but the actual CMP that I2S solves is inferred from source-region structure rather than observed CMP operand logs.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2674_h0",
+      "target": "lcms",
+      "branch_id": 2674,
+      "analysis_path": "prompts/lcms_2674.analysis.json",
+      "file": "/src/Little-CMS/src/cmslut.c",
+      "function": "cmsPipelineAlloc",
+      "line": "1373",
+      "source_line": "       if (InputChannels >= cmsMAXCHANNELS ||",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "prtr",
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace substitutes logged FOURCC operands ('prtr' device-class, 'Lab ' colorspace) into the matching input signature offsets, steering execution to a cmsPipelineAlloc call where InputChannels reaches cmsMAXCHANNELS and the boundary check fires.",
+        "one_line": "I2S places 'prtr'/'Lab' FOURCCs to route to cmsMAXCHANNELS boundary check"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "ICC profile whose class/colorspace FOURCC signatures route to a cmsPipelineAlloc call with InputChannels >= cmsMAXCHANNELS",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "Exact 4-byte FOURCC profile-class and colorspace tokens at offsets 0x0c-0x16 (e.g. 'prtr', 'Lab ') that must equal hard-coded signature constants the parser compares against, steering execution to a cmsPipelineAlloc invocation whose InputChannels argument reaches cmsMAXCHANNELS so line 1373's true side is taken.",
+            "why_winner_satisfies": "The winning vpc seed carries 'prtr' at 0x0c-0x0f and 'Lab Lab ' at 0x10-0x17, and is the only seed that takes the true side (L1373 T=1 in the W role); its lineage contains an I2S-floor dash row, so I2SRandReplace spliced a logged CMP operand into these signature offsets.",
+            "why_loser_doesnt": "value_profile has no I2SRandReplace mutator; its blocking seeds keep the generic 'mntr'/'RGB '/'XYZ ' signatures at those offsets and never flip line 1373 to true (L1373 T=0 F=492 in the L role).",
+            "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes the exact signature constant at the matching input offset, instantly satisfying the multi-byte FOURCC equality that value_profile (which lacks the mutator) cannot place by chance."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the InputChannels>=cmsMAXCHANNELS comparison in cmsPipelineAlloc, globally blocked on its true side.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmslut.c:1373:12",
+            "exact_quote": "Source line:        if (InputChannels >= cmsMAXCHANNELS ||"
+          },
+          {
+            "claim": "Only the winner role takes the true side of line 1373; the loser role never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1373",
+            "exact_quote": "d=1   L1373  T=1 F=1  T=0 F=492  if (InputChannels >= cmsMAXCHANNELS ||  <-- BLOCKER"
+          },
+          {
+            "claim": "The winning seed carries the 'prtr' profile-class signature where losers carry 'mntr'.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0c-0x0d",
+            "exact_quote": "0x000c  70(p)x1                             6d(m)x51 00(.)x4 61(a)x2 6c(l)x2 +1u  DIFFER"
+          },
+          {
+            "claim": "The winning seed carries 'Lab ' colorspace signatures where losers carry 'RGB '/'XYZ '.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 92250adb6e11893d offset 0x10",
+            "exact_quote": "Lab Lab "
+          },
+          {
+            "claim": "The loser value_profile seeds use the generic 'mntr' / 'RGB XYZ ' signatures.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 0038d716a0108db4 offset 0x0c-0x16",
+            "exact_quote": "..b.lcms.@..mntr"
+          },
+          {
+            "claim": "cmplog/vpc add the I2SRandReplace mutator that substitutes one CMP operand into matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace entirely.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile preserves inputs whose CMP operands move closer to matching via a distance bucket, including matching-prefix length for string/memory CMPs.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback/Instrumentation",
+            "exact_quote": "matching-prefix\nlength for string/memory CMPs"
+          },
+          {
+            "claim": "cmplog has the CMP buffer but no CMP_MAP gradient bucket feedback that value_profile adds.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "The cmplog loser stays blocked much longer than the vpc winner.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 avg duration",
+            "exact_quote": "avg duration blocked: winner=7.40h  loser=24.00h"
+          },
+          {
+            "claim": "vpc wins both decisive pairs, one isolating value_profile and one isolating I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 headers",
+            "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose only roadblock is the multi-byte FOURCC signature equality, where cmplog alone (I2S, no CMP_MAP) resolves the branch as fast as vpc \u2014 that would show I2S substitution suffices and the value_profile axis is not required, collapsing the multi_feature claim."
+        },
+        "weakest_evidence_point": "The CMP_MAP-gradient axis (Pair 1) is inferred from the loser's 24h block and the winner's concentrated FOURCC bytes rather than from a direct prefix-distance observation, so the value_profile contribution is the least directly evidenced claim.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "lcms_2674_h1",
+      "target": "lcms",
+      "branch_id": 2674,
+      "analysis_path": "prompts/lcms_2674.analysis.json",
+      "file": "/src/Little-CMS/src/cmslut.c",
+      "function": "cmsPipelineAlloc",
+      "line": "1373",
+      "source_line": "       if (InputChannels >= cmsMAXCHANNELS ||",
+      "signature": {
+        "gate_structure": "other:multi_cmp_chain",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "CMP_MAP prefix-length bucket feedback is the capability cmplog lacks; value_profile retains intermediate near-matches on FOURCC signature comparisons, providing a gradient that cmplog's CMP buffer alone cannot supply.",
+        "one_line": "VP CMP_MAP prefix-length bucket gradient is what cmplog lacks for FOURCC convergence"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "cmplog",
+          "technique": "value_profile",
+          "axis": "value_profile"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "ICC profile whose class/colorspace FOURCC signatures route to a cmsPipelineAlloc call with InputChannels >= cmsMAXCHANNELS",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>cmplog (value_profile)"
+            ],
+            "what_input_feature": "The same FOURCC signature bytes at offsets 0x0c-0x16, but approached as a multi-byte comparison whose matching-prefix length must grow incrementally before the exact match is reached.",
+            "why_winner_satisfies": "The winner adds value_profile's CMP_MAP gradient on top of cmplog; the byte-diff shows the winner converged to a single concentrated value ('prtr','Lab ') at these offsets while losers retain a spread, consistent with a prefix-distance gradient retaining intermediate near-matches as corpus.",
+            "why_loser_doesnt": "cmplog has the edge+CMP buffer but no CMP_MAP bucket feedback, so it cannot retain partial-prefix progress on the signature comparisons; it stays blocked 10/10 with avg duration 24.00h versus the winner's 7.40h.",
+            "mechanism_attribution": "value_profile's CMP_MAP records a matching-prefix-length bucket per string/memory CMP, preserving inputs that move closer to the target FOURCC; this gradient is the technique cmplog lacks, so the vpc>cmplog divergence is attributable to the CMP_MAP gradient axis."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the InputChannels>=cmsMAXCHANNELS comparison in cmsPipelineAlloc, globally blocked on its true side.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "cmslut.c:1373:12",
+            "exact_quote": "Source line:        if (InputChannels >= cmsMAXCHANNELS ||"
+          },
+          {
+            "claim": "Only the winner role takes the true side of line 1373; the loser role never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1373",
+            "exact_quote": "d=1   L1373  T=1 F=1  T=0 F=492  if (InputChannels >= cmsMAXCHANNELS ||  <-- BLOCKER"
+          },
+          {
+            "claim": "The winning seed carries the 'prtr' profile-class signature where losers carry 'mntr'.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0c-0x0d",
+            "exact_quote": "0x000c  70(p)x1                             6d(m)x51 00(.)x4 61(a)x2 6c(l)x2 +1u  DIFFER"
+          },
+          {
+            "claim": "The winning seed carries 'Lab ' colorspace signatures where losers carry 'RGB '/'XYZ '.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 92250adb6e11893d offset 0x10",
+            "exact_quote": "Lab Lab "
+          },
+          {
+            "claim": "The loser value_profile seeds use the generic 'mntr' / 'RGB XYZ ' signatures.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 0038d716a0108db4 offset 0x0c-0x16",
+            "exact_quote": "..b.lcms.@..mntr"
+          },
+          {
+            "claim": "cmplog/vpc add the I2SRandReplace mutator that substitutes one CMP operand into matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile lacks I2SRandReplace entirely.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile preserves inputs whose CMP operands move closer to matching via a distance bucket, including matching-prefix length for string/memory CMPs.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback/Instrumentation",
+            "exact_quote": "matching-prefix\nlength for string/memory CMPs"
+          },
+          {
+            "claim": "cmplog has the CMP buffer but no CMP_MAP gradient bucket feedback that value_profile adds.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "The cmplog loser stays blocked much longer than the vpc winner.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 avg duration",
+            "exact_quote": "avg duration blocked: winner=7.40h  loser=24.00h"
+          },
+          {
+            "claim": "vpc wins both decisive pairs, one isolating value_profile and one isolating I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2 headers",
+            "exact_quote": "--- Pair 2: value_profile_cmplog > value_profile  [delta: I2S] ---"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose only roadblock is the multi-byte FOURCC signature equality, where cmplog alone (I2S, no CMP_MAP) resolves the branch as fast as vpc \u2014 that would show I2S substitution suffices and the value_profile axis is not required, collapsing the multi_feature claim."
+        },
+        "weakest_evidence_point": "The CMP_MAP-gradient axis (Pair 1) is inferred from the loser's 24h block and the winner's concentrated FOURCC bytes rather than from a direct prefix-distance observation, so the value_profile contribution is the least directly evidenced claim.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

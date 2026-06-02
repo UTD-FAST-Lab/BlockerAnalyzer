@@ -1,0 +1,100 @@
+{
+  "branch_id": 2107,
+  "target": "lcms",
+  "summary_one_line": "Profile bytes that force an output-direction PCS conversion whose ComputeConversion/AddConversion fails, reaching Error with Lut still allocated.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Profile-header bytes (device class FOURCC at offset 0x0c and color-space signatures at 0x10/0x14) that select a non-input, non-devicelink profile so the output-direction branch (line 602) runs _cmsReadOutputLUT and a subsequent ComputeConversion/AddConversion failure jumps to Error while Lut is non-NULL.",
+      "why_winner_satisfies": "Winner seeds carry varied device-class FOURCCs (link/prtr/spac) and color spaces (MCHC/GRAY/RGB/MCH1/Lab) at the header offsets, and per-role coverage shows the winner exclusively hitting the output-direction block (lines 562-566, 602-612) and the abstract/conversion path (583-592).",
+      "why_loser_doesnt": "value_profile seeds are uniformly 'mntr'+'RGB ' headers that take the input direction (line 597 lIsInput true), so Lut is freed at line 619 before any goto and the Error path never sees a non-NULL Lut.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes intercepted CMP operands (the FOURCC/colorspace literals compared inside cmsGetDeviceClass/ColorSpaceIsCompatible) into the input bytes, letting vpc construct the rare device-class/colorspace combination that drives the output-direction conversion failure; plain value_profile lacks I2SRandReplace."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "The same output-direction-failure profile, but here reached via gradient progress on the integer/string CMPs guarding the colorspace-compatibility and conversion checks rather than purely by substitution.",
+      "why_winner_satisfies": "value_profile_cmplog resolves 9/10 with avg hitcount 80 on the branch; its CMP_MAP gradient feedback preserves intermediate inputs that get progressively closer to matching the colorspace signature CMPs (lines 568, 583), so the output-direction conversion path is reached and fails into Error.",
+      "why_loser_doesnt": "plain cmplog resolves only 2/10 with avg hitcount 8; without CMP_MAP-bucket feedback it cannot retain near-miss inputs on the colorspace comparisons, so it rarely assembles the exact header combination that drives the output-direction failure.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient feedback (Hamming-distance / matching-prefix buckets) preserves inputs that approach matching the colorspace/device-class comparisons as new corpus entries, supplying cmplog's substitution stage in vpc with stepping-stones; cmplog alone has only edge-bucket feedback and cannot ratchet toward the rare combination."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side is the Error-path free of a non-NULL Lut.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L646",
+      "exact_quote": "if (Lut != NULL) cmsPipelineFree(Lut);"
+    },
+    {
+      "claim": "The winner exclusively exercises the output-direction conversion block.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L602-L606",
+      "exact_quote": "[W]   605                  Lut = _cmsReadOutputLUT(hProfile, Intent);"
+    },
+    {
+      "claim": "Only the winner reaches the conversion/abstract path that can goto Error with Lut allocated.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L609",
+      "exact_quote": "if (!ComputeConversion(i, hProfiles, Intent, BPC[i], AdaptationStates[i], &m, &off)) goto Error;"
+    },
+    {
+      "claim": "Winner seeds carry varied device-class FOURCCs at the header offset (link/prtr/spac).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0f8bbd51a2d5664d offset 0x0c",
+      "exact_quote": "6c 69 6e 6b   ..b.lcms.@..link"
+    },
+    {
+      "claim": "Loser value_profile seeds are uniformly mntr+RGB headers.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 154a2c890bbdb5cf offset 0x0c",
+      "exact_quote": "6d 6e 74 72   ..b.lcms.@..mntr"
+    },
+    {
+      "claim": "The device-class FOURCC offset differs between W and L byte sets.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c",
+      "exact_quote": "6c(l)x4 70(p)x4 73(s)x2             6d(m)x22 6c(l)x3 00(.)x1"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes intercepted CMP operands into the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile is the loser-distinguishing technique and lacks I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile preserves inputs whose CMP operands are closer to matching as new corpus.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "vpc strongly outperforms cmplog at the branch in resolution and hitcount.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "avg hitcount on branch: winner=80  loser=8"
+    },
+    {
+      "claim": "vpc strongly outperforms value_profile at the branch.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "prob_div=0.90  dur_div=18.60h  hit_div=80"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2107 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0f8bbd51a2d5664d` and observed an I2S-floor dash row (mutation_op = -) at depth 15 of the 16-level ancestor chain, the lower-bound signal of an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where forcing the output-direction conversion failure requires no input-byte-derived comparand (e.g. a constant device class), yet vpc still resolves the Error-with-Lut branch far faster than value_profile, would refute the I2S-substitution attribution."
+  },
+  "weakest_evidence_point": "The Pair-2 value_profile attribution rests on the cmplog-vs-vpc hitcount/resolution gap plus mechanism reasoning, not on a direct lineage trace showing CMP_MAP stepping-stones for the cmplog loser.",
+  "confidence": "medium"
+}

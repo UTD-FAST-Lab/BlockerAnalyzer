@@ -1,0 +1,81 @@
+{
+  "branch_id": 2295,
+  "target": "lcms",
+  "summary_one_line": "Input must carry the 4-byte ICC color-space signature 'HLS ' (0x48 4c 53 20) so cmsChannelsOfColorSpace dispatches into the cmsSigHlsData case.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A 4-byte FOURCC equal to the cmsSigHlsData signature 'HLS ' = 0x48 0x4c 0x53 0x20 at the profile color-space field (offset 0x10-0x13), which makes the switch on ColorSpace match case cmsSigHlsData at cmspcs.c:895 (true side).",
+      "why_winner_satisfies": "Every cmplog winner seed places the ASCII bytes 'HLS ' at offsets 0x10-0x13 (e.g. seed 66120690646875c5: 48 4c 53 20), and the per-role overlay shows L895 true side hit 14 times in W vs 0 in L.",
+      "why_loser_doesnt": "Every naive loser seed carries 'RGB ' (52 47 42 20) at offsets 0x10-0x13 instead of 'HLS ', so the switch dispatches to case cmsSigRgbData (true 52 times in L) and never reaches the cmsSigHlsData arm.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer where the runtime constant 'HLS '/cmsSigHlsData (0x484c5320) was compared against the input color-space field, then substitutes that exact 4-byte operand at the matching input offset; naive has only havoc byte mutations and must blindly land all 4 magic bytes, which it never does (0/10 trials)."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the cmsSigHlsData switch case at cmspcs.c:895 inside cmsChannelsOfColorSpace.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmspcs.c:895:5",
+      "exact_quote": "case cmsSigHlsData:"
+    },
+    {
+      "claim": "Winner cmplog seeds place the ASCII bytes HLS at offsets 0x10-0x12.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 66120690646875c5 offset 0x10",
+      "exact_quote": "48 4c 53 20 4c 61 62 02 07 d9 00 0c 00 17 00 16   HLS Lab"
+    },
+    {
+      "claim": "Loser naive seeds carry RGB at offsets 0x10-0x12 instead of HLS.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 05c646cb9928d9d9 offset 0x10",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ"
+    },
+    {
+      "claim": "Offsets 0x10/0x11/0x12 cleanly separate W (H/L/S) from L (R/G/B).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x10-0x12",
+      "exact_quote": "0x0010  48(H)x7                             52(R)x10                            DIFFER"
+    },
+    {
+      "claim": "The cmsSigHlsData true side is hit in the winner role and never in the loser role.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L895",
+      "exact_quote": "d=1   L 895  T=14 F=14  T=0 F=66  case cmsSigHlsData:"
+    },
+    {
+      "claim": "The loser instead dispatches into the cmsSigRgbData arm.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L893",
+      "exact_quote": "d=1   L 893  T=10 F=18  T=52 F=14  case cmsSigRgbData:"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace substitutes a CMP operand at matching input offsets, which naive cannot do.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has only havoc/token mutators and no I2S.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    },
+    {
+      "claim": "naive blocked the branch in all 10 trials while cmplog resolved it in 8.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 trial counts",
+      "exact_quote": "winner: resolved=8/10  blocked=2  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2295 --role W --fuzzer cmplog --trial 2 --seed 66120690646875c5`; the chain has 9 levels and reports the I2S-floor signal with 2 ancestor dash rows (mutation_op = -) at depths 7 and 8, direct lower-bound evidence of an I2SRandReplace find in this cmplog winner's ancestry."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where naive resolves the cmsSigHlsData case at a rate comparable to cmplog despite the 4-byte 'HLS ' magic check, indicating the FOURCC gate is not the I2S-sensitive blocker."
+  },
+  "weakest_evidence_point": "The dash-row floor signal is a lower bound and the leaf mutation_op lists only havoc names, so the literal I2SRandReplace tag is not directly recorded on the winning seed itself.",
+  "confidence": "high"
+}

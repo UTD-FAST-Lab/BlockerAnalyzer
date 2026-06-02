@@ -1,0 +1,94 @@
+{
+  "branch_id": 3818,
+  "target": "libpng",
+  "summary_one_line": "Inputs must carry valid multi-entry chunk structures (text/sPLT/unknown) so png_free_data is invoked with a per-item num != -1.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A PNG with valid chunk-type and length/CRC fields whose comparisons against libpng's expected literals pass, so deeper chunk-parsing populates info_ptr arrays and png_free_data is later reached with num != -1.",
+      "why_winner_satisfies": "Winner cmplog seeds carry intact chunk headers (PNG/IHDR/gAMA/sRGB at fixed offsets) and the winner-only coverage reaches per-chunk free paths (tRNS 508, eXIf 621, hIST 641, PLTE 650) that the loser never enters, indicating more chunks parsed to valid state.",
+      "why_loser_doesnt": "Loser naive seeds corrupt the chunk-type / length / CRC region (e.g. offsets 0x1d-0x1e, 0x2c-0x3d differ with no concentration toward the valid literals), so those chunk comparisons fail and the per-item free branches stay un-hit (loser L=0 on the blocker true side).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads intercepted integer/string CMP operands from the CmpLogObserver buffer and substitutes the expected chunk-type/CRC literal directly into the matching input offset, letting cmplog clear the chunk-validation comparisons that naive must hit by chance; verified by an I2S-floor dash-row ancestor in the winner lineage."
+    },
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "A PNG whose chunk-validation comparison operands are driven progressively closer to the expected values, so chunk parsing succeeds and png_free_data is reached with a per-item num != -1.",
+      "why_winner_satisfies": "value_profile resolves the branch in all 10 trials and accumulates a positive hitcount (avg=77) on the blocker, reaching the same per-chunk free paths; CMP_MAP distance buckets reward inputs whose chunk-field comparisons get nearer to matching, steering toward valid chunk structures.",
+      "why_loser_doesnt": "naive has no CMP_MAP feedback, so its corrupted chunk fields (divergent, unconcentrated bytes at the chunk-type/length offsets) provide no gradient and it stays blocked (loser=0/10, blocked 24.00h).",
+      "mechanism_attribution": "value_profile's CMP_MAP records a Hamming/prefix-distance bucket per CMP; an input whose chunk-field comparison is closer to matching adds a new bucket and is preserved, giving a hill-climbing gradient toward valid chunks that plain edge coverage (naive) lacks."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true branch of if (num != -1) at png.c:674 inside png_free_data, globally blocked on side T.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "png.c:674:8",
+      "exact_quote": "Source line:    if (num != -1)"
+    },
+    {
+      "claim": "cmplog wins over naive with full divergence at this branch via the I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile wins over naive with full divergence at this branch via the value_profile technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "Winner-only coverage enters per-chunk free paths (tRNS/eXIf/hIST/PLTE) that the loser never reaches, evidencing deeper chunk parsing.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L508 / L650",
+      "exact_quote": "[W]   650     {"
+    },
+    {
+      "claim": "Winner seeds carry intact PNG/IHDR/gAMA/sRGB chunk headers.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner seed 074cbf90cbbef94f offset 0x00",
+      "exact_quote": "89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52"
+    },
+    {
+      "claim": "Loser-blocking seeds differ from winners at chunk-field offsets with no concentration toward the valid literals.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x001d",
+      "exact_quote": "0x001d  52(R)x20                            7f(.)x4 00(.)x3 52(R)x2 ff(.)x1     PARTIAL"
+    },
+    {
+      "claim": "The loser is blocked on the true side for the full campaign while the winner resolves it.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 durations",
+      "exact_quote": "avg duration blocked: winner=0.00h  loser=24.00h"
+    },
+    {
+      "claim": "value_profile accumulates a positive hitcount on the branch while the loser stays at zero.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 hitcount",
+      "exact_quote": "avg hitcount on branch: winner=77  loser=0"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for a CMP operand and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile feedback preserves inputs whose CMP operands are closer to matching than previously seen, creating a gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 3818 --role W --fuzzer cmplog --trial 1 --seed 013b9f2a08a04135` and `--seed 074cbf90cbbef94f`; both winner chains contain an I2S-floor dash row (mutation_op = -) at depth 6 (shared ancestor 94c47bff5687a0c9), the lower-bound signal of an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness in which all chunk-validation comparisons are removed (chunks accepted unconditionally) but the num != -1 branch still resolved far more often under cmplog/value_profile than naive — showing the divergence is not driven by comparison-gated chunk parsing."
+  },
+  "weakest_evidence_point": "The exact offsets whose comparisons gate reaching num != -1 are inferred from the per-role coverage and PNG chunk layout, not pinned to a single concentrated I2S-substitutable byte run in the BYTE DIFF (all rows are PARTIAL).",
+  "confidence": "medium"
+}

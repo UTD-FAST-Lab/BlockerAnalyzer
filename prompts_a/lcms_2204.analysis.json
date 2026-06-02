@@ -1,0 +1,81 @@
+{
+  "branch_id": 2204,
+  "target": "lcms",
+  "summary_one_line": "Profile class/colorspace tag bytes that build a pipeline whose adjacent stages have mismatched channel counts, taking the true branch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Header tag bytes at offsets 0x0c-0x0f (device class) and 0x10-0x17 (data/PCS colorspace signatures) set to non-default four-char codes (e.g. 'link','spac','scnr' with 'MCHC'/'GRAY'/'Lab ') so the constructed cmsPipeline contains adjacent stages where next->InputChannels != prev->OutputChannels, reaching the true (return FALSE) side of cmslut.c:1305.",
+      "why_winner_satisfies": "value_profile_cmplog winning seeds carry varied class codes at 0x0c-0x0f ('link','prtr','spac','scnr') and varied colorspaces at 0x10-0x17 ('MCHCXYZ ','GRAYXYZ ','RGB Lab '), driving heterogeneous channel-count pipeline stages; the per-role overlay marks line 1306 'return FALSE' as W-only and the branch hitcount is 107 for the winner.",
+      "why_loser_doesnt": "value_profile loser seeds are byte-locked to class 'mntr' at 0x0c-0x0f and colorspace 'RGB XYZ ' at 0x10-0x17 across all 10 seeds, building channel-consistent pipelines that always take the false side (T=0 F=670 at L1305) and never resolve the branch (resolved=0/10).",
+      "mechanism_attribution": "The only technique delta between value_profile_cmplog and value_profile is the I2SRandReplace input-to-state mutator. The four-char ICC signature codes ('link','MCHC','GRAY','Lab ') are exact magic-string comparands tested in lcms profile dispatch; I2SRandReplace logs the runtime CMP operand and splices the exact literal into the input bytes, letting vpc populate non-'mntr'/'RGB'/'XYZ' tag fields that select differently-shaped pipelines. value_profile lacks I2SRandReplace and its CMP_MAP Hamming gradient cannot synthesize the exact four-char tag, so it stays pinned to the default class."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a channel-count mismatch check inside BlessLUT's pipeline-chain walk; the globally blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmslut.c:1305",
+      "exact_quote": "if (next->InputChannels != prev->OutputChannels)"
+    },
+    {
+      "claim": "The winner-only resolves the true side (return FALSE) of the blocker per the per-role overlay.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1306",
+      "exact_quote": "[W]  1306                  return FALSE;"
+    },
+    {
+      "claim": "The winner takes the true branch 14 times while the loser never does (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L1305",
+      "exact_quote": "d=1   L1305  T=14 F=303  T=0 F=670  if (next->InputChannels != prev->OutputChannels)"
+    },
+    {
+      "claim": "Winner seeds carry varied device-class codes at offset 0x0c-0x0f such as 'link', differing from the loser-locked 'mntr'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0f8bbd51a2d5664d offset 0x0c",
+      "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 6c 69 6e 6b   ..b.lcms.@..link"
+    },
+    {
+      "claim": "Winner seeds vary the data/PCS colorspace signature fields at 0x10-0x17 (e.g. 'MCHCXYZ ').",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0f8bbd51a2d5664d offset 0x10",
+      "exact_quote": "4d 43 48 43 58 59 5a 20 07 d9 08 0c 00 17 00 16   MCHCXYZ ........"
+    },
+    {
+      "claim": "All loser seeds are byte-locked to device class 'mntr' at offset 0x0c-0x0f.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0313315f3b972394 offset 0x0c",
+      "exact_quote": "00 00 62 9c 6c 63 6d 73 03 40 00 00 6d 6e 74 72   ..b.lcms.@..mntr"
+    },
+    {
+      "claim": "The per-offset byte diff shows W and L differ at offsets 0x0c and 0x0d where W is varied and L is locked to 'm'/'n'.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x000c-0x000d",
+      "exact_quote": "0x000c  6c(l)x5 73(s)x4 70(p)x2             6d(m)x10                            DIFFER"
+    },
+    {
+      "claim": "The only mutation-technique difference for the involved winner is the addition of I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "The loser fuzzer value_profile lacks I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2204 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0f8bbd51a2d5664d` and observed an I2S-floor dash row (mutation_op = -) at depth 15 of the 16-level ancestor chain, the floor signal for an unwrapped I2SRandReplace find in vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with a fixed pipeline whose stage channel counts are mismatched regardless of any input tag bytes (no exact four-char comparand gate) where value_profile_cmplog shows no advantage over value_profile in reaching the true branch."
+  },
+  "weakest_evidence_point": "The exact data-path from the varied tag/colorspace bytes to a mismatched-channel pipeline is inferred from source structure, not directly traced; multiple class/colorspace combinations map to differing channel counts but the specific gating comparand is not shown in the cited source window.",
+  "confidence": "medium"
+}

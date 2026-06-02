@@ -1,0 +1,81 @@
+{
+  "branch_id": 2088,
+  "target": "lcms",
+  "summary_one_line": "Profile connection-space signature field at offset 0x10 must equal the FOURCC 'Lab ' so InPCS hits cmsSigLabData.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The 4-byte colorspace/PCS signature in the profile header (offset 0x10 in these seeds) must be the FOURCC 'Lab ' = 0x4c 0x61 0x62 0x20, so InPCS in AddConversion's switch equals cmsSigLabData and the true side at line 452 is taken.",
+      "why_winner_satisfies": "Winner-resolving seeds carry 'Lab ' (4c 61 62 20) at offset 0x10-0x13, matching the cmsSigLabData switch constant; the per-role overlay then enters the Lab-input arm (lines 454-478) marked [W].",
+      "why_loser_doesnt": "Loser-blocking seeds all carry 'RGB ' (52 47 42 20) at offset 0x10, an RGB/non-PCS device colorspace; InPCS therefore never equals cmsSigLabData and the case-452 true side is never taken (loser hitcount on branch = 0).",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace intercepts the switch comparison against the cmsSigLabData literal, records the constant 'Lab ' in the CmpLogObserver buffer, and substitutes it into the input at the offset where the prior operand ('RGB ' / other signature) appeared; naive and value_profile lack I2SRandReplace and cannot directly plant the exact 4-byte magic, so they stall on the false side."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the switch case selecting Lab-input PCS handling in AddConversion.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmscnvrt.c:452",
+      "exact_quote": "case cmsSigLabData: // Input profile operates in Lab"
+    },
+    {
+      "claim": "Both decisive pairs differ by the I2S technique only.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2 delta tags",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The second decisive pair (vpc>vp) is also an I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 delta tag",
+      "exact_quote": "Pair 2: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner-resolving seeds contain the ASCII 'Lab ' signature at offset 0x10.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "winner Seed 2 offset 0x10",
+      "exact_quote": "4c 61 62 20 4c 61 62 20 07 d9 00 0c 00 17 00 16   Lab Lab ........"
+    },
+    {
+      "claim": "Loser-blocking seeds carry the 'RGB ' signature at offset 0x10 instead of 'Lab '.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "loser Seed 1 offset 0x10",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "The byte diff localizes the discriminating bytes to offsets 0x10-0x12 where winners are L/Lab-leaning and losers are uniformly R/G/B.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0010",
+      "exact_quote": "0x0010  4c(L)x14 58(X)x2 43(C)x2 4d(M)x1 +1u  52(R)x20"
+    },
+    {
+      "claim": "The loser never takes the true side of the blocker (hitcount 0), while the winner takes it many times.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 hitcount",
+      "exact_quote": "avg hitcount on branch: winner=165  loser=0"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace scans the input for one CMP operand and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so it cannot directly plant the operand.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2088 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0b8368b936d0cbb9` and observed one I2S-floor dash row (mutation_op = -) at depth 14 (ancestor 5441efb6193a1a03); also ran `--fuzzer cmplog --trial 1 --seed 044d3fc2a2e1afbd` and observed one dash row at depth 17 (same ancestor). Both decisive winners' chains contain the I2S-floor signal."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A naive or value_profile trial reaching the case-452 true side at comparable rate without ever placing the exact 'Lab ' FOURCC at the PCS-signature offset (i.e., resolving the branch by some byte pattern other than the cmsSigLabData literal), which would show the divergence is not driven by I2S magic-value substitution."
+  },
+  "weakest_evidence_point": "The exact input offset that maps to InPCS is inferred from the seed-byte 'Lab '/'RGB ' alignment at 0x10 rather than from explicit source-to-byte tracing of the profile-header parse.",
+  "confidence": "high"
+}

@@ -1,0 +1,100 @@
+{
+  "branch_id": 6674,
+  "target": "libxml2",
+  "summary_one_line": "Input must place '-' as the third byte after '<!' (i.e. '<!--') so xmlParseMarkupDecl's switch dispatches the comment arm.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A '<!' followed by a '-' byte at the NXT(2) position, so the switch on NXT(2) selects case '-' and calls xmlParseComment. The single discriminating byte is the '-' (0x2d) immediately after '<!'.",
+      "why_winner_satisfies": "cmplog intercepts the switch comparison on NXT(2) against the constant '-' as a CMP callback; I2SRandReplace can read that operand and substitute the literal '-' at the matching input offset after '<!', flipping an existing '<!E'/'<!A' markup decl into '<!--'.",
+      "why_loser_doesnt": "naive has only havoc/token mutators and no CMP introspection; its corpus seeds carry '<!DOCTYPE'/SYSTEM markup (case 'E'/'A'/'N' arms) and it never lands the exact '-' byte at NXT(2) within budget, so case '-' stays at T=0 for all 10 trials.",
+      "mechanism_attribution": "cmplog's I2SRandReplace substitutes the logged switch operand '-' at the NXT(2) byte offset, which plain naive havoc cannot reliably hit; this is the input-to-state comparison-solving technique distinguishing cmplog from naive."
+    },
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "Same byte-level requirement (a '-' at NXT(2) after '<!' producing '<!--'), but reached because the comment/markup-decl arm becomes a NEW coverage bucket under context-sensitive indexing since xmlParseMarkupDecl is reached from multiple call contexts.",
+      "why_winner_satisfies": "naive_ctx folds the call-context hash into the edge-map index, so the same xmlParseMarkupDecl switch edges register as distinct (call-context, edge) pairs across the internal-subset / external-subset / conditional-section call paths; this rewards exploring the markup-decl switch arms and drives the corpus toward inputs that exercise case '-'.",
+      "why_loser_doesnt": "naive uses a bare per-edge map, so once the switch edges are hit via any one call path they are no longer 'new', removing the gradient that would push exploration toward the case '-' arm; it stays blocked all 10 trials.",
+      "mechanism_attribution": "naive_ctx's CtxHook makes (call-context, edge) pairs count as new coverage, so the multi-caller xmlParseMarkupDecl switch arms each yield fresh feedback; this context-sensitive coverage granularity is what distinguishes naive_ctx from naive."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked branch is the case '-' arm of xmlParseMarkupDecl, whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "parser.c:6969",
+      "exact_quote": "case '-':"
+    },
+    {
+      "claim": "case '-' calls xmlParseComment, the comment-parsing path the winner reaches.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L6970",
+      "exact_quote": "xmlParseComment(ctxt);"
+    },
+    {
+      "claim": "The switch dispatch on NXT(2) selects the markup-declaration arm, so NXT(2)=='-' is the discriminating byte condition.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L6954",
+      "exact_quote": "switch (NXT(2)) {"
+    },
+    {
+      "claim": "cmplog resolves the case '-' arm where naive does not (winner of the I2S pair).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 cmplog>naive",
+      "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace scans the input for a matching operand and substitutes the other CMP operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S substitution mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "any of the above. No I2S."
+    },
+    {
+      "claim": "naive_ctx resolves the branch in all 10 trials while naive is blocked in all 10 (winner of the ctx_coverage pair).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 naive_ctx>naive",
+      "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+    },
+    {
+      "claim": "naive_ctx folds the call-context hash into the edge-map index so the same edge registers at different slots per call path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Instrumentation",
+      "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it"
+    },
+    {
+      "claim": "Under naive_ctx a new coverage bucket is a new (call-context, edge) pair rather than a bare edge.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Feedback",
+      "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge"
+    },
+    {
+      "claim": "xmlParseMarkupDecl is reached from multiple call contexts (internal subset, conditional sections, external subset), making context-sensitivity informative.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "Call chain hop 2",
+      "exact_quote": "hop 2  parser.c:xmlParseConditionalSections  (/src/libxml2/parser.c:6804-6923, calls xmlParseMarkupDecl at line 6907)"
+    },
+    {
+      "claim": "naive_ctx uses only havoc/token mutators with no I2S or CMP_MAP, so its win is feedback-driven not comparison-solving.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": false,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 6674 --role W --fuzzer cmplog --trial 1 --seed any` and `db_query.py more-seeds --branch 6674 --role W --fuzzer cmplog`; both returned no rows. seed_bisect stored only naive_ctx winner seeds for this branch (all 6 resolving seeds are fuzzer=naive_ctx), so no cmplog ancestor chain exists in the DB to inspect for I2S-floor dash rows. I2S contribution for the cmplog>naive pair therefore could not be verified in lineage; it remains inferred from the single-byte switch operand on NXT(2) and the cmplog-only I2SRandReplace mechanism."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the '<!' + NXT(2) switch on '-' (comment arm) in which cmplog shows NO advantage over naive at reaching case '-', indicating the single '-' byte is reachable by havoc alone and I2S substitution is not the driver."
+  },
+  "weakest_evidence_point": "The I2S mechanism for the cmplog>naive pair is unverified in lineage because the DB holds only naive_ctx winner seeds, so the I2S attribution rests on source/mechanism inference rather than an observed dash-row ancestor chain.",
+  "confidence": "medium"
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 2110,
+  "target": "lcms",
+  "summary_one_line": "Input must encode a parametric tone-curve Type field equal to 2 so the switch dispatches to case 2.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "An ICC parametric curve whose stored Type selector decodes to the integer 2, so the switch(Type) at line 344 dispatches to case 2 (line 380). The blocker is the true side of the case-2 dispatch; the input must carry a parametricCurveType field exactly equal to 2 somewhere in the parsed profile bytes.",
+      "why_winner_satisfies": "Winner seeds reach case 2 at runtime (line 380 fires T=602000 in W vs T=0 in L) and the whole case-2 body (lines 380-404) is marked [W] winner-resolving-only, with the branch hit 304270/391450 times by the winners. The cmplog/vpc winners can place the exact byte value 2 into the Type field via I2SRandReplace because the switch(Type) comparison logs the constant operand 2.",
+      "why_loser_doesnt": "Loser seeds never take case 2: line 380 shows T=0 F=204000 for L, and the entire case-2 body is not marked [L]. naive/value_profile have no I2S substitution to plant the discriminant integer 2 into the Type field, so they stay blocked on this side for the full 24h (avg duration blocked loser=24.00h).",
+      "mechanism_attribution": "cmplog and value_profile_cmplog add I2SRandReplace, which reads the post-execution CmpLogObserver buffer for the switch(Type) comparison, finds where the current Type bytes appear in the input, and substitutes the logged constant operand (2) at those offsets, satisfying case 2 directly. naive and value_profile lack I2SRandReplace and must hit the exact discriminant by chance, which does not happen in 24h."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of the switch arm case 2 inside DefaultEvalParametricFn, selected by the Type discriminant.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsgamma.c:380:5",
+      "exact_quote": "Source line:     case 2:"
+    },
+    {
+      "claim": "The case-2 dispatch is governed by switch(Type).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L344",
+      "exact_quote": "switch (Type) {"
+    },
+    {
+      "claim": "Winners take case 2 while losers never do, per per-role branch divergence.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L380",
+      "exact_quote": "L 380  T=602000 F=2140000  T=0 F=204000  case 2:  <-- BLOCKER"
+    },
+    {
+      "claim": "The entire case-2 body is exclusively winner-resolving coverage.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L380-L404",
+      "exact_quote": "[W]   380      case 2: <-- BLOCKER"
+    },
+    {
+      "claim": "Winners hit the branch hundreds of thousands of times; losers zero.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "avg hitcount on branch: winner=304270  loser=0"
+    },
+    {
+      "claim": "Losers stay blocked the full campaign duration.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "avg duration blocked: winner=3.10h  loser=24.00h"
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace which substitutes a logged CMP operand at matching input offsets, enabling the discriminant value.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive and value_profile lack I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2110 --role W --fuzzer value_profile_cmplog --trial 1 --seed 2387be4af54319dc`. The ancestor chain has 7 levels and the trailing I2S-floor signal reports 2 dash rows (mutation_op = -) at depths 5 and 6, characteristic of unwrapped I2SRandReplace finds in cmplog/vpc under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with switch(Type) on an input-derived integer where cmplog/vpc fail to reach case 2 while naive reaches it at the same rate, i.e. no I2S advantage for hitting an exact switch discriminant."
+  },
+  "weakest_evidence_point": "The exact input offset encoding the Type discriminant is not isolated in the BYTE DIFF (offsets show profile-tag differences like RGB/Lab/XYZ, not a clearly distinguishable Type=2 field), so the precise substituted offset is inferred from source, not directly observed.",
+  "confidence": "medium"
+}

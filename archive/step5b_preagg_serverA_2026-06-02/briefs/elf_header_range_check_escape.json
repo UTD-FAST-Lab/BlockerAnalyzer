@@ -1,0 +1,230 @@
+{
+  "feature_id": "elf_header_range_check_escape",
+  "mechanism_family": "I2S_pro",
+  "mechanism_label": "elf_header_range_check_escape",
+  "definition": "I2S substitutes ELF header field operands (or range-boundary integers) to produce a vmaddr/vmsize combination that falls outside the translator base map, taking the CoversRange miss path.",
+  "n_members": 2,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog"
+    ],
+    "lacks_axis": [
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "bloaty_10",
+      "target": "bloaty",
+      "branch_id": 10,
+      "analysis_path": "prompts/bloaty_10.analysis.json",
+      "file": "/src/bloaty/src/bloaty.cc",
+      "function": "bloaty::RangeSink::AddRange(char const*, std::basic_string_view<char, std::char_traits<char> >, unsigned long, unsigned long, unsigned long, unsigned long)",
+      "line": "1331",
+      "source_line": "    if (!translator_->vm_map.CoversRange(vmaddr, vmsize) ||",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "derived_integer",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2S reads CMP operands from the CoversRange comparison, substitutes the range-boundary integers into the matching header dword slots, synthesizing a vmaddr/vmsize that lands outside the base map.",
+        "one_line": "I2S plants precise header dwords to produce an out-of-range vm address"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "ELF header fields encoding a vm range that falls outside the base map's covered region, so CoversRange returns false",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "A structurally coherent ELF input whose program/section-header offset and size fields (vmaddr/vmsize at the dword-aligned header slots, e.g. bytes around 0x10-0x27) decode to a vm range that is NOT covered by translator_->vm_map, driving the !CoversRange(vmaddr, vmsize) TRUE side at bloaty.cc:1331.",
+            "why_winner_satisfies": "Winner cmplog seeds carry a valid ELF magic plus structured 4-byte header values (e.g. 00 00 00 10 / 00 00 00 10 at 0x20-0x27, 50 55 markers at 0x18-0x19) so AddRange is invoked with concrete vmaddr/vmsize that I2S has tuned to land outside the base map, hitting the THROW true side 26 times.",
+            "why_loser_doesnt": "Naive loser seeds fill the header region with padding (long runs of 0x20 spaces and 0x00) rather than the precise dword values that decode to an out-of-range vm range; they reach line 1331 only on the FALSE side (L1331 T=0 F=550000) and never satisfy the TRUE condition.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer for the CoversRange / range-comparison CMP operands and substitutes the parsed comparand back into the matching input header offsets, letting cmplog land precise vmaddr/vmsize values that naive's blind havoc byte mutation cannot synthesize."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked branch is the TRUE side of a CoversRange check on vmaddr/vmsize inside RangeSink::AddRange.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "bloaty.cc:1331",
+            "exact_quote": "if (!translator_->vm_map.CoversRange(vmaddr, vmsize) ||"
+          },
+          {
+            "claim": "The globally blocked side is the true branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Globally blocked side",
+            "exact_quote": "Globally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "cmplog resolved this branch in all 10 trials while naive was blocked in all 10, hitting it 26 times on average.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog>naive",
+            "exact_quote": "avg hitcount on branch: winner=26  loser=0"
+          },
+          {
+            "claim": "Winner seeds are coherent ELF inputs with structured header dword fields at the offsets that feed vmaddr/vmsize.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "winner seed 05a56c847ffbf4de offsets 0x18-0x27",
+            "exact_quote": "00 00 00 10 00 00 00 10 00 00 00 00 00 00 00 00"
+          },
+          {
+            "claim": "Winner seeds carry the 50 55 marker bytes in the header region distinguishing them from loser padding.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x18-0x19",
+            "exact_quote": "   0x0018  50(P)x2                             20( )x10 9c(.)x8 ae(.)x1 35(5)x1    DIFFER"
+          },
+          {
+            "claim": "Loser naive seeds fill the header region with runs of space (0x20) padding instead of precise dword values.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "loser seed 43b1a3ff84794b7e offset 0x10-0x1f",
+            "exact_quote": "00 00 00 00 00 00 20 20 20 20 20 20 ff 3c ff ff"
+          },
+          {
+            "claim": "On the loser, line 1331 is reached only on the FALSE side and never the TRUE side.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L1331",
+            "exact_quote": "d=1   L1331  T=6 F=0  T=0 F=550000  if (!translator_->vm_map.CoversRange(vmaddr, vmsize) ||  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand back into matching input byte offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic ELF harness gating an out-of-range CoversRange check on input header dwords where cmplog and naive resolve the TRUE side at statistically indistinguishable rates would refute the I2S-substitution attribution."
+        },
+        "weakest_evidence_point": "The exact input offsets that decode into vmaddr/vmsize are inferred from ELF structure and the winner/loser byte concentration, not directly traced through bloaty's ELF parser to line 1331.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "bloaty_145",
+      "target": "bloaty",
+      "branch_id": 145,
+      "analysis_path": "prompts/bloaty_145.analysis.json",
+      "file": "/src/bloaty/src/range_map.cc",
+      "function": "bloaty::RangeMap::CoversRange(unsigned long, unsigned long) const",
+      "line": "315",
+      "source_line": "    } else if (it == mappings_.end() || !EntryContains(it, addr)) {",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "7f 45 4c 46",
+        "operand_width_bytes": 4,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2S reads CMP operands from ELF header field comparisons and substitutes the exact magic and structural field values, enabling the translator map to be populated and CoversRange's miss-path to be exercised.",
+        "one_line": "I2S reconstructs ELF header fields to drive translator map and reach CoversRange true side"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A well-formed ELF whose parsed structural fields build a translator map then query CoversRange with an address outside that map.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "An ELF input (magic 7f 45 4c 46) whose header/structural fields parse far enough to populate translator_ and invoke RangeMap::CoversRange via RangeSink::AddRange (bloaty.cc:1331), supplying a vmaddr/vmsize whose first lookup iterator either reaches mappings_.end() or fails EntryContains, so the else-if at range_map.cc:315 takes its true side and returns false.",
+            "why_winner_satisfies": "Winner-resolving cmplog seeds carry a clean ELF magic plus concentrated structural bytes (e.g. 7f ff-marked fields at 0x09-0x0c and the PU/0x50 0x55 pair at 0x18-0x19) that satisfy the parser CMP gates so the translator_ branch is entered and CoversRange is reached, where the W-only lines 316-317 (return false) are hit and the branch true side covered.",
+            "why_loser_doesnt": "Loser-blocking naive seeds carry malformed/space-filled bytes after the magic (runs of 0x20 across 0x0a-0x1c, swapped ELF class/data at 0x04-0x06) that never drive the parser through the translator_-establishing path with an uncovered address; their CoversRange invocations stay on the false side (line 315 L T=0 F=1260000) and the branch true side is never taken.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads intercepted integer/string CMP operands from the CmpLogObserver buffer and substitutes the expected operand into matching input offsets, letting it reconstruct the exact ELF header field values that the bloaty parser compares against; naive must hit those multi-byte field values by blind havoc and never does within budget, so only cmplog drives the input through the translator map construction that exercises the CoversRange true side."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true side of an else-if in CoversRange that returns false when the iterator is at end or EntryContains fails.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "range_map.cc:315:16",
+            "exact_quote": "} else if (it == mappings_.end() || !EntryContains(it, addr)) {"
+          },
+          {
+            "claim": "The winning side covers the return-false lines 316-317 (W-only) while the loser only ever exercises the surrounding loop.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "range_map.cc:316-317",
+            "exact_quote": "[W]   316        return false;"
+          },
+          {
+            "claim": "CoversRange is reached through the translator_ guard at the call site bloaty.cc:1331.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "bloaty.cc:1330-1331",
+            "exact_quote": "if (!translator_->vm_map.CoversRange(vmaddr, vmsize) || <-- CALL"
+          },
+          {
+            "claim": "Winner-resolving cmplog seeds begin with a clean ELF magic and concentrated structural bytes including the 50 55 pair at offset 0x18.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 05a56c847ffbf4de offsets 0x00-0x1f",
+            "exact_quote": "0000: 7f 45 4c 46 01 02 0a 0a 0a ff ff ff 7f 24 20 0a   .ELF.........$ ."
+          },
+          {
+            "claim": "Loser-blocking naive seeds fill the post-magic region with runs of 0x20 spaces rather than valid structural fields.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 43b1a3ff84794b7e offset 0x0c onward",
+            "exact_quote": "0000: 7f 45 4c 46 02 01 01 00 00 00 00 7f ff 20 20 00   .ELF.........  ."
+          },
+          {
+            "claim": "W and L bytes diverge sharply across offsets 0x06-0x1c where the winner holds concentrated values and the loser holds spaces, the dataflow signal into the parser fields.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0c-0x19",
+            "exact_quote": "0x0018  50(P)x2                             9c(.)x8 20( )x7 ae(.)x1 35(5)x1     DIFFER"
+          },
+          {
+            "claim": "On the loser side the blocker true side is taken zero times against 1260000 false on the d=1 enclosing frame.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L315",
+            "exact_quote": "d=1   L 315  T=6 F=0  T=0 F=1260000  } else if (it == mappings_.end() || !EntryContains(it, ad...  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for a CMP operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator and must reach field values by blind havoc.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic ELF-parsing harness in which the CoversRange true side is reachable purely by a length/insert mutation with no multi-byte structural-field CMP gate would let naive resolve the branch as fast as cmplog, contradicting the I2S attribution."
+        },
+        "weakest_evidence_point": "The exact ELF field whose CMP gate I2S solves to enter the translator_ path is inferred from byte-diff concentration and source structure, not directly traced to a logged CMP operand.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "branch_id": 2170,
+  "target": "lcms",
+  "summary_one_line": "ICC profile PCS field at offset 0x14 must equal the 4-char signature 'Lab ' rather than 'XYZ ' to take the true branch",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The 4-byte PCS color-space signature in the ICC profile header (offset 0x14-0x17) must be the literal 'Lab ' (4c 61 62 20) so that cmsGetPCS(hProfile) == cmsSigLabData; any other PCS such as 'XYZ ' (58 59 5a 20) takes the false branch.",
+      "why_winner_satisfies": "Every winner-resolving seed carries 4c 61 62 20 ('Lab ') at offsets 0x14-0x16, exactly the constant the source compares cmsGetPCS(hProfile) against (cmsSigLabData).",
+      "why_loser_doesnt": "Every loser-blocking seed carries 58 59 5a 20 ('XYZ ') at offsets 0x14-0x16, so cmsGetPCS returns a non-Lab PCS and the true branch is never taken.",
+      "mechanism_attribution": "cmplog/vpc intercept the PCS-signature integer/string comparison, log the runtime operand cmsSigLabData, and I2SRandReplace splices that 4-byte literal into the input at the offset where the old PCS value appeared; naive and value_profile lack I2SRandReplace and must blindly mutate the 4-byte field to the exact magic, which they fail to do in 24h."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is an equality test of the profile PCS against the Lab-data signature constant.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L6 / cmsio1.c:246",
+      "exact_quote": "if (cmsGetPCS(hProfile) == cmsSigLabData) {"
+    },
+    {
+      "claim": "Winner-resolving seeds carry the ASCII 'Lab' bytes at offsets 0x14-0x16.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x14-0x16",
+      "exact_quote": "   0x0014  4c(L)x20                            58(X)x20                            DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds carry the ASCII 'XYZ' bytes at offsets 0x14-0x16 instead.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x15-0x16",
+      "exact_quote": "   0x0016  62(b)x20                            5a(Z)x20                            DIFFER"
+    },
+    {
+      "claim": "A concrete winner seed shows 'Lab ' at the PCS header field.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 144b12f16838dfe5 offset 0x10",
+      "exact_quote": "0010: 4c 61 62 20 4c 61 62 20 07 d9 00 0c 00 17 00 16   Lab Lab ........"
+    },
+    {
+      "claim": "A concrete loser seed shows 'XYZ ' at the PCS header field.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0313315f3b972394 offset 0x10",
+      "exact_quote": "0010: 52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which substitutes one logged CMP operand at offsets where the other operand appears in the input.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so the I2S delta is what value_profile_cmplog adds over value_profile.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "Both decisive pairs differ by exactly the I2S technique.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "L26 / L34",
+      "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2170 --role W --fuzzer cmplog --trial 1 --seed 12a22fd23d13237c` and observed an I2S-floor dash row (mutation_op = -) at depth 4 of the 5-level ancestor chain; tool reported '1 ancestor dash row(s) at depth 4', characteristic of an unwrapped I2SRandReplace find in cmplog under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on a 4-byte equality where naive/value_profile resolve the gate at the same rate as cmplog/vpc within the budget, showing I2S substitution confers no advantage for this magic-constant comparison."
+  },
+  "weakest_evidence_point": "The I2S-floor signal is a single unnamed dash row (lower bound) rather than a literal logged I2SRandReplace name, so the chain only corroborates an I2S find without naming the exact mutation that produced the Lab bytes.",
+  "confidence": "high"
+}

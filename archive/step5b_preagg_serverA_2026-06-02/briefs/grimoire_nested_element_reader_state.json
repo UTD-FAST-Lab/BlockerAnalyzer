@@ -1,0 +1,533 @@
+{
+  "feature_id": "grimoire_nested_element_reader_state",
+  "mechanism_family": "grimoire_structural_pro",
+  "mechanism_label": "nested_element_reader_state",
+  "definition": "Grimoire builds well-nested element open/close trees with siblings and attributes that advance the xmlTextReader state machine into XML_TEXTREADER_END/BACKTRACK/XML_ELEMENT_NODE states that cmplog byte mutations never assemble.",
+  "n_members": 5,
+  "involved_fuzzers": [
+    "cmplog",
+    "grimoire"
+  ],
+  "techniques_seen": [
+    "grimoire_structural"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "grimoire_structural",
+    "has_axis": [
+      "grimoire"
+    ],
+    "lacks_axis": [
+      "cmplog"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libxml2_7268",
+      "target": "libxml2",
+      "branch_id": 7268,
+      "analysis_path": "prompts/libxml2_7268.analysis.json",
+      "file": "/src/libxml2/xmlreader.c",
+      "function": "xmlTextReaderRead",
+      "line": "1328",
+      "source_line": "            (reader->node->type == XML_ELEMENT_NODE) &&",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "XML_ELEMENT_NODE",
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "Grimoire's gap-abstraction and structural recombination build well-formed XML with sibling element nodes, driving reader->node to an XML_ELEMENT_NODE with a following sibling; cmplog's byte/I2S mutations produce syntactically present XML but never the required sibling-element tree shape.",
+        "one_line": "Grimoire builds sibling-element XML tree shape needed for XML_ELEMENT_NODE branch"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "grimoire",
+          "loser": "cmplog",
+          "technique": "grimoire_structural",
+          "axis": "grimoire_structural"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Well-formed XML where an element node having a following sibling is itself an empty/childless XML_ELEMENT_NODE during forward traversal",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "grimoire>cmplog (grimoire_structural)"
+            ],
+            "what_input_feature": "A valid XML document whose DOM produces, while xmlTextReaderRead traverses forward from an XML_TEXTREADER_ELEMENT state, a node that is an XML_ELEMENT_NODE with a non-NULL next sibling (reader->node->next != NULL at L1326) AND whose type is XML_ELEMENT_NODE at L1328. The branch needs the tree to actually be built into element nodes with sibling structure, not merely a syntactically present XML header.",
+            "why_winner_satisfies": "Grimoire wins 10/10 and is the only fuzzer to enter the L1328 true side at all (W shows T=1 F=3 vs L T=0 F=20). The GeneralizationStage abstracts byte runs of a coverage-preserving XML corpus entry into <GAP> tokens and the Grimoire string/structural mutators recombine those generalized fragments, so it can synthesize new well-formed element/sibling tree shapes that drive reader->node to an element node with a following sibling, taking the true branch and reaching L1335-1337 (W-exclusive lines).",
+            "why_loser_doesnt": "cmplog reaches L1327 (node->next != NULL) but never satisfies L1328 (L: T=0 F=20) \u2014 its seeds are mutated XML text (valid <?xml version=\"1.0\"?> headers, DOCTYPE) but the resulting parse tree does not present an XML_ELEMENT_NODE with a following sibling at the traversal point; cmplog's byte-level havoc + I2S + token mutators perturb literals/bytes but do not construct the required sibling-element grammar structure, so it falls through to the L1370/L1384 backtrack path (L-exclusive lines).",
+            "mechanism_attribution": "grimoire structural: the single-technique delta over cmplog is grimoire's GeneralizationStage (<GAP> abstraction) plus the Grimoire structural mutators (GrimoireExtension/RecursiveReplacement/StringReplacement) that splice generalized token/gap structures. This grammar-free structural recombination builds new well-formed XML element/sibling shapes that cmplog's byte/I2S/token mutators cannot. This is structural-mutation attribution, not comparison-logging substitution: both fuzzers already run the same input-to-state stage, so I2S cannot be the divergence axis."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The lone decisive pair is grimoire > cmplog with delta grimoire_structural, the single-technique difference being grimoire's added stages over the shared cmplog/I2S stack.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: grimoire > cmplog  [delta: grimoire_structural]"
+          },
+          {
+            "claim": "The blocker condition requires the current node to be an XML_ELEMENT_NODE while a following sibling exists.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1326-1328",
+            "exact_quote": "(reader->node->type == XML_ELEMENT_NODE) && <-- BLOCKER"
+          },
+          {
+            "claim": "Grimoire resolves the branch in every trial while cmplog never does.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "grimoire/cmplog rows",
+            "exact_quote": "grimoire                        10        0          0  winner (grimoire_structural vs cmplog)"
+          },
+          {
+            "claim": "Only the winner takes the true side of the L1328 blocker; the loser takes it zero times.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1328",
+            "exact_quote": "d=1   L1328  T=1 F=3  T=0 F=20  (reader->node->type == XML_ELEMENT_NODE) &&  <-- BLOCKER"
+          },
+          {
+            "claim": "The winner-exclusive lines downstream of the blocker set XML_TEXTREADER_END and jump to node_found, the resolving path.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1335-1337",
+            "exact_quote": "[W]  1335  \t    reader->state = XML_TEXTREADER_END;"
+          },
+          {
+            "claim": "Grimoire's added technique over cmplog is the GeneralizationStage plus Grimoire structural mutators that splice generalized token/gap structures (grammar-free structural mutation).",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire section",
+            "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+          },
+          {
+            "claim": "Both grimoire and cmplog run I2S, so I2S cannot be the divergence axis between them.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire baseline relationship",
+            "exact_quote": "The single-technique delta is therefore\n`grimoire` vs `cmplog` (both have I2S; grimoire adds generalization +\nGrimoire mutators), not vs naive."
+          },
+          {
+            "claim": "Loser cmplog seeds contain valid XML text (version header, DOCTYPE) yet still block the branch.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "loser seed id=05a2233124360cc9",
+            "exact_quote": "3c 3f 78 6d 6c 20 76 65 72 73 69 6f 6e 3d 22 31   <?xml version=\"1"
+          },
+          {
+            "claim": "The winner grimoire seed differs structurally from the loser cmplog seeds across the document body, not just at a single literal offset.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x00-0x27",
+            "exact_quote": "Per-offset byte sets. Format: hex(ascii)xCOUNT. Shows offsets where W and L bytes differ AND at least one side is concentrated"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness exposing the same node->type==XML_ELEMENT_NODE-with-following-sibling gate in which cmplog resolves the branch as often as grimoire \u2014 showing the divergence comes from byte/I2S reach rather than from grimoire's structural recombination of well-formed XML."
+        },
+        "weakest_evidence_point": "No grimoire-discovered W lineage chain or generalized <GAP> artifact is shown in the prompt, so the structural-recombination mechanism is inferred from technique knowledge plus the L1328 coverage split rather than directly observed in this seed's history.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_7288",
+      "target": "libxml2",
+      "branch_id": 7288,
+      "analysis_path": "prompts/libxml2_7288.analysis.json",
+      "file": "/src/libxml2/xmlreader.c",
+      "function": "xmlTextReaderReadAttributeValue",
+      "line": "2826",
+      "source_line": "\tif (reader->curnode->children == NULL)",
+      "signature": {
+        "gate_structure": "presence_or_nonnull",
+        "operand_kind": "none_structural",
+        "operand_literal": null,
+        "operand_width_bytes": null,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "Grimoire's RecursiveReplacementMutator recombines generalized token/gap structures to produce nested element-with-attribute markup (e.g. `<l n=\"\"><b ...>`) that makes the parser create a childless XML_ATTRIBUTE_NODE; cmplog's mutations stay in DOCTYPE territory and never enter the attribute-node loop.",
+        "one_line": "Grimoire splices element-attribute markup producing childless attribute node"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "grimoire",
+          "loser": "cmplog",
+          "technique": "grimoire_structural",
+          "axis": "grimoire_structural"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Reaching an attribute node with no children requires a well-formed XML element-with-attribute structure that grimoire's structural recombination builds and re-tries.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "grimoire>cmplog (grimoire_structural)"
+            ],
+            "what_input_feature": "A syntactically valid XML element carrying an attribute whose value parses to an XML_ATTRIBUTE_NODE with an empty (children==NULL) value, e.g. element-open + attribute-name + quoted value markup such as `<l n=\"\"><b ...>`, so the reader loop reaches xmlTextReaderReadAttributeValue on a childless attribute node.",
+            "why_winner_satisfies": "The grimoire winner seeds carry intact XML element/attribute markup produced by structural splicing \u2014 `<l n=\"\"><b ...>` appears at offset 0x10 onward, and lineage shows the leaf was built by GrimoireRecursiveReplacementMutator recombining generalised token/gap structures rather than mangling raw bytes. The branch true side is taken 25 times (avg hitcount=25) and resolved in 10/10 trials.",
+            "why_loser_doesnt": "The cmplog loser seeds are byte/token mutations of a fixed `<?xml version=\"1.0\"?> <!DOCTYPE a SYSTEM \"dtds/...` skeleton (offsets 0x10-0x40 are DOCTYPE boilerplate), so the parser stays in DOCTYPE/external-entity territory and the attribute-node loop never produces a childless XML_ATTRIBUTE_NODE: at the blocker cmplog shows T=0 F=11 and blocked 9/10 trials for 23.30h.",
+            "mechanism_attribution": "Both fuzzers share the input-to-state comparison-solving stage, so the single-technique delta is grimoire's GeneralizationStage + Grimoire structural mutators: generalising corpus bytes into token/gap templates and recursively splicing them lets grimoire synthesise the nested element-with-attribute markup that constructs a childless attribute node, which per-offset byte substitution alone (cmplog) does not assemble."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker true side requires an attribute node whose children pointer is NULL.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L2826",
+            "exact_quote": "if (reader->curnode->children == NULL)"
+          },
+          {
+            "claim": "The winning grimoire seeds contain valid XML element-with-attribute markup.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 0037c50e9826accb offset 0x10",
+            "exact_quote": "3c 6c 20 6e 3d 22 22 3e 3c 62 20 72 49 53 4f 2d   <l n=\"\"><b rISO-"
+          },
+          {
+            "claim": "The winning seed was produced by a Grimoire structural mutator.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 0037c50e9826accb",
+            "exact_quote": "mutation_op=GrimoireRecursiveReplacementMutator"
+          },
+          {
+            "claim": "The loser cmplog seeds are byte/token mutations of a fixed DOCTYPE/dtds skeleton.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 2792bedfa11bd0f7 offset 0x30",
+            "exact_quote": "61 20 53 59 53 54 45 4d 20 22 64 74 64 73 2f 31   a SYSTEM \"dtds/1"
+          },
+          {
+            "claim": "At the blocker the loser never takes the true side while the winner does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L2826",
+            "exact_quote": "d=1   L2826  T=9 F=1  T=0 F=11  if (reader->curnode->children == NULL)  <-- BLOCKER"
+          },
+          {
+            "claim": "grimoire resolves the branch in all trials while cmplog blocks in nine of ten.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+          },
+          {
+            "claim": "The single-technique delta is grimoire's generalization plus structural mutators on top of the shared cmplog/I2S stack.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire baseline relationship",
+            "exact_quote": "The single-technique delta is therefore\n`grimoire` vs `cmplog` (both have I2S; grimoire adds generalization +\nGrimoire mutators), not vs naive."
+          },
+          {
+            "claim": "Grimoire mutators splice and recurse on generalised token/gap structures, a grammar-free structural mutation.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire mutators/stages",
+            "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness whose only blocker is reaching a childless attribute node, where cmplog resolves it as often as grimoire (no grimoire advantage), would show the divergence is not driven by structural recombination."
+        },
+        "weakest_evidence_point": "The claim that cmplog stays stuck in DOCTYPE/external-entity parsing rather than the attribute loop is inferred from seed byte layout, not from a per-role trace of where cmplog inputs actually diverge in the parser.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_7294",
+      "target": "libxml2",
+      "branch_id": 7294,
+      "analysis_path": "prompts/libxml2_7294.analysis.json",
+      "file": "/src/libxml2/xmlreader.c",
+      "function": "xmlTextReaderNodeType",
+      "line": "2952",
+      "source_line": "\t    if ((reader->state == XML_TEXTREADER_END) ||",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "XML_TEXTREADER_END",
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "Grimoire's structural mutators generate well-nested element open/close documents that advance the reader into XML_TEXTREADER_END/BACKTRACK states; cmplog's byte/I2S/token mutations fail to synthesize balanced nested element structure so the end state is never reached.",
+        "one_line": "Grimoire builds balanced nested elements advancing reader to END/BACKTRACK state"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "grimoire",
+          "loser": "cmplog",
+          "technique": "grimoire_structural",
+          "axis": "grimoire_structural"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Well-formed nested-element XML that drives the reader into an END/BACKTRACK state on an element node, taking the end-element true branch.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "grimoire>cmplog (grimoire_structural)"
+            ],
+            "what_input_feature": "A structurally valid XML document with nested element open/close tags (e.g. <a><b ...></b></a>) so the reader, after descending into an element, reaches reader->state == XML_TEXTREADER_END or XML_TEXTREADER_BACKTRACK while node->type is XML_ELEMENT_NODE, hitting line 2952's true side.",
+            "why_winner_satisfies": "Grimoire winner seeds carry intact XML grammar fragments \u2014 DOCTYPE/SYSTEM declarations plus element bodies like '><a><b f=\"\"><' \u2014 produced by recursive structural splicing of generalized token/gap structures, so the reader walks far enough to enter the end/backtrack state and the branch true count is non-zero (W T=3 at L2952).",
+            "why_loser_doesnt": "Cmplog loser seeds stall in the early document prolog/parse loop; at the blocker line their true count is zero (L T=0 F=23) and they never reach an element-end state, because byte-level I2S/havoc/token mutation does not synthesize the balanced nested open/close element structure required to advance the reader to XML_TEXTREADER_END/BACKTRACK.",
+            "mechanism_attribution": "grimoire's GeneralizationStage abstracts corpus entries into <GAP>/token structures and the Grimoire structural mutators (RecursiveReplacement, RandomDelete) splice grammar-shaped fragments, generating well-nested element documents that cmplog's byte-oriented havoc+token+i2s stack cannot assemble; since the input-to-state stage is present in both fuzzers, the divergence is attributable solely to grimoire's structural mutation layer."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true side of an end-element state test on an XML_ELEMENT_NODE.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "xmlreader.c:2952",
+            "exact_quote": "if ((reader->state == XML_TEXTREADER_END) ||"
+          },
+          {
+            "claim": "Taking the true side returns the END_ELEMENT reader type, reached only after element close.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2953-2954",
+            "exact_quote": "(reader->state == XML_TEXTREADER_BACKTRACK))\n[B]  2954  \t\treturn(XML_READER_TYPE_END_ELEMENT);"
+          },
+          {
+            "claim": "The decisive pair is grimoire>cmplog with the grimoire_structural single-technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: grimoire > cmplog  [delta: grimoire_structural]"
+          },
+          {
+            "claim": "Grimoire resolves the branch in all 10 trials while cmplog blocks in all 10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "subject 40",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "Winner grimoire seeds contain nested XML element structure produced by Grimoire structural mutators.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 1 (id=4c1ded53000f2888)",
+            "exact_quote": "td\"><a><b f=\"\"><"
+          },
+          {
+            "claim": "Winner seed lineage is driven by Grimoire recursive replacement and delete mutators.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 1 mutation_op",
+            "exact_quote": "mutation_op=GrimoireRecursiveReplacementMutator,GrimoireRandomDeleteMutator,GrimoireRandomDeleteMutator"
+          },
+          {
+            "claim": "At the blocker line the winner takes the true side while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L2952",
+            "exact_quote": "d=1   L2952  T=3 F=10  T=0 F=23  if ((reader->state == XML_TEXTREADER_END) ||  <-- BLOCKER"
+          },
+          {
+            "claim": "Loser cmplog seeds are byte/token mutations of the document prolog, not nested element structure.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser Seed 1 (id=05a2233124360cc9)",
+            "exact_quote": "mutation_op=BytesExpandMutator,TokenReplace,ByteRandMutator"
+          },
+          {
+            "claim": "Both grimoire and cmplog include the I2SRandReplace stage, so I2S is not the differentiator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire baseline relationship",
+            "exact_quote": "grimoire builds on the full cmplog stack \u2014\nit includes the `CmpLogObserver`, the `TracingStage`, and the\n`I2SRandReplace` (i2s) stage \u2014 and ADDS a `GeneralizationStage` plus\nGrimoire structural mutators"
+          },
+          {
+            "claim": "Grimoire's added layer is structural generalization plus grammar-free structural mutation.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire mutators/stages",
+            "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating only on reaching an element-end/backtrack state shows cmplog resolving it as fast as grimoire, i.e. no divergence when the target requires balanced nested open/close tags rather than a single literal byte gate."
+        },
+        "weakest_evidence_point": "The claim that cmplog's stall is specifically the inability to synthesize balanced nested open/close element structure rests on seed-byte inspection, not on a counted structural metric of element nesting depth.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_8556",
+      "target": "libxml2",
+      "branch_id": 8556,
+      "analysis_path": "prompts/libxml2_8556.analysis.json",
+      "file": "/src/libxml2/xmlreader.c",
+      "function": "xmlTextReaderRead",
+      "line": "1371",
+      "source_line": "\t(reader->node->type == XML_ELEMENT_NODE) &&",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "XML_ELEMENT_NODE",
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "Grimoire's RecursiveReplacement and RandomDelete mutators splice element fragments into deeper well-formed trees (nested <a><b> with empty attribute), driving the reader into a terminal childless element traversal that exposes the true branch; cmplog's byte blobs never form nested element structure.",
+        "one_line": "Grimoire splices nested element fragments for terminal childless XML_ELEMENT_NODE traversal"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "grimoire",
+          "loser": "cmplog",
+          "technique": "grimoire_structural",
+          "axis": "grimoire_structural"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Well-formed nested XML with an empty/childless element reached via the sibling-exhausted traversal path so oldstate==ELEMENT and node->type==ELEMENT_NODE both hold",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "grimoire>cmplog (grimoire_structural)"
+            ],
+            "what_input_feature": "A structurally valid XML document with nested element nodes that, during streaming reader traversal, lands on an XML_ELEMENT_NODE having no children and no NODE_IS_EMPTY flag, while the previous state was XML_TEXTREADER_ELEMENT and node->next is NULL (sibling list exhausted). This requires the parser to build a real element tree deep enough to back-track over a terminal childless element.",
+            "why_winner_satisfies": "grimoire winner seeds carry coherent element grammar: seed 1 holds `<!DOCTYPEa SYSTE`/`td\"><a><b f=\"\"><` (nested <a><b> elements with an empty attribute), so the reader walks into element children and exhausts siblings, driving the true branch at L1371 \u2014 its hitcount on the branch is 4 vs the loser's 0, and DIVERGENT BRANCHES shows W reaches L1371 T=2 while L is T=0.",
+            "why_loser_doesnt": "cmplog loser seeds are byte-mangled length-prefixed blobs (`06 00 00 00 31 32 37 37 37 32 .xml`) that never assemble the nested element structure; at the blocker line L records T=0 F=14, meaning the reader repeatedly evaluates the predicate but node->type is never XML_ELEMENT_NODE on that traversal path, so the true side stays unvisited across all 10 trials.",
+            "mechanism_attribution": "grimoire's GeneralizationStage plus Grimoire structural mutators (GrimoireRecursiveReplacementMutator, GrimoireRandomDeleteMutator) splice and recurse on generalized token/gap structures, so grimoire can recombine whole element fragments into deeper well-formed trees. cmplog has the same I2S stage but only byte-level havoc/token mutation, so it cannot synthesize the nested element nesting; the divergence is the grimoire-structural delta, not I2S."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the node->type == XML_ELEMENT_NODE conjunct of a guard whose enclosing condition also requires oldstate==XML_TEXTREADER_ELEMENT, no children, and NODE_IS_EMPTY clear.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1370-1373",
+            "exact_quote": "if ((oldstate == XML_TEXTREADER_ELEMENT) &&\n[B]  1371  \t(reader->node->type == XML_ELEMENT_NODE) && <-- BLOCKER"
+          },
+          {
+            "claim": "The winning grimoire seed contains nested element structure with an empty attribute element.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 4c1ded53000f2888, offsets 0x30-0x3f",
+            "exact_quote": "td\"><a><b f=\"\"><"
+          },
+          {
+            "claim": "The winner takes the true branch (hitcount 4) while the loser never does (hitcount 0).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 avg hitcount",
+            "exact_quote": "avg hitcount on branch: winner=4  loser=0"
+          },
+          {
+            "claim": "At the blocker line the winner reaches the true side while the loser stays entirely on the false side.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1371",
+            "exact_quote": "L1371  T=2 F=0  T=0 F=14  (reader->node->type == XML_ELEMENT_NODE) &&  <-- BLOCKER"
+          },
+          {
+            "claim": "The loser seeds are length-prefixed byte blobs rather than coherent nested XML.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 2792bedfa11bd0f7, offsets 0x00-0x0f",
+            "exact_quote": "06 00 00 00 31 32 37 37 37 32 2e 78 6d 6c 5c 0a"
+          },
+          {
+            "claim": "grimoire's structural mutators recombine generalized token/gap structures, a capability cmplog lacks despite both having I2S.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire Mutators/stages",
+            "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+          },
+          {
+            "claim": "The single-technique delta between grimoire and cmplog is generalization plus Grimoire mutators, not I2S, since both run I2S.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire Baseline relationship",
+            "exact_quote": "The single-technique delta is therefore\n`grimoire` vs `cmplog` (both have I2S; grimoire adds generalization +\nGrimoire mutators), not vs naive."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "If cmplog (havoc + I2S only, no structural recombination) resolves this branch at a comparable rate to grimoire on a synthetic harness requiring nested-element traversal, the grimoire-structural attribution is wrong and the gate is reachable by byte-level mutation alone."
+        },
+        "weakest_evidence_point": "I infer the loser never assembles nested elements from its mangled byte layout, but I did not directly confirm via lineage that grimoire's structural mutators (rather than its co-resident I2S stage) are what produce the winning nested structure.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libxml2_8567",
+      "target": "libxml2",
+      "branch_id": 8567,
+      "analysis_path": "prompts/libxml2_8567.analysis.json",
+      "file": "/src/libxml2/xmlreader.c",
+      "function": "xmlTextReaderRead",
+      "line": "1505",
+      "source_line": "            ((reader->state != XML_TEXTREADER_END) &&",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "XML_TEXTREADER_END",
+        "operand_width_bytes": null,
+        "byte_signature": "unclear",
+        "mechanism_summary": "Grimoire builds empty-element-followed-by-sibling XML trees (e.g. nested `<a><b f=\"\"><`) driving reader->state to XML_TEXTREADER_END, taking the false side; cmplog's byte mutations produce degenerate text-expansion paths where state is never END.",
+        "one_line": "Grimoire constructs empty-element-with-sibling tree driving reader to END state"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "grimoire",
+          "loser": "cmplog",
+          "technique": "grimoire_structural",
+          "axis": "grimoire_structural"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "XML with an empty element having a following sibling, so the reader reaches XML_TEXTREADER_END state and takes the false branch",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "grimoire>cmplog (grimoire_structural)"
+            ],
+            "what_input_feature": "A well-formed XML document containing an empty/childless element node that is immediately followed by a sibling node (or is itself empty), so that xmlTextReaderRead sets reader->state = XML_TEXTREADER_END (lines 1335 or 1374) before reaching the blocker at 1505; the false side of (reader->state != XML_TEXTREADER_END) is taken only when state == XML_TEXTREADER_END.",
+            "why_winner_satisfies": "grimoire-discovered winner seeds carry valid structural XML (e.g. Seed 1: '<?l ?><!DOCTYPEa SYSTEM \"dtds/127772.dtd\"><a><b f=\"\"><' with nested elements). grimoire's GeneralizationStage + Grimoire structural mutators splice generalised token/gap structures, building nested element shapes that drive the reader into the END-state arms; the W-only lines 1335/1374 (reader->state = XML_TEXTREADER_END) are hit only on winner runs, and the blocker false side shows L1505 F=3 for W vs F=0 for L.",
+            "why_loser_doesnt": "cmplog seeds remain in a degenerate parse (e.g. Seed 1 'wwwwwwwwwwwwml\\' run of 'w' bytes prefixing the XML) that exercises the text/CDATA expansion path (L-only lines 1437-1439, xmlTextReaderExpand) instead of the empty-element-with-sibling arms; reader->state never becomes XML_TEXTREADER_END so the blocker's false side is never taken (L1505 T=26 F=0). cmplog's byte-level I2S substitution cannot synthesize the nested element-with-sibling tree structure that grimoire's structural recombination produces.",
+            "mechanism_attribution": "grimoire structural: grimoire builds on the full cmplog/I2S stack and ADDS a GeneralizationStage plus Grimoire structural mutators (GrimoireRecursiveReplacementMutator, GrimoireRandomDeleteMutator, etc.) that splice generalised token/gap structures grammar-free. This structural recombination, absent from plain cmplog, assembles the empty-element-followed-by-sibling tree shape that drives the reader to XML_TEXTREADER_END; the single-technique delta over cmplog is precisely generalization + Grimoire mutators."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The decisive pair is grimoire>cmplog with delta grimoire_structural and prob_div 1.00.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: grimoire > cmplog  [delta: grimoire_structural]"
+          },
+          {
+            "claim": "The blocker's false branch is taken only when reader->state equals XML_TEXTREADER_END.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1505",
+            "exact_quote": "((reader->state != XML_TEXTREADER_END) && <-- BLOCKER"
+          },
+          {
+            "claim": "The state is set to XML_TEXTREADER_END only on winner-resolving (W) source lines, in the empty-element-with-sibling arm.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1335",
+            "exact_quote": "[W]  1335  \t    reader->state = XML_TEXTREADER_END;"
+          },
+          {
+            "claim": "A second W-only END-state arm fires for an empty element node with no children.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1374",
+            "exact_quote": "[W]  1374  \treader->state = XML_TEXTREADER_END;"
+          },
+          {
+            "claim": "Winner grimoire seeds carry well-formed nested XML element structure.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed_id 4c1ded53000f2888",
+            "exact_quote": "td\"><a><b f=\"\"><"
+          },
+          {
+            "claim": "Loser cmplog seeds carry a degenerate 'w'-byte run prefixing the XML and never take the blocker false side (L1505 F=0 for L).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1505",
+            "exact_quote": "L1505  T=10 F=3  T=26 F=0  ((reader->state != XML_TEXTREADER_END) &&  <-- BLOCKER"
+          },
+          {
+            "claim": "Loser-blocking seeds instead exercise the text/CDATA expansion path that is loser-only.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1437",
+            "exact_quote": "[L]  1437              if (xmlTextReaderExpand(reader) == NULL)"
+          },
+          {
+            "claim": "grimoire adds a GeneralizationStage plus Grimoire structural mutators on top of the full cmplog/I2S stack, which is the single-technique delta.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire",
+            "exact_quote": "it includes the `CmpLogObserver`, the `TracingStage`, and the\n`I2SRandReplace` (i2s) stage \u2014 and ADDS a `GeneralizationStage` plus\nGrimoire structural mutators"
+          },
+          {
+            "claim": "The Grimoire mutators splice and recurse on generalised token/gap structures via string-based grammar-free structural mutation.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire",
+            "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "If a synthetic harness gating on reader->state == XML_TEXTREADER_END (an empty element followed by a sibling) were resolved by plain cmplog as fast as by grimoire, with no advantage from structural recombination, the grimoire-structural attribution would be refuted."
+        },
+        "weakest_evidence_point": "The claim that grimoire's structural recombination specifically builds the empty-element-with-sibling tree (rather than just producing more valid XML by chance) is inferred from seed structure and source, not directly traced through lineage.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

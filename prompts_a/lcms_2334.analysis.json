@@ -1,0 +1,69 @@
+{
+  "branch_id": 2334,
+  "target": "lcms",
+  "summary_one_line": "An ICC profile whose tag-table directs the parser to a valid tag-type-base offset so the 8-byte type-base read returns 1 record.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A well-formed ICC profile whose header signature bytes and tag-directory offsets steer cmsReadTag to a real tag, so _cmsReadTypeBase's io->Read of sizeof(_cmsTagBase) (8 bytes) actually returns 1 record and the read condition is exercised (taking the globally-blocked true side at least once, then proceeding to return a non-zero type base). The required bytes are the profile signature/colorspace fields around offsets 0x0c-0x13 plus the 'acsp' magic region near 0x24-0x2f that gate the parser path into the tag-reading loop.",
+      "why_winner_satisfies": "The vpc winner seed carries a structurally distinct profile signature region (offset 0x0c-0x13 = 'link8CLR', e.g. link device class with CLR colorspace) and 0x29=0x10, 0x2f=0x20 — byte patterns that route the parser to a tag whose type-base read succeeds. Its lineage chain contains an I2S-floor dash row, evidence the discriminating signature bytes were substituted by I2SRandReplace from logged CMP operands rather than stumbled on by havoc; the branch is reached and resolved (T=1 F=1 at L444 in the W column).",
+      "why_loser_doesnt": "The value_profile loser seeds all carry 'mntrRGB ' at 0x0c-0x13 and 'acspAPPL' with 0x29=0x50 / 0x2f=0x00, a header variant that never drives the parser past the gating checks to a tag whose type-base read returns 1 — at L444 the W column shows T=1 F=1 (reached and resolved) while the L column shows T=0 F=69, i.e. the loser only ever takes the false (failure) side, never resolving.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile's CMP_MAP feedback. I2SRandReplace splices logged comparison operands (the expected profile signature / tag-type literals compared inside the lcms parser) directly into the matching input-byte positions, manufacturing the exact signature/offset bytes that let the tag-table walk reach a readable type base. value_profile has only the CMP_MAP Hamming/prefix gradient and havoc/token mutators (no I2SRandReplace), so it cannot place the multi-byte literal exactly and stays blocked."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the type-base read condition reading sizeof(_cmsTagBase) and the globally-blocked side is the true branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsplugin.c:444",
+      "exact_quote": "if (io -> Read(io, &Base, sizeof(_cmsTagBase), 1) != 1)"
+    },
+    {
+      "claim": "Only the winner reaches and resolves the blocker at L444; the loser only takes the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L444",
+      "exact_quote": "d=1   L 444  T=1 F=1  T=0 F=69  if (io -> Read(io, &Base, sizeof(_cmsTagBase), 1) != 1)  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner and loser differ in the profile signature/colorspace bytes at offsets 0x0c-0x13.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x13",
+      "exact_quote": "0x000c  6c(l)x1                             6d(m)x10                            DIFFER"
+    },
+    {
+      "claim": "The winner header region near the acsp magic differs from the loser at offsets 0x29 and 0x2f.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x29",
+      "exact_quote": "0x0029  10(.)x1                             50(P)x10                            DIFFER"
+    },
+    {
+      "claim": "The winning seed was produced by value_profile_cmplog, the loser seeds by value_profile.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 719bcc3dfe724b4f vs 0313315f3b972394",
+      "exact_quote": "fuzzer=value_profile_cmplog, trial=1, discovered_at=5791s"
+    },
+    {
+      "claim": "value_profile_cmplog includes the I2SRandReplace mutator while value_profile does not.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace, only havoc and token mutators plus CMP_MAP feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2334 --role W --fuzzer value_profile_cmplog --trial 1 --seed 719bcc3dfe724b4f`; the chain has 15 ancestor levels and the tool reports 'I2S-floor signal: 1 ancestor dash row(s) at depth 14' (ancestor 5441efb6193a1a03, mutation_op = -), the ParentInfo-only floor signal of an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where value_profile (no I2SRandReplace) resolves the type-base read at the same rate as value_profile_cmplog, showing the CMP_MAP gradient alone suffices and the I2S literal substitution is not the cause of divergence."
+  },
+  "weakest_evidence_point": "Which specific multi-byte literal I2SRandReplace substituted (profile signature vs a downstream tag-type signature) is inferred from the byte-diff offsets and call chain, not directly observed in the spliced bytes.",
+  "confidence": "medium"
+}

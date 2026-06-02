@@ -1,0 +1,69 @@
+{
+  "branch_id": 2093,
+  "target": "lcms",
+  "summary_one_line": "Profile must encode colorspace FOURCC 'XYZ ' at offset 0x14 and 'Lab ' at 0x10, so a==cmsSigXYZData && b==cmsSigLabData.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The 4-byte colorspace signature at input offset 0x14 must be the FOURCC 'XYZ ' (58 59 5a 20) while the PCS/colorspace field at 0x10 reads 'Lab ' (4c 61 62 20), so the two compared colorspace signatures equal cmsSigXYZData and cmsSigLabData respectively, satisfying the compound equality gate at line 502.",
+      "why_winner_satisfies": "Winner-resolving seeds carry the literal FOURCC bytes that make a==cmsSigXYZData && b==cmsSigLabData; the per-role overlay shows the true side of line 502 taken 20 times in W (T=20) and the on-branch hitcount is 121-187, whereas loser seeds never take it.",
+      "why_loser_doesnt": "Loser-blocking seeds carry 'RGB ' (52 47 42 20) at 0x10 and 'XYZ ' (58 59 5a 20) at 0x14 in the opposite slots, so a==cmsSigRGBData not cmsSigXYZData; line 502's true side is never taken (T=0) and the branch stays blocked 24h.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace intercepts the integer/string CMP comparing the parsed colorspace signature against the literals cmsSigXYZData and cmsSigLabData, logs the constant operand, finds the seed bytes matching the other operand, and substitutes the exact 4-byte FOURCC into the input — naive and value_profile lack I2SRandReplace and must hit the exact 4-byte literal by chance, so they stay blocked all 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a compound equality gate requiring a==cmsSigXYZData and b==cmsSigLabData.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmscnvrt.c:502:9",
+      "exact_quote": "if ((a == cmsSigXYZData) && (b == cmsSigLabData)) return TRUE;"
+    },
+    {
+      "claim": "Winner seeds encode 'XYZ' at offset 0x14-0x16 while loser seeds encode 'XYZ' there only as part of the RGB-in-PCS arrangement.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x14-0x16",
+      "exact_quote": "0x0014  4c(L)x20                            58(X)x20                            DIFFER"
+    },
+    {
+      "claim": "Winner seed bytes at offset 0x10 spell 'XYZ Lab' (the XYZ/Lab interchangeable colorspaces).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0b8368b936d0cbb9 offset 0x0010",
+      "exact_quote": "XYZ Lab "
+    },
+    {
+      "claim": "Loser seed bytes at offset 0x10 spell 'RGB XYZ', placing RGB (not XYZ) as the colorspace compared at the gate.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0313315f3b972394 offset 0x0010",
+      "exact_quote": "RGB XYZ "
+    },
+    {
+      "claim": "The winner takes the true side of line 502 (T=20) while the loser never does (T=0), confirming the loser lacks the required signatures.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L 502",
+      "exact_quote": "d=1   L 502  T=20 F=0  T=0 F=0"
+    },
+    {
+      "claim": "cmplog and vpc add I2SRandReplace, which scans the input for an operand match and substitutes the other CMP operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive and value_profile have no I2SRandReplace mutator.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2093 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0b8368b936d0cbb9` and observed one I2S-floor dash row (mutation_op = -) at depth 14 of the 15-level ancestor chain; the tool's trailing 'I2S-floor signal: 1 ancestor dash row(s) at depth 14' line confirms an unwrapped I2SRandReplace find in the winner's lineage."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on the 4-byte 'XYZ '/'Lab ' FOURCC equality in which naive/value_profile resolve the gate as fast as cmplog/vpc (no I2S advantage), which would mean the literal-substitution mechanism is not what separates winners from losers."
+  },
+  "weakest_evidence_point": "The exact byte-to-signature mapping (offset 0x10 = PCS 'Lab ', offset 0x14 = colorspace 'XYZ ') is inferred from the ICC header layout and the byte diff rather than from instrumented source dataflow tracing the parsed fields back to those offsets.",
+  "confidence": "high"
+}

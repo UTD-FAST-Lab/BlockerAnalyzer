@@ -1,0 +1,75 @@
+{
+  "branch_id": 6383,
+  "target": "libxml2",
+  "summary_one_line": "Input must drive an entity-reference name whose first byte is 'a' (e.g. &amp; / &apos;) into xmlGetPredefinedEntity's switch.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A parsed entity-reference name (passed as `name` to xmlGetPredefinedEntity) whose first byte name[0] equals 'a' (0x61), so the switch(name[0]) selects `case 'a':`; concretely the predefined entity names &amp; or &apos; reaching the function via xmlSAX2GetEntity.",
+      "why_winner_satisfies": "The cmplog winner repeatedly reaches and resolves the 'a'-case: it takes the true side 63 times (W T=63 F=0 at line 307) and the enclosing function shows hitcount 130 on the branch for the winner, indicating the entity-name dispatch lands on 'a' and exercises the amp/apos xmlStrEqual comparisons (lines 308/310 hit only on the W side).",
+      "why_loser_doesnt": "The naive loser never selects `case 'a':` (L T=0 F=479 at line 307); every one of its 479 invocations falls through to `default:` (L T=479 F=0 at line 317), so name[0] is never 'a' and the amp/apos comparison lines 308/310 are never reached (T=0 F=0 for the loser).",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer, which captures the operands of the switch dispatch on name[0] and the xmlStrEqual(name, \"amp\"/\"apos\") string comparisons, then substitutes the logged constant operand ('a', \"amp\", \"apos\") into the input bytes at the offsets where the current name appears, manufacturing entity names that route through `case 'a':`; naive has only blind havoc/token mutation and no CMP introspection, so it must stumble onto the exact first byte by chance and almost never does."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the `case 'a':` arm of a switch on name[0] in xmlGetPredefinedEntity, whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "entities.c:307:9",
+      "exact_quote": "Source line:         case 'a':"
+    },
+    {
+      "claim": "The dispatch is a switch on the first byte of the entity name.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "entities.c:298",
+      "exact_quote": "switch (name[0]) {"
+    },
+    {
+      "claim": "Taking case 'a' leads to the amp/apos predefined-entity string comparisons.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "entities.c:308,310",
+      "exact_quote": "if (xmlStrEqual(name, BAD_CAST \"amp\"))"
+    },
+    {
+      "claim": "The winner takes the 'a' case 63 times while the loser never does, falling through to default on all 479 calls.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 307 and 317",
+      "exact_quote": "d=1   L 307  T=63 F=0  T=0 F=479  case 'a':  <-- BLOCKER"
+    },
+    {
+      "claim": "The loser routes every invocation to the default arm, confirming name[0] is never 'a' for the loser.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 line 317",
+      "exact_quote": "d=1   L 317  T=0 F=63  T=479 F=0  default:"
+    },
+    {
+      "claim": "The winner hits the branch far more often than the loser (130 vs 3).",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "subject 31 hitcount",
+      "exact_quote": "avg hitcount on branch: winner=130  loser=3"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand into the input at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has no I2S; only blind havoc/token mutation.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 6383 --role W --fuzzer cmplog --trial 3 --seed fdfc3a57ef078849` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 17 and 18 in the 19-level ancestor chain; tool printed 'I2S-floor signal: 2 ancestor dash row(s) at depth 17, 18.'"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with switch(name[0]){case 'a': ...} gated behind an entity-name string comparison would be refuted if naive resolves `case 'a':` as often as cmplog (no significant cmplog>naive divergence), showing the first-byte/string dispatch is not what I2S substitution is solving."
+  },
+  "weakest_evidence_point": "The byte-diff section shows broad whole-prefix divergence rather than a clean concentrated 'amp'/'apos' substring at a single offset, so the exact input offset where I2S writes the 'a'/amp/apos operand is inferred from source dispatch rather than read directly from the diff.",
+  "confidence": "medium"
+}

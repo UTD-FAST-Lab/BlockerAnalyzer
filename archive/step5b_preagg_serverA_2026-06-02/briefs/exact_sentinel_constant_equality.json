@@ -1,0 +1,224 @@
+{
+  "feature_id": "exact_sentinel_constant_equality",
+  "mechanism_family": "I2S_pro",
+  "mechanism_label": "exact_sentinel_constant_equality",
+  "definition": "I2S logs a wide sentinel constant (UINT64_MAX / kUnknownSize) from an integer equality CMP and substitutes it directly into the matching input bytes, satisfying a gate that VP's distance metric cannot synthesize.",
+  "n_members": 2,
+  "involved_fuzzers": [
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "bloaty_7",
+      "target": "bloaty",
+      "branch_id": 7,
+      "analysis_path": "prompts/bloaty_7.analysis.json",
+      "file": "/src/bloaty/src/bloaty.cc",
+      "function": "bloaty::RangeSink::IsVerboseForVMRange(unsigned long, unsigned long)",
+      "line": "1103",
+      "source_line": "  if (vmsize == RangeMap::kUnknownSize) {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "kUnknownSize (UINT64_MAX)",
+        "operand_width_bytes": 8,
+        "byte_signature": "contiguous_literal",
+        "mechanism_summary": "I2S logs the kUnknownSize (UINT64_MAX) operand from the equality CMP and substitutes the all-ones 8-byte pattern into the parsed size field; value_profile's distance metric cannot synthesize that exact constant.",
+        "one_line": "I2S substitutes UINT64_MAX sentinel into the size field to satisfy the equality gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input must produce a vmsize field equal to the kUnknownSize sentinel (UINT64_MAX) to take the true branch.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "An input that drives the vmsize argument of IsVerboseForVMRange to exactly RangeMap::kUnknownSize (the all-ones UINT64_MAX sentinel), i.e. a parsed 8-byte size field set to 0xFFFFFFFFFFFFFFFF rather than any concrete range length.",
+            "why_winner_satisfies": "value_profile_cmplog resolves the branch in 10/10 trials, taking the true side (W: T=70 F=0 at L1103) and reaching the sentinel-only code at L1104-1105; its seeds carry concentrated 0xff bytes (e.g. offset 0x34 ff x6) inside the parsed header region, exactly the byte value the kUnknownSize equality wants substituted.",
+            "why_loser_doesnt": "value_profile blocks the branch in 10/10 trials, always taking the false side (L: T=0 F=2170 at L1103) and never executing the sentinel rewrite at L1104; lacking I2SRandReplace it cannot place the exact 8-byte UINT64_MAX sentinel into the size field, so the equality never holds.",
+            "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace to value_profile's stack; I2S logs the runtime CMP operand kUnknownSize (UINT64_MAX) and substitutes it directly into the matching input bytes, satisfying the exact-equality gate. value_profile's CMP_MAP only buckets operand distance and cannot synthesize the all-ones constant, so it stalls at the false side."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is an exact-equality comparison of vmsize against the kUnknownSize sentinel constant.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L1103",
+            "exact_quote": "if (vmsize == RangeMap::kUnknownSize) {"
+          },
+          {
+            "claim": "The winning side (true branch) leads to the sentinel-only rewrite vmsize = UINT64_MAX - vmaddr at L1104, confirming the constant is the all-ones sentinel.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L1104",
+            "exact_quote": "vmsize = UINT64_MAX - vmaddr;"
+          },
+          {
+            "claim": "value_profile_cmplog is the decisive winner resolving in 10/10 trials while value_profile is the loser blocked in 10/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+          },
+          {
+            "claim": "The loser value_profile never reaches the true side and is blocked across all trials.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+          },
+          {
+            "claim": "At the blocker line the winner takes the true side and the loser only ever takes the false side.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L1103",
+            "exact_quote": "L1103  T=70 F=0  T=0 F=2170  if (vmsize == RangeMap::kUnknownSize) {"
+          },
+          {
+            "claim": "Winner seeds carry concentrated 0xff bytes in the parsed header region, the value the sentinel equality demands.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x34",
+            "exact_quote": "0x0034  ff(.)x6 80(.)x4"
+          },
+          {
+            "claim": "Only value_profile_cmplog carries I2SRandReplace; value_profile explicitly lacks it.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog Mutators",
+            "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+          },
+          {
+            "claim": "value_profile has no I2SRandReplace and only buckets CMP operand distance, not exact constants.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with an exact 8-byte equality gate against UINT64_MAX in which value_profile resolves the gate as often as value_profile_cmplog, showing CMP_MAP distance feedback alone suffices and I2S substitution is not the decisive factor."
+        },
+        "weakest_evidence_point": "Lineage could not confirm an I2S-floor row in any winning seed chain (all-havoc within the 50-level cap), so the I2SRandReplace attribution rests on the exact-equality CMP shape plus the vpc-vs-vp technique delta rather than direct mutator-chain evidence.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "bloaty_143",
+      "target": "bloaty",
+      "branch_id": 143,
+      "analysis_path": "prompts/bloaty_143.analysis.json",
+      "file": "/src/bloaty/src/range_map.cc",
+      "function": "bloaty::RangeMap::AddRangeWithTranslation(unsigned long, unsigned long, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, bloaty::RangeMap const&, bool, bloaty::RangeMap*)",
+      "line": "260",
+      "source_line": "  if (size == kUnknownSize) {",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "kUnknownSize sentinel",
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2S logs the kUnknownSize sentinel constant from the size equality CMP and splices it into the input bytes that flow to the size field, directly satisfying the equality that value_profile's distance feedback only approximates.",
+        "one_line": "I2S splices kUnknownSize sentinel into the size field to satisfy equality check"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A parsed input (Mach-O object) that drives AddRangeWithTranslation with a size operand equal to the kUnknownSize sentinel.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A well-formed enough object file whose parser produces an AddRangeWithTranslation call where the size argument equals the kUnknownSize sentinel, so the True branch at range_map.cc:260 is taken. The winning seeds carry the Mach-O 64-bit magic ce fa ed fe at offset 0x00-0x03 and a structured header body, whereas the path that sets size==kUnknownSize requires the parser to advance deep enough to emit an unknown-sized range.",
+            "why_winner_satisfies": "Every winner seed begins with the Mach-O magic ce fa ed fe and shares an identical stable header (offsets 0x00-0x20 fixed across all 10 winners). These inputs drive 22887 hits on the branch and 140 invocations of AddFileRangeForVMAddr, reaching the True side (W: T=70 F=200 at L260) and resolving in 10/10 trials.",
+            "why_loser_doesnt": "Loser seeds carry the WASM magic 00 61 73 6d (\\0asm) and are short (17-59 bytes); they reach AddRangeWithTranslation only on the False side (L: T=0 F=366 at L260) and never produce a size==kUnknownSize range, blocking the True branch in 10/10 trials with hitcount 0.",
+            "mechanism_attribution": "The two fuzzers differ by exactly I2SRandReplace: value_profile_cmplog adds the cmplog input-to-state stage on top of the same comparison feedback value_profile already has. When the parser compares the running size against the kUnknownSize sentinel (a fixed wide constant), the cmplog CMP buffer logs that constant and I2SRandReplace can splice it into the input bytes that flow to the size field, directly synthesizing the equality value_profile's distance feedback only nudges toward. This is I2S comparison-solving on a magic-constant equality gate."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked branch is the True side of an equality comparison against the kUnknownSize sentinel.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "range_map.cc:260",
+            "exact_quote": "Source line:   if (size == kUnknownSize) {"
+          },
+          {
+            "claim": "The globally blocked side is the True branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "range_map.cc:260:7",
+            "exact_quote": "Globally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "Winner seeds carry the Mach-O magic ce fa ed fe at offsets 0x00-0x03, fixed across all 10 winners.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offsets 0x0000-0x0003",
+            "exact_quote": "0x0000  ce(.)x10                            00(.)x10                            DIFFER"
+          },
+          {
+            "claim": "Loser seeds carry the WASM magic 00 61 73 6d at the start.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "loser seed 001b86721a62221a",
+            "exact_quote": "0000: 00 61 73 6d 00 e8 e9 2d 00 25 20 00 fe ff ff ff   .asm...-.% ....."
+          },
+          {
+            "claim": "Winner resolves 10/10 with 22887 branch hits while loser blocks 10/10 with hitcount 0.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "avg hitcount on branch: winner=22887  loser=0"
+          },
+          {
+            "claim": "At the blocker line the winner takes the True side (T=70) while the loser never does (T=0).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L260",
+            "exact_quote": "L 260  T=70 F=200  T=0 F=366  if (size == kUnknownSize) {  <-- BLOCKER"
+          },
+          {
+            "claim": "value_profile_cmplog adds I2SRandReplace on top of the shared CMP machinery, which value_profile lacks.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "value_profile_cmplog's mutator stack includes I2SRandReplace.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile_cmplog mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with an equality gate against a wide sentinel constant in which value_profile resolves the gate as often as value_profile_cmplog (no I2S advantage), showing the divergence is not driven by input-to-state substitution of the constant."
+        },
+        "weakest_evidence_point": "The lineage floor query found no dash rows in any winning seed, so the I2S attribution rests on the technique delta and source CMP shape rather than direct confirmation that I2SRandReplace produced these seeds.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

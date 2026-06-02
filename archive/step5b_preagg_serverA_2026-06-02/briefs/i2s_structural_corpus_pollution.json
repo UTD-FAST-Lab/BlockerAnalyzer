@@ -1,0 +1,151 @@
+{
+  "feature_id": "i2s_structural_corpus_pollution",
+  "mechanism_family": "I2S_anti",
+  "mechanism_label": "i2s_structural_corpus_pollution",
+  "definition": "I2S excels at solving upstream structural CMP roadblocks (length, CRC, magic), inflating the corpus with large deeply-decoded valid inputs; the target bytes receive no random mutation because the corpus is dominated by structurally-complex images rather than short inputs that probe the target condition.",
+  "n_members": 1,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog"
+    ],
+    "lacks_axis": [
+      "naive"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libpng_4002",
+      "target": "libpng",
+      "branch_id": 4002,
+      "analysis_path": "prompts/libpng_4002.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_bKGD",
+      "line": "2018",
+      "source_line": "         if (buf[0] != 0 || buf[2] != 0 || buf[4] != 0)",
+      "signature": {
+        "gate_structure": "inequality_or_range",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0",
+        "operand_width_bytes": 1,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2S clears structural CMP roadblocks (length, CRC, magic) and drives the corpus toward large valid images deep in IDAT decoding, starving bKGD chunk bytes of random mutation; naive keeps inputs small and blindly randomizes chunk bytes, eventually flipping a high background byte non-zero.",
+        "one_line": "Non-zero high background bytes; I2S drags corpus to valid IDAT-heavy inputs"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "naive",
+          "loser": "cmplog",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A short PNG whose color-type bKGD chunk carries a non-zero high byte in buf[0], buf[2] or buf[4]",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "naive>cmplog (I2S)"
+            ],
+            "what_input_feature": "A truecolor (RGB) bKGD chunk reached with bit_depth<=8 and at least one of the high-order background bytes buf[0], buf[2] or buf[4] non-zero, so that the line-2018 disjunction takes its TRUE side ('invalid color').",
+            "why_winner_satisfies": "naive produces short inputs (375-793 bytes) that error out of image decoding early and re-enter the bKGD path repeatedly while havoc randomizes the chunk payload bytes; it reaches L2018 with T=13 F=1, i.e. it lucky-hits a non-zero buf[0]/buf[2]/buf[4] many times.",
+            "why_loser_doesnt": "cmplog produces large, structurally-valid inputs (8360-8771 bytes) that pass the length/CRC roadblocks and sink execution into IDAT row decoding; at L2018 it is stuck at T=0 F=19, always seeing all-zero background bytes and never flipping a high byte non-zero.",
+            "mechanism_attribution": "This is an I2S-anti branch where the I2S fuzzer LOSES. cmplog's comparison-solving substitution clears the structural integer-CMP roadblocks (length, CRC, magic) and drives the corpus toward big valid images deep in IDAT decoding, starving the bKGD color bytes of random mutation. naive's plain havoc byte/word mutation, having no CMP introspection to chase, keeps inputs small and blindly randomizes the chunk bytes, so it lucky-flips a high background byte non-zero. The winning technique is havoc-only mutation, not any CMP-solving."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The decisive pair is naive (winner) over cmplog (loser) on the I2S technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: naive > cmplog  [delta: I2S]"
+          },
+          {
+            "claim": "The blocked TRUE side requires buf[0], buf[2] or buf[4] to be non-zero.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngrutil.c:2018",
+            "exact_quote": "if (buf[0] != 0 || buf[2] != 0 || buf[4] != 0)"
+          },
+          {
+            "claim": "The TRUE (blocked) side is the globally blocked side at this branch.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "Globally blocked side",
+            "exact_quote": "Globally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "naive resolves the branch nearly always while cmplog never resolves it.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "naive vs cmplog rows",
+            "exact_quote": "naive                            9        1          0  winner (I2S vs cmplog)"
+          },
+          {
+            "claim": "cmplog is blocked in all ten trials.",
+            "cited_section": "TRIAL VECTOR",
+            "cited_locator": "cmplog row",
+            "exact_quote": "cmplog                           0       10          0  loser (I2S vs naive)"
+          },
+          {
+            "claim": "On the call chain, naive takes the TRUE side many times (T=13) while cmplog never does (T=0).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L2018",
+            "exact_quote": "d=1   L2018  T=13 F=1  T=0 F=19  if (buf[0] != 0 || buf[2] != 0 || buf[4] != 0)"
+          },
+          {
+            "claim": "cmplog (L) spends thousands of invocations in IDAT row-decoding functions that naive (W) never enters.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "png_read_finish_row / png_read_IDAT_data",
+            "exact_quote": "0      3960  OSS_FUZZ_png_read_finish_row"
+          },
+          {
+            "claim": "Winner naive seeds are small (e.g. 375 bytes).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner-resolving Seed 5",
+            "exact_quote": "size=375 bytes, fuzzer=naive"
+          },
+          {
+            "claim": "Loser cmplog seeds are large (e.g. 8759 bytes).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Loser-blocking Seed 1",
+            "exact_quote": "size=8759 bytes, fuzzer=cmplog"
+          },
+          {
+            "claim": "naive's winning mutation_op chains are pure havoc byte/word mutators with no I2S.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner-resolving Seed 1 mutation_op",
+            "exact_quote": "mutation_op=ByteAddMutator,WordAddMutator,CrossoverReplaceMutator,ByteNegMutator,BytesExpandMutator,BytesRandSetMutator"
+          },
+          {
+            "claim": "naive has no I2S mutator; its mutation set is havoc + token only.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "cmplog's I2SRandReplace substitutes logged CMP operands at matching input offsets, which solves structural roadblocks.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with a non-zero-color gate behind a bKGD-style chunk in which cmplog resolves the gate as fast as or faster than naive, i.e. I2S substitution reaching the color bytes rather than only the structural roadblocks."
+        },
+        "weakest_evidence_point": "The byte-diff section shows only diffuse PARTIAL differences in the IHDR/gAMA/sRGB header region, not at the actual bKGD color bytes, so the precise dataflow offset of the winning non-zero byte is inferred from execution-depth and file-size divergence rather than read directly off the seed bytes.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "branch_id": 6483,
+  "target": "libxml2",
+  "summary_one_line": "A long-prefix QName (len>=XML_MAX_NAMELEN) terminated so the huge-name copy loop at 3013 exits via its false side after a colon",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "An XML element/attribute QName whose prefix exceeds XML_MAX_NAMELEN so the dynamic-buffer copy loop at parser.c:3013 is entered, and which is terminated (by 0 or ':') so the loop takes its false exit rather than spinning forever on more name bytes; this is reached only through deep, well-formed enough SAX element/attribute parsing (entity refs, references, attribute processing).",
+      "why_winner_satisfies": "naive_ctx seeds carry a recognizable XML skeleton (`\\n<ml v...`, `<?xml version=`, `<ISO-10646-UCS-2`) and runs of repeated bytes (0xc0, 0xb2, 0xb5, 'x') that form an oversized name; the winner's hit-count profile shows it drives the deeper parser states the false-exit path requires (xmlParseEntityRef W=72 vs L=0, xmlParseReference W=54 vs L=0), and the blocker's false side is actually taken in the W role (L3013 F=36/F=6 with buffer present).",
+      "why_loser_doesnt": "naive seeds are dominated by '.' fill (0x2e) and a `\\n<Rxul...` skeleton that never builds an oversized terminated prefix and never reaches the entity/reference parsing depth (xmlParseEntityRef/xmlParseReference L hits = 0); the loser blocks the false side because the surrounding parse states are never explored, not because of any single comparand byte.",
+      "mechanism_attribution": "Both fuzzers share the identical havoc+token mutator stack with no I2S and no CMP_MAP, so the divergence is not comparison-solving. naive_ctx's CtxHook folds the caller call-context hash into the edge-map index, so an edge inside xmlSplitQName reached via a NEW SAX2 call path (e.g. through xmlSAX2AttributeInternal vs xmlSAX2StartElement) registers as new coverage. That extra granularity rewards and retains the intermediate seeds that progressively build a longer prefix and deeper parse state, letting the context-sensitive arm climb to the loop's false-exit state that the bare-edge naive arm prunes as already-covered."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The decisive pair is naive_ctx > naive with delta ctx_coverage, the only divergence being coverage granularity.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: naive_ctx > naive  [delta: ctx_coverage]"
+    },
+    {
+      "claim": "The blocker is the false (loop-exit) side of the huge-name copy loop at parser.c:3013 inside xmlSplitQName.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "parser.c:3013",
+      "exact_quote": "while ((c != 0) && (c != ':')) { /* tested bigname.xml */ <-- BLOCKER"
+    },
+    {
+      "claim": "The blocker loop at 3013 is only entered after the len>=max huge-name branch, i.e. a prefix exceeding XML_MAX_NAMELEN.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "parser.c:3000",
+      "exact_quote": "if (len >= max) {"
+    },
+    {
+      "claim": "Winner seeds carry an XML skeleton with long runs of repeated bytes that form an oversized name.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 1 id=03e5576b2c37e929",
+      "exact_quote": "c0 c0 c0 c0 c0 c0 78 78 d7 ff ff ff ff ff ff ff"
+    },
+    {
+      "claim": "Winner seeds contain well-formed XML declaration / encoding markers indicating deeper valid parse states.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner seed 4 id=f4de14c0bb25be46",
+      "exact_quote": "37 37 f4 2d 78 6d 6c 5c 0a 3c 49 53 4f 2d 31 30   77.-xml\\.<ISO-10"
+    },
+    {
+      "claim": "The winner drives deep reference/entity parsing the loser never reaches (W=72/54 vs L=0).",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "xmlParseEntityRef / xmlParseReference",
+      "exact_quote": "72         0  xmlParseEntityRef"
+    },
+    {
+      "claim": "Loser seeds are dominated by '.' fill and a shallow skeleton that never builds an oversized terminated prefix.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser seed 1 id=1a3a3db8872967a2",
+      "exact_quote": "2e 2e 2e 2e 2e 2e 20 28 73 69 93 20 6f 6c 65 29   ...... (si. ole)"
+    },
+    {
+      "claim": "naive_ctx uses the same havoc/token mutators as naive with no I2S and no CMP_MAP; divergence is the context-indexed edge map.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx",
+      "exact_quote": "the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "A new bucket for naive_ctx is a new (call-context, edge) pair rather than a bare edge.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Feedback",
+      "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+    },
+    {
+      "claim": "The blocker false side is actually taken in the winner role with a populated buffer.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L3013",
+      "exact_quote": "L3013  T=889 F=3  T=1840 F=36"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "context-sensitive coverage",
+    "verified_in_lineage": false,
+    "verification_method": "claimed_mechanism is context-sensitive coverage (naive_ctx CtxHook), not I2SRandReplace, so the mandatory lineage I2S-floor check does not apply. The MECHANISM CONTEXT section confirms naive_ctx has 'No I2SRandReplace, no CMP_MAP' and emits 'havoc/token names only; no ParentInfo-only / dash rows', so a dash-row lineage signal would be absent by construction; verification rests on the per-role coverage overlay and hit-count divergence instead."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on the xmlSplitQName huge-name loop false-exit, where naive and naive_ctx resolve the branch at statistically indistinguishable rates (no context-granularity advantage), would refute the claim that context-sensitive coverage is the enabling mechanism."
+  },
+  "weakest_evidence_point": "Whether the context-indexed coverage (distinct SAX2 call paths into xmlSplitQName) is the actual driver versus the winner simply finding deeper parse states by luck, since seeds are stored under naive_ctx but no per-edge context-slot count is shown directly.",
+  "confidence": "medium"
+}

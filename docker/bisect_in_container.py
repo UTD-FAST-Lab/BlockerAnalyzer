@@ -34,12 +34,19 @@ Output: results.json with per-branch hitting seeds.
 
 import argparse
 import json
+import multiprocessing
 import os
 import re
 import subprocess
 import sys
 import tempfile
 import time
+
+
+# Set True when queues are scanned in parallel workers, to suppress the
+# per-bucket depth-0 progress prints (they would interleave illegibly across
+# workers). The per-queue start/Done summary is still printed from the parent.
+_QUIET = False
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +312,7 @@ def _bisect_recursive(queue_dir, seed_names, fuzz_bin, branch_specs, work_dir,
     for i in range(0, n, bucket_size):
         buckets.append(seed_names[i:i + bucket_size])
 
-    if depth == 0:
+    if depth == 0 and not _QUIET:
         print(f"      Depth 0: {n} seeds -> {len(buckets)} buckets "
               f"of ~{bucket_size}, {len(active_specs)} branches",
               file=sys.stderr)
@@ -327,7 +334,7 @@ def _bisect_recursive(queue_dir, seed_names, fuzz_bin, branch_specs, work_dir,
         if not hits:
             continue
 
-        if depth == 0:
+        if depth == 0 and not _QUIET:
             print(f"        bucket {bi}: {len(hits)} branches hit "
                   f"({len(completed)} complete)", file=sys.stderr)
 
@@ -338,6 +345,68 @@ def _bisect_recursive(queue_dir, seed_names, fuzz_bin, branch_specs, work_dir,
             results, completed, max_seeds, batch_size, deadline,
             depth=depth + 1
         )
+
+
+# ---------------------------------------------------------------------------
+# Parallel queue worker
+# ---------------------------------------------------------------------------
+
+def _scan_one_queue(task):
+    """Worker entry point: scan ONE queue in its own tempdir.
+
+    task = (qi, n_queues, queue_subdir, branches, queues_root, fuzz_bin,
+            max_seeds, batch_size, deadline)
+    Returns (queue_subdir, branches, elapsed, results_list) where
+    results_list is the list of all_results dicts for this queue (empty if the
+    queue dir was missing).
+    """
+    (qi, n_queues, queue_subdir, branches, queues_root, fuzz_bin,
+     max_seeds, batch_size, deadline) = task
+
+    queue_dir = os.path.join(queues_root, queue_subdir)
+    if not os.path.isdir(queue_dir):
+        print(f"  [{qi+1}/{n_queues}] SKIP {queue_subdir} — not found",
+              file=sys.stderr)
+        return (queue_subdir, branches, 0.0, [])
+
+    branch_specs = [
+        (b['file'], b['line'], b['col'], b['side'], b['branch_id'])
+        for b in branches
+    ]
+
+    work_dir = tempfile.mkdtemp(prefix='scan_work_')
+    t0 = time.time()
+    try:
+        hits = scan_queue(
+            queue_dir, fuzz_bin, branch_specs, work_dir,
+            max_seeds=max_seeds, batch_size=batch_size, deadline=deadline
+        )
+    finally:
+        for root, dirs, files in os.walk(work_dir, topdown=False):
+            for f in files:
+                os.remove(os.path.join(root, f))
+            for d in dirs:
+                os.rmdir(os.path.join(root, d))
+        if os.path.exists(work_dir):
+            os.rmdir(work_dir)
+    elapsed = time.time() - t0
+
+    branch_lookup = {b['branch_id']: b for b in branches}
+    results = []
+    for bid, seed_list in hits.items():
+        b = branch_lookup[bid]
+        results.append({
+            'branch_id': bid,
+            'queue_subdir': queue_subdir,
+            'type': b['type'],
+            'hitting_seeds': seed_list,
+        })
+
+    print(f"  [{qi+1}/{n_queues}] {queue_subdir}: "
+          f"{len(hits)}/{len(branches)} branches hit, "
+          f"{sum(len(v) for v in hits.values())} seeds, {elapsed:.1f}s",
+          file=sys.stderr)
+    return (queue_subdir, branches, elapsed, results)
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +425,11 @@ def main():
                         help='Max seeds per fuzz_bin invocation (default 500)')
     parser.add_argument('--timeout', type=int, default=0,
                         help='Total timeout in seconds (0 = no timeout)')
+    parser.add_argument('--workers', type=int,
+                        default=int(os.environ.get('BISECT_WORKERS', '24')),
+                        help='Parallel queue workers (default 24 or '
+                             '$BISECT_WORKERS). Queues are independent, so this '
+                             'is near-linear speedup. Capped to #queues.')
     args = parser.parse_args()
 
     with open(args.jobs) as f:
@@ -363,65 +437,33 @@ def main():
 
     queues = jobs.get('queues', {})
     total_branches = sum(len(q['branches']) for q in queues.values())
-    print(f"Processing {len(queues)} queues, {total_branches} branch-jobs",
-          file=sys.stderr)
+    workers = max(1, min(args.workers, len(queues)))
+    print(f"Processing {len(queues)} queues, {total_branches} branch-jobs "
+          f"({workers} parallel workers)", file=sys.stderr)
 
-    work_dir = tempfile.mkdtemp(prefix='scan_work_')
     deadline = (time.time() + args.timeout) if args.timeout > 0 else None
+
+    # One task per queue; each worker scans in its own tempdir (queue scans
+    # share no state), so the box's cores collapse the serial walk to roughly
+    # one queue's wall-clock.
+    tasks = [
+        (qi, len(queues), queue_subdir, queue_info['branches'], args.queues,
+         args.fuzz_bin, args.max_seeds, args.batch_size, deadline)
+        for qi, (queue_subdir, queue_info) in enumerate(queues.items())
+    ]
+
     all_results = []
-
-    try:
-        for qi, (queue_subdir, queue_info) in enumerate(queues.items()):
-            queue_dir = os.path.join(args.queues, queue_subdir)
-            if not os.path.isdir(queue_dir):
-                print(f"  [{qi+1}/{len(queues)}] SKIP {queue_subdir} — not found",
-                      file=sys.stderr)
-                continue
-
-            branches = queue_info['branches']
-            branch_specs = [
-                (b['file'], b['line'], b['col'], b['side'], b['branch_id'])
-                for b in branches
-            ]
-
-            print(f"  [{qi+1}/{len(queues)}] {queue_subdir}: "
-                  f"{len(branches)} branches", file=sys.stderr)
-
-            t0 = time.time()
-            hits = scan_queue(
-                queue_dir, args.fuzz_bin, branch_specs, work_dir,
-                max_seeds=args.max_seeds, batch_size=args.batch_size,
-                deadline=deadline
-            )
-            elapsed = time.time() - t0
-
-            total_found = sum(len(v) for v in hits.values())
-            branches_hit = len(hits)
-            print(f"    Done: {branches_hit}/{len(branches)} branches hit, "
-                  f"{total_found} seeds, {elapsed:.1f}s", file=sys.stderr)
-
-            branch_lookup = {b['branch_id']: b for b in branches}
-            for bid, seed_list in hits.items():
-                b = branch_lookup[bid]
-                all_results.append({
-                    'branch_id': bid,
-                    'queue_subdir': queue_subdir,
-                    'type': b['type'],
-                    'hitting_seeds': seed_list,
-                })
-
-            if deadline and time.time() > deadline:
-                print("  Total timeout reached", file=sys.stderr)
-                break
-
-    finally:
-        for root, dirs, files in os.walk(work_dir, topdown=False):
-            for f in files:
-                os.remove(os.path.join(root, f))
-            for d in dirs:
-                os.rmdir(os.path.join(root, d))
-        if os.path.exists(work_dir):
-            os.rmdir(work_dir)
+    if workers > 1 and len(tasks) > 1:
+        global _QUIET
+        _QUIET = True  # children inherit via fork; suppress interleaved prints
+        with multiprocessing.Pool(workers) as pool:
+            for _qsub, _branches, _elapsed, results in pool.imap_unordered(
+                    _scan_one_queue, tasks):
+                all_results.extend(results)
+    else:
+        for task in tasks:
+            _qsub, _branches, _elapsed, results = _scan_one_queue(task)
+            all_results.extend(results)
 
     with open(args.output, 'w') as f:
         json.dump({'results': all_results}, f)

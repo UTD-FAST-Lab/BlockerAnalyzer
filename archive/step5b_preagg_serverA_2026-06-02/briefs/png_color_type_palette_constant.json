@@ -1,0 +1,1150 @@
+{
+  "feature_id": "png_color_type_palette_constant",
+  "mechanism_family": "I2S_pro",
+  "mechanism_label": "png_color_type_palette_constant",
+  "definition": "I2S intercepts the color_type equality CMP (value 0x03 = PNG_COLOR_TYPE_PALETTE) and plants the constant at the IHDR color_type byte, enabling the palette-specific handler path that random mutation rarely satisfies.",
+  "n_members": 11,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "naive",
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libpng_3864_h0",
+      "target": "libpng",
+      "branch_id": 3864,
+      "analysis_path": "prompts/libpng_3864.analysis.json",
+      "file": "/src/libpng/png.c",
+      "function": "OSS_FUZZ_png_check_IHDR",
+      "line": "2636",
+      "source_line": "   if (((color_type == PNG_COLOR_TYPE_PALETTE) && bit_depth > 8) ||",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "enum_or_code",
+        "operand_literal": "PNG_COLOR_TYPE_PALETTE",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts the color_type and bit_depth integer CMPs, logs the small-integer enum comparands, and substitutes them at offsets 0x18/0x19, planting the exact forbidden pairing (palette+depth>8) that random mutation cannot assemble.",
+        "one_line": "I2S plants forbidden color_type/bit_depth enum pair at IHDR offsets"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "IHDR color_type/bit_depth bytes must form an individually-valid but mutually-disallowed combination (e.g. PALETTE with depth>8, or RGB/GA/RGBA with depth<8)",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The IHDR bit_depth byte (offset 0x18) and color_type byte (offset 0x19) must each pass the prior validity gates (L2622 valid bit_depth set, L2629 valid color_type set) yet form a forbidden pairing: color_type==3 (PALETTE) with bit_depth>8, OR color_type in {2,4,6} with bit_depth<8.",
+            "why_winner_satisfies": "cmplog discovers seeds whose color_type/bit_depth bytes settle on the specific small-integer comparands the L2636 disjuncts test against; the winner takes the TRUE side at L2636 (T=45 F=0) and resolves on all 10 trials.",
+            "why_loser_doesnt": "naive only reaches the FALSE side at L2636 (T=0 F=17) and stays blocked on 9/10 trials; its color_type/bit_depth byte combinations never hit a valid-but-forbidden pairing because random byte mutation rarely lands exactly on the enum comparands.",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer recording the operands of the color_type==N and bit_depth comparisons at L2636/L2622/L2629, finds the matching input byte at offset 0x18/0x19 and substitutes the other operand, planting the exact enum value needed to enter the forbidden combination."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the TRUE side of the L2636 color_type/bit_depth combination check.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L2636",
+            "exact_quote": "if (((color_type == PNG_COLOR_TYPE_PALETTE) && bit_depth > 8) ||"
+          },
+          {
+            "claim": "The TRUE side fires for PALETTE+depth>8 or for RGB/GRAY_ALPHA/RGB_ALPHA with depth<8.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2637-L2639",
+            "exact_quote": "color_type == PNG_COLOR_TYPE_RGB_ALPHA) && bit_depth < 8))"
+          },
+          {
+            "claim": "Winners take L2636 TRUE (T=45) while losers never do (T=0).",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L2636",
+            "exact_quote": "T=45 F=0  T=0 F=17  if (((color_type == PNG_COLOR_TYPE_PALETTE) && bit_depth ...  <-- BLOCKER"
+          },
+          {
+            "claim": "color_type and bit_depth pass their individual validity gates at L2622 and L2629 before reaching L2636.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L2622, L2629",
+            "exact_quote": "if (color_type < 0 || color_type == 1 ||"
+          },
+          {
+            "claim": "cmplog wins over naive with the I2S delta, resolving 10/10 vs 1/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace substitutes one logged CMP operand at matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "value_profile wins over naive with the value_profile delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile > naive  [delta: value_profile]"
+          },
+          {
+            "claim": "value_profile preserves inputs whose CMP operands are closer to matching as new CMP_MAP buckets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "naive_ctx wins over naive with the ctx_coverage delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3",
+            "exact_quote": "Pair 3: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "naive_ctx's CtxHook records the same edge at different map slots per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx instrumentation",
+            "exact_quote": "the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it"
+          },
+          {
+            "claim": "The discriminating bytes are at offsets 0x18 (bit_depth) and 0x19 (color_type) where W and L differ.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "0x0018, 0x0019",
+            "exact_quote": "0x0019  03(.)x30                            00(.)x7 04(.)x2 06(.)x1"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating only on a valid-but-disallowed color_type/bit_depth pairing where cmplog, value_profile, and naive_ctx all fail to outperform naive (no resolution advantage) would refute that these three techniques each enable the forbidden-combination branch."
+        },
+        "weakest_evidence_point": "The naive_ctx (ctx_coverage) advantage is the least mechanistically tied to the byte feature \u2014 its win may reflect general corpus-retention diversity rather than anything specific to the color_type/bit_depth combination, and its hit_div is only 7 vs 144/103 for the CMP techniques.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3883",
+      "target": "libpng",
+      "branch_id": 3883,
+      "analysis_path": "prompts/libpng_3883.analysis.json",
+      "file": "/src/libpng/pngread.c",
+      "function": "OSS_FUZZ_png_read_info",
+      "line": "119",
+      "source_line": "         else if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x03",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts the color_type==PNG_COLOR_TYPE_PALETTE CMP, logs constant 3, and substitutes it at the single IHDR byte offset 0x19; naive must land that exact byte by blind havoc and never does in 10 trials.",
+        "one_line": "I2S plants palette color_type constant 3 at single IHDR byte"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "IHDR color_type byte at offset 0x19 must equal 0x03 (PNG_COLOR_TYPE_PALETTE) for the line-119 true branch to fire.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The IHDR color_type byte at file offset 0x19 must hold the exact value 0x03 (PNG_COLOR_TYPE_PALETTE). The blocker line 119 compares png_ptr->color_type, derived directly from that IHDR byte, against the PNG_COLOR_TYPE_PALETTE constant; only color_type==3 takes the true side.",
+            "why_winner_satisfies": "All 10 cmplog winning seeds carry 03 at offset 0x19 (the byte-diff shows 03(.)x10 for W with no other values), so png_handle_IHDR records color_type=PALETTE and line 119 evaluates true (W branch fires T=10 F=0).",
+            "why_loser_doesnt": "The naive loser seeds hold 00 or 04 at offset 0x19 (byte-diff shows L 00(.)x8 04(.)x2), neither of which is PNG_COLOR_TYPE_PALETTE, so line 119 is always false for the loser (L branch fires T=0 F=10) and it stays blocked all 24h.",
+            "mechanism_attribution": "cmplog's I2SRandReplace intercepts the integer CMP at line 119 (color_type vs PNG_COLOR_TYPE_PALETTE constant 3), logs the constant operand into the CmpLogObserver buffer, then substitutes that value into the matching input byte at offset 0x19; naive has no CMP introspection and must land color_type==3 by blind havoc, which it never does in 10 trials."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the true side of a comparison of png_ptr->color_type against PNG_COLOR_TYPE_PALETTE at pngread.c:119.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L119",
+            "exact_quote": "else if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&"
+          },
+          {
+            "claim": "All winner seeds hold byte 0x03 at offset 0x19 while losers hold 0x00 or 0x04.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  03(.)x10                            00(.)x8 04(.)x2"
+          },
+          {
+            "claim": "The winner takes the true side of line 119 in all 10 trials while the loser never does.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L119",
+            "exact_quote": "else if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog resolves the branch in all 10 trials and naive in none, with the loser blocked the full 24h.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 subject 21",
+            "exact_quote": "avg duration blocked: winner=0.90h  loser=24.00h"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace scans the input for an operand match and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive has no I2S mutator and only blind havoc/token mutations.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on color_type==3 where naive resolves the branch as readily as cmplog (no I2S advantage), i.e. cmplog does not significantly out-resolve naive at the color_type==PALETTE gate."
+        },
+        "weakest_evidence_point": "The mode & PNG_HAVE_PLTE == 0 second conjunct on line 120 is also required for the chunk-error path, but the byte controlling PLTE-absence is not isolated in the byte diff, so the single-feature claim assumes color_type is the sole limiting factor.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_3892_h0",
+      "target": "libpng",
+      "branch_id": 3892,
+      "analysis_path": "prompts/libpng_3892.analysis.json",
+      "file": "/src/libpng/pngread.c",
+      "function": "OSS_FUZZ_png_read_end",
+      "line": "787",
+      "source_line": "   if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x03",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts the color_type==PNG_COLOR_TYPE_PALETTE CMP at pngread.c:787, logs constant 3, and splices it into the single color_type byte at offset 0x19; naive's blind havoc byte mutation never lands 0x03 at that structurally-gated byte across 10 trials.",
+        "one_line": "I2S substitutes palette color_type constant into single IHDR byte"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "IHDR color_type byte at offset 0x19 must equal 3 (PNG_COLOR_TYPE_PALETTE) for png_read_end to take the true branch",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The IHDR color_type field (single byte at file offset 0x19) must hold the exact value 0x03 = PNG_COLOR_TYPE_PALETTE; the gate at pngread.c:787 compares png_ptr->color_type against PNG_COLOR_TYPE_PALETTE and only the true branch reaches when this byte parsed into color_type equals 3.",
+            "why_winner_satisfies": "Every cmplog winner-resolving seed carries 03 at offset 0x19, and the byte-diff shows W bytes 03(.)x4 concentrated at that offset versus the loser set; cmplog's I2SRandReplace reads the color_type==PNG_COLOR_TYPE_PALETTE CMP operand from the CmpLogObserver buffer and substitutes 3 at the input offset, planting the required palette color_type.",
+            "why_loser_doesnt": "naive seeds carry non-palette color_type bytes at offset 0x19 (00 dominates, plus 06/04/02) and never reach the true branch; without CMP interception naive can only land color_type=3 by blind havoc byte mutation, which it failed to do in all 10 trials.",
+            "mechanism_attribution": "cmplog's I2SRandReplace substitution: the integer-CMP interception logs the PNG_COLOR_TYPE_PALETTE operand and the i2s mutator splices value 3 into the color_type byte, a precise single-byte fix naive's havoc-only stack cannot reliably produce."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker at pngread.c:787 tests color_type == PNG_COLOR_TYPE_PALETTE.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngread.c:787:8",
+            "exact_quote": "if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&"
+          },
+          {
+            "claim": "cmplog winner seeds carry 03 at offset 0x19 while losers carry non-palette bytes there.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  03(.)x4                             00(.)x13 06(.)x9 04(.)x1 02(.)x1    DIFFER"
+          },
+          {
+            "claim": "cmplog winner-resolving seeds take the true branch.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Winner-resolving seeds header",
+            "exact_quote": "Winner-resolving seeds (take true branch)"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace scans the input for one CMP operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S; it can only mutate via havoc/token stack.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          },
+          {
+            "claim": "cmplog beats naive at this branch with prob_div 0.90.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog > naive",
+            "exact_quote": "prob_div=0.90  dur_div=18.30h  hit_div=7"
+          },
+          {
+            "claim": "grimoire shares the full cmplog I2S stack and adds generalization plus Grimoire mutators.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire Baseline relationship",
+            "exact_quote": "grimoire builds on the full cmplog stack \u2014\nit includes the `CmpLogObserver`, the `TracingStage`, and the\n`I2SRandReplace` (i2s) stage \u2014 and ADDS a `GeneralizationStage` plus\nGrimoire structural mutators."
+          },
+          {
+            "claim": "The single-technique delta for grimoire vs cmplog is the added generalization plus Grimoire mutators.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire Baseline relationship",
+            "exact_quote": "The single-technique delta is therefore\n`grimoire` vs `cmplog` (both have I2S; grimoire adds generalization +\nGrimoire mutators), not vs naive."
+          },
+          {
+            "claim": "GeneralizationStage replaces concrete byte runs with <GAP> placeholders.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "grimoire Mutators / stages",
+            "exact_quote": "`GeneralizationStage`\nreplaces concrete byte runs in a corpus entry with `<GAP>` placeholders"
+          },
+          {
+            "claim": "cmplog wins over grimoire at this branch with prob_div 0.80.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 cmplog > grimoire",
+            "exact_quote": "prob_div=0.80  dur_div=15.90h  hit_div=6"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on color_type==PALETTE where naive resolves the branch as fast as cmplog (i.e. the single color_type byte is reachable by blind havoc), which would refute that I2S byte-substitution is what gives cmplog its edge."
+        },
+        "weakest_evidence_point": "The grimoire>loss attribution to GeneralizationStage perturbation is inferential \u2014 both grimoire and cmplog have I2S, so I cannot directly observe in the seeds why grimoire fails to retain the color_type=3 byte, only that it shares the I2S stack yet loses.",
+        "confidence": "medium"
+      }
+    },
+    {
+      "id": "libpng_3912",
+      "target": "libpng",
+      "branch_id": 3912,
+      "analysis_path": "prompts/libpng_3912.analysis.json",
+      "file": "/src/libpng/pngrtran.c",
+      "function": "OSS_FUZZ_png_init_read_transformations",
+      "line": "1493",
+      "source_line": "   if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x03",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts the color_type==3 CMP, learns constant 3, and substitutes it at the single IHDR byte at offset 0x19; naive holds 0x00 or 0x04 at that offset and never reaches the palette true side in 10 trials.",
+        "one_line": "I2S substitutes palette constant 3 at single IHDR color_type byte"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Input IHDR color_type byte at offset 0x19 must equal 0x03 (PNG_COLOR_TYPE_PALETTE) to take the winning true branch.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The PNG IHDR color_type field (the byte at file offset 0x19, immediately after the 1-byte bit-depth) must hold the exact value 0x03, which is PNG_COLOR_TYPE_PALETTE; only then does the branch compare png_ptr->color_type == PNG_COLOR_TYPE_PALETTE succeed and the true side dispatch into png_init_palette_transformations.",
+            "why_winner_satisfies": "All ten winner-resolving (cmplog) seeds carry 0x03 at offset 0x19 (BYTE DIFF shows 03(.)x10), so every winning input declares a palette image; per-role coverage confirms the true side and png_init_palette_transformations fire only in W.",
+            "why_loser_doesnt": "Loser-blocking (naive) seeds never put 0x03 at offset 0x19 \u2014 they hold 0x00 (grayscale) or 0x04 (gray+alpha) \u2014 so color_type != PALETTE, the false branch is taken and png_init_rgb_transformations runs instead.",
+            "mechanism_attribution": "cmplog's I2SRandReplace intercepts the integer CMP color_type == 3, learns the constant 3 operand, and substitutes it at the matching input byte (offset 0x19); naive has only blind havoc and cannot reliably land the single exact constant 0x03 on that one structurally-gated byte."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is an equality test of png_ptr->color_type against PNG_COLOR_TYPE_PALETTE, true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngrtran.c:1493",
+            "exact_quote": "if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE)"
+          },
+          {
+            "claim": "All ten winner seeds hold 0x03 at offset 0x19 while losers hold 0x00 or 0x04, the PNG color_type field.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  03(.)x10                            00(.)x8 04(.)x2"
+          },
+          {
+            "claim": "The true side and palette-init path execute only in the winner-resolving seed set.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1493 d=1",
+            "exact_quote": "T=10 F=0  T=0 F=10  if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE)"
+          },
+          {
+            "claim": "The winner enters png_init_palette_transformations and the loser enters png_init_rgb_transformations instead.",
+            "cited_section": "HIT-COUNT DIVERGENCE",
+            "cited_locator": "pngrtran.c:1118-1203 and 1207-1288",
+            "exact_quote": "0       10  pngrtran.c:png_init_rgb_transformations"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace, which finds CMP operands in the input and substitutes the other operand at matching offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has only havoc + token mutators and no I2S substitution.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on color_type==3 where naive resolves the true branch as fast as cmplog, showing the single exact-constant byte is not what cmplog's I2S substitution is buying."
+        },
+        "weakest_evidence_point": "The dash-row I2S-floor signal is a lower bound and indirect \u2014 it confirms an I2S find in the chain but does not prove the specific 0x03 substitution at offset 0x19 was the I2S edit rather than a fortunate havoc mutation in a later generation.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_3913",
+      "target": "libpng",
+      "branch_id": 3913,
+      "analysis_path": "prompts/libpng_3913.analysis.json",
+      "file": "/src/libpng/pngrtran.c",
+      "function": "OSS_FUZZ_png_read_transform_info",
+      "line": "1947",
+      "source_line": "      if (info_ptr->color_type == PNG_COLOR_TYPE_PALETTE)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x03",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts the color_type==0x03 comparison, finds the live color_type byte in the input, and substitutes the constant 0x03 at offset 0x19, solving a 1-in-256 equality by targeted substitution rather than blind havoc.",
+        "one_line": "I2S substitutes single-byte PALETTE constant into IHDR color_type field"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "IHDR color_type byte (offset 0x19) must equal 0x03 (PNG_COLOR_TYPE_PALETTE) to take the winning true branch",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The IHDR color_type field at input offset 0x19 must hold the exact byte 0x03 (PNG_COLOR_TYPE_PALETTE); the branch at pngrtran.c:1947 compares info_ptr->color_type against the constant PNG_COLOR_TYPE_PALETTE and the true side fires only on an exact match.",
+            "why_winner_satisfies": "All 10 cmplog winner-resolving seeds carry byte 0x03 at offset 0x19 (W bytes = 03(.)x10), so the IHDR color_type equals PNG_COLOR_TYPE_PALETTE and the true side at L1947 fires (W T=10 F=0).",
+            "why_loser_doesnt": "naive loser-blocking seeds hold 0x00 or 0x04 at offset 0x19 (L bytes = 00(.)x8 04(.)x2), never the required 0x03, so the equality fails and the false side is taken every time (L T=0 F=10).",
+            "mechanism_attribution": "cmplog's CMP interception logs the runtime operand PNG_COLOR_TYPE_PALETTE (0x03) of the trace_cmp at L1947, and I2SRandReplace scans the input for the live color_type byte and substitutes 0x03 at offset 0x19, solving an exact-equality roadblock that naive's blind havoc must hit by chance over a 1-in-256 single byte."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocking branch is an equality test of color_type against PNG_COLOR_TYPE_PALETTE at pngrtran.c:1947.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngrtran.c:1947",
+            "exact_quote": "if (info_ptr->color_type == PNG_COLOR_TYPE_PALETTE)"
+          },
+          {
+            "claim": "All winner seeds carry byte 0x03 at offset 0x19 while loser seeds carry 0x00 or 0x04 there.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  03(.)x10                            00(.)x8 04(.)x2"
+          },
+          {
+            "claim": "The winner takes the true side ten of ten times while the loser takes it zero of ten.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1947",
+            "exact_quote": "L1947  T=10 F=0  T=0 F=10  if (info_ptr->color_type == PNG_COLOR_TYPE_PALETTE)  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at matching input offsets, enabling exact-match roadblock solving over naive havoc.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive has no I2S mutator, only blind havoc/token mutation.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on color_type==PNG_COLOR_TYPE_PALETTE in which naive resolves the branch as fast as cmplog (no cmplog advantage), showing the single-byte exact-equality gate is not what cmplog's I2S substitution is solving."
+        },
+        "weakest_evidence_point": "The I2S-floor dash row is a lower-bound proxy (the build does not log the literal I2SRandReplace string), so the depth-3 dash ancestor is presumptive rather than definitive proof that the 0x19 byte was set by I2S substitution specifically.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_3951_h0",
+      "target": "libpng",
+      "branch_id": 3951,
+      "analysis_path": "prompts/libpng_3951.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_IHDR",
+      "line": "883",
+      "source_line": "      case PNG_COLOR_TYPE_PALETTE:",
+      "signature": {
+        "gate_structure": "switch_case",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x03",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts the switch comparison of color_type against case constant 3, finds the color_type byte in the input at offset 0x19, and substitutes 0x03 there, directly routing into the PALETTE switch arm that naive's random mutations never reach.",
+        "one_line": "I2S substitutes PALETTE case constant into IHDR color_type switch operand"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "IHDR color_type byte at offset 0x19 must equal 0x03 (PNG_COLOR_TYPE_PALETTE) to take the true side.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The IHDR color_type byte at input offset 0x19 (buf[9], the 10th byte of the 13-byte IHDR payload) must hold value 0x03 = PNG_COLOR_TYPE_PALETTE; the switch on png_ptr->color_type then takes the line 883 case body.",
+            "why_winner_satisfies": "Every cmplog winning seed carries 0x03 at offset 0x19, and the BYTE DIFF column shows the winner set is concentrated entirely on 03 there (03(.)x30), while DIVERGENT BRANCHES shows line 883 firing W T=30 F=0.",
+            "why_loser_doesnt": "naive loser seeds hold 00/04/06 at offset 0x19 (GRAY_with_other, RGB, RGBA paths), never the exact 0x03 PALETTE value, so line 883's true side is never taken (L T=0 F=10).",
+            "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer recording the switch comparison color_type vs the case constant 3, finds the loser's color_type byte in the input, and substitutes the constant 3 at offset 0x19 \u2014 directly solving the equality the loser cannot reach by blind havoc."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the PNG_COLOR_TYPE_PALETTE case of the switch on png_ptr->color_type, true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngrutil.c:883",
+            "exact_quote": "case PNG_COLOR_TYPE_PALETTE:"
+          },
+          {
+            "claim": "color_type is read from buf[9], which is the IHDR payload byte at input offset 0x19.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L862",
+            "exact_quote": "color_type = buf[9];"
+          },
+          {
+            "claim": "The winning inputs hold 0x03 at offset 0x19 while losers hold 00/04/06.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  03(.)x30                            00(.)x7 04(.)x2 06(.)x1"
+          },
+          {
+            "claim": "Line 883 fires only for the winner set; losers never take its true side.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L883",
+            "exact_quote": "d=1   L 883  T=30 F=0  T=0 F=10  case PNG_COLOR_TYPE_PALETTE:"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "cmplog wins 10/10 vs naive 1/10 with prob_div 0.90 at this branch.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "value_profile records a CMP_MAP distance bucket and preserves inputs closer to matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile beats naive at this branch (Pair 2).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "Pair 2: value_profile > naive  [delta: value_profile]"
+          },
+          {
+            "claim": "naive_ctx uses naive's mutators with no I2S/CMP_MAP, but context-indexes the edge map so (call-context, edge) pairs count as new coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Mutators/Feedback",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+          },
+          {
+            "claim": "naive_ctx beats naive at this branch (Pair 3).",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3",
+            "exact_quote": "Pair 3: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "naive's mutator stack contains no I2S, so it cannot directly solve the equality.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed",
+            "exact_quote": "any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on color_type==3 where cmplog still blocks while naive resolves at the same rate \u2014 i.e. forcing 0x03 at offset 0x19 fails to flip the branch, showing offset 0x19 is not the controlling byte."
+        },
+        "weakest_evidence_point": "The naive_ctx win is attributed to richer corpus retention raising havoc luck rather than any comparison-solving, which is the least mechanistically direct of the three claims.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_3966_h0",
+      "target": "libpng",
+      "branch_id": 3966,
+      "analysis_path": "prompts/libpng_3966.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_sBIT",
+      "line": "1182",
+      "source_line": "   if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x03",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts color_type==3 (PNG_COLOR_TYPE_PALETTE), records the constant operand 3, and substitutes it into the IHDR color_type byte at offset 0x19, satisfying the equality gate that naive misses with values 00/04/06.",
+        "one_line": "I2S writes PALETTE constant into IHDR color_type byte for sBIT handler equality"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "IHDR color_type byte (offset 0x19) must equal PNG_COLOR_TYPE_PALETTE (3) so the sBIT handler takes the palette branch.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The IHDR color_type field at byte offset 0x19 must hold the exact value 0x03 (PNG_COLOR_TYPE_PALETTE); this value is later loaded into png_ptr->color_type and equality-compared against the constant 3 at the blocker line.",
+            "why_winner_satisfies": "Every cmplog winner-resolving seed carries 03 at offset 0x19 in the IHDR chunk; the BYTE DIFF shows offset 0x19 is W=03 across all 25 winner samples, and the equality CMP color_type==3 logs the constant 3 into the CmpLogObserver so I2SRandReplace can splice it into the input byte.",
+            "why_loser_doesnt": "naive loser-blocking seeds never carry 03 at offset 0x19 (loser bytes are 00/04/06), so png_ptr->color_type never equals 3 and the true branch stays blocked.",
+            "mechanism_attribution": "cmplog intercepts the equality compare png_ptr->color_type == 3, records the constant operand 3, and I2SRandReplace substitutes 3 at the input offset corresponding to the IHDR color_type byte, directly satisfying the exact-equality gate that naive must hit by blind chance."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is an equality test of png_ptr->color_type against PNG_COLOR_TYPE_PALETTE, true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L1182",
+            "exact_quote": "if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE)"
+          },
+          {
+            "claim": "The winning byte value at IHDR offset 0x19 is 0x03 across all winner samples while losers never carry 0x03 there.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  03(.)x25                            00(.)x7 04(.)x2 06(.)x1"
+          },
+          {
+            "claim": "cmplog wins the branch in 10/10 trials versus naive's 1/10 with a strong probability divergence.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog>naive",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "cmplog's I2SRandReplace scans the input for an operand and substitutes the other operand at those offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+          },
+          {
+            "claim": "naive has no I2S mutator.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "any of the above. No I2S."
+          },
+          {
+            "claim": "value_profile wins the branch in 9/10 trials versus naive via the value_profile delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 value_profile>naive",
+            "exact_quote": "Pair 2: value_profile > naive  [delta: value_profile]"
+          },
+          {
+            "claim": "value_profile retains as corpus any input that produces a CMP-operand pair closer to matching than previously seen.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile averages 37 hits on the branch for winners with prob_div 0.80.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 metrics",
+            "exact_quote": "avg hitcount on branch: winner=37  loser=0"
+          },
+          {
+            "claim": "naive_ctx wins the branch in 9/10 trials versus naive via the ctx_coverage delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3 naive_ctx>naive",
+            "exact_quote": "Pair 3: naive_ctx > naive  [delta: ctx_coverage]"
+          },
+          {
+            "claim": "naive_ctx folds call-context into the edge-map index so the same edge is recorded at different slots per call path, and uses naive's mutators with no I2S/CMP_MAP.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Instrumentation/Mutators",
+            "exact_quote": "the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "naive_ctx uses naive's havoc+token stack with no I2SRandReplace and no CMP_MAP.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+          },
+          {
+            "claim": "The winner-resolving seeds shown were stored by fuzzer naive_ctx and carry 03 at offset 0x19.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 1 id=0598f1586c91784d",
+            "exact_quote": "00 00 00 5b 00 00 00 45 08 03 00 00 01 52 ed aa   ...[...E.....R.."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on color_type==3 in which cmplog does NOT resolve the branch faster than naive (no dose response to the equality-gate width), which would show I2S substitution is not the operative mechanism."
+        },
+        "weakest_evidence_point": "The ctx_coverage hypothesis attributes the win to context-indexed corpus retention, but the prompt offers no direct evidence that context-distinct paths through png_handle_sBIT are what preserve near-palette IHDR inputs; it is inferred from mechanism description rather than seed lineage.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_3996_h0",
+      "target": "libpng",
+      "branch_id": 3996,
+      "analysis_path": "prompts/libpng_3996.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_handle_bKGD",
+      "line": "1932",
+      "source_line": "       (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x03",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts the color_type==PNG_COLOR_TYPE_PALETTE comparison and substitutes the constant 3 into the IHDR color_type byte, directly flipping the equality without random search; naive seeds carry 06/04/00 at offset 0x19 and never satisfy the gate.",
+        "one_line": "I2S substitutes PALETTE constant into color_type for bKGD handler equality gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "IHDR color_type byte (offset 0x19) must equal 3 (PNG_COLOR_TYPE_PALETTE) so the bKGD out-of-place check takes the true side.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The IHDR color_type byte at file offset 0x19 must hold the literal value 0x03 (PNG_COLOR_TYPE_PALETTE), which makes png_ptr->color_type == PNG_COLOR_TYPE_PALETTE true at L1932.",
+            "why_winner_satisfies": "Every cmplog winner-resolving seed carries 08 03 at offsets 0x18-0x19; the byte diff shows offset 0x0019 is 03 in all 34 winner samples, and W takes L1932 with T=55 F=0.",
+            "why_loser_doesnt": "Loser-blocking naive seeds carry color_type 06/04/00 at offset 0x19 (06x5 04x5 00x4); they never set 0x03, so L1932 stays false (T=0 F=20) and the branch is blocked.",
+            "mechanism_attribution": "cmplog logs the color_type == PNG_COLOR_TYPE_PALETTE comparison operands into the CmpLogObserver buffer; I2SRandReplace then substitutes the constant 3 into the input byte where the live color_type value appears, directly flipping the equality without random search."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocked branch is the true side of color_type == PNG_COLOR_TYPE_PALETTE at L1932.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L1932",
+            "exact_quote": "(png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&"
+          },
+          {
+            "claim": "Winner inputs take L1932 true while losers take it false.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L1932",
+            "exact_quote": "(png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&  <-- BLOCKER"
+          },
+          {
+            "claim": "All winner samples set the color_type byte at offset 0x19 to 03 while losers set 06/04/00.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  03(.)x34                            06(.)x5 04(.)x5 00(.)x4"
+          },
+          {
+            "claim": "cmplog winning seeds carry 08 03 at offsets 0x18-0x19.",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "offset 0x0018-0x0019",
+            "exact_quote": "00 00 00 5b 00 00 00 45 08 03 00 00 01 52 ed aa"
+          },
+          {
+            "claim": "A loser-blocking naive seed carries 08 06 at offsets 0x18-0x19 (color_type 6).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "Seed 1 loser offset 0x0018-0x0019",
+            "exact_quote": "00 00 00 5b 00 00 00 45 08 06 00 00 01 52 ed aa"
+          },
+          {
+            "claim": "cmplog intercepts integer CMPs and I2SRandReplace substitutes one operand at matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "value_profile preserves inputs that bring CMP operands closer to matching via a distance bucket.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "naive_ctx folds the call context into the edge-map index so the same edge under a new context is new coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx instrumentation",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "cmplog wins 10/10 over naive's 1/10, value_profile 8/10, naive_ctx 10/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pairs 1-3",
+            "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on color_type == 3 in which cmplog resolves no faster than naive (no I2S advantage), or in which winners reach the branch with color_type bytes other than 0x03, would refute the offset-0x19==3 feature hypothesis."
+        },
+        "weakest_evidence_point": "The value_profile and naive_ctx attributions are inferred from mechanism descriptions and the shared 0x19==3 byte requirement; no value_profile/naive_ctx lineage was run to confirm those techniques (not I2S leakage) drove their wins.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_4078",
+      "target": "libpng",
+      "branch_id": 4078,
+      "analysis_path": "prompts/libpng_4078.analysis.json",
+      "file": "/src/libpng/pngrutil.c",
+      "function": "OSS_FUZZ_png_read_start_row",
+      "line": "4457",
+      "source_line": "      if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x03",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts the color_type CMP, records constant 0x03 (PNG_COLOR_TYPE_PALETTE), and substitutes it into the single IHDR color_type byte at offset 0x19; naive must blindly land the exact value and never does in 10 trials.",
+        "one_line": "I2S substitutes 0x03 into IHDR color_type byte for palette equality"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "IHDR color_type byte at offset 0x19 must equal 0x03 (PNG_COLOR_TYPE_PALETTE) to take the true branch",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The IHDR color_type field (offset 0x19 in the header) must hold the exact value 0x03, the PNG_COLOR_TYPE_PALETTE constant, so that the equality test png_ptr->color_type == PNG_COLOR_TYPE_PALETTE at pngrutil.c:4457 evaluates true (also requires PNG_EXPAND set so the enclosing block at 4455 is entered).",
+            "why_winner_satisfies": "All 10 cmplog winner-resolving seeds carry 0x03 at offset 0x19, and the branch true side fired in all 10 (W L4457 T=10 F=0); cmplog discovered the resolving seed at 7s.",
+            "why_loser_doesnt": "The naive loser-blocking seeds never hold 0x03 at offset 0x19 (they carry 0x00 x8 and 0x04 x2), so the equality never matches and the branch stays on the false side in all 10 trials (L L4457 T=0 F=10), keeping naive blocked for 24h.",
+            "mechanism_attribution": "cmplog intercepts the integer CMP at pngrutil.c:4457 via __sanitizer_cov_trace_cmp, records both operands (the runtime color_type byte and the constant 0x03), and I2SRandReplace substitutes the constant 0x03 into the input at the offset where the current color_type byte appears; naive has only havoc/token mutators and no CMP introspection, so it must blindly land 0x03 on the single color_type byte."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is an equality test of color_type against the PALETTE constant on the globally blocked true side.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "pngrutil.c:4457",
+            "exact_quote": "if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE)"
+          },
+          {
+            "claim": "Winner-resolving seeds carry 0x03 at offset 0x19 while loser-blocking seeds carry 0x00 (mostly) or 0x04.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  03(.)x10                            00(.)x8 04(.)x2"
+          },
+          {
+            "claim": "The blocker true side fired in all 10 winner trials and zero loser trials.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L4457",
+            "exact_quote": "L4457  T=10 F=0  T=0 F=10  if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE)"
+          },
+          {
+            "claim": "cmplog resolved the branch 9/10 and naive blocked 10/10 with naive losing ~20.7h.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog > naive",
+            "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+          },
+          {
+            "claim": "cmplog discovered a winner-resolving seed carrying 0x03 at offset 0x19 very early (7s).",
+            "cited_section": "BRANCH SEEDS",
+            "cited_locator": "seed 282c4c4b85d3af6c offset 0x18",
+            "exact_quote": "00 00 00 5b 00 00 00 45 08 03 00 00 01 52 ed aa"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other operand, which naive lacks.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive has no I2S mutator, only havoc and token mutations.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Observed mutation_op",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness gating on color_type == 0x03 where cmplog and naive resolve the branch at statistically equal rates and times, showing the single-byte equality is not what gives cmplog its advantage."
+        },
+        "weakest_evidence_point": "Whether the gate is purely the single color_type byte or also depends on PNG_EXPAND being set upstream (line 4455), which would make the resolving condition multi-byte rather than a clean one-byte I2S substitution.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_4085_h0",
+      "target": "libpng",
+      "branch_id": 4085,
+      "analysis_path": "prompts/libpng_4085.analysis.json",
+      "file": "/src/libpng/pngset.c",
+      "function": "OSS_FUZZ_png_set_IHDR",
+      "line": "276",
+      "source_line": "   if (info_ptr->color_type == PNG_COLOR_TYPE_PALETTE)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0x03",
+        "operand_width_bytes": 1,
+        "byte_signature": "single_byte",
+        "mechanism_summary": "I2SRandReplace intercepts the 1-byte CMP at pngset.c:276 via __sanitizer_cov_trace_cmp1, records constant 3 (PNG_COLOR_TYPE_PALETTE), and substitutes it into the color_type byte at offset 0x19; naive must blind-mutate a single exact byte.",
+        "one_line": "I2S substitutes constant 3 into color_type byte for palette equality"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "IHDR color_type byte at offset 0x19 must equal 3 (PNG_COLOR_TYPE_PALETTE) to take the true branch.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)"
+            ],
+            "what_input_feature": "The IHDR color_type byte at file offset 0x19 must hold the value 0x03 (PNG_COLOR_TYPE_PALETTE) so that the equality test info_ptr->color_type == PNG_COLOR_TYPE_PALETTE is true.",
+            "why_winner_satisfies": "Every winner-resolving seed carries 0x03 at offset 0x19 (W bytes 03(.)x30, all 30 occurrences), exactly matching the PALETTE constant compared at line 276.",
+            "why_loser_doesnt": "Loser-blocking seeds never hold 0x03 at offset 0x19 (L bytes 00(.)x7 04(.)x2 06(.)x1) so the color_type equality test is always false.",
+            "mechanism_attribution": "cmplog intercepts the integer CMP at line 276 via __sanitizer_cov_trace_cmp1, logging the constant operand 3; I2SRandReplace then substitutes 3 into the color_type byte, deterministically solving the equality where naive must blind-mutate the exact value."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is an equality test of color_type against PNG_COLOR_TYPE_PALETTE, true side globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L6-7",
+            "exact_quote": "if (info_ptr->color_type == PNG_COLOR_TYPE_PALETTE)\nGlobally blocked side: T  (true branch)"
+          },
+          {
+            "claim": "All winner-resolving seeds hold 0x03 at offset 0x19 while no loser holds 3 there.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0019",
+            "exact_quote": "0x0019  03(.)x30                            00(.)x7 04(.)x2 06(.)x1"
+          },
+          {
+            "claim": "The winner takes the true side 30 times while the loser never does at line 276.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "L276",
+            "exact_quote": "d=1   L 276  T=30 F=0  T=0 F=10  if (info_ptr->color_type == PNG_COLOR_TYPE_PALETTE)"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "cmplog wins the I2S pair: resolved 10/10 vs loser 1/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 cmplog>naive",
+            "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+          },
+          {
+            "claim": "value_profile writes CMP operands into a CMP_MAP keyed by operand-distance bucket, preserving inputs closer to matching.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Feedback",
+            "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+          },
+          {
+            "claim": "value_profile wins its decisive pair via the value_profile technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2 value_profile>naive",
+            "exact_quote": "--- Pair 2: value_profile > naive  [delta: value_profile] ---"
+          },
+          {
+            "claim": "naive_ctx folds call context into the edge-map index, making (call-context, edge) pairs count as new coverage.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx Instrumentation",
+            "exact_quote": "the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "naive_ctx wins its decisive pair via the ctx_coverage technique delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3 naive_ctx>naive",
+            "exact_quote": "--- Pair 3: naive_ctx > naive  [delta: ctx_coverage] ---"
+          },
+          {
+            "claim": "naive has only flat edge counters and no I2S or CMP_MAP introspection.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive Mutators",
+            "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with an equality gate color_type==3 on a single input byte where cmplog does NOT resolve the gate faster than naive (no prob_div / time advantage), which would refute the I2S-substitution mechanism."
+        },
+        "weakest_evidence_point": "The value_profile and naive_ctx hypotheses share the same single-byte equality feature as I2S, so their distinct mechanism attributions rest on technique knowledge rather than seed-byte evidence that uniquely separates the three winners.",
+        "confidence": "high"
+      }
+    },
+    {
+      "id": "libpng_3877",
+      "target": "libpng",
+      "branch_id": 3877,
+      "analysis_path": "prompts/libpng_3877.analysis.json",
+      "file": "/src/libpng/png.c",
+      "function": "OSS_FUZZ_png_muldiv",
+      "line": "3355",
+      "source_line": "      if (a == 0 || times == 0)",
+      "signature": {
+        "gate_structure": "equality",
+        "operand_kind": "single_byte_constant",
+        "operand_literal": "0",
+        "operand_width_bytes": null,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace reads the CmpLogObserver entry for the a==0/times==0 integer CMP, then substitutes the zero constant into the matching multi-byte fixed-point input field, satisfying the equality that naive cannot hit by blind mutation across varied chunk-type paths.",
+        "one_line": "I2S substitutes zero into fixed-point field to satisfy equality-against-zero guard"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "Reaching the TRUE side needs a parsed fixed-point argument (a or times) to equal exactly zero entering png_muldiv.",
+        "pair_decision": "single_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "A PNG chunk whose parsed fixed-point value (e.g. gamma/chromaticity) is decoded to a==0 or times==0, so the equality-against-zero guard at png.c:3355 evaluates true; the winning seeds also vary the chunk-type FOURCC bytes at offsets 0x25-0x28 and 0x35-0x38 to reach chunk handlers that feed png_muldiv with a zero operand.",
+            "why_winner_satisfies": "Winners take the TRUE side 28 times (W T=28) versus zero for losers, and resolved the branch in 8/10 trials; their inputs diversify the chunk-type bytes (gAMA->iTXt/tEXt forms at 0x25-0x28) reaching code paths where a zero fixed-point reaches the multiply guard.",
+            "why_loser_doesnt": "Losers never take the TRUE side (L T=0) and stay blocked in 9/10 (naive) and 8/10 (vp) trials; they keep churning the same gAMA/sRGB chunk bytes and the numeric fields never resolve to exactly zero for the a/times operand.",
+            "mechanism_attribution": "cmplog and value_profile_cmplog run I2SRandReplace, which reads the CmpLogObserver entry for the a==0 / times==0 integer CMP and substitutes the logged constant (0) into the matching input offset, directly satisfying the equality; naive and plain value_profile lack I2SRandReplace and must blind-mutate the multi-byte fixed-point field to exactly zero."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is an equality-against-zero guard whose TRUE side is globally blocked.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L3355",
+            "exact_quote": "if (a == 0 || times == 0)"
+          },
+          {
+            "claim": "Both decisive pairs differ only by the I2S technique.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 and Pair 2",
+            "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+          },
+          {
+            "claim": "The winner takes the blocked TRUE side while the loser never does, evidencing the winner satisfies the zero condition.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L3355",
+            "exact_quote": "T=28 F=282  T=0 F=313  if (a == 0 || times == 0)"
+          },
+          {
+            "claim": "Winners diversify the chunk-type FOURCC bytes that losers leave fixed, reaching handlers that feed a zero operand.",
+            "cited_section": "BYTE DIFF",
+            "cited_locator": "offset 0x0025",
+            "exact_quote": "67(g)x16 69(i)x3 74(t)x2            67(g)x20"
+          },
+          {
+            "claim": "The winner resolved the branch in 8/10 trials versus 1/10 for the naive loser, showing a strong per-trial divergence attributable to I2S.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 winner/loser",
+            "exact_quote": "winner: resolved=8/10  blocked=2  unreached=0"
+          },
+          {
+            "claim": "The naive loser stayed blocked in 9/10 trials.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1 loser",
+            "exact_quote": "loser:  resolved=1/10  blocked=9  unreached=0"
+          },
+          {
+            "claim": "cmplog provides I2SRandReplace that substitutes a logged CMP operand at matching input offsets, enabling the zero-equality match.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog Mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "Plain value_profile has no I2SRandReplace, so the vpc>vp gap is attributable to I2S.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile Mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness with the a==0||times==0 zero-equality gate over a multi-byte parsed fixed-point field where cmplog/vpc do NOT resolve faster than naive/value_profile (no dose-response on the zero-equality roadblock)."
+        },
+        "weakest_evidence_point": "It is uncertain which specific chunk handler feeds the zero operand into png_muldiv, since no 1-hop caller fired in W and the FOURCC diversification is inferred rather than traced to the multiply call site.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

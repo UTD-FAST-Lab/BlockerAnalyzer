@@ -1,0 +1,162 @@
+{
+  "feature_id": "png_structural_compound_gate",
+  "mechanism_family": "I2S_pro",
+  "mechanism_label": "png_structural_compound_gate",
+  "definition": "I2S satisfies a compound structural gate (chunk FOURCC AND a zero-length comparand together) to reach the false side of a conjunction that naive cannot assemble.",
+  "n_members": 1,
+  "involved_fuzzers": [
+    "cmplog",
+    "naive",
+    "value_profile",
+    "value_profile_cmplog"
+  ],
+  "techniques_seen": [
+    "I2S"
+  ],
+  "suggested_axis_partition": {
+    "axis_differ": "I2S",
+    "has_axis": [
+      "cmplog",
+      "value_profile_cmplog"
+    ],
+    "lacks_axis": [
+      "naive",
+      "value_profile"
+    ]
+  },
+  "authoring_contract": {
+    "goal": "ONE parameterized template.c isolating this cluster's shared mechanism, with exactly ONE compile-time -D knob = the program-feature axis. params.json:parameter MUST name that macro; scan_values sweep it; fuzzers = involved_fuzzers; expected_direction = '<winner> > <loser>'.",
+    "isolate": "No partial-match coverage edges unless the mechanism IS a gradient (VP families). Keep the gate the only objective.",
+    "verdict_metric": "crash_count at <corpus>/crashes (__builtin_trap())."
+  },
+  "members": [
+    {
+      "id": "libpng_3896_h0",
+      "target": "libpng",
+      "branch_id": 3896,
+      "analysis_path": "prompts/libpng_3896.analysis.json",
+      "file": "/src/libpng/pngread.c",
+      "function": "OSS_FUZZ_png_read_end",
+      "line": "833",
+      "source_line": "             || (png_ptr->mode & PNG_HAVE_CHUNK_AFTER_IDAT) != 0)",
+      "signature": {
+        "gate_structure": "state_or_grammar",
+        "operand_kind": "multibyte_literal",
+        "operand_literal": "IDAT",
+        "operand_width_bytes": 4,
+        "byte_signature": "dispersed_multibyte",
+        "mechanism_summary": "I2SRandReplace logs both the IDAT chunk_name FOURCC operand and the zero-length comparand from CmpLogObserver, then splices them into the input, constructing a well-formed trailing zero-length IDAT that navigates the conjunction's false side \u2014 a compound structural requirement naive cannot produce.",
+        "one_line": "I2S assembles trailing zero-length IDAT chunk satisfying compound false-side gate"
+      },
+      "decisive_pairs": [
+        {
+          "winner": "cmplog",
+          "loser": "naive",
+          "technique": "I2S",
+          "axis": "I2S"
+        },
+        {
+          "winner": "value_profile_cmplog",
+          "loser": "value_profile",
+          "technique": "I2S",
+          "axis": "I2S"
+        }
+      ],
+      "analysis": {
+        "summary_one_line": "A trailing zero-length IDAT chunk (4-byte 'IDAT' FOURCC, length 0, no later chunk) so the IDAT-too-many disjunction evaluates false.",
+        "pair_decision": "multi_feature",
+        "hypotheses": [
+          {
+            "covers_pairs": [
+              "cmplog>naive (I2S)",
+              "value_profile_cmplog>value_profile (I2S)"
+            ],
+            "what_input_feature": "An input that reaches the chunk_name == png_IDAT arm (line 824) on a second/trailing IDAT and then drives the line-833 disjunction false: a zero-length IDAT (length==0) after the zstream ended and with PNG_HAVE_CHUNK_AFTER_IDAT unset, which requires the 4-byte chunk-name field to exactly equal the 'IDAT' FOURCC and a zero length field.",
+            "why_winner_satisfies": "cmplog/vpc winners resolve the branch (cmplog 9/10, vpc 8/10 resolved) and reach the false side (W reaches T=5 F=34 at line 833 vs loser T=44 F=0); I2SRandReplace can splice the logged 'IDAT' FOURCC operand and the 0 length comparand into the input bytes, manufacturing the well-formed trailing zero-length IDAT.",
+            "why_loser_doesnt": "naive and value_profile losers stay blocked (naive 0/10, vp 1/10 resolved) and never take the false side (loser T=44 F=0 at line 833 \u2014 only the true 'Too many IDATs' arm fires); without I2S substitution they cannot reliably place the exact 4-byte IDAT chunk-name plus zero length to satisfy the conjunction's negation.",
+            "mechanism_attribution": "cmplog and value_profile_cmplog add I2SRandReplace, which reads the CmpLogObserver buffer, finds where the chunk_name/length comparison operands appear in the input, and substitutes the matching IDAT FOURCC and zero-length values; naive and value_profile lack this mutator, so the dash-row (mutation_op = -) I2S finds in the winners' lineage are the divergence cause."
+          }
+        ],
+        "evidence_trail": [
+          {
+            "claim": "The blocker is the false side of the line-833 IDAT length/flag disjunction in OSS_FUZZ_png_read_end.",
+            "cited_section": "BLOCKER",
+            "cited_locator": "L4-L7, pngread.c:833",
+            "exact_quote": "Globally blocked side: F  (false branch)"
+          },
+          {
+            "claim": "The blocking condition is the disjunction over IDAT length/ZSTREAM and the chunk-after-IDAT flag.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L832-L833",
+            "exact_quote": "if ((length > 0 && !(png_ptr->flags & PNG_FLAG_ZSTREAM_ENDED))"
+          },
+          {
+            "claim": "Reaching line 833 requires the IDAT chunk-name arm at line 824.",
+            "cited_section": "SOURCE CONTEXT",
+            "cited_locator": "L824",
+            "exact_quote": "else if (chunk_name == png_IDAT)"
+          },
+          {
+            "claim": "The loser never takes the false side of the blocker while the winner reaches it.",
+            "cited_section": "DIVERGENT BRANCHES",
+            "cited_locator": "d=1 L833",
+            "exact_quote": "d=1   L 833  T=5 F=34  T=44 F=0  || (png_ptr->mode & PNG_HAVE_CHUNK_AFTER_IDAT) != 0)  <-- BLOCKER"
+          },
+          {
+            "claim": "cmplog wins over naive on the I2S delta, resolving 9/10 vs 0/10.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 1",
+            "exact_quote": "--- Pair 1: cmplog > naive  [delta: I2S] ---"
+          },
+          {
+            "claim": "value_profile_cmplog wins over value_profile on the I2S delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 3",
+            "exact_quote": "--- Pair 3: value_profile_cmplog > value_profile  [delta: I2S] ---"
+          },
+          {
+            "claim": "cmplog adds I2SRandReplace which substitutes one CMP operand at matching input offsets.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "cmplog mutators",
+            "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+          },
+          {
+            "claim": "naive and value_profile lack I2SRandReplace.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "value_profile mutators",
+            "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+          },
+          {
+            "claim": "naive_ctx wins over naive on the ctx_coverage delta.",
+            "cited_section": "DECISIVE PAIRS",
+            "cited_locator": "Pair 2",
+            "exact_quote": "--- Pair 2: naive_ctx > naive  [delta: ctx_coverage] ---"
+          },
+          {
+            "claim": "naive_ctx folds the call context into the edge-map index so the same edge is a new bucket per call path.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx instrumentation",
+            "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+          },
+          {
+            "claim": "naive_ctx feedback rewards new (call-context, edge) pairs rather than bare edges.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx feedback",
+            "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+          },
+          {
+            "claim": "naive_ctx uses no I2S or CMP_MAP, only havoc/token mutators.",
+            "cited_section": "MECHANISM CONTEXT",
+            "cited_locator": "naive_ctx mutators",
+            "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+          }
+        ],
+        "falsifiability": {
+          "would_be_refuted_by": "A synthetic harness where naive (no I2S, flat edge feedback) reaches the line-833 false branch at the same rate as cmplog within budget, showing the trailing zero-length-IDAT FOURCC gate is solvable by plain havoc without operand substitution or context coverage."
+        },
+        "weakest_evidence_point": "The byte-diff offsets (0x17-0x18) sit in the IHDR length/dimension region rather than pinpointing the trailing-IDAT chunk-name bytes, so the exact input location I2S substitutes the IDAT FOURCC is inferred from source, not directly shown.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

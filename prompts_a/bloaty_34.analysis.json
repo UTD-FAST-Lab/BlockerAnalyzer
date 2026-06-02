@@ -1,0 +1,81 @@
+{
+  "branch_id": 34,
+  "target": "bloaty",
+  "summary_one_line": "Valid ELF magic at bytes 0-3 plus byte 0x05 (EI_DATA) holding a value other than 1 (LSB) or 2 (MSB) to reach the default arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "Bytes 0x00-0x03 must equal the literal magic 7f 45 4c 46 (\\177ELF) so the memcmp guard at line 452 passes, AND byte 0x05 (ident[EI_DATA]) must hold a value other than ELFDATA2LSB(1) or ELFDATA2MSB(2) so the switch at line 468 falls through to the default arm at line 475.",
+      "why_winner_satisfies": "Winning cmplog seeds keep the magic 7f 45 4c 46 at offsets 0x00-0x03 and place a non-{1,2} value at offset 0x05 (e.g. seed 1 has 0x30, seed 2 has 0x00, seed 3 has 0xe7), so EI_DATA misses both case labels and hits default.",
+      "why_loser_doesnt": "Loser naive seeds also keep the magic but set offset 0x05 to either 0x01 or 0x02 in every sample, so EI_DATA always matches case ELFDATA2LSB or ELFDATA2MSB and the switch never reaches default.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLog buffer for the switch comparison on ident[EI_DATA] and substitutes the recorded compared operand at the input offset, but unlike a single magic-number gate the winning move is to make the byte NOT equal the case labels; I2S surfaces the magic prefix (7f 45 4c 46) keeping line 452 satisfied while the switch on a single byte is escaped via a non-matching value, a combination cmplog reaches and naive's blind havoc rarely lands while preserving the magic."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of the switch on ident[EI_DATA] at elf.cc:475.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "elf.cc:475:5",
+      "exact_quote": "Location: /src/bloaty/src/elf.cc:475:5"
+    },
+    {
+      "claim": "Reaching the default requires passing the magic memcmp guard and missing both EI_DATA case labels.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L452, L468-476",
+      "exact_quote": "if (memcmp(ident, \"\\177ELF\", 4) != 0) {"
+    },
+    {
+      "claim": "The switch dispatches on ident[EI_DATA] with cases ELFDATA2LSB and ELFDATA2MSB before default.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L468-476",
+      "exact_quote": "switch (ident[EI_DATA]) {"
+    },
+    {
+      "claim": "Winning cmplog seeds preserve the ELF magic 7f 45 4c 46 at offsets 0x00-0x03.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 1 W id=0989f57862fb3e41 offset 0x00",
+      "exact_quote": "0000: 7f 45 4c 46 02 30 01 00 00 00 20 20 20 20 20 00"
+    },
+    {
+      "claim": "A winning seed places a non-{1,2} value (0xe7) at offset 0x05 so EI_DATA misses both case labels.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Seed 3 W id=51f1d6d54d767ae6 offset 0x05",
+      "exact_quote": "0000: 7f 45 4c 46 02 e7 00 00 00 00 20 20 20 20 20 00"
+    },
+    {
+      "claim": "Loser naive seeds set offset 0x05 to 0x01 or 0x02 (a valid EI_DATA case), so the switch matches a case and never reaches default.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 id=01a53df0ebbce533 offset 0x05",
+      "exact_quote": "0000: 7f 45 4c 46 01 01 01 00 f2 00 20 21 df 20 00 00"
+    },
+    {
+      "claim": "The byte-diff shows W offset 0x05 concentrated on non-{1,2} values while L offset 0x05 is dominated by 01/02.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0005",
+      "exact_quote": "0x0005  68(h)x5 00(.)x2 30(0)x1 e7(.)x1 +1u  01(.)x27 02(.)x5"
+    },
+    {
+      "claim": "The divergent-branches table shows the blocker default at line 475 taken only in W (T=60) and never in L (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 elf.cc:475",
+      "exact_quote": "d=1   L 475  T=60 F=0  T=0 F=2220  default:  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other CMP operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 34 --role W --fuzzer cmplog --trial 1 --seed 51f1d6d54d767ae6` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 1 and 2; also ran it on seed 0989f57862fb3e41 whose leaf is itself a ParentInfo-only dash row plus one ancestor dash row at depth 1, both confirming I2S contribution to the winning seeds under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose switch dispatches on a single byte gated behind a preceding magic memcmp showing naive resolving the default arm as often as cmplog (no cmplog>naive divergence), which would mean I2S substitution of the magic prefix is not what enables the winner."
+  },
+  "weakest_evidence_point": "Whether I2S's advantage here is solving the magic memcmp prefix (a roadblock) versus the switch byte being escaped by chance, since reaching default requires a NON-matching byte that I2S does not directly synthesize.",
+  "confidence": "medium"
+}

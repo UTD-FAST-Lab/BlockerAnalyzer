@@ -1,0 +1,69 @@
+{
+  "branch_id": 133,
+  "target": "bloaty",
+  "summary_one_line": "Input must begin with the 4-byte Mach-O magic cf fa ed fe so magic equals MH_MAGIC/MH_MAGIC_64/FAT_CIGAM.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The first 4 bytes of the input must equal the Mach-O magic word cf fa ed fe at offset 0x00-0x03 so that the read magic compares equal to one of MH_MAGIC / MH_MAGIC_64 / FAT_CIGAM at macho.cc:618, taking the true branch into the MachOObjectFile constructor.",
+      "why_winner_satisfies": "Every cmplog winner-resolving seed begins with the exact bytes cf fa ed fe at offsets 0x00-0x03, which is the little-endian Mach-O magic; the per-offset byte sets show these four offsets are fully concentrated to that value across all 10 winner seeds.",
+      "why_loser_doesnt": "The naive loser-blocking seeds begin with 00 61 73 6d ('\\0asm', the WebAssembly magic), so magic never matches any Mach-O constant and execution falls through to the nullptr return at line 623, exercising the false branch.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the logged CMP operands from the magic==MH_MAGIC comparison and splices the constant magic value into the input at the matching offset; naive has no CMP introspection and cannot synthesize the exact 4-byte magic, so it never crosses the gate."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch at macho.cc:618 fires the true side only when magic equals one of three Mach-O magic constants.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "macho.cc:618",
+      "exact_quote": "if (magic == MH_MAGIC || magic == MH_MAGIC_64 || magic == FAT_CIGAM) {"
+    },
+    {
+      "claim": "All winner-resolving seeds carry the Mach-O magic cf fa ed fe in their first four bytes.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0000-0x0003",
+      "exact_quote": "0x0000  cf(.)x10                            00(.)x10                            DIFFER"
+    },
+    {
+      "claim": "The winning seed bytes literally start with cf fa ed fe.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 492ed499061ee540",
+      "exact_quote": "0000: cf fa ed fe 00 20 20 20 20 20 00 00 00 00 00 00"
+    },
+    {
+      "claim": "The loser-blocking seeds start with the WebAssembly magic \\0asm and not a Mach-O magic.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 00050eebd8570fd9",
+      "exact_quote": "0000: 00 61 73 6d fe 00 6d 00 01 01 01 01 01 01 01 01   .asm..m........."
+    },
+    {
+      "claim": "Loser inputs fall through TryOpenMachOFile to the nullptr return because magic does not match.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L618",
+      "exact_quote": "d=1   L 618  T=96 F=0  T=0 F=120  if (magic == MH_MAGIC || magic == MH_MAGIC_64 || magic ==...  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace, which scans the input for an operand and substitutes the other operand at those offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "naive has no I2S capability.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 133 --role W --fuzzer cmplog --trial 1 --seed 492ed499061ee540`; the ancestor chain contains one I2S-floor dash row (mutation_op = -) at depth 3 (ancestor a24245b7a5bd58f1), the under-build signal of an unwrapped I2SRandReplace find exclusive to cmplog/vpc."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on a 4-byte exact-equality magic where naive resolves the gate as often as cmplog (no cmplog>naive divergence), showing the magic byte is reachable by plain havoc rather than requiring I2S substitution."
+  },
+  "weakest_evidence_point": "The dash-row I2S signal is a lower-bound floor at depth 3 of one seed's chain; it confirms some I2S contribution but does not prove the specific magic-byte splice was the I2S edit rather than a later havoc refinement.",
+  "confidence": "high"
+}

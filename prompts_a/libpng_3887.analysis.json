@@ -1,0 +1,69 @@
+{
+  "branch_id": 3887,
+  "target": "libpng",
+  "summary_one_line": "Input must contain a chunk whose 4-byte type field equals the PLTE FOURCC so chunk_name == png_PLTE holds true.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A PNG chunk whose 4-byte chunk-type field decodes to png_PLTE (ASCII 'PLTE' = 0x50 0x4c 0x54 0x45), making the equality test chunk_name == png_PLTE at pngread.c:159 evaluate true and dispatch png_handle_PLTE.",
+      "why_winner_satisfies": "cmplog resolves the branch in 10/10 trials and hits the true side 293 times on average; its I2SRandReplace mutator reads the failing 4-byte chunk_name comparison from the CmpLogObserver buffer and substitutes the png_PLTE constant directly into the chunk-type bytes, so a PLTE chunk appears in the input.",
+      "why_loser_doesnt": "naive blocks the branch in 10/10 trials with 0 hits on the true side; with only havoc/token mutators it never blindly lands the exact 4-byte PLTE tag at a valid chunk-type offset, so chunk_name == png_PLTE is never satisfied and execution falls through the else-if chain.",
+      "mechanism_attribution": "cmplog's I2SRandReplace intercepts the integer CMP of chunk_name against the png_PLTE constant via __sanitizer_cov_trace_cmp4, records both operands, and splices the constant operand into matching input bytes; naive has no CMP introspection and cannot target the exact magic tag."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is the equality test chunk_name == png_PLTE at pngread.c:159, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "pngread.c:159:16",
+      "exact_quote": "else if (chunk_name == png_PLTE)"
+    },
+    {
+      "claim": "Taking the true side dispatches png_handle_PLTE, which only the winner reaches.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L160",
+      "exact_quote": "[W]   160           png_handle_PLTE(png_ptr, info_ptr, length);"
+    },
+    {
+      "claim": "cmplog resolves the branch in all 10 trials and hits the true side 293 times on average while naive never does.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "subject 21",
+      "exact_quote": "avg hitcount on branch: winner=293  loser=0"
+    },
+    {
+      "claim": "naive blocks the branch in all 10 trials; cmplog resolves all 10.",
+      "cited_section": "TRIAL VECTOR",
+      "cited_locator": "naive/cmplog rows",
+      "exact_quote": "loser:  resolved=0/10  blocked=10  unreached=0"
+    },
+    {
+      "claim": "The winner reaches the true side of line 159 while the loser never does (T=10 vs T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L159",
+      "exact_quote": "else if (chunk_name == png_PLTE)  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog's I2SRandReplace scans the input for an operand and substitutes the other operand, which lands magic constants like a chunk tag.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets"
+    },
+    {
+      "claim": "naive has only havoc/token mutators and no I2S, so it cannot introspect the chunk_name CMP.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Observed mutation_op",
+      "exact_quote": "**Observed `mutation_op` in seed metadata**: any of the above. No I2S."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 3887 --role W --fuzzer cmplog --trial 1 --seed 013b9f2a08a04135` and observed 1 I2S-floor dash row (mutation_op = -) at depth 6 of the 7-level ancestor chain (ancestor 94c47bff5687a0c9), the lower-bound signal of an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on chunk_name == png_PLTE where naive resolves the branch as fast as cmplog, showing the 4-byte magic-tag equality is reachable by blind havoc without CMP introspection."
+  },
+  "weakest_evidence_point": "The byte diff does not pinpoint a fixed PLTE-tag offset (PLTE chunks sit at variable offsets after IHDR/gAMA/sRGB), so the literal 'PLTE' bytes are not directly visible in the shown seed prefix; the FOURCC inference rests on the source equality and lineage I2S signal rather than a byte-level diff.",
+  "confidence": "high"
+}

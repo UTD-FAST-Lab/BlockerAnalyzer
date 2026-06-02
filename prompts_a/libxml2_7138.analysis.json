@@ -1,0 +1,124 @@
+{
+  "branch_id": 7138,
+  "target": "libxml2",
+  "summary_one_line": "A well-formed DTD-bearing XML doc whose attribute value reaches the old-XML-1.0 name-char check at valid.c:3573 with a letter/digit char",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["grimoire>cmplog (grimoire_structural)"],
+      "what_input_feature": "A structurally valid XML document carrying a DOCTYPE with a SYSTEM-referenced DTD plus element/attribute markup (e.g. <!DOCTYPE...SYSTEM \"dtds/...dtd\">...<a><b xlink:f=\"\">), so an attribute declaration's value is parsed and routed into xmlValidateNmtokens/Name/AttributeValueInternal, calling xmlIsDocNameChar with a real name character on the doc->properties XML_DOC_OLD10 path.",
+      "why_winner_satisfies": "Grimoire winner seeds are short, well-formed XML where a clean <?l ?> declaration, <!DOCTYPEa SYSTEM \"dtds/127772.dtd\"> and concrete element/attribute markup <a><b xlink:f=\"\"> reach the validation call chain; the generalization+structural-recombination stage assembles and preserves this nested grammar structure so the attribute value feeds xmlIsDocNameChar with the true branch taken (W shows L3573 T=123).",
+      "why_loser_doesnt": "Cmplog loser seeds carry a leading filename/garbage prefix (e.g. 127772.xml\\n or 06 00 06 00 00 00 31 32 37 37 37 32 ...) before the <?xml version=\"1.0\"?> declaration, so the document is malformed earlier and the attribute value path that reaches the true side fires far less often (L shows L3573 T=30); havoc/I2S byte substitution does not reliably build the nested DOCTYPE+element grammar that grimoire structural mutation does.",
+      "mechanism_attribution": "Grimoire's GeneralizationStage replaces concrete byte runs with <GAP> placeholders and the Grimoire structural mutators (GrimoireRecursiveReplacementMutator, GrimoireExtensionMutator) splice/recurse on those generalized token structures, enabling grammar-free assembly of the nested DOCTYPE+element document that cmplog (I2S byte substitution only) cannot synthesize."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "Byte content that progressively matches the multi-clause comparison cascade routing into the validation path (DOCTYPE/SYSTEM keyword bytes and the attribute-type switch), so the input is rewarded for partial matches toward reaching xmlIsDocNameChar's true branch.",
+      "why_winner_satisfies": "value_profile_cmplog adds CMP_MAP gradient buckets so partial-match progress on the string/integer comparisons along the chain (switch type at xmlValidateAttributeValueInternal L3865, name-char clauses) is retained as new feedback, letting the fuzzer climb toward the true side and resolve in 8/10 trials (winner: resolved=8/10).",
+      "why_loser_doesnt": "Plain cmplog has no CMP_MAP gradient signal — only edge buckets plus I2S substitution — so it gets no credit for partial progress on the comparison cascade and stalls blocked in 9/10 trials (loser: resolved=1/10 blocked=9) with far fewer true-branch hits (avg hitcount on branch: winner=99 loser=8).",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix-distance feedback buckets) rewards inputs for partial comparison matches along the validation chain, giving the fuzzer a smooth climb toward the name-char true branch that plain cmplog's binary edge feedback does not provide."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of the name-char test on the old-XML-1.0 else path inside xmlIsDocNameChar.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "valid.c:3572-3573",
+      "exact_quote": "if ((IS_LETTER(c)) || (IS_DIGIT(c)) || <-- BLOCKER"
+    },
+    {
+      "claim": "Reaching the blocker requires the doc->properties old-10 path (else branch).",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "valid.c:3547",
+      "exact_quote": "if ((doc == NULL) || (doc->properties & XML_DOC_OLD10) == 0) {"
+    },
+    {
+      "claim": "The blocker is reached via attribute-value validation calling xmlIsDocNameChar.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "valid.c:3779",
+      "exact_quote": "if (!xmlIsDocNameChar(doc, val)) <-- CALL"
+    },
+    {
+      "claim": "Grimoire winner seeds are well-formed XML with a SYSTEM DTD and element/attribute markup.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id d7c31b52479b9451",
+      "exact_quote": "43 54 59 50 45 61 20 53 59 53 54 45 4d 20 22 64   CTYPEa SYSTEM \"d"
+    },
+    {
+      "claim": "Grimoire winner seeds contain concrete element/attribute markup reaching the validation chain.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id d7c31b52479b9451 offset 0x30",
+      "exact_quote": "3c 61 3e 3c 62 20 78 6c 69 6e 6b 3a 66 3d 22 22   <a><b xlink:f=\"\""
+    },
+    {
+      "claim": "Grimoire winner seeds are produced by Grimoire structural mutators.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id d7c31b52479b9451 mutation_op",
+      "exact_quote": "mutation_op=GrimoireRecursiveReplacementMutator,GrimoireExtensionMutator"
+    },
+    {
+      "claim": "Grimoire's generalization+structural mutators recombine generalized token structures.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire section",
+      "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+    },
+    {
+      "claim": "Cmplog loser seeds carry a leading filename/garbage prefix before the XML declaration.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id a0f1e597ae5a2ec0 offset 0x00",
+      "exact_quote": "06 00 06 00 00 00 31 32 37 37 37 32 2e 78 6d 6c   ......127772.xml"
+    },
+    {
+      "claim": "Grimoire winner resolved every trial while cmplog loser blocked in 9/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0\n  loser:  resolved=1/10  blocked=9  unreached=0"
+    },
+    {
+      "claim": "The winner takes the true side far more often than the loser at the blocker line.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L3573",
+      "exact_quote": "L3573  T=123 F=387  T=30 F=192  if ((IS_LETTER(c)) || (IS_DIGIT(c)) ||  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog adds CMP_MAP gradient buckets on top of cmplog.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog section",
+      "exact_quote": "union of cmplog and value_profile — edge counters,\nper-execution CMP buffer (`CmpLogObserver`), and CMP_MAP gradient buckets."
+    },
+    {
+      "claim": "value_profile_cmplog feedback includes CMP_MAP-bucket signals absent in plain cmplog.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog feedback",
+      "exact_quote": "edge-bucket + CMP_MAP-bucket signals."
+    },
+    {
+      "claim": "Plain cmplog feedback is only the same edge-bucket signal as naive.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog feedback",
+      "exact_quote": "same edge-bucket signal as naive. The CMP buffer is\nconsumed by the mutator, not by feedback."
+    },
+    {
+      "claim": "value_profile_cmplog resolved 8/10 while cmplog blocked 9/10 with much higher branch hitcount.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "avg hitcount on branch: winner=99  loser=8"
+    },
+    {
+      "claim": "The comparison cascade includes the attribute-type switch routing toward the validation call.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L3865",
+      "exact_quote": "L3865  T=0 F=84  T=0 F=285  switch (type) {"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "grimoire structural",
+    "verified_in_lineage": false,
+    "verification_method": "Decisive pairs are grimoire>cmplog (grimoire_structural) and value_profile_cmplog>cmplog (value_profile); neither winner mechanism is I2SRandReplace, so the mandatory I2S lineage check does not apply. Pair 1's claimed mechanism is grimoire structural, corroborated directly by the winner seed metadata mutation_op=GrimoireRecursiveReplacementMutator,GrimoireExtensionMutator in BRANCH SEEDS rather than by a lineage dash-row query."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where cmplog (no grimoire structural stage, no CMP_MAP) resolves the old-XML-1.0 name-char true branch as often as grimoire/value_profile_cmplog, showing structural recombination and gradient feedback give no advantage at building the nested DOCTYPE+element document."
+  },
+  "weakest_evidence_point": "Whether the XML_DOC_OLD10 else-path requirement is genuinely the discriminator versus simple document well-formedness is inferred from source plus seed shape, not directly proven by a per-role branch hit on line 3547.",
+  "confidence": "medium"
+}

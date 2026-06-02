@@ -1,0 +1,75 @@
+{
+  "branch_id": 2330,
+  "target": "lcms",
+  "summary_one_line": "Reach deep LUT-A2B curve parsing where _cmsReadUInt16Number is called with n==NULL, gated by exact ICC tag-type magic and offset words.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "An ICC profile whose tag-type signature/structure bytes (the 'lcms' magic prefix, profile-class FOURCC at 0x0c, color-space FOURCC at 0x10, and tag-type offset/count words) match exactly so the parser descends into Type_LUTA2B_Read, which calls _cmsReadUInt16Number(io, NULL) at line 2565 — the only call site exercising the blocked false (n==NULL) side of line 133.",
+      "why_winner_satisfies": "Winner seeds carry profile-class FOURCCs ('mntr','link') at offset 0x0c and color-space tokens ('RGB ','8CLR') at 0x10 and reach the deep call chain: Type_LUTA2B_Read has W hits=8 (L hits=0) and its L2565 _cmsReadUInt16Number(io,NULL) branch shows T=0 F=8 for W versus T=0 F=0 for L, so only the winner reaches the n==NULL site.",
+      "why_loser_doesnt": "Loser seeds saturate the shallow Type_Curve_Read default arm (L1171 T=57 F=3) parsing many curves but never enter Type_LUTA2B_Read (L hits=0), so the n==NULL call at line 2565 is never executed and line 133 false side stays at F=0 for the loser.",
+      "mechanism_attribution": "cmplog/vpc I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes the exact comparand (tag-type signature / offset words) into the matching input offsets, solving the equality gates that admit deeper LUT-A2B descent; naive and value_profile lack I2SRandReplace and cannot place the precise multi-byte FOURCC/offset values by havoc alone."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked side is the false branch of line 133 in _cmsReadUInt16Number.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsplugin.c:133:9",
+      "exact_quote": "if (n != NULL) *n = _cmsAdjustEndianess16(tmp);"
+    },
+    {
+      "claim": "The only call site passing NULL (n==NULL, the false side) on the divergent chain is inside Type_LUTA2B_Read at line 2565.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=6 L2565",
+      "exact_quote": "if (!_cmsReadUInt16Number(io, NULL)) return NULL;"
+    },
+    {
+      "claim": "Only the winner reaches Type_LUTA2B_Read; the loser never invokes it.",
+      "cited_section": "HIT-COUNT DIVERGENCE",
+      "cited_locator": "Type_LUTA2B_Read 8 vs 0",
+      "exact_quote": "       8         0  cmstypes.c:Type_LUTA2B_Read  (/src/Little-CMS/src/cmstypes.c:2548-2612)"
+    },
+    {
+      "claim": "The loser saturates the shallow Type_Curve_Read default curve arm instead of descending into LUT structures.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=3 L1171",
+      "exact_quote": "default:  // Curve"
+    },
+    {
+      "claim": "Winner inputs carry profile-class FOURCCs at offset 0x0c distinguishing them from loser inputs.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0f",
+      "exact_quote": "   0x000c  6d(m)x12 6c(l)x6 00(.)x2            6d(m)x20"
+    },
+    {
+      "claim": "Winner inputs carry varied color-space tokens at offset 0x10 (L/R/8/M) while loser inputs are uniformly 'R'.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x10",
+      "exact_quote": "   0x0010  4c(L)x8 52(R)x4 38(8)x3 4d(M)x3 +2u  52(R)x20"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at matching input offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, so its loss against vpc is attributable to the I2S delta.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2330 --role W --fuzzer cmplog --trial 1 --seed 009bf4fd7bb8c4ca`; the ancestor chain has an I2S-floor dash row (mutation_op = -) at depth 4, the under-current-build signature of an unwrapped I2SRandReplace find in cmplog."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A naive or value_profile trial reaching line 133 false side (F>0) while never executing I2SRandReplace would refute that the I2S substitution of tag-type/offset gates is what admits the deep LUT-A2B descent."
+  },
+  "weakest_evidence_point": "The byte-diff offsets show winner/loser FOURCC differences but do not directly prove which specific equality CMP gates the Type_LUTA2B_Read entry, so the exact gated comparand is inferred from the call chain rather than observed in lineage.",
+  "confidence": "high"
+}

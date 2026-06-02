@@ -1,0 +1,69 @@
+{
+  "branch_id": 4031,
+  "target": "libpng",
+  "summary_one_line": "Input must contain an sCAL chunk whose 4-byte big-endian length field is < 4, hitting the short-chunk reject path.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)", "cmplog>naive (I2S)"],
+      "what_input_feature": "A well-formed PNG carrying an sCAL chunk (chunk-type FOURCC 's','C','A','L') placed after IHDR and before IDAT, where the chunk's 4-byte big-endian length field holds a value strictly less than 4 so png_handle_sCAL takes the `length < 4` true branch at pngrutil.c:2403.",
+      "why_winner_satisfies": "Winner-resolving seeds (vpc/cmplog) reach line 2403 and take its true side (W: T=18 F=15) and the blocker becomes hit (avg hitcount on branch winner=18 / 34), meaning the fuzzer produced an sCAL chunk with a length field <4; the I2S winners place the correct chunk-type literal bytes at the chunk position so the sCAL handler is dispatched at all.",
+      "why_loser_doesnt": "Loser-blocking seeds never take the true side (L: T=0 F=25) and the branch hitcount stays 0; without I2S the loser fails to synthesize the exact 4-byte sCAL chunk-type tag (and a sub-4 length) by random byte mutation, so png_handle_sCAL with length<4 is never dispatched.",
+      "mechanism_attribution": "cmplog/vpc carry I2SRandReplace, which reads the CmpLogObserver record of the chunk-name comparison and substitutes the logged 'sCAL' FOURCC operand at the matching input offset, manufacturing the chunk-type literal that random havoc bytes (naive/value_profile) cannot place; once dispatched, a small/absent length field satisfies length<4."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of `else if (length < 4)` inside png_handle_sCAL, the globally blocked side.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "pngrutil.c:2403:13",
+      "exact_quote": "Source line:    else if (length < 4)\nGlobally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "Reaching the blocker requires the sCAL chunk handler to be entered after IHDR and before IDAT.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L2403",
+      "exact_quote": "/* Need unit type, width, \\0, height: minimum 4 bytes */"
+    },
+    {
+      "claim": "Winner inputs take the true side of L2403 while loser inputs never do.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2403",
+      "exact_quote": "d=1   L2403  T=18 F=15  T=0 F=25  else if (length < 4)  <-- BLOCKER"
+    },
+    {
+      "claim": "Both decisive pairs carry the I2S technique delta and the winners resolve the branch while losers block.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 and Pair 2",
+      "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "The winner produces hits on the branch where the loser produces none.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "avg hitcount on branch: winner=18  loser=0"
+    },
+    {
+      "claim": "cmplog/vpc add I2SRandReplace, which substitutes a logged CMP operand at the matching input offset.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile / naive have no I2SRandReplace mutator, so they cannot perform the operand substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 4031 --role W --fuzzer value_profile_cmplog --trial 1 --seed 384ddb337e2d2818` and observed I2S-floor dash rows (mutation_op = -) at depths 2 and 3; also ran it for cmplog seed 774ddf3ddc65ad44 (trial 1) and observed a dash row at depth 14 — both winning chains for the two I2S pairs contain at least one I2S-floor ancestor."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating only on a length<4 integer comparison with NO preceding multi-byte literal chunk-type FOURCC match would show naive/value_profile resolving it as fast as cmplog/vpc (no I2S advantage), refuting that the divergence comes from I2S substitution of the chunk-type literal."
+  },
+  "weakest_evidence_point": "The seed byte dumps only show the first 0x40 bytes (PNG header/gAMA region), so I cannot directly point at the sCAL chunk-type tag or its sub-4 length field in the input — the FOURCC-substitution claim rests on the source dispatch structure plus the I2S-floor lineage rather than visible chunk bytes.",
+  "confidence": "medium"
+}

@@ -1,0 +1,100 @@
+{
+  "branch_id": 2209,
+  "target": "lcms",
+  "summary_one_line": "A multi-profile ICC input whose profile-class/colorspace FOURCC fields build a non-empty Lut pipeline that cmsPipelineCat dups stage-by-stage.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "A valid 4-byte ICC profile-class FOURCC at offset 0x0c (e.g. 'link','prtr','spac','lcms') plus a recognized device/colorspace tag, so DefaultICCintents builds a non-empty Lut whose stages cmsPipelineCat then dups into l1 via cmsPipelineInsertStage.",
+      "why_winner_satisfies": "Winner-resolving seeds carry varied non-default profile-class signatures at 0x0c-0x0f ('lcms','link','prtr','spac','MCH1'), and the vpc winner's lineage contains an I2S-floor dash row that splices logged CMP operands into these FOURCC offsets, producing inputs that traverse the stage-dup loop and take the blocked true side.",
+      "why_loser_doesnt": "value_profile lacks I2SRandReplace; its loser-blocking seeds are uniformly 'mntr' at 0x0c-0x0f (6d 6e 74 72) and never substitute the alternate profile-class operands needed, so the pipeline stays in a shape that does not reach the InsertStage true branch (0/10 resolved).",
+      "mechanism_attribution": "value_profile_cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes the logged comparand for the profile-class FOURCC check at the input offset, which value_profile (no I2S stage) cannot perform."
+    },
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)"],
+      "what_input_feature": "The same multi-profile FOURCC/colorspace fields, but reached via incremental Hamming-distance progress on the profile-class and colorspace CMP operands rather than a single exact substitution.",
+      "why_winner_satisfies": "value_profile_cmplog adds the CMP_MAP gradient on top of I2S, so partial matches on the 0x0c-0x16 tag bytes earn new CMP_MAP buckets and are retained as corpus, letting it resolve 9/10 with 50 hits versus cmplog's 5 hits.",
+      "why_loser_doesnt": "plain cmplog has no CMP_MAP feedback; without per-bucket distance credit it cannot accumulate the partial FOURCC/colorspace progress and resolves only 2/10 trials (loser blocked=8).",
+      "mechanism_attribution": "value_profile_cmplog's CMP_MAP gradient (Hamming/prefix-distance buckets) rewards inputs that bring the profile-class/colorspace comparands closer to matching, a feedback signal cmplog lacks."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of an InsertStage check inside the per-stage dup loop of cmsPipelineCat.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmslut.c:1620",
+      "exact_quote": "if (!cmsPipelineInsertStage(l1, cmsAT_END, cmsStageDup(mpe)))"
+    },
+    {
+      "claim": "The winner takes the loop/insert path while the blocked true side is the global blocker.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "blocked side",
+      "exact_quote": "Globally blocked side: T  (true branch)"
+    },
+    {
+      "claim": "Winner seeds carry varied profile-class FOURCC fields at offsets 0x0c-0x0f distinct from the loser's uniform 'mntr'.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x000c-0x000d",
+      "exact_quote": "0x000c  6c(l)x4 70(p)x4 73(s)x2             6d(m)x20                            DIFFER"
+    },
+    {
+      "claim": "Loser-blocking seeds are uniformly 'mntr' at the profile-class offset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Loser Seed 1 offset 0x000c",
+      "exact_quote": "..b.lcms.@..mntr"
+    },
+    {
+      "claim": "Winner-resolving seeds carry alternate profile-class signatures such as 'link' and 'spac'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "Winner Seed 1 / Seed 3 offset 0x000c",
+      "exact_quote": "..b.lcms.@..link"
+    },
+    {
+      "claim": "value_profile_cmplog provides I2SRandReplace whereas value_profile does not.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    },
+    {
+      "claim": "I2SRandReplace substitutes a logged operand at the input offset where the other operand matched.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile adds CMP_MAP distance-bucket feedback that rewards near-matching operands.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "cmplog (the Pair 2 loser) has no CMP_MAP gradient feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Feedback",
+      "exact_quote": "same edge-bucket signal as naive. The CMP buffer is\nconsumed by the mutator, not by feedback."
+    },
+    {
+      "claim": "vpc resolves the branch with far more hits than cmplog, showing accumulated progress.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 hitcount",
+      "exact_quote": "avg hitcount on branch: winner=50  loser=5"
+    },
+    {
+      "claim": "Pair 1 winner resolves 9/10 while the value_profile loser resolves 0/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 counts",
+      "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2209 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0f8bbd51a2d5664d` and observed one I2S-floor dash row (mutation_op = -) at depth 15 of the ancestor chain (ancestor 5441efb6193a1a03), the lower-bound signal of an I2SRandReplace find in vpc under the current build"
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the profile-class FOURCC field present but a fixed/zeroed stage list (so cmsPipelineCat's l2->Elements is always NULL) on which value_profile_cmplog and value_profile resolve at equal rates, showing the FOURCC substitution is not what gates the stage-dup branch."
+  },
+  "weakest_evidence_point": "The byte diff localizes the gating field to the 0x0c-0x0f profile-class FOURCC, but the actual CMP that I2S solves is inferred from source-region structure rather than observed CMP operand logs.",
+  "confidence": "medium"
+}

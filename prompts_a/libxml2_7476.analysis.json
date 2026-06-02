@@ -1,0 +1,63 @@
+{
+  "branch_id": 7476,
+  "target": "libxml2",
+  "summary_one_line": "A processing instruction (<?...?>) must appear inside an internal DTD subset so ctxt->inSubset==1 holds at the PI handler.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "The input must contain a processing instruction emitted while the parser is inside the internal DTD subset, i.e. a `<?...?>` between `<!DOCTYPE name [` and the closing `]>`, so that ctxt->inSubset == 1 when xmlSAX2ProcessingInstruction runs and the true branch at L2740 is taken (then xmlAddChild to intSubset at L2741).",
+      "why_winner_satisfies": "The naive_ctx winner resolves 8/10 and takes the true side (L2740 T=2 in W vs T=0 in L); its seed carries a well-formed `<?xml version=\"1.0\"?>` prolog plus a `<!DOCTYPE a...` declaration, the structural scaffold needed to enter inSubset==1 when a PI is parsed inside the subset. Context-sensitive coverage rewards the PI handler reached via the DTD-internal-subset call context as a distinct new edge, so the path into the subset PI handler stays in the corpus and gets driven to the inSubset==1 site.",
+      "why_loser_doesnt": "naive blocks 10/10 and only ever takes the false side (L2740 T=0 F=91 in L); it reaches xmlSAX2ProcessingInstruction 91 times but with inSubset==0, so it falls through to the parent/root handling at L2747-L2755 (the [L] lines). Its inputs have the DOCTYPE/PI fragments mangled and never assemble a PI nested inside an open internal subset, so the inSubset==1 state never co-occurs with a PI parse.",
+      "mechanism_attribution": "The only technique delta between naive_ctx and naive is the CtxHook: naive_ctx folds a running call-context hash into the edge-map index, so reaching xmlSAX2ProcessingInstruction via the internal-subset parse path is a fresh (call-context, edge) coverage bucket that naive's bare-edge map cannot distinguish from the much more frequent root-level PI path. This context-sensitive coverage keeps the subset-PI input alive in the corpus and steers mutation toward the inSubset==1 true branch; the mutators are identical havoc/token (no I2S, no CMP_MAP)."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the true side of `if (ctxt->inSubset == 1)` in xmlSAX2ProcessingInstruction, whose true arm adds the PI to the internal subset.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L2740-L2741",
+      "exact_quote": "2740  if (ctxt->inSubset == 1) { <-- BLOCKER\n[W]  2741  \txmlAddChild((xmlNodePtr) ctxt->myDoc->intSubset, ret);"
+    },
+    {
+      "claim": "The winner takes the true side of the blocker while the loser only takes the false side and proceeds to the parent/root handling.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2740 / L2747",
+      "exact_quote": "d=1   L2740  T=2 F=0  T=0 F=91  if (ctxt->inSubset == 1) {  <-- BLOCKER"
+    },
+    {
+      "claim": "The winning seed contains a well-formed XML prolog and a DOCTYPE declaration, the structural scaffold for entering an internal subset.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed fbd4d48bc7f5a45b offsets 0x12-0x3f",
+      "exact_quote": "rsion=\"1.0\"?>.<!\n0030: 44 4f 43 54 59 50 45 20 61 39 39 30 30 30 65 65   DOCTYPE a99000ee"
+    },
+    {
+      "claim": "The loser inputs reach the PI handler 91 times but always with the non-subset state, never the inSubset==1 true side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "L2740 loser column",
+      "exact_quote": "d=1   L2740  T=2 F=0  T=0 F=91  if (ctxt->inSubset == 1) {  <-- BLOCKER"
+    },
+    {
+      "claim": "naive_ctx differs from naive only by a CtxHook that folds the call-context into the edge-map index, making (call-context, edge) pairs the coverage unit.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Instrumentation/Feedback",
+      "exact_quote": "keeps a running hash of the current call context (caller chain) and\nfolds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "naive_ctx uses the same havoc/token mutator stack as naive with no I2S or CMP_MAP, so the divergence is attributable to the coverage granularity, not comparison solving.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`, no\nCMP_MAP."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "context-sensitive coverage",
+    "verified_in_lineage": false,
+    "verification_method": "Lineage verification is not mandatory for context-sensitive coverage, but I ran `python3 tools/db_query.py lineage --branch 7476 --role W --fuzzer naive_ctx --trial 1 --seed fbd4d48bc7f5a45b` as a sanity check. The 8-level chain is all havoc/token ops (BytesExpandMutator, TokenInsert, CrossoverReplaceMutator, etc.); the single dash row at depth 7 is the imported-root ancestor, not an I2S find, consistent with MECHANISM CONTEXT stating naive_ctx has no I2SRandReplace/CMP_MAP and no ParentInfo-only dash rows. The winner mechanism is the CtxHook coverage granularity, not comparison solving."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the PI handler is reached from only one call context (no root-level vs subset-level path ambiguity) would show naive_ctx and naive resolving the inSubset==1 site at the same rate, killing the context-sensitivity attribution."
+  },
+  "weakest_evidence_point": "The claim that naive's bare-edge map conflates the subset-PI path with the root-level PI path is inferred from the 91 root-level PI hits and the CtxHook description, not directly observed as a collided map slot.",
+  "confidence": "medium"
+}

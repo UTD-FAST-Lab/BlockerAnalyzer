@@ -1,0 +1,81 @@
+{
+  "branch_id": 13,
+  "target": "bloaty",
+  "summary_one_line": "Input must be a Mach-O object file whose magic and section structure let bloaty parse a non-empty build_id.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)", "value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The leading bytes must form a Mach-O magic constant (ce fa ed fe / cf fa ed fe) followed by enough valid Mach-O load-command/section structure (including __ section-name bytes 5f 5f) that file->GetBuildId() returns a non-empty string, so the true side of if (!build_id.empty()) is taken.",
+      "why_winner_satisfies": "All winner-resolving seeds begin with the Mach-O magic ce fa ed fe (or cf fa ed fe) and carry embedded 5f 5f (__) section-name bytes and load-command sizing fields; these parse into a Mach-O whose build_id (UUID) is recovered, populating build_id and exercising lines 1751-1757 only in W.",
+      "why_loser_doesnt": "All loser-blocking seeds begin with 00 61 73 6d (WASM \\0asm) or similar non-Mach-O magic; bloaty parses them as a format that yields an empty build_id, so GetBuildId() returns empty and line 1750 always takes the false side (T=0 in L).",
+      "mechanism_attribution": "cmplog/vpc intercept the object-file format CMPs (magic and structural-field comparisons) and I2SRandReplace splices the exact required literals (Mach-O magic, section-name bytes) into the input at the offsets where the parser compares them; naive and value_profile lack I2SRandReplace and cannot reconstruct the multi-field magic/structure by blind havoc, so they never produce a parseable build_id."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocked true side requires a non-empty build_id at the if guard.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "L1750, blocked side=T",
+      "exact_quote": "if (!build_id.empty()) {"
+    },
+    {
+      "claim": "build_id is produced by parsing the object file via file->GetBuildId().",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L1749",
+      "exact_quote": "std::string build_id = file->GetBuildId();"
+    },
+    {
+      "claim": "Only winner-resolving seeds exercise the true-side body lines 1751-1757.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L1750",
+      "exact_quote": "L1750  T=54 F=0  T=0 F=120  if (!build_id.empty()) {  <-- BLOCKER"
+    },
+    {
+      "claim": "Winner seeds begin with the Mach-O magic ce fa ed fe and carry embedded __ (5f 5f) section-name bytes.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id dcb7ff92fe9d1ffa, offset 0x0000",
+      "exact_quote": "0000: ce fa ed fe 02 01 01 20 20 20 01 b0 48 13 5f 5f"
+    },
+    {
+      "claim": "Another winner seed uses the alternate Mach-O 64-bit magic cf fa ed fe.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 6ac11a9dca2495f8, offset 0x0000",
+      "exact_quote": "0000: cf fa ed fe 48 13 5f 5f 02 00 00 00 02 01 01 20"
+    },
+    {
+      "claim": "Loser-blocking seeds begin with non-Mach-O magic such as 00 61 73 6d (\\0asm).",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0002812e1528da92, offset 0x0000",
+      "exact_quote": "0000: 00 61 73 6d 7b 45 4c 46 01 01 46 01 01 17 04 00"
+    },
+    {
+      "claim": "At the leading magic offsets W and L bytes are sharply concentrated and disjoint (ce/fa/ed/fe vs 00/61/73/6d).",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0000-0x0003",
+      "exact_quote": "0x0000  ce(.)x7 cf(.)x2                     00(.)x19 21(!)x1                    DIFFER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which substitutes a logged CMP operand at matching input offsets, unlike naive.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace; only its vpc counterpart adds it, matching the second decisive pair direction.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 13 --role W --fuzzer cmplog --trial 1 --seed dcb7ff92fe9d1ffa` and observed an I2S-floor dash row (mutation_op = -) at depth 18 of the ancestor chain. Corroborated with `--fuzzer value_profile_cmplog --seed 40a17ee7fff2f42d`, which showed two dash rows at depths 17 and 18, confirming I2S contribution in both decisive-pair winners under the current floor signal."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on a non-empty build_id behind a Mach-O magic/structure check in which naive (no I2S) resolves the branch at the same rate as cmplog within the budget, showing the magic/structure literals are reachable by blind havoc rather than requiring I2S substitution."
+  },
+  "weakest_evidence_point": "That bloaty's GetBuildId() returns non-empty specifically for Mach-O (vs other formats) is inferred from the seed magic bytes and source guard, not directly observed from a build_id value in the prompt.",
+  "confidence": "high"
+}

@@ -1,0 +1,573 @@
+==== BLOCKER ====
+Target: libpng
+Branch ID: 3890
+Location: /src/libpng/pngread.c:229:16
+Enclosing function: OSS_FUZZ_png_read_info
+Source line:       else if (chunk_name == png_sPLT)
+Globally blocked side: T  (true branch)
+
+==== TRIAL VECTOR (per fuzzer, n=10 trials) ====
+fuzzer                    resolved  blocked  unreached  role
+naive                            0       10          0  loser (I2S vs cmplog); loser (value_profile vs value_profile)
+cmplog                          10        0          0  winner (I2S vs naive)
+value_profile                   10        0          0  winner (value_profile vs naive)
+value_profile_cmplog             ?        ?          ?  REFERENCE
+naive_ctx                        4        6          0  REFERENCE
+naive_ngram4                     1        9          0  REFERENCE
+mopt                             1        9          0  REFERENCE
+minimizer                        0       10          0  REFERENCE
+fast                             2        8          0  REFERENCE
+grimoire                         ?        ?          ?  REFERENCE
+
+INVOLVED fuzzers (synthetic-verification scope): ['cmplog', 'naive', 'value_profile']
+REFERENCE fuzzers (auxiliary context only):     ['value_profile_cmplog', 'naive_ctx', 'naive_ngram4', 'mopt', 'minimizer', 'fast', 'grimoire']
+
+==== DECISIVE PAIRS (2) ====
+--- Pair 1: cmplog > naive  [delta: I2S] ---
+  subject 21  (cmplog vs naive, admissible)
+  winner: resolved=10/10  blocked=0  unreached=0
+  loser:  resolved=0/10  blocked=10  unreached=0
+  avg duration blocked: winner=0.00h  loser=24.00h
+  avg hitcount on branch: winner=579  loser=0
+  prob_div=1.00  dur_div=24.00h  hit_div=579
+  subject-level: delta_AUC=22677480.0  p_AUC=0.0002  delta_Final=307.4  p_final=0.0002
+--- Pair 2: value_profile > naive  [delta: value_profile] ---
+  subject 22  (value_profile vs naive, admissible)
+  winner: resolved=10/10  blocked=0  unreached=0
+  loser:  resolved=0/10  blocked=10  unreached=0
+  avg duration blocked: winner=5.50h  loser=24.00h
+  avg hitcount on branch: winner=478  loser=0
+  prob_div=1.00  dur_div=18.50h  hit_div=478
+  subject-level: delta_AUC=16855020.0  p_AUC=0.0002  delta_Final=254.7  p_final=0.0002
+
+==== SOURCE CONTEXT (per-role coverage overlay) ====
+Legend: [W] winner-resolving only  [L] loser-blocking only  [B] both  [ ] not hit
+Source: db/per_role_coverage/libpng/3890/{W,L}/branch_coverage_show.txt
+
+--- Enclosing function: OSS_FUZZ_png_read_info (/src/libpng/pngread.c:93-262) ---
+[ ]    91  void PNGAPI
+[ ]    92  png_read_info(png_structrp png_ptr, png_inforp info_ptr)
+[B]    93  {
+[B]    94  #ifdef PNG_HANDLE_AS_UNKNOWN_SUPPORTED
+[B]    95     int keep;
+[B]    96  #endif
+[ ]    97  
+[B]    98     png_debug(1, "in png_read_info");
+[ ]    99  
+[B]   100     if (png_ptr == NULL || info_ptr == NULL)
+[ ]   101        return;
+[ ]   102  
+[ ]   103     /* Read and check the PNG file signature. */
+[B]   104     png_read_sig(png_ptr, info_ptr);
+[ ]   105  
+[B]   106     for (;;)
+[B]   107     {
+[B]   108        png_uint_32 length = png_read_chunk_header(png_ptr);
+[B]   109        png_uint_32 chunk_name = png_ptr->chunk_name;
+[ ]   110  
+[ ]   111        /* IDAT logic needs to happen here to simplify getting the two flags
+[ ]   112         * right.
+[ ]   113         */
+[B]   114        if (chunk_name == png_IDAT)
+[L]   115        {
+[L]   116           if ((png_ptr->mode & PNG_HAVE_IHDR) == 0)
+[ ]   117              png_chunk_error(png_ptr, "Missing IHDR before IDAT");
+[ ]   118  
+[L]   119           else if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&
+[L]   120               (png_ptr->mode & PNG_HAVE_PLTE) == 0)
+[ ]   121              png_chunk_error(png_ptr, "Missing PLTE before IDAT");
+[ ]   122  
+[L]   123           else if ((png_ptr->mode & PNG_AFTER_IDAT) != 0)
+[ ]   124              png_chunk_benign_error(png_ptr, "Too many IDATs found");
+[ ]   125  
+[L]   126           png_ptr->mode |= PNG_HAVE_IDAT;
+[L]   127        }
+[ ]   128  
+[B]   129        else if ((png_ptr->mode & PNG_HAVE_IDAT) != 0)
+[ ]   130        {
+[ ]   131           png_ptr->mode |= PNG_HAVE_CHUNK_AFTER_IDAT;
+[ ]   132           png_ptr->mode |= PNG_AFTER_IDAT;
+[ ]   133        }
+[ ]   134  
+[ ]   135        /* This should be a binary subdivision search or a hash for
+[ ]   136         * matching the chunk name rather than a linear search.
+[ ]   137         */
+[B]   138        if (chunk_name == png_IHDR)
+[B]   139           png_handle_IHDR(png_ptr, info_ptr, length);
+[ ]   140  
+[B]   141        else if (chunk_name == png_IEND)
+[ ]   142           png_handle_IEND(png_ptr, info_ptr, length);
+[ ]   143  
+[B]   144  #ifdef PNG_HANDLE_AS_UNKNOWN_SUPPORTED
+[B]   145        else if ((keep = png_chunk_unknown_handling(png_ptr, chunk_name)) != 0)
+[ ]   146        {
+[ ]   147           png_handle_unknown(png_ptr, info_ptr, length, keep);
+[ ]   148  
+[ ]   149           if (chunk_name == png_PLTE)
+[ ]   150              png_ptr->mode |= PNG_HAVE_PLTE;
+[ ]   151  
+[ ]   152           else if (chunk_name == png_IDAT)
+[ ]   153           {
+[ ]   154              png_ptr->idat_size = 0; /* It has been consumed */
+[ ]   155              break;
+[ ]   156           }
+[ ]   157        }
+[B]   158  #endif
+[B]   159        else if (chunk_name == png_PLTE)
+[W]   160           png_handle_PLTE(png_ptr, info_ptr, length);
+[ ]   161  
+[B]   162        else if (chunk_name == png_IDAT)
+[L]   163        {
+[L]   164           png_ptr->idat_size = length;
+[L]   165           break;
+[L]   166        }
+[ ]   167  
+[B]   168  #ifdef PNG_READ_bKGD_SUPPORTED
+[B]   169        else if (chunk_name == png_bKGD)
+[B]   170           png_handle_bKGD(png_ptr, info_ptr, length);
+[B]   171  #endif
+[ ]   172  
+[B]   173  #ifdef PNG_READ_cHRM_SUPPORTED
+[B]   174        else if (chunk_name == png_cHRM)
+[B]   175           png_handle_cHRM(png_ptr, info_ptr, length);
+[B]   176  #endif
+[ ]   177  
+[B]   178  #ifdef PNG_READ_eXIf_SUPPORTED
+[B]   179        else if (chunk_name == png_eXIf)
+[W]   180           png_handle_eXIf(png_ptr, info_ptr, length);
+[B]   181  #endif
+[ ]   182  
+[B]   183  #ifdef PNG_READ_gAMA_SUPPORTED
+[B]   184        else if (chunk_name == png_gAMA)
+[B]   185           png_handle_gAMA(png_ptr, info_ptr, length);
+[B]   186  #endif
+[ ]   187  
+[B]   188  #ifdef PNG_READ_hIST_SUPPORTED
+[B]   189        else if (chunk_name == png_hIST)
+[W]   190           png_handle_hIST(png_ptr, info_ptr, length);
+[B]   191  #endif
+[ ]   192  
+[B]   193  #ifdef PNG_READ_oFFs_SUPPORTED
+[B]   194        else if (chunk_name == png_oFFs)
+[B]   195           png_handle_oFFs(png_ptr, info_ptr, length);
+[B]   196  #endif
+[ ]   197  
+[B]   198  #ifdef PNG_READ_pCAL_SUPPORTED
+[B]   199        else if (chunk_name == png_pCAL)
+[B]   200           png_handle_pCAL(png_ptr, info_ptr, length);
+[B]   201  #endif
+[ ]   202  
+[B]   203  #ifdef PNG_READ_sCAL_SUPPORTED
+[B]   204        else if (chunk_name == png_sCAL)
+[B]   205           png_handle_sCAL(png_ptr, info_ptr, length);
+[B]   206  #endif
+[ ]   207  
+[B]   208  #ifdef PNG_READ_pHYs_SUPPORTED
+[B]   209        else if (chunk_name == png_pHYs)
+[B]   210           png_handle_pHYs(png_ptr, info_ptr, length);
+[B]   211  #endif
+[ ]   212  
+[B]   213  #ifdef PNG_READ_sBIT_SUPPORTED
+[B]   214        else if (chunk_name == png_sBIT)
+[B]   215           png_handle_sBIT(png_ptr, info_ptr, length);
+[B]   216  #endif
+[ ]   217  
+[B]   218  #ifdef PNG_READ_sRGB_SUPPORTED
+[B]   219        else if (chunk_name == png_sRGB)
+[B]   220           png_handle_sRGB(png_ptr, info_ptr, length);
+[B]   221  #endif
+[ ]   222  
+[B]   223  #ifdef PNG_READ_iCCP_SUPPORTED
+[B]   224        else if (chunk_name == png_iCCP)
+[W]   225           png_handle_iCCP(png_ptr, info_ptr, length);
+[B]   226  #endif
+[ ]   227  
+[B]   228  #ifdef PNG_READ_sPLT_SUPPORTED
+[B]   229        else if (chunk_name == png_sPLT) <-- BLOCKER
+[W]   230           png_handle_sPLT(png_ptr, info_ptr, length);
+[B]   231  #endif
+[ ]   232  
+[B]   233  #ifdef PNG_READ_tEXt_SUPPORTED
+[B]   234        else if (chunk_name == png_tEXt)
+[B]   235           png_handle_tEXt(png_ptr, info_ptr, length);
+[B]   236  #endif
+[ ]   237  
+[B]   238  #ifdef PNG_READ_tIME_SUPPORTED
+[B]   239        else if (chunk_name == png_tIME)
+[B]   240           png_handle_tIME(png_ptr, info_ptr, length);
+[B]   241  #endif
+[ ]   242  
+[B]   243  #ifdef PNG_READ_tRNS_SUPPORTED
+[B]   244        else if (chunk_name == png_tRNS)
+[W]   245           png_handle_tRNS(png_ptr, info_ptr, length);
+[B]   246  #endif
+[ ]   247  
+[B]   248  #ifdef PNG_READ_zTXt_SUPPORTED
+[B]   249        else if (chunk_name == png_zTXt)
+[W]   250           png_handle_zTXt(png_ptr, info_ptr, length);
+[B]   251  #endif
+[ ]   252  
+[B]   253  #ifdef PNG_READ_iTXt_SUPPORTED
+[B]   254        else if (chunk_name == png_iTXt)
+[W]   255           png_handle_iTXt(png_ptr, info_ptr, length);
+[B]   256  #endif
+[ ]   257  
+[B]   258        else
+[B]   259           png_handle_unknown(png_ptr, info_ptr, length,
+[B]   260               PNG_HANDLE_CHUNK_AS_DEFAULT);
+[B]   261     }
+[B]   262  }
+
+--- No 1-hop callers of OSS_FUZZ_png_read_info fired in W (callers index present but none matched) ---
+
+==== HIT-COUNT DIVERGENCE (per function in cov dump) ====
+Functions where W and L invocation counts differ by >=3.0x or one is zero. 'Entry-line count' = first executable line in the function body — a proxy for invocation count.
+
+  W hits    L hits  function  (file:start-end)
+       0      5950  OSS_FUZZ_png_read_row  (/src/libpng/pngread.c:384-616)
+       0         7  OSS_FUZZ_png_read_update_info  (/src/libpng/pngread.c:268-289)
+       0         1  OSS_FUZZ_png_read_end  (/src/libpng/pngread.c:767-935)
+
+==== DIVERGENT BRANCHES (on call chain, rough order) ====
+Branches with W/L divergence in functions on the call chain (enclosing + 1-hop + chain). Rough execution order: outermost caller → blocker. Caveats: this assumes no recursion; loops/gotos break source-line order locally; off-chain divergent branches (L explored code W didn't, or vice versa) are summarized below the chain section — see HIT-COUNT DIVERGENCE for the function-level view.
+
+depth     src  W(T/F)  L(T/F)  source
+--- d=1  OSS_FUZZ_png_read_info  (/src/libpng/pngread.c:93-262) ---
+  d=1   L 100  T=0 F=25  T=0 F=10  if (png_ptr == NULL || info_ptr == NULL)
+  d=1   L 100  T=0 F=25  T=0 F=10  if (png_ptr == NULL || info_ptr == NULL)
+  d=1   L 114  T=0 F=502  T=7 F=106  if (chunk_name == png_IDAT)
+  d=1   L 116  T=0 F=0  T=0 F=7  if ((png_ptr->mode & PNG_HAVE_IHDR) == 0)
+  d=1   L 119  T=0 F=0  T=0 F=7  else if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&
+  d=1   L 123  T=0 F=0  T=0 F=7  else if ((png_ptr->mode & PNG_AFTER_IDAT) != 0)
+  d=1   L 129  T=0 F=502  T=0 F=106  else if ((png_ptr->mode & PNG_HAVE_IDAT) != 0)
+  d=1   L 138  T=24 F=478  T=10 F=103  if (chunk_name == png_IHDR)
+  d=1   L 141  T=0 F=478  T=0 F=103  else if (chunk_name == png_IEND)
+  d=1   L 145  T=0 F=478  T=0 F=103  else if ((keep = png_chunk_unknown_handling(png_ptr, chun...
+  d=1   L 159  T=5 F=473  T=0 F=103  else if (chunk_name == png_PLTE)
+  d=1   L 162  T=0 F=473  T=7 F=96  else if (chunk_name == png_IDAT)
+  d=1   L 169  T=31 F=442  T=4 F=92  else if (chunk_name == png_bKGD)
+  d=1   L 174  T=34 F=408  T=3 F=89  else if (chunk_name == png_cHRM)
+  d=1   L 179  T=1 F=407  T=0 F=89  else if (chunk_name == png_eXIf)
+  d=1   L 184  T=47 F=360  T=11 F=78  else if (chunk_name == png_gAMA)
+  d=1   L 189  T=5 F=355  T=0 F=78  else if (chunk_name == png_hIST)
+  d=1   L 194  T=19 F=336  T=5 F=73  else if (chunk_name == png_oFFs)
+  d=1   L 199  T=74 F=262  T=18 F=55  else if (chunk_name == png_pCAL)
+  d=1   L 204  T=2 F=260  T=7 F=48  else if (chunk_name == png_sCAL)
+  d=1   L 209  T=2 F=258  T=5 F=43  else if (chunk_name == png_pHYs)
+  d=1   L 214  T=39 F=219  T=10 F=33  else if (chunk_name == png_sBIT)
+  d=1   L 219  T=26 F=193  T=10 F=23  else if (chunk_name == png_sRGB)
+  d=1   L 224  T=7 F=186  T=0 F=23  else if (chunk_name == png_iCCP)
+  d=1   L 229  T=48 F=138  T=0 F=23  else if (chunk_name == png_sPLT)  <-- BLOCKER
+  d=1   L 234  T=3 F=135  T=7 F=16  else if (chunk_name == png_tEXt)
+  d=1   L 239  T=3 F=132  T=5 F=11  else if (chunk_name == png_tIME)
+  d=1   L 244  T=7 F=125  T=0 F=11  else if (chunk_name == png_tRNS)
+  d=1   L 249  T=2 F=123  T=0 F=11  else if (chunk_name == png_zTXt)
+  d=1   L 254  T=10 F=113  T=0 F=11  else if (chunk_name == png_iTXt)
+
+[off-chain: 85 additional divergent branches across 6 functions (see HIT-COUNT DIVERGENCE for which functions)]
+
+==== BRANCH SEEDS (shared across decisive pairs) ====
+Note: seed_bisect picks one (fuzzer, trial) per direction by lex-min, so the storing fuzzer may differ from a pair's decisive winner/loser. Each seed below carries its actual (fuzzer, trial); the bytes exercise the named branch side regardless of provenance.
+
+==== Winner-resolving seeds (take true branch) ====
+Seed 1 (id=064b6b512c9b84b1, size=1007 bytes, fuzzer=cmplog, trial=1, discovered_at=5s, mutation_op=DwordAddMutator,WordInterestingMutator,QwordAddMutator,BytesRandInsertMutator):
+  0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR
+  0010: 00 00 00 5b 00 00 00 45 08 06 00 00 01 52 ed aa   ...[...E.....R..
+  0020: e4 00 00 00 04 67 41 4d 41 00 00 b1 8f 0b fc 61   .....gAMA......a
+  0030: 05 00 00 00 01 73 52 47 42 01 d9 c9 2c 7f 00 00   .....sRGB...,...
+Seed 2 (id=022b38992f98528b, size=995 bytes, fuzzer=cmplog, trial=1, discovered_at=104s, mutation_op=BytesDeleteMutator,BitFlipMutator,ByteFlipMutator,ByteInterestingMutator,ByteNegMutator,DwordInterestingMutator):
+  0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR
+  0010: 00 00 00 5b 00 00 00 45 08 06 00 00 01 52 ed aa   ...[...E.....R..
+  0020: e4 00 00 00 04 67 41 4d 41 00 00 b1 8f 0b fc 61   .....gAMA......a
+  0030: 05 00 00 00 01 69 43 43 50 01 d9 c9 2c 7f 00 00   .....iCCP...,...
+Seed 3 (id=074cbf90cbbef94f, size=710 bytes, fuzzer=cmplog, trial=1, discovered_at=744s, mutation_op=WordAddMutator):
+  0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR
+  0010: 00 00 00 5b 00 00 00 45 08 06 00 00 01 52 ed aa   ...[...E.....R..
+  0020: e4 00 00 00 04 67 41 4d 41 00 00 b1 8f 0b fc 61   .....gAMA......a
+  0030: 05 00 00 00 01 73 52 47 42 01 d9 c9 2c 7f 00 00   .....sRGB...,...
+Seed 4 (id=020d204c22cad811, size=720 bytes, fuzzer=cmplog, trial=1, discovered_at=757s, mutation_op=BytesInsertMutator,BytesCopyMutator,QwordAddMutator,ByteInterestingMutator):
+  0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR
+  0010: 00 00 00 5b 00 00 00 45 08 06 00 00 01 52 ed aa   ...[...E.....R..
+  0020: e4 00 00 00 04 67 41 4d 41 00 00 b1 8f 0b fc 61   .....gAMA......a
+  0030: 05 00 00 00 01 73 52 47 42 01 d9 c9 2c 7f 00 00   .....sRGB...,...
+Seed 5 (id=015f9b31905f8499, size=1225 bytes, fuzzer=cmplog, trial=1, discovered_at=1100s, mutation_op=BytesDeleteMutator,BytesExpandMutator,QwordAddMutator,ByteFlipMutator,ByteRandMutator,ByteInterestingMutator):
+  0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR
+  0010: 00 00 00 5b 00 00 00 45 08 06 00 00 01 52 ed aa   ...[...E.....R..
+  0020: e4 00 00 00 04 67 41 4d 41 00 00 b1 8f 0b fc 61   .....gAMA......a
+  0030: 05 00 00 00 01 73 52 47 42 01 d9 c9 2c 7f 00 00   .....sRGB...,...
+
+==== Loser-blocking seeds (take false branch) ====
+Seed 1 (id=00140bdb0aa48f31, size=2316 bytes, fuzzer=naive, trial=1, discovered_at=1s, mutation_op=BytesRandInsertMutator,BytesRandInsertMutator,CrossoverReplaceMutator,TokenInsert,DwordInterestingMutator,BytesExpandMutator,BytesRandInsertMutator):
+  0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR
+  0010: 00 00 00 5b 00 00 00 45 08 06 00 00 01 52 ed aa   ...[...E.....R..
+  0020: e4 00 00 00 04 67 41 4d 41 80 00 b1 8f 0b fc 61   .....gAMA......a
+  0030: 05 00 00 00 01 73 52 47 42 01 d9 c9 2c 7f 00 00   .....sRGB...,...
+Seed 2 (id=00c12f3d55212fd8, size=932 bytes, fuzzer=naive, trial=1, discovered_at=408s, mutation_op=QwordAddMutator,ByteInterestingMutator,BytesSetMutator,ByteIncMutator):
+  0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR
+  0010: 00 00 00 55 00 00 a0 86 10 00 00 00 01 7f ed aa   ...U............
+  0020: e4 00 00 00 04 67 41 4d 41 00 00 b1 8f 0b fc 61   .....gAMA......a
+  0030: 05 00 00 00 01 73 52 47 42 01 d9 c9 2c 7f 00 00   .....sRGB...,...
+Seed 3 (id=00a0761917250025, size=768 bytes, fuzzer=naive, trial=1, discovered_at=1159s, mutation_op=DwordAddMutator,TokenReplace,BytesInsertCopyMutator,BytesRandInsertMutator,BytesRandInsertMutator):
+  0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR
+  0010: 00 00 05 0a 00 00 80 00 02 00 00 00 01 00 ff aa   ................
+  0020: e4 00 00 00 04 67 41 4d 41 00 00 b1 8f 0b 04 61   .....gAMA......a
+  0030: 05 00 00 00 01 73 52 47 42 01 d9 c9 2c 7f 00 00   .....sRGB...,...
+Seed 4 (id=004b9750af3eaa48, size=5109 bytes, fuzzer=naive, trial=1, discovered_at=1232s, mutation_op=ByteNegMutator,BytesDeleteMutator,CrossoverReplaceMutator,WordInterestingMutator,ByteFlipMutator):
+  0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR
+  0010: 00 00 00 05 00 00 00 03 04 00 00 00 01 00 00 aa   ................
+  0020: e4 00 00 00 04 67 41 4d 41 00 00 b1 8f 0b 04 61   .....gAMA......a
+  0030: 05 00 00 00 01 73 52 47 42 01 d9 c9 2c 7f 00 00   .....sRGB...,...
+Seed 5 (id=014d4a3ba385c013, size=1030 bytes, fuzzer=naive, trial=1, discovered_at=1748s, mutation_op=QwordAddMutator,CrossoverInsertMutator,ByteNegMutator,WordInterestingMutator,TokenReplace,ByteFlipMutator,ByteNegMutator):
+  0000: 89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52   .PNG........IHDR
+  0010: 00 00 00 10 00 00 a0 86 10 04 00 00 01 7f ed aa   ................
+  0020: e4 00 00 00 04 67 41 4d 41 00 00 b1 8f aa 56 aa   .....gAMA.....V.
+  0030: aa 00 00 00 01 73 52 47 42 01 d9 c9 2c 7f 00 00   .....sRGB...,...
+
+
+==== BYTE DIFF (W vs L at common offsets) ====
+Per-offset byte sets. Format: hex(ascii)xCOUNT. Shows offsets where W and L bytes differ AND at least one side is concentrated (≤4 distinct values) — likely-informative dataflow signal.
+
+ Offset  W bytes                             L bytes                             tag
+   0x000b  0d(.)x24 01(.)x1                    0d(.)x10                            PARTIAL
+   0x000c  49(I)x24 65(e)x1                    49(I)x10                            PARTIAL
+   0x000d  48(H)x24 52(R)x1                    48(H)x10                            PARTIAL
+   0x000e  44(D)x24 47(G)x1                    44(D)x10                            PARTIAL
+   0x000f  52(R)x24 42(B)x1                    52(R)x10                            PARTIAL
+   0x0010  00(.)x24 01(.)x1                    00(.)x10                            PARTIAL
+   0x0011  00(.)x24 d9(.)x1                    00(.)x10                            PARTIAL
+   0x0012  00(.)x24 c9(.)x1                    00(.)x9 05(.)x1                     PARTIAL
+   0x0013  5b([)x24 2c(,)x1                    5b([)x2 55(U)x1 0a(.)x1 05(.)x1 +5u  PARTIAL
+   0x0014  00(.)x24 7f(.)x1                    00(.)x10                            PARTIAL
+   0x0016  00(.)x23 80(.)x2                    a0(.)x4 00(.)x3 80(.)x2 02(.)x1     PARTIAL
+   0x0017  45(E)x22 00(.)x3                    86(.)x3 00(.)x3 45(E)x2 03(.)x1 +1u  PARTIAL
+   0x0018  08(.)x22 04(.)x3                    10(.)x4 08(.)x2 04(.)x2 02(.)x1 +1u  PARTIAL
+   0x0019  06(.)x22 00(.)x2 73(s)x1            00(.)x7 04(.)x2 06(.)x1             PARTIAL
+   0x001a  00(.)x24 50(P)x1                    00(.)x10                            PARTIAL
+   0x001b  00(.)x24 4c(L)x1                    00(.)x10                            PARTIAL
+   0x001c  01(.)x24 54(T)x1                    01(.)x9 00(.)x1                     PARTIAL
+   0x001d  52(R)x24 64(d)x1                    7f(.)x4 00(.)x3 52(R)x2 ff(.)x1     PARTIAL
+   0x001e  ed(.)x24 05(.)x1                    ed(.)x7 ff(.)x2 00(.)x1             PARTIAL
+   0x001f  aa(.)x24 05(.)x1                    aa(.)x10                            PARTIAL
+   0x0020  e4(.)x24 05(.)x1                    e4(.)x10                            PARTIAL
+   0x0021  00(.)x24 4d(M)x1                    00(.)x10                            PARTIAL
+   0x0022  00(.)x24 a5(.)x1                    00(.)x10                            PARTIAL
+   0x0023  00(.)x24 2d(-)x1                    00(.)x10                            PARTIAL
+   0x0024  04(.)x24 0a(.)x1                    04(.)x10                            PARTIAL
+   0x0025  67(g)x24 00(.)x1                    67(g)x10                            PARTIAL
+   0x0026  41(A)x22 59(Y)x2 00(.)x1            41(A)x10                            PARTIAL
+   0x0027  4d(M)x24 00(.)x1                    4d(M)x10                            PARTIAL
+   0x0028  41(A)x17 53(S)x7 20( )x1            41(A)x10                            PARTIAL
+   0x0029  00(.)x24 63(c)x1                    00(.)x9 80(.)x1                     PARTIAL
+   0x002a  00(.)x24 48(H)x1                    00(.)x10                            PARTIAL
+   0x002b  b1(.)x22 7f(.)x2 4e(N)x1            b1(.)x10                            PARTIAL
+   0x002c  8f(.)x15 0f(.)x9 4d(M)x1            8f(.)x10                            PARTIAL
+   0x002d  0b(.)x24 00(.)x1                    0b(.)x9 aa(.)x1                     PARTIAL
+   0x002e  fc(.)x24 00(.)x1                    fc(.)x6 04(.)x3 56(V)x1             PARTIAL
+   0x002f  61(a)x21 00(.)x3 7a(z)x1            61(a)x9 aa(.)x1                     PARTIAL
+   0x0030  05(.)x24 26(&)x1                    05(.)x9 aa(.)x1                     PARTIAL
+   0x0033  00(.)x24 80(.)x1                    00(.)x10                            PARTIAL
+   0x0034  01(.)x24 00(.)x1                    01(.)x9 09(.)x1                     PARTIAL
+   0x0035  73(s)x13 7a(z)x7 74(t)x2 69(i)x1 +2u  73(s)x9 74(t)x1                     PARTIAL
+   ... (9 more divergent offsets)
+==== MECHANISM CONTEXT (involved fuzzers only) ====
+--- cmplog ---
+**Instrumentation**: naive's edge counters **plus** integer-CMP
+interception (`__sanitizer_cov_trace_cmp1/2/4/8`) and
+string/memory-CMP interception (`__sanitizer_weak_hook_strcmp`,
+`__sanitizer_weak_hook_memcmp`, etc.). Each CMP callback records
+both operands into a per-execution `CmpLogObserver` buffer keyed by
+PC.
+
+**Feedback**: same edge-bucket signal as naive. The CMP buffer is
+consumed by the mutator, not by feedback.
+
+**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`.
+`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,
+picks a CMP entry, scans the input for byte sequences matching one
+operand, and substitutes the other operand at those offsets.
+
+**Observed `mutation_op` in seed metadata**:
+<!-- TODO(i2s-logging-bug): the current LibAFL fuzzbench build does NOT
+     wrap I2SRandReplace in LogMutationMetadata, so the string
+     "I2SRandReplace" never appears in `.metadata`. Instead, I2S finds
+     surface as seeds whose metadata has ParentInfo but NO mutator-name
+     list — these render as `mutation_op = -` in `db_query.py lineage`
+     output and `resolving_seeds.mutation_op IS NULL` in SQL.
+     Confirmed 2026-05-17: naive/vp produce ZERO such seeds in 6000
+     samples; cmplog/vpc produce them at ~0.1–0.3%. This is a LOWER
+     BOUND ("floor") — some I2S finds leak into the havoc bucket
+     because other stages wrap I2S as a sub-mutator and tag the result
+     with their own havoc/token list. When the logging fix lands,
+     revert this caveat and require the literal `I2SRandReplace`
+     string instead. -->
+havoc/token names; **plus** silent ParentInfo-only entries
+(`mutation_op = -` in lineage output) that — in cmplog/vpc only —
+indicate an I2SRandReplace find under the current build. The dash
+rows are exclusive to cmplog and value_profile_cmplog **within the
+original 4-fuzzer canonical set**; there their presence in a winning
+seed's ancestor chain is direct (lower-bound) evidence of I2S
+contribution.
+<!-- CAVEAT(10-fuzzer set, 2026-05-27): dash-row = I2S only holds when
+     comparing against naive / value_profile. `mopt` and `grimoire`
+     wrap their mutators in LineageMutatorWrap with an EMPTY names list,
+     so they ALSO emit nameless (`mutation_op = -`) rows for non-I2S
+     finds — see the mopt / grimoire sections. Against those two the
+     dash signal is NOT I2S-exclusive. fast / minimizer / naive_ctx /
+     naive_ngram4 use plain LineageMutator (names captured), so they do
+     NOT emit dash rows and the signal stays clean against them. -->
+
+**Per-execution cost**: edge increment + one callback per intercepted
+CMP per execution + post-execution CMP-buffer processing.
+
+--- naive ---
+**Instrumentation**: SanitizerCoverage edge counters
+(`__sanitizer_cov_trace_pc_guard*` callbacks compiled in via clang
+`-fsanitize-coverage=...`).
+
+**Feedback**: per-edge hit-count bucket; a new bucket triggers a
+corpus-add (LibAFL `MaxMapFeedback` over the edge map).
+
+**Mutators**: havoc + token stack — `ByteFlipMutator`, `ByteRandMutator`,
+`ByteIncMutator`, `ByteDecMutator`, `ByteAddMutator`, `WordAddMutator`,
+`DwordAddMutator`, `QwordAddMutator`, `BytesDeleteMutator`,
+`BytesInsertMutator`, `BytesInsertCopyMutator`, `BytesExpandMutator`,
+`BytesRandInsertMutator`, `BytesRandSetMutator`, `BytesCopyMutator`,
+`BytesSwapMutator`, `WordInterestingMutator`, `DwordInterestingMutator`,
+`ByteInterestingMutator`, `CrossoverInsertMutator`,
+`CrossoverReplaceMutator`, `TokenInsert`, `TokenReplace`.
+
+**Observed `mutation_op` in seed metadata**: any of the above. No I2S.
+
+**Per-execution cost**: one edge-counter increment per executed BB edge.
+
+--- value_profile ---
+**Instrumentation**: naive's edge counters **plus** integer-CMP
+interception, but instead of buffering operands per execution (cmplog),
+each CMP callback writes into a `CMP_MAP` keyed by (PC, operand-distance
+bucket). The distance bucket is a coarse encoding of how close the two
+operands were (Hamming distance bucket for `trace_cmp*`; matching-prefix
+length for string/memory CMPs).
+
+**Feedback**: edge-bucket signal **plus** new-CMP_MAP-bucket signal
+(both via `MaxMapFeedback`-style coverage). An input that produces a
+CMP-operand pair closer to matching than any previously-seen pair
+adds a new CMP_MAP bucket and is preserved as corpus.
+
+**Mutators**: naive's havoc + token stack. No `I2SRandReplace`.
+
+**Observed `mutation_op` in seed metadata**: havoc/token names only —
+no ParentInfo-only entries (no `mutation_op = -` rows). Absence of
+the dash signal is direct evidence the seed was found by naive or
+value_profile, not by an I2S stage.
+<!-- TODO(i2s-logging-bug): when the I2SRandReplace logging fix lands,
+     this section becomes "Absence of `I2SRandReplace` is direct
+     evidence ..." again. See the cmplog section above for the floor
+     caveat. -->
+
+
+**Per-execution cost**: edge increment + CMP_MAP update per intercepted
+CMP per execution.
+
+==== TASK ====
+ANALYZE THIS BRANCH IN ISOLATION. Do NOT compare against templates/. Naming an existing template here anchors the later cross-branch classification pass.
+
+WRITE EXACTLY ONE FILE:
+  /home/miao/BlockerAnalyzer/prompts/libpng_3890.analysis.json
+
+Do NOT produce template.c or params.json — those are the deferred verification phase.
+
+SCHEMA (every field is mandatory; missing or empty fields = analysis failure). The example below uses `//` comments for guidance — REMOVE all `//` lines and inline `//` comments from your emitted JSON (standard JSON does not allow comments).
+
+{
+  "branch_id": 3890,
+  "target": "libpng",
+  "summary_one_line": "string, <=25 words, the input feature required to take the winning side",
+  "pair_decision": "single_feature",
+    // pick EXACTLY ONE of: "single_feature" | "multi_feature"
+    // decisive pairs at this branch: [cmplog>naive (I2S), value_profile>naive (value_profile)]
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+        // labels MUST match exactly as in DECISIVE PAIRS (e.g. "cmplog>naive (I2S)")
+      "what_input_feature": "concrete description of the bytes/structure required",
+      "why_winner_satisfies": "what about the winner inputs meets the requirement",
+      "why_loser_doesnt": "what is missing in the loser inputs",
+      "mechanism_attribution": "free text — explain which fuzzer technique enables the winner; must agree with claimed_mechanism below"
+    }
+    // pair_decision="single_feature" => exactly 1 hypothesis whose covers_pairs lists ALL decisive pairs
+    // pair_decision="multi_feature"  => 2+ hypotheses, each covers_pairs listing its subset
+  ],
+  "evidence_trail": [
+    {
+      "claim": "atomic factual claim (1 sentence)",
+      "cited_section": "BLOCKER",
+        // pick the canonical short name of the cited section, one of:
+        //   BLOCKER | TRIAL VECTOR | DECISIVE PAIRS | SOURCE CONTEXT |
+        //   HIT-COUNT DIVERGENCE | DIVERGENT BRANCHES | BRANCH SEEDS |
+        //   BYTE DIFF | MECHANISM CONTEXT
+        // validator accepts the full section header too (e.g. "BYTE DIFF (W vs L at common offsets)")
+      "cited_locator": "offsets 0x06-0x0f | L1701 | seed_id ab12... | etc.",
+      "exact_quote": "verbatim substring of the prompt — COPY-PASTE, do not paraphrase"
+    }
+    // at least ONE entry per hypothesis sub-field (what / why_winner / why_loser / mechanism)
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+      // pick EXACTLY ONE — the technique that enables the WINNER:
+      //   comparison-solving (roadblock dimension):
+      //     "I2SRandReplace"     (cmplog / vpc input-to-state substitution)
+      //     "CMP_MAP gradient"   (vp / vpc Hamming/prefix-distance feedback)
+      //   coverage-granularity (feedback dimension):
+      //     "context-sensitive coverage" (naive_ctx CtxHook: (call-context, edge) pairs are new coverage)
+      //     "ngram coverage"            (naive_ngram4: N-gram edge tuples are new coverage)
+      //   mutation/scheduling (mutation dimension):
+      //     "grimoire structural"  (grimoire GeneralizationStage + structural/grammar recombination)
+      //     "mopt mutation"        (mopt: MOpt-scheduled mutation-operator probabilities)
+      //     "calibrated energy"    (minimizer/fast: corpus-minimization / calibrated power schedule)
+      //     "aflfast rarity"       (fast: AFLFast rare-edge power schedule)
+      //   baseline / fallback:
+      //     "havoc-only"         (lucky havoc byte mutation, no CMP introspection)
+      //     "token-replace"      (TokenInsert/TokenReplace dictionary mutations)
+      //     "other"              (genuinely cannot classify — NOT a substitute for a known technique above)
+    "verified_in_lineage": true,
+      // pick true or false
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 3890 --role W --fuzzer cmplog --trial 1 --seed <ID>` and observed an I2S-floor row (mutation_op = -) at depth 19 of the chain"
+    // TODO(i2s-logging-bug): the LibAFL cmplog harness does NOT log
+    //   the literal "I2SRandReplace" string into seed metadata. Until
+    //   that is fixed, the verification signal is the dash-row floor
+    //   (ParentInfo-only entries; SQL NULL mutation_op). Confirmed
+    //   2026-05-17: dash rows are exclusive to cmplog/vpc in the
+    //   current data (zero occurrences in 6000 naive/vp samples).
+    //   When the logging fix lands, revert this rule to require the
+    //   literal "I2SRandReplace" name and treat the dash signal as
+    //   secondary corroboration.
+    // MANDATORY when claimed_mechanism="I2SRandReplace": invoke db_query.py lineage on >=1 winning seed
+    //   - if you find at least one I2S-floor row in the ancestor chain (mutation_op = -
+    //     for ancestors of a cmplog/vpc-discovered seed): verified_in_lineage=true,
+    //     and cite the depth(s) in verification_method.
+    //   - if the chain is all-havoc (no dash rows): verified_in_lineage=false; note that
+    //     I2S contribution may still exist in the leaked havoc bucket, explain (>=20 chars).
+    //   - if you could not run db_query (data missing, etc.): verified_in_lineage=false; explain what blocked you
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "ONE concrete observation that, if true, would kill this hypothesis (something a synthetic experiment could observe, not a story)"
+  },
+  "weakest_evidence_point": "one sentence naming your single most uncertain claim",
+  "confidence": "medium"
+    // pick EXACTLY ONE of: "high" | "medium" | "low"
+}
+
+RULES:
+ - No reference to templates/ anywhere in your output. Classification is a separate later pass.
+ - Every hypothesis sub-claim must be supported by >=1 evidence_trail entry.
+ - exact_quote must be a LITERAL substring of this prompt — COPY-PASTE, do NOT paraphrase, abbreviate, or summarize. A script (tools/check_analysis.py) will reject quotes that do not appear verbatim (whitespace-tolerant).
+ - cited_section: the validator accepts either the canonical short name (BLOCKER, BYTE DIFF, etc.) or the full section header from the prompt.
+ - claimed_mechanism and mechanism_attribution must agree on the same technique.
+ - When claimed_mechanism = "I2SRandReplace": you MUST invoke `python3 tools/db_query.py lineage` on >=1 winning seed BEFORE finalizing the analysis. Record what you observed in verification_method.
+
+
+DEEP-DIVE QUERIES:
+  python3 tools/db_query.py lineage --branch 3890 --role W|L --fuzzer <F> --trial <T> --seed <id>
+    MANDATORY when claimed_mechanism="I2SRandReplace" (see RULES). Optional otherwise. Returns the ancestor chain (mutation ops walked back from the leaf up to 50 levels). The trailing 'I2S-floor signal' line summarizes dash rows (mutation_op = -); see fuzzer_mechanism_library.md cmplog section for the floor interpretation under the current build.
+  python3 tools/db_query.py more-seeds --branch 3890 --role W|L [--fuzzer <F>] [--limit 20] [--show-bytes 64]
+    Optional. Additional seeds beyond the 5 shown above (capped by seed_bisect's max_seeds; default 10 per branch x direction).

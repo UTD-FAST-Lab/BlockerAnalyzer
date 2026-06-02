@@ -190,16 +190,18 @@ def _extract_source_lines(cov_file):
 # ─── per-target walk (Option A: parse once, share across subjects) ──────────
 
 _HOURLY_RE = re.compile(r"branch_report_h(\d+)\.txt$")
+_SHOW_HOURLY_RE = re.compile(r"^t(\d+)h\.txt$")
 
 
 def _trial_report_map(trial_dir):
-    """Map {time_s: path_to_branch_report} for ONE trial dir, supporting both
-    report layouts:
+    """Map {time_s: path_to_branch_report} for ONE trial dir, supporting the
+    three report layouts seen across campaigns:
 
       (a) pilot layout : <trial>/reports/<time_s>/branch_coverage_show.txt
       (b) icse2027 layout: <trial>/branch_report_h<NN>.txt  (NN = hour → NN*3600s)
+      (c) icse27 layout : <trial>/show_reports/t<NN>h.txt    (NN = hour → NN*3600s)
 
-    Returns {} if neither is present.
+    Returns {} if none is present.
     """
     trial_dir = Path(trial_dir)
     out = {}
@@ -215,6 +217,13 @@ def _trial_report_map(trial_dir):
             m = _HOURLY_RE.search(f.name)
             if m:
                 out[int(m.group(1)) * 3600] = f
+    if not out:
+        show = trial_dir / "show_reports"
+        if show.is_dir():
+            for f in show.glob("t*h.txt"):
+                m = _SHOW_HOURLY_RE.match(f.name)
+                if m:
+                    out[int(m.group(1)) * 3600] = f
     return out
 
 

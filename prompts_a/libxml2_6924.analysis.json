@@ -1,0 +1,131 @@
+{
+  "branch_id": 6924,
+  "target": "libxml2",
+  "summary_one_line": "Reaching xmlNewNs's false branch requires a well-formed XML doc with a non-xml namespace declaration parsed through the SAX2 attribute path.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>cmplog (value_profile)", "value_profile>naive (value_profile)"],
+      "what_input_feature": "Input bytes that satisfy the multi-byte string equality gates on the path to xmlNewNs — the 'xmlns'/'xml:' attribute-name comparisons (att[0]=='x' && att[1]=='m' && att[2]=='l' && att[3]=='n' && att[4]=='s') and xmlStrEqual checks — so the parser issues a namespace declaration and calls xmlNewNs, then takes the false branch because prefix != 'xml'.",
+      "why_winner_satisfies": "The value_profile winners drive each character-by-character CMP closer to matching via the CMP_MAP distance buckets, so partially-correct namespace tokens are retained and refined until the full 'xmlns' literal is assembled; their branch hitcount climbs to 89 (vp>naive) and 15 (vpc>cmplog) versus the loser's ~1-4, showing repeated successful calls into xmlNewNs.",
+      "why_loser_doesnt": "naive and cmplog get no per-CMP closeness gradient: a partly-correct 'xmlns' token earns no new coverage bucket, so the multi-byte equality is only solved by blind luck — losers stay blocked in 8/10 trials with branch hitcount of 1-4.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient: each intercepted integer/string CMP writes a (PC, operand-distance bucket) entry, and an input closer to matching adds a new bucket and is preserved, giving a hill-climbing signal that solves the xmlns/xmlStrEqual roadblocks that naive/cmplog must brute-force."
+    },
+    {
+      "covers_pairs": ["grimoire>cmplog (grimoire_structural)"],
+      "what_input_feature": "A structurally well-formed nested XML document (DOCTYPE + nested elements with namespace-bearing attributes) so the SAX2 start-element path repeatedly invokes xmlNewNs for valid non-xml prefixes.",
+      "why_winner_satisfies": "grimoire's generalization + structural splicing recombine generalised token/gap structures into deeply valid XML; its winning seeds show GrimoireRecursiveReplacementMutator / GrimoireRandomDeleteMutator provenance and a branch hitcount of 1959 (vs loser 1), i.e. it manufactures hundreds of valid namespace declarations per execution.",
+      "why_loser_doesnt": "cmplog (the single-technique baseline grimoire builds on) has I2S but no structural recombination, so it cannot assemble the nested well-formed element structure that produces many xmlNewNs calls — it stays blocked in 8/10 trials with hitcount 1.",
+      "mechanism_attribution": "grimoire structural: the GeneralizationStage replaces concrete byte runs with <GAP> placeholders and the Grimoire mutators splice/recurse on those generalised structures, building grammar-valid nested XML that the cmplog baseline (same I2S, no generalization) cannot construct."
+    },
+    {
+      "covers_pairs": ["naive_ctx>naive (ctx_coverage)"],
+      "what_input_feature": "An XML input that reaches xmlNewNs through the SAX2 attribute-internal call context (xmlSAX2AttributeInternal -> xmlNewNs at SAX2.c:1214), where the call path itself is the distinguishing signal.",
+      "why_winner_satisfies": "naive_ctx folds the caller chain into the edge-map index, so reaching the xmlNewNs edge via the SAX2 namespace-declaration call context counts as new (call-context, edge) coverage; this rewards inputs progressing down the attribute path and lifts branch hitcount to 79 with 8/10 resolved.",
+      "why_loser_doesnt": "plain naive records only the bare edge, so once any path has touched the xmlNewNs region it earns no further credit for reaching it through the namespace-declaration context, leaving the path under-explored — naive resolves only 2/10 with hitcount 4.",
+      "mechanism_attribution": "context-sensitive coverage: naive_ctx's CtxHook keeps a running hash of the caller chain and indexes the edge map by (call-context, edge), so the SAX2-attribute call path into xmlNewNs is treated as fresh coverage and explored, whereas naive collapses it to one already-seen edge."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the false side of the prefix=='xml' test in xmlNewNs; the winners take the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "tree.c:739:9",
+      "exact_quote": "if ((prefix != NULL) && (xmlStrEqual(prefix, BAD_CAST \"xml\"))) {"
+    },
+    {
+      "claim": "The globally blocked side is the false branch.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "blocked side",
+      "exact_quote": "Globally blocked side: F  (false branch)"
+    },
+    {
+      "claim": "xmlNewNs is reached through xmlSAX2AttributeInternal at SAX2.c:1214 on a winner-only path.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "SAX2.c:1214",
+      "exact_quote": "nsret = xmlNewNs(ctxt->node, val, NULL); <-- CALL"
+    },
+    {
+      "claim": "The path to xmlNewNs passes through multi-byte 'xmlns' character-equality gates.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "SAX2.c:1170-1171",
+      "exact_quote": "(name[3] == 'n') && (name[4] == 's') && (name[5] == 0)) {"
+    },
+    {
+      "claim": "value_profile (pair 3) raises branch hitcount to 89 vs naive's 4 while resolving 9/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 3 value_profile > naive",
+      "exact_quote": "avg hitcount on branch: winner=89  loser=4"
+    },
+    {
+      "claim": "value_profile_cmplog (pair 1) resolves 10/10 and raises hitcount to 15 vs cmplog's 1.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 value_profile_cmplog > cmplog",
+      "exact_quote": "avg hitcount on branch: winner=15  loser=1"
+    },
+    {
+      "claim": "value_profile's CMP_MAP encodes operand closeness and preserves inputs that get closer to matching.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "grimoire (pair 2) drives branch hitcount to 1959 vs cmplog's 1.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 grimoire > cmplog",
+      "exact_quote": "avg hitcount on branch: winner=1959  loser=1"
+    },
+    {
+      "claim": "grimoire winning seeds carry Grimoire structural-mutator provenance.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 9ac54fe3dd9be284",
+      "exact_quote": "mutation_op=GrimoireRecursiveReplacementMutator"
+    },
+    {
+      "claim": "grimoire's single-technique delta over cmplog is generalization plus Grimoire structural mutators (both have I2S).",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire",
+      "exact_quote": "The single-technique delta is therefore\n`grimoire` vs `cmplog` (both have I2S; grimoire adds generalization +\nGrimoire mutators), not vs naive."
+    },
+    {
+      "claim": "Grimoire mutators splice grammar-free structural mutations over generalised token/gap structures.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "grimoire stages",
+      "exact_quote": "splice and recurse on these generalised token/gap structures\n(string-based, grammar-free structural mutation)"
+    },
+    {
+      "claim": "naive_ctx (pair 4) resolves 8/10 vs naive 2/10 and raises hitcount to 79 vs 4.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 4 naive_ctx > naive",
+      "exact_quote": "avg hitcount on branch: winner=79  loser=4"
+    },
+    {
+      "claim": "naive_ctx folds call-context into the edge-map index so the same edge is new coverage per call path.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx",
+      "exact_quote": "folds it into the edge-map index, so the same basic-block edge is\nrecorded at different map slots depending on the call path that\nreached it."
+    },
+    {
+      "claim": "For naive_ctx a new bucket is a new (call-context, edge) pair rather than a bare edge.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive_ctx feedback",
+      "exact_quote": "a \"new bucket\" is a new\n(call-context, edge) pair rather than a bare edge."
+    },
+    {
+      "claim": "value_profile uses only naive's havoc/token mutators with no I2S substitution.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "CMP_MAP gradient",
+    "verified_in_lineage": false,
+    "verification_method": "Primary hypothesis is value_profile CMP_MAP gradient, for which lineage I2S-floor verification does not apply (vp has no I2SRandReplace stage). For corroboration I ran `python3 tools/db_query.py lineage --branch 6924 --role W --fuzzer grimoire --trial 1 --seed 8f8537181bfef3b5` and saw I2SRandReplace ops plus 1 dash row at depth 4, but per the 10-fuzzer caveat dash rows are NOT I2S-exclusive against grimoire, so this is not treated as a CMP_MAP verification."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating xmlNewNs behind the 'xmlns' string-equality CMPs in which value_profile fails to resolve the false branch faster than naive/cmplog (no resolution-rate gain from the CMP_MAP distance gradient)."
+  },
+  "weakest_evidence_point": "The BYTE DIFF section reports no informative W-vs-L byte divergence, so the specific input bytes that distinguish the three winning techniques are inferred from source/hitcount rather than directly diffed.",
+  "confidence": "medium"
+}

@@ -1,0 +1,100 @@
+{
+  "branch_id": 2282,
+  "target": "lcms",
+  "summary_one_line": "Input must carry the FOURCC 'MCHF' (4d 43 48 46) at the profile data-colorspace field (offset 0x10-0x13) to take the case cmsSigMCHFData arm.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "The 4-byte data-colorspace FOURCC at offset 0x10-0x13 must equal the exact signature 'MCHF' (4d 43 48 46), which _cmsLCMScolorSpace compares against cmsSigMCHFData to take the true arm at line 869.",
+      "why_winner_satisfies": "Every cmplog winner-resolving seed carries the literal ASCII 'MCHF' at offset 0x10-0x13 (e.g. seed 1 '4c 61 62 20 4d 43 48 46' / Lab MCHF at 0x10-0x17, seed 5 '4d 43 48 46' at 0x10). The byte diff shows W concentrates 4d(M)/43(C)/48(H)/46(F) at those four offsets, exactly the cmsSigMCHFData signature.",
+      "why_loser_doesnt": "Naive loser-blocking seeds hold 'RGB ' (52 47 42 20) at offset 0x10-0x13 — a different recognized colorspace that routes to case cmsSigRgbData (line 815), never reaching the cmsSigMCHFData arm. The byte diff marks offsets 0x10/0x11/0x12 DIFFER with L pinned to 52(R)/47(G)/42(B).",
+      "mechanism_attribution": "cmplog's I2SRandReplace intercepts the integer CMP of the 4-byte colorspace field against the cmsSigMCHFData constant, logs the constant operand, and substitutes it back into the input at the matching offset, planting 'MCHF' where naive's blind havoc would need a 4-byte exact-match jackpot."
+    },
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "The same 4-byte FOURCC at offset 0x10-0x13 must reach the exact value 'MCHF' (4d 43 48 46); the switch on ProfileSpace is an exact 4-byte equality, with no partial credit from intermediate bytes.",
+      "why_winner_satisfies": "value_profile resolved 10/10 trials; the winning bytes carry 'MCHF' at offset 0x10-0x13, matching cmsSigMCHFData and driving the true side (W shows T=17 F=32 on the blocker branch versus L's T=0).",
+      "why_loser_doesnt": "Naive's loser bytes stay at 'RGB ' (52 47 42 20) at offset 0x10-0x13 and the blocker's true side is never taken (L T=0 F=62), so the cmsSigMCHFData arm stays blocked across all 10 naive trials.",
+      "mechanism_attribution": "value_profile's CMP_MAP records the operand-distance bucket for the colorspace-field comparison; an input whose field is Hamming-closer to cmsSigMCHFData than any prior input is preserved as corpus, giving a gradient that ratchets the 4-byte field toward 'MCHF' across generations — a feedback path naive lacks."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the case cmsSigMCHFData arm of a switch on the profile colorspace signature, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmspcs.c:869",
+      "exact_quote": "case cmsSigMCHFData:"
+    },
+    {
+      "claim": "The enclosing switch dispatches on ProfileSpace, so each case is an exact equality against a 4-byte colorspace signature.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmspcs.c:812",
+      "exact_quote": "switch (ProfileSpace) {"
+    },
+    {
+      "claim": "cmplog winner-resolving seeds carry the literal 'MCHF' ASCII at the colorspace field.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 1dac8eeb03e84133 offset 0x10-0x17",
+      "exact_quote": "4c 61 62 20 4d 43 48 46 07 d9 00 0c 00 17 00 16   Lab MCHF........"
+    },
+    {
+      "claim": "A cmplog winner has 'MCHF' starting at offset 0x10.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed e5af04f1920bf641 offset 0x10",
+      "exact_quote": "4d 43 48 46 58 59 5a 20 07 d9 00 0c 00 17 00 16   MCHFXYZ ........"
+    },
+    {
+      "claim": "The byte diff shows W concentrates M/C/H/F at offsets 0x10-0x13 while L holds R/G/B, a DIFFER signal.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0010-0x0012",
+      "exact_quote": "0x0010  4d(M)x11 4c(L)x2                    52(R)x10                            DIFFER"
+    },
+    {
+      "claim": "Naive loser-blocking seeds carry 'RGB ' at the colorspace field, routing to a different case.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 05c646cb9928d9d9 offset 0x10",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "On the blocker branch the winner takes the true side while the loser never does (T=0).",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 cmspcs.c:869",
+      "exact_quote": "d=1   L 869  T=17 F=32  T=0 F=62  case cmsSigMCHFData:  <-- BLOCKER"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other operand at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile preserves inputs whose CMP-operand pair is closer to matching than prior inputs, giving a Hamming-distance gradient.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "value_profile resolved all 10 trials while naive blocked all 10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1 value_profile vs naive",
+      "exact_quote": "winner: resolved=10/10  blocked=0  unreached=0"
+    },
+    {
+      "claim": "cmplog won over naive on subject 11 with prob_div 0.80 attributed to the I2S delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2 cmplog vs naive",
+      "exact_quote": "Pair 2: cmplog > naive  [delta: I2S]"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2282 --role W --fuzzer cmplog --trial 2 --seed 1dac8eeb03e84133` and observed 2 I2S-floor dash rows (mutation_op = -) at depth 11 and 12 of the ancestor chain, the lower-bound signal of an I2SRandReplace find under the current build. This verification covers the cmplog>naive (I2S) hypothesis; the value_profile>naive pair is attributed to CMP_MAP gradient, not I2S."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose 4-byte colorspace field is compared byte-by-byte (per-byte CMP edges) rather than as one 4-byte equality showing naive resolving the branch as readily as cmplog/value_profile — i.e. the exact-match 4-byte gate is not what blocks naive."
+  },
+  "weakest_evidence_point": "The value_profile (CMP_MAP gradient) attribution is inferred from mechanism knowledge and final-coverage counts; no value_profile-discovered seed is shown in BRANCH SEEDS (all winner seeds are cmplog-provenance), so the gradient path is not directly traced in lineage.",
+  "confidence": "high"
+}

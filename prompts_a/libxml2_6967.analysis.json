@@ -1,0 +1,94 @@
+{
+  "branch_id": 6967,
+  "target": "libxml2",
+  "summary_one_line": "A literal '[' byte must appear at the host position of the URI authority (after http://) to take the IPv6-bracket branch.",
+  "pair_decision": "multi_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["cmplog>naive (I2S)"],
+      "what_input_feature": "A single literal '[' (0x5b) byte positioned at the start of the host token, i.e. immediately after the 'http://' scheme-and-slashes prefix that xmlParse3986Authority reaches when *cur is dereferenced at uri.c:454.",
+      "why_winner_satisfies": "cmplog winner seeds carry the exact prefix 'http://[' so that *cur=='[' is true; e.g. seed 20b2621140bcb91b has '5b([)' at offset 0x09 right after 'tp://', and the BYTE DIFF shows W concentrates 5b([)x8 at offset 0x08 while L never does.",
+      "why_loser_doesnt": "naive loser seeds reach the same host position but hold a non-'[' byte there (digit/letter/'/'), so *cur=='[' is false and they fall through to the IPv4/hostname path; the loser-blocking seeds show 'http://www', 'http://f2', 'http://fak' with no bracket at offset 0x08.",
+      "mechanism_attribution": "cmplog's I2SRandReplace reads the intercepted compare *cur=='[' from the CmpLogObserver buffer, then substitutes the constant operand '[' into the input at the matching host offset, planting the required bracket byte that blind havoc rarely produces; this is the I2S input-to-state substitution technique that naive lacks."
+    },
+    {
+      "covers_pairs": ["value_profile>naive (value_profile)"],
+      "what_input_feature": "Same literal '[' (0x5b) byte at the host position after 'http://', but reached via incremental Hamming/closeness feedback on the *cur=='[' character comparison rather than direct substitution.",
+      "why_winner_satisfies": "value_profile winner seeds also carry 'http://[' (seed 2ec8851de49ee930 has '5b([)' at offset 0x08 following 'http://'), and value_profile preserves inputs whose host byte is progressively closer to '[', driving the corpus toward the bracket.",
+      "why_loser_doesnt": "naive loser seeds have no CMP_MAP feedback, so an input whose host byte is one bit away from '[' earns no new coverage bucket and is discarded; their host position stays at 'w'/'f'/digit and *cur=='[' never holds.",
+      "mechanism_attribution": "value_profile's CMP_MAP gradient: each *cur=='[' comparison writes an operand-distance bucket; an input whose host byte is Hamming-closer to '[' than any prior input adds a new bucket and is retained, ratcheting the corpus toward the exact byte that naive's edge-only feedback cannot sense."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocking branch is *cur=='[' at uri.c:454, true side globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "uri.c:454:9",
+      "exact_quote": "Source line:     if (*cur == '[') {"
+    },
+    {
+      "claim": "cmplog wins over naive at this branch with an I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: cmplog > naive  [delta: I2S]"
+    },
+    {
+      "claim": "value_profile wins over naive at this branch with a value_profile technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 2",
+      "exact_quote": "Pair 2: value_profile > naive  [delta: value_profile]"
+    },
+    {
+      "claim": "A cmplog winner seed contains 'http://[' so *cur=='[' is satisfied at the host position.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 20b2621140bcb91b offset 0x00",
+      "exact_quote": "3d 22 6a 22 74 70 3a 2f 2f 5b 61 6b 65 75 72 2a   =\"j\"tp://[akeur*"
+    },
+    {
+      "claim": "A value_profile winner seed contains 'http://[' so *cur=='[' is satisfied.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 2ec8851de49ee930 offset 0x00",
+      "exact_quote": "27 68 74 74 70 3a 2f 2f 5b 77 77 2e 77 33 2e 6f   'http://[ww.w3.o"
+    },
+    {
+      "claim": "Winner inputs concentrate the '[' byte at offset 0x08 while loser inputs never do, an informative dataflow signal at the host position.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0008",
+      "exact_quote": "0x0008  5b([)x8 2f(/)x6 3a(:)x3             2f(/)x24 3a(:)x7 74(t)x5 66(f)x3 +9u  PARTIAL"
+    },
+    {
+      "claim": "A naive loser seed reaches the same authority position but holds 'www' (no bracket) at the host, so the false branch is taken.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0028492ac168fa2b offset 0x00",
+      "exact_quote": "44 20 27 68 74 74 70 3a 2f 2f 77 77 77 2e 77 33   D 'http://www.w3"
+    },
+    {
+      "claim": "cmplog adds I2SRandReplace which scans the input for an operand and substitutes the other operand at matching offsets.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "cmplog Mutators",
+      "exact_quote": "`I2SRandReplace` reads the post-execution `CmpLogObserver` buffer,\npicks a CMP entry, scans the input for byte sequences matching one\noperand, and substitutes the other operand at those offsets."
+    },
+    {
+      "claim": "value_profile retains an input when its CMP-operand pair is closer to matching than any seen before, ratcheting toward the target byte.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Feedback",
+      "exact_quote": "An input that produces a\nCMP-operand pair closer to matching than any previously-seen pair\nadds a new CMP_MAP bucket and is preserved as corpus."
+    },
+    {
+      "claim": "naive has only edge counters and no CMP introspection, so it cannot sense closeness to '['.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "naive Feedback",
+      "exact_quote": "per-edge hit-count bucket; a new bucket triggers a\ncorpus-add (LibAFL `MaxMapFeedback` over the edge map)."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 6967 --role W --fuzzer cmplog --trial 3 --seed 20b2621140bcb91b` and observed 2 I2S-floor dash rows (mutation_op = -) at depths 4 and 5 of the 6-level ancestor chain, the lower-bound signal of an I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness gating on *cur=='[' where cmplog and value_profile reach the bracket branch no faster than naive (equal time-to-resolve across all three), showing the literal bracket byte is not what the comparison-solving techniques supply."
+  },
+  "weakest_evidence_point": "The value_profile hypothesis assumes CMP_MAP closeness on a single-character '[' compare gives a meaningful gradient, but a 1-byte equality has very coarse Hamming buckets, so its advantage over naive may instead come from retaining the shared 'http://' prefix rather than ratcheting the host byte itself.",
+  "confidence": "medium"
+}

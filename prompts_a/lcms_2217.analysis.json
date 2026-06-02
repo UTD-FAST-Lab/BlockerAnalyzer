@@ -1,0 +1,81 @@
+{
+  "branch_id": 2217,
+  "target": "lcms",
+  "summary_one_line": "An ICC profile whose pipeline produces two adjacent 3x3 matrix stages with NULL offsets, requiring profile-class/colorspace FOURCC literals at the header.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "An ICC profile header whose device/profile-class FOURCC (offset 0x0c-0x0f) and colorspace tags (0x10-0x16) parse into a transform pipeline that yields two adjacent matrix stages, both with Offset==NULL and 3x3 channel dims, so _MultiplyMatrix reaches the matrix-merge guard at line 211. The winner reaches the line at all (T=13 vs L T=0); the false-side then fires because offsets are NULL/dims are 3x3.",
+      "why_winner_satisfies": "Winning vpc seeds carry diverse, well-formed profile-class FOURCCs at 0x0c-0x0f (prtr, scnr, lcms-class) and varied colorspace pairs (CMY/XYZ, RGB/Lab, MCH3/XYZ) at 0x10-0x16, building pipelines that survive to the matrix-multiply optimizer. The branch goes from never reached by the loser to T=13 hits, and the function entry-line proxy XFormSampler16 shows 107000 W hits vs 0 L hits.",
+      "why_loser_doesnt": "Loser vp seeds are uniformly stuck at the mntr profile class (0x0c=6d 'm', 0x0d=6e 'n', flagged DIFFER) with a single fixed RGB/XYZ colorspace, never producing the dual-matrix-stage pipeline; the blocker line is reached on the false direction only (T=0 F=0 then T=0 F=10) and the matrix-merge path stays at 0 hits across all 10 trials.",
+      "mechanism_attribution": "vpc adds the I2SRandReplace mutator that vp lacks. I2SRandReplace splices logged ICC FOURCC comparison operands (the magic tag/profile-class strings the parser compares the header against) directly into the input bytes at the offsets where they are read, manufacturing valid profile-class/colorspace combinations that vp's distance-bucket feedback alone could not assemble byte-by-byte."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the matrix-offset/dimension guard inside _MultiplyMatrix, reached only after two adjacent matrix stages exist.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "cmsopt.c:211",
+      "exact_quote": "if (m1->Offset != NULL || m2 ->Offset != NULL ||"
+    },
+    {
+      "claim": "The decisive pair is value_profile_cmplog over value_profile with an I2S technique delta.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "Pair 1: value_profile_cmplog > value_profile  [delta: I2S]"
+    },
+    {
+      "claim": "Winner seeds carry diverse profile-class FOURCCs while losers are uniformly mntr at offsets 0x0c-0x0d.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x0c-0x0d",
+      "exact_quote": "0x000c  70(p)x9 00(.)x2 73(s)x2             6d(m)x10                            DIFFER"
+    },
+    {
+      "claim": "Winners vary the colorspace tag field while losers keep one fixed value, showing dataflow into the pipeline-shape decision.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offset 0x0010",
+      "exact_quote": "0x0010  52(R)x5 43(C)x3 4c(L)x3 4d(M)x1 +1u  52(R)x10                            PARTIAL"
+    },
+    {
+      "claim": "A winning seed contains a profile-class/colorspace FOURCC pair (scnr RGB Lab) consistent with reaching the matrix optimizer.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0a8e83ebe7bb8d29",
+      "exact_quote": "52 47 42 20 4c 61 62 20 07 d9 b0 0c 55 17 00 16   RGB Lab ....U..."
+    },
+    {
+      "claim": "Loser seeds are uniformly the mntr/RGB/XYZ header that never reaches the matrix-merge path.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 0313315f3b972394",
+      "exact_quote": "00 14 00 2e 61 63 73 70 41 50 50 4c 00 00 00 00   ....acspAPPL...."
+    },
+    {
+      "claim": "The blocker true side is reached by W (T=13) but never by L, and L hits only the false side.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L211",
+      "exact_quote": "d=1   L 211  T=13 F=0  T=0 F=10  if (m1->Offset != NULL || m2 ->Offset != NULL ||  <-- BLOCKER"
+    },
+    {
+      "claim": "value_profile_cmplog adds the I2SRandReplace mutator that value_profile lacks.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    },
+    {
+      "claim": "value_profile has no I2SRandReplace, only havoc plus token mutators.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "ran `python3 tools/db_query.py lineage --branch 2217 --role W --fuzzer value_profile_cmplog --trial 1 --seed 10085a2784839154` and observed 1 I2S-floor dash row (mutation_op = -) at depth 16 of the 17-level ancestor chain, the ParentInfo-only signature characteristic of an unwrapped I2SRandReplace find under the current build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness where the matrix-merge guard is gated only on numeric matrix offsets/dimensions with no FOURCC/magic equality comparison upstream still shows vpc beating vp at this branch, which would show I2S operand substitution is not the enabling mechanism."
+  },
+  "weakest_evidence_point": "The byte-diff shows winner FOURCC diversity but does not directly prove those bytes are the comparison operands I2SRandReplace substituted versus reached by havoc luck on the CMP_MAP gradient shared by both fuzzers.",
+  "confidence": "medium"
+}

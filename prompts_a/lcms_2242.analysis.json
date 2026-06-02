@@ -1,0 +1,69 @@
+{
+  "branch_id": 2242,
+  "target": "lcms",
+  "summary_one_line": "Profile color-space signature at offset 0x10-0x13 must be a FOURCC outside the recognized cmsSig* cases to reach the switch default arm.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "The 4-byte color-space signature read into `Space` (input offset 0x10-0x13) must NOT equal any of the recognized switch cases (cmsSigGrayData, cmsSigRgbData='RGB ', cmsSigLabData, cmsSigCmykData, cmsSigCmyData); only a non-matching signature falls through to the `default:;` arm at line 752.",
+      "why_winner_satisfies": "Winner-resolving seeds carry non-standard FOURCCs at offset 0x10-0x13 — e.g. 4d 43 48 35 ('MCH5'), 4d 43 48 31 ('MCH1'), 4d 59 20 ('MY '), which match no switch case, so `switch (Space)` falls through to the blocked default arm; the per-role overlay shows line 752 hit only by W.",
+      "why_loser_doesnt": "All loser-blocking seeds carry the literal 52 47 42 20 ('RGB ') at offset 0x10-0x13, which dispatches to `case cmsSigRgbData` (line 732, hit by both W and L) and returns TRUE before ever reaching `default:;`, so the loser is permanently stuck on the false side.",
+      "mechanism_attribution": "value_profile_cmplog adds I2SRandReplace on top of value_profile's CMP_MAP feedback: the equality comparisons that implement the switch on `Space` are logged by CmpLogObserver, and I2SRandReplace splices the logged comparand bytes into the input position holding the color-space signature, flipping it away from 'RGB ' to a non-recognized value that takes the default arm. Plain value_profile lacks I2SRandReplace, so it can only nudge the FOURCC via Hamming-bucket gradient and never escapes the 'RGB ' attractor in 10 trials."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is the default arm of a switch on the color-space Space, reachable only when Space matches no enumerated case.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "cmspcs.c:725, 752",
+      "exact_quote": "switch (Space) {"
+    },
+    {
+      "claim": "Line 752 (the default arm) is hit only by the winner-resolving seed set.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L752",
+      "exact_quote": "[W]   752  default:; <-- BLOCKER"
+    },
+    {
+      "claim": "Winner seeds carry non-standard FOURCC color-space signatures at offset 0x10 such as 'MCH5'.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0b95845ee7e78d38 offset 0x10",
+      "exact_quote": "4d 43 48 35 4c 61 62 20 07 d9 00 0c 00 17 00 16   MCH5Lab ........"
+    },
+    {
+      "claim": "Loser seeds carry the literal 'RGB ' signature at offset 0x10, which matches a switch case.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed 0313315f3b972394 offset 0x10",
+      "exact_quote": "52 47 42 20 58 59 5a 20 07 d9 00 0c 00 17 00 16   RGB XYZ ........"
+    },
+    {
+      "claim": "The byte diff shows offset 0x10-0x12 differs: winners vary while every loser holds R/G/B.",
+      "cited_section": "BYTE DIFF",
+      "cited_locator": "offsets 0x10-0x12",
+      "exact_quote": "   0x0010  4d(M)x5 00(.)x1 41(A)x1 35(5)x1 +2u  52(R)x10                            DIFFER"
+    },
+    {
+      "claim": "In the loser, the RGB case arm (line 732) is taken, diverting flow before the default arm.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L732",
+      "exact_quote": "case cmsSigRgbData:  if (White)    *White = RGBwhite;"
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace while value_profile_cmplog has it.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "naive's havoc + token stack **plus** `I2SRandReplace`"
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 2242 --role W --fuzzer value_profile_cmplog --trial 1 --seed 0cae0d2f5478842f` and observed one I2S-floor dash row (mutation_op = -) at depth 15 of the 16-level ancestor chain, the characteristic ParentInfo-only signature of an unwrapped I2SRandReplace find under the current vpc build."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness whose switch operands (the cmsSig* FOURCC constants) are NOT input-byte pre-images — e.g. derived at runtime — yet value_profile_cmplog still resolves the default arm at the same rate as plain value_profile, showing the divergence is not driven by I2S substitution of the color-space signature."
+  },
+  "weakest_evidence_point": "The default arm could also be reachable by inputs whose Space byte is corrupted/zeroed (seed 1208988c94dacf3f shows 'MY ' with leading zeros), so I cannot fully exclude that some winner resolutions came from generic havoc truncation rather than a targeted I2S FOURCC substitution.",
+  "confidence": "high"
+}

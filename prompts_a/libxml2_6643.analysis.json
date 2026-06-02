@@ -1,0 +1,69 @@
+{
+  "branch_id": 6643,
+  "target": "libxml2",
+  "summary_one_line": "A '?' (0x3f) occurrence indicator byte must follow an element Name inside a DTD children content declaration.",
+  "pair_decision": "single_feature",
+  "hypotheses": [
+    {
+      "covers_pairs": ["value_profile_cmplog>value_profile (I2S)"],
+      "what_input_feature": "Inside a well-formed DTD <!ELEMENT ...> children content declaration, after the parser consumes an element Name (the 'else' branch at line 6347), the very next input byte at the parse cursor (RAW) must be '?' (0x3f) so the equality test `if (RAW == '?')` at parser.c:6358 takes its true branch.",
+      "why_winner_satisfies": "value_profile_cmplog reaches the blocker true side 6/10 trials and resolves 9/10; the winning seed embeds the full DTD prolog (<?xml ...?>, <!DOCTYPE a SYSTEM \"dtds/1...\") needed to drive the parser into xmlParseElementChildrenContentDeclPriv, and I2SRandReplace can splice the literal '?' operand from the RAW=='?' comparison into the cursor position.",
+      "why_loser_doesnt": "value_profile resolves only 2/10 and never takes the blocker true side (W T=6 vs L T=0 at L6358); its inputs reach the surrounding parse machinery but the byte at the cursor after the element Name is not '?', so the equality comparison only ever yields false, draining time into the *,+,else arms (L6361 T=21, L6367) instead.",
+      "mechanism_attribution": "The only technique distinguishing winner (value_profile_cmplog) from loser (value_profile) is I2SRandReplace: both carry value-profile distance feedback, but only vpc has the cmplog CMP buffer + I2SRandReplace mutator that logs the '?' operand of `RAW == '?'` and substitutes it directly into the input cursor, deterministically satisfying the single-byte equality gate that distance-bucket feedback alone does not flip."
+    }
+  ],
+  "evidence_trail": [
+    {
+      "claim": "The blocker is a single-byte equality test against '?' whose true side is globally blocked.",
+      "cited_section": "BLOCKER",
+      "cited_locator": "parser.c:6358",
+      "exact_quote": "Source line: \tif (RAW == '?') {"
+    },
+    {
+      "claim": "The '?' test is reached only in the else branch after an element Name is parsed via xmlParseName.",
+      "cited_section": "SOURCE CONTEXT",
+      "cited_locator": "L6347-6358",
+      "exact_quote": "elem = xmlParseName(ctxt);"
+    },
+    {
+      "claim": "value_profile_cmplog is the winner resolving 9/10 and value_profile is the loser blocked 8/10.",
+      "cited_section": "DECISIVE PAIRS",
+      "cited_locator": "Pair 1",
+      "exact_quote": "winner: resolved=9/10  blocked=1  unreached=0"
+    },
+    {
+      "claim": "The winner takes the blocker true side while the loser never does.",
+      "cited_section": "DIVERGENT BRANCHES",
+      "cited_locator": "d=1 L6358",
+      "exact_quote": "L6358  T=6 F=3  T=0 F=32  if (RAW == '?') {  <-- BLOCKER"
+    },
+    {
+      "claim": "The winning seed contains the DTD prolog structure required to reach the children content declaration parser.",
+      "cited_section": "BRANCH SEEDS",
+      "cited_locator": "seed_id 518db8383db21f1c",
+      "exact_quote": "3e 0a 3c 21 44 4f 43 54 59 50 45"
+    },
+    {
+      "claim": "value_profile_cmplog's only distinguishing mutator over value_profile is I2SRandReplace.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile_cmplog Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack **plus** `I2SRandReplace`."
+    },
+    {
+      "claim": "value_profile lacks I2SRandReplace, leaving only CMP_MAP gradient feedback.",
+      "cited_section": "MECHANISM CONTEXT",
+      "cited_locator": "value_profile Mutators",
+      "exact_quote": "**Mutators**: naive's havoc + token stack. No `I2SRandReplace`."
+    }
+  ],
+  "mechanism_consistency_check": {
+    "claimed_mechanism": "I2SRandReplace",
+    "verified_in_lineage": true,
+    "verification_method": "Ran `python3 tools/db_query.py lineage --branch 6643 --role W --fuzzer value_profile_cmplog --trial 1 --seed 518db8383db21f1c`; the ancestor chain shows an I2S-floor dash row (mutation_op = -) at depth 4 (ancestor 8c7bd7ba6dfb824c), the ParentInfo-only signature characteristic of an I2SRandReplace find under the current build; tool reports '1 ancestor dash row(s) at depth 4'."
+  },
+  "falsifiability": {
+    "would_be_refuted_by": "A synthetic harness with the `RAW == '?'` single-byte equality gate where value_profile resolves the true side as often as value_profile_cmplog (no significant I2S advantage), showing CMP_MAP gradient alone flips the byte."
+  },
+  "weakest_evidence_point": "The byte-diff section shows only PARTIAL concentration and no offset isolates a clean '?'(0x3f)-present vs -absent contrast at the cursor, so the direct byte-level pre-image of the substituted operand is inferred from source + lineage rather than shown explicitly.",
+  "confidence": "medium"
+}
