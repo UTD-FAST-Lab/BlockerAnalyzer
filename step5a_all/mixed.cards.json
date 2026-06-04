@@ -112,5 +112,25 @@
     "why_winner_satisfies": "The value_profile winner seed is 'SELECT 11-013>=1 3=13-3-323=13=13 ...' with distinct single-byte operators per offset (3e(>),3d(=),2d(-),2f(/),3c(<)), exactly the operand-distance gradient that CMP_MAP rewards; W resolves 9/10 and is the only side that takes the blocker true branch (W T=1 F=62 vs L T=0 F=743).",
     "why_loser_doesnt": "Both losers (naive, value_profile_cmplog) stay blocked: their inputs are degenerate digit/operator runs ('SELECT 222&22222...', '2222222222222222') concentrated on '2'(0x32), '&'(0x26) and '1'(0x31) across offsets 0x07-0x2d, never assembling the operator diversity that nudges the CMP operand pair across the threshold; naive has no CMP feedback at all and value_profile_cmplog's added substitution stage diverts mutation effort away from the gradient.",
     "mechanism_attribution": "value_profile's CMP_MAP gradient: each intercepted integer CMP writes a (PC, operand-distance bucket) entry, so an input producing operands closer to matching adds a new bucket and is preserved, walking the corpus toward the rare true branch. naive lacks this feedback entirely; value_profile_cmplog adds a substitution stage that here is counterproductive (it loses to plain value_profile), so the enabling technique is the CMP_MAP gradient."
+  },
+  {
+    "id": "lcms_2149",
+    "family": "mixed",
+    "target": "lcms",
+    "branch_id": 2149,
+    "analysis_path": "prompts_a/lcms_2149.analysis.json",
+    "file": "/src/Little-CMS/src/cmsio0.c",
+    "function": "_cmsReadHeader",
+    "line": "776",
+    "source_line": "    if (io -> Read(io, &Header, sizeof(cmsICCHeader), 1) != 1) {",
+    "covers_pairs": [
+      "naive>naive_ctx (ctx_coverage)",
+      "naive>cmplog (I2S)",
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A short input whose total length is less than sizeof(cmsICCHeader) (128 bytes), so io->Read cannot return the requested 1 record and the comparison `!= 1` is true. The winning seeds are 83 and 110 bytes; the losing seeds are 7717-25258 bytes carrying a full, valid ICC header (magic 'lcms'/'acsp', signature bytes at the header offsets).",
+    "why_winner_satisfies": "Both winner-resolving seeds are well under 128 bytes (83 and 110) and their resolving mutation chains are pure havoc byte deletions (BytesDeleteMutator appears repeatedly in the leaf op), which shrink the buffer below the header size so Read fails and the true branch is taken (W: T=2 F=0 at line 776).",
+    "why_loser_doesnt": "Every loser-blocking seed is many KB long and begins with a well-formed ICC header (magic 'lcms', 'acsp APPL', size/version fields), so Read returns 1, the false branch is taken, and the seed proceeds deep into tag-table parsing (loser executes MemoryRead 23700 times and SearchOneTag/_cmsSearchTag thousands of times) \u2014 these large valid-header inputs never get shrunk below 128 bytes by the loser fuzzers.",
+    "mechanism_attribution": "The winner technique is plain havoc byte mutation (havoc-only): naive and value_profile shrink the input via BytesDeleteMutator until Read underflows below the header size. The loser fuzzers' distinguishing techniques actively keep them on the valid-header path instead: cmplog/vpc I2S substitution solves the magic/signature CMPs and rewards deeper-parsing larger inputs, and naive_ctx's call-context-folded edge map credits new (call-context, edge) pairs inside the tag loop, so both stay anchored to large structured inputs and rarely emit a short one. So this is an anti branch resolved purely by havoc shrinking, agreeing with claimed_mechanism havoc-only."
   }
 ]
