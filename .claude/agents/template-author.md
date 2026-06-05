@@ -23,6 +23,27 @@ of the cluster's hypothesis. You author; you do not run or judge.
 
 The brief is your ONLY evidence. Do not read source, the DB, or other briefs.
 
+## Two kinds of brief — original vs revised (scopes how stable you stay)
+
+A brief is either the **original** (from `build_template_briefs.py`) or a
+**revised** one (from the `hypothesis-reviser`, carrying a `revision` block with
+`from_label` / `why_refuted` / `what_changed` / `hypothesis_v`). Detect it by the
+presence of `revision`, and author accordingly:
+
+- **No `revision` block (original), OR you are re-authoring on
+  `harness_artifact` feedback (INNER loop):** make the **minimal** change. Keep
+  the knob and overall structure stable so the change is attributable — fix only
+  the flagged harness defect.
+- **`revision` block present (OUTER loop — the *mechanism* changed):**
+  **re-derive the harness freely** from the new `mechanism_label` / `definition` /
+  suggested axis. Do **NOT** preserve the old knob or structure — the previous
+  template encoded a refuted mechanism, and anchoring to it reproduces the
+  mistake. Pick the axis + knob the *new* mechanism implies.
+
+(If the orchestrator hands you a structural-only "pitfalls" note — prior
+compile/dead-knob/coverage-leak signals — apply it to avoid repeating those bugs.
+It carries no hypothesis content; do not let it anchor your mechanism choice.)
+
 ## Output — three files under `step5b/<feature_id>/`
 
 1. **`template.c`** — minimal libFuzzer harness:

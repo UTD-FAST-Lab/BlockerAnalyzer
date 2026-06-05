@@ -15,11 +15,16 @@ BlockerAnalyzer/
 │   └── coverage_curves.png                # plot_coverage_curves.py output
 ├── csvs/               # Analysis CSV outputs (significance, candidates, reps)
 ├── step5a/             # Step 5a intermediates — per-family distiller cards + signature JSONs
-├── templates/          # Feature catalog — parameterized hypothesis harnesses (see Feature Catalog section)
-│   ├── feature_spec.template.json    # JSON schema for feature_spec.json
-│   ├── branch_index.json             # Append-only (target, branch_id) → template_id map
-│   ├── <feature_id>/                 # One subdir per surviving hypothesis (template.c + params.json + feature_spec.json)
-│   └── legacy/                       # Refuted / superseded hypotheses (kept as methodology record)
+├── step5b/             # Step 5b — author→verify→adjudicate→revise loop, ALL outcomes in place
+│   ├── briefs/<feature_id>.json      # Per-cluster authoring brief (build_template_briefs.py)
+│   └── <feature_id>/
+│       ├── verdict.json              # TERMINAL: status ∈ reproduced | rejected | inconclusive
+│       ├── loop_state.json           # Append-only revision trail (one row per attempt)
+│       └── attempts/<hN_tM>/         # Per-attempt: brief.json + template.c + params.json
+│                                     #   + feature_spec.json + verification_run.json + adjudication.json
+├── templates/          # DEPRECATED 2026-06-05 — prior promote-on-reproduce catalog; no longer
+│   └── legacy/         #   written/read. Outcomes now live in step5b/<id>/verdict.json. Kept as
+│                       #   historical methodology record only (see Feature Catalog section).
 ├── fuzzer_mechanism_library.md  # Per-fuzzer mechanism paragraphs, spliced into prompts by study_units.py evidence-per-branch
 ├── db/                 # SQLite: blockers.sqlite (branches + study_subjects + subject_branches + seeds)
 ├── tools/              # Reusable analysis scripts
@@ -124,7 +129,8 @@ Specialized agents live in `.claude/agents/`:
 | **hypothesis-signature-distiller** (Sonnet) | `step5a/<family>/signatures.json` (one signature per card) | Pass-A distiller of **step 5a**. Reads ONE hypothesis card (built by `tools/build_signature_cards.py`, family-tagged by `tools/mechanism_family.py`) and normalizes it into ONE structured signature `{gate_structure, operand_kind, operand_literal, operand_width_bytes, byte_signature, mechanism_summary, one_line}` — closed-vocab gate slots plus an **open** `mechanism_summary` (the technique's effect in free text, no fixed taxonomy, so Pass B can *discover* categories rather than have them imposed). Does NOT cluster or read source/DB — **tool-restricted to Read+Write** so per-card isolation is enforced. |
 | **signature-feature-classifier** (Sonnet) | `step5a/<family>/clusters.json` (discovered feature clusters) | Pass-B classifier of **step 5a**. **Discovers** feature categories from a family's signatures — clusters branches by `mechanism_summary` similarity (gate slots secondary; opens member analyses via `analysis_path` when ambiguous), and coins an emergent `mechanism_label` + `feature_id` + definition per cluster. Applies NO pre-defined taxonomy (categories are the output, not an input). Does NOT author templates (that is 5b). Read+Write. |
 | **template-author** (Opus) | `step5b/<feature_id>/{template.c, params.json, feature_spec.json}` (verdict: pending) | **Author** stage of **step 5b**. Reads ONE cluster brief (`step5b/briefs/<feature_id>.json`, built by `tools/build_template_briefs.py`) and generates the synthetic program: ONE parameterized libFuzzer harness isolating the cluster's shared mechanism with exactly ONE compile-time `-D` knob = the program-feature axis. Does NOT run the sweep (`verify_template.py`) or judge verdicts (`verdict-adjudicator`). Read+Write. The macro↔params consistency + live-knob are enforced by `tools/check_template.py`. |
-| **verdict-adjudicator** (Opus) | `step5b/<feature_id>/adjudication.json` | **Adjudicator** stage of **step 5b** — the INDEPENDENT judge invoked only when `verify_template.py` returns refuted / inconclusive(with-crashes) / partially_reproduced. Reads the harness + `verification_run.json` signals + the brief, and rules `harness_artifact` (→ regenerate with feedback, retry budget 2), `genuine_refutation` (→ ACCEPT the verdict, record to `templates/legacy/`, no retry), or `underpowered` (→ bounded rerun). Deliberately separate from the author to block confirmation bias. Read+Write. |
+| **verdict-adjudicator** (Opus) | `step5b/<feature_id>/attempts/<hN_tM>/adjudication.json` | **Adjudicator** stage of **step 5b** — the INDEPENDENT judge invoked only when `verify_template.py` returns refuted / inconclusive(with-crashes) / partially_reproduced. Reads the harness + `verification_run.json` signals + the brief, and rules `harness_artifact` (→ INNER loop: re-author with feedback, budget N=3), `genuine_refutation` (→ OUTER loop: escalate to `hypothesis-reviser`, budget M=3; may early-escalate), or `underpowered` (→ bounded rerun). Writes the per-attempt decision; the terminal `verdict.json` (reproduced/rejected/inconclusive) is the orchestrator's. Deliberately separate from author + reviser to block confirmation bias. Read+Write. |
+| **hypothesis-reviser** (Opus) | `step5b/<feature_id>/attempts/<h(N+1)>/brief.json` (revised) or `no_viable_revision.json` | **Outer-loop** stage of **step 5b** — invoked on `genuine_refutation`. Reads the refuted brief + `verification_run.json` + `adjudication.json` + `loop_state.json` and emits ONE **shallow** revision: a new `mechanism_label` / `definition` / suggested axis+knob for the **same member set** (NO re-cluster, NO 4b re-analysis, NO membership change). Leads on the observation the old hypothesis failed to explain; declines (`no_viable_revision` → feature goes `inconclusive`) rather than relabel cosmetically. The only 5b agent that consumes empirical verification feedback to re-form a hypothesis; separate from both author and `feature-hypothesis-generator` (whose isolation contract it must not break). Read+Write. |
 
 The metaphorical-testing pipeline uses **push-mode**: the orchestrator
 runs `tools/study_units.py evidence-per-branch --target T --branch-id M`
@@ -232,15 +238,24 @@ set) plus lcms, bloaty, sqlite3 from prior runs. jsoncpp/woff2 have
 `Dockerfile.cov` but no campaign yet. See `TODO.md` (P2 — Scope expansion)
 for the remaining 5-→10-target work.
 
-## Feature Catalog (templates/)
+## Feature Catalog (templates/ — DEPRECATED 2026-06-05)
+
+> **DEPRECATED:** the `templates/` and `templates/legacy/` folders are no longer
+> used. Step 5b now keeps every outcome in place under `step5b/<feature_id>/`,
+> with the verdict as the `status` field of `step5b/<feature_id>/verdict.json`
+> (`reproduced` / `rejected` / `inconclusive`) — there is no promote-to-`templates/`
+> or record-to-`legacy/` step. To enumerate verified features, query
+> `step5b/*/verdict.json` for `status == reproduced`. The tables below are the
+> **historical** verified/refuted methodology record from the prior
+> template-writing era and are retained for reference only.
 
 Falsifiable hypothesis harnesses, one per surviving program-feature
 hypothesis. Under the analysis-only contract (2026-05-17) these are
-produced by the **step 5a Pass B classifier** (not yet
-implemented) from the per-branch `.analysis.json` files — NOT directly by
-the `feature-hypothesis-generator` agent. The existing entries below
-predate the contract (prior template-writing era) and are kept as the
-verified/refuted methodology record. Each entry `templates/<feature_id>/`
+produced by the **step 5a Pass B classifier** from the per-branch
+`.analysis.json` files — NOT directly by the `feature-hypothesis-generator`
+agent. The existing entries below predate the contract (prior template-writing
+era) and are kept as the verified/refuted methodology record. Each entry
+(historically `templates/<feature_id>/`)
 is a falsifiable hypothesis about ONE program-side parameter controlling
 ONE fuzzer-pair divergence, with three files:
 
@@ -549,33 +564,68 @@ python3 tools/check_synergy_clusters.py                            # co-cluster 
 **Step 5b — author → preflight → verify → adjudicate loop**
 (built + end-to-end validated 2026-05-24):
 
-The loop turns each step-5a cluster into a verified-or-refuted template. Two
-agents (author, adjudicator) bracket two deterministic tools (preflight, runner).
-**Retry policy (locked): two regenerations on a harness artifact; a genuine
-refutation is recorded, never retried** (no re-clustering back to 5a).
+The loop turns each step-5a cluster into a verified / rejected / inconclusive
+template. THREE agents bracket two deterministic tools: `template-author`
+(inner), `verdict-adjudicator` (judge), `hypothesis-reviser` (outer). It is a
+**two-level loop** (revised 2026-06-05):
+- **INNER (template revision), budget N=3** — fix a *broken harness* while
+  holding the hypothesis fixed (minimal attributable diff).
+- **OUTER (hypothesis revision), budget M=3** — when a *faithful* harness
+  refutes, the `hypothesis-reviser` re-forms the mechanism for the SAME members
+  (shallow: no re-cluster, no 4b re-analysis) and the inner loop restarts.
+
+The adjudicator may **early-escalate** to the outer loop (rule `genuine_refutation`
+before N is spent) when the *hypothesis*, not the harness, is the problem.
+
+**No `templates/` or `legacy/` move — all outcomes stay in place under
+`step5b/<feature_id>/`;** the terminal status is a field in
+`verdict.json`, one of **reproduced** (a sweep reproduced the predicted
+divergence), **rejected** (faithful harnesses refuted cleanly across all
+revisions — confident negative), or **inconclusive** (reviser declined / M
+exhausted / unresolved underpowered — left for manual review).
 
 ```
 build_template_briefs.py  → step5b/briefs/<id>.json   (cluster + members' analyses)
-  └─ template-author agent → step5b/<id>/{template.c, params.json, feature_spec.json}  (verdict: pending)
-       └─ check_template.py (preflight) ──FAIL──────────────┐ mechanical → regenerate
-            └─ PASS → verify_template.py (sweep)             │  (budget 2)
-                 ├─ reproduced / reproduced_in_median → ACCEPT → promote to templates/<id>/
-                 ├─ build_fail / execs=0 / all-zero ─────────┘ mechanical → regenerate
+  └─ template-author agent → step5b/<id>/attempts/<hN_tM>/{template.c, params.json, feature_spec.json}
+       └─ check_template.py (preflight) ──FAIL──────────────┐ mechanical → re-author  (INNER, N=3)
+            └─ PASS → verify_template.py (smoke→full sweep)  │
+                 ├─ reproduced / reproduced_in_median → verdict.json status=reproduced  ✓
+                 ├─ build_fail / execs=0 / all-zero ─────────┘ mechanical → re-author  (INNER, N=3)
                  └─ refuted / inconclusive(w/crashes) / partially
-                      └─ verdict-adjudicator agent →
-                           harness_artifact   → regenerate w/ feedback (budget 2)
-                           genuine_refutation → record to templates/legacy/<id>/
-                           underpowered       → rerun (more trials / wider scan)
+                      └─ verdict-adjudicator agent → attempts/<hN_tM>/adjudication.json
+                           harness_artifact   → re-author w/ feedback        (INNER, N=3)
+                           genuine_refutation → hypothesis-reviser agent      (OUTER, M=3)
+                           │                       → attempts/<h(N+1)>/brief.json (new mechanism)
+                           │                       → restart INNER on the revised brief
+                           │                       → reviser declines / M exhausted → status=inconclusive
+                           │                       → all revisions refute cleanly    → status=rejected
+                           underpowered       → bounded rerun (more trials / wider scan)
 ```
 
+Every attempt is preserved under `step5b/<id>/attempts/<hN_tM>/`
+(brief + harness + `verification_run.json` + `adjudication.json` + feedback);
+`step5b/<id>/loop_state.json` is the append-only revision trail (one row per
+attempt: ids, verify verdict, adjudication decision, feedback, next action).
+**Cost guard:** run a *smoke* sweep inside the loop; spend the full `params.json`
+budget only to confirm an attempt that looks `reproduced`.
+
+Orchestration is **Claude-orchestrated** (a documented procedure, not yet a
+driver script): Claude dispatches the agents, runs the tools, and maintains
+`loop_state.json` + `verdict.json` per the two-level budgets (N=3 inner, M=3
+outer).
+
 ```bash
-python3 tools/build_template_briefs.py --family all          # step5b/briefs/*.json (13)
-# dispatch template-author over a brief -> step5b/<id>/{template.c, params.json, feature_spec.json}
-python3 tools/check_template.py  --template step5b/<id>      # preflight (cheap; gates the sweep)
-python3 tools/verify_template.py --template step5b/<id>      # full sweep -> verification_run.json
-python3 tools/verify_template.py --template step5b/<id> --trials 2 --duration-s 15 \
-    --fuzzers naive,cmplog --scan-values 1,8                 # smoke (decisive pair, tiny budget)
-# if non-reproduced: dispatch verdict-adjudicator over step5b/<id>/ -> adjudication.json
+python3 tools/build_template_briefs.py --family all          # step5b/briefs/*.json
+# INNER: dispatch template-author over a brief -> step5b/<id>/attempts/<hN_tM>/{template.c, params.json, feature_spec.json}
+python3 tools/check_template.py  --template step5b/<id>/attempts/<hN_tM>   # preflight (cheap; gates the sweep)
+python3 tools/verify_template.py --template step5b/<id>/attempts/<hN_tM> --trials 2 --duration-s 15 \
+    --fuzzers naive,cmplog --scan-values 1,8                 # SMOKE first (decisive pair, tiny budget)
+python3 tools/verify_template.py --template step5b/<id>/attempts/<hN_tM>   # FULL sweep only to confirm a `reproduced`-looking smoke
+# if non-reproduced: dispatch verdict-adjudicator -> attempts/<hN_tM>/adjudication.json
+#   harness_artifact   -> re-author (INNER, N=3)
+#   genuine_refutation -> dispatch hypothesis-reviser -> attempts/<h(N+1)>/brief.json (OUTER, M=3), restart INNER
+#   underpowered       -> bounded rerun
+# on terminate: write step5b/<id>/verdict.json {status: reproduced|rejected|inconclusive}
 ```
 
 Build model: each variant ships a `<fuzzer>_cc` LibAFL wrapper on PATH in the
@@ -591,12 +641,16 @@ verification block in place.
 Runs **only the involved fuzzers** (decisive winners + losers). Reference
 fuzzers are auxiliary context, not part of the verdict.
 
-**Staging vs catalog:** authored templates land in `step5b/<id>/` (proposals).
-On `reproduced` they promote to `templates/<id>/`; on `genuine_refutation` to
-`templates/legacy/<id>/` — keeping `templates/` the verified catalog. (Promotion
-is currently manual.) **Validated 2026-05-24:** the loop ran end-to-end on
-`opaque_exact_literal_dispatch_gate` (author → preflight PASS → smoke verify
-`reproduced`).
+**Outcomes stay in place (no separate catalog).** Everything for a feature lives
+under `step5b/<feature_id>/`; the verdict is the `status` field of
+`verdict.json` (`reproduced` / `rejected` / `inconclusive`), NOT a move into a
+`templates/` or `legacy/` folder. **The `templates/` and `legacy/` folders are
+deprecated (2026-06-05)** — they were the prior "promote-on-reproduce" staging
+model and are no longer written or read by the loop. To find verified features,
+query `step5b/*/verdict.json` for `status == reproduced`. **Validated 2026-05-24:**
+the loop ran end-to-end on `opaque_exact_literal_dispatch_gate` (author →
+preflight PASS → smoke verify `reproduced`); the two-level revision loop +
+in-place verdicts were added 2026-06-05.
 
 **(Removed) Step 6 — lint template-shape consistency.** `lint_template_shapes.py`
 was deleted 2026-05-29: it checked decisive-shape purity of the *agent's*
