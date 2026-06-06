@@ -37,7 +37,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = REPO_ROOT / "templates"
 DEFAULT_IMAGE = "libafl-coverage-base"   # has clang-18, small
-CANON = {"naive", "cmplog", "value_profile", "value_profile_cmplog"}
+# icse27 10-fuzzer set (extended 2026-06-06 from the original 4 canonical
+# variants; the campaign now sweeps minimizer/fast/naive_ctx/grimoire/honggfuzz
+# in addition to the base I2S/VP grid). Each variant ships a <fuzzer>_cc wrapper
+# in the libafl image, so verify_template can build any of them.
+CANON = {"naive", "cmplog", "value_profile", "value_profile_cmplog",
+         "minimizer", "fast", "naive_ctx", "naive_ngram",
+         "grimoire", "honggfuzz"}
 
 # Compile each scan value to assembly (deterministic, no timestamps) and sha it.
 COMPILE_SCRIPT = r"""
