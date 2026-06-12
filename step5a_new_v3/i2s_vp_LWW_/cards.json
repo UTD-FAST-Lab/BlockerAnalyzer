@@ -1,0 +1,164 @@
+[
+  {
+    "id": "libpng_3833",
+    "family": "i2s_vp/LWW_",
+    "target": "libpng",
+    "branch_id": 3833,
+    "analysis_path": "prompts_a/libpng_3833.analysis.json",
+    "file": "/src/libpng/png.c",
+    "function": "png.c:png_XYZ_from_xy",
+    "line": "1288",
+    "source_line": "   if (xy->greenx < 0 || xy->greenx > PNG_FP_1) return 1;",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "Input must reach png_XYZ_from_xy with a green chromaticity field whose fixed-point value satisfies greenx<0 OR greenx>PNG_FP_1 (100000 = 0x000186A0), i.e. the multi-byte greenx operand must be pushed above the 100000 magnitude threshold so the line-1288 guard takes its true side and returns 1.",
+    "why_winner_satisfies": "The value_profile_cmplog winner reaches line 1288 and takes the true side (W shows T=1 F=0 at L1288 while the loser shows T=0 F=40), resolves the branch in 9/10 trials, and accumulates 56 hits versus the loser's 3 \u2014 its chromaticity bytes land greenx outside the [0,PNG_FP_1] window.",
+    "why_loser_doesnt": "The cmplog loser only ever takes the false side at L1288 (T=0 F=40), blocks in 8/10 trials, and never drives greenx above the 100000 threshold; it stalls 21.10h on the branch with only 3 hits, so its green chromaticity stays inside the in-range window.",
+    "mechanism_attribution": "Both fuzzers carry the same input-to-state substitution mutator (cmplog and vpc are identical except for value_profile), so the comparison-solving mutator is held constant; the winning technique is value_profile's CMP_MAP gradient. The comparison greenx>PNG_FP_1 is a magnitude inequality against the multi-byte constant 100000 (0x000186A0) that literal-substitution mutation cannot directly solve, but the CMP_MAP Hamming/prefix-distance buckets reward inputs whose greenx operand creeps progressively closer to and past 100000, giving the gradient that lets vpc overshoot the threshold where plain cmplog cannot."
+  },
+  {
+    "id": "libxml2_6792",
+    "family": "i2s_vp/LWW_",
+    "target": "libxml2",
+    "branch_id": 6792,
+    "analysis_path": "prompts_a/libxml2_6792.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "parser.c:xmlParseLookupInternalSubset",
+    "line": "11261",
+    "source_line": "        else if (state == ']') {",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A DOCTYPE internal-subset body whose unescaped scan reaches a ']' character (setting the scanner state machine to state==']') and then a following '>' / blank, i.e. a `]` closing sequence inside the parsed DTD section. Reaching the BLOCKER true side at parser.c:11261 requires the byte stream to advance the state machine through '<' / quote / ']' transitions until state holds ']'.",
+    "why_winner_satisfies": "The value_profile_cmplog winner resolves 9/10 and actually enters state==']' (W shows T=4 at L11261 and downstream W-only execution of the `if (*cur == '>')`, `IS_BLANK_CH`, and state==' ' arms at 11262-11286). Its CMP_MAP gradient feedback rewards inputs that incrementally match the multi-byte DTD structure, so the scanner state machine is steered into the ']' state.",
+    "why_loser_doesnt": "The cmplog loser blocks 8/10 and never sets state==']' \u2014 L shows T=0 at L11261 and never executes the 11262-11286 W-only arms; its scan stalls in the generic state-tracking arms (state!=0, '<', quote) without reaching the ']' close. Lacking CMP_MAP gradient, it gets no partial-progress credit for assembling the ']'-bearing internal subset.",
+    "mechanism_attribution": "value_profile adds CMP_MAP gradient buckets: each intercepted comparison contributes Hamming/prefix-distance feedback so inputs that partially match the multi-byte DTD ']'-close structure are retained and refined. cmplog (I2S only, no CMP_MAP) gets no such gradient credit, so it cannot incrementally walk the scanner state machine into state==']'. The delta between the two involved fuzzers is exactly value_profile, so the winning mechanism is CMP_MAP gradient."
+  },
+  {
+    "id": "libxml2_6800",
+    "family": "i2s_vp/LWW_",
+    "target": "libxml2",
+    "branch_id": 6800,
+    "analysis_path": "prompts_a/libxml2_6800.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "parser.c:xmlParseLookupInternalSubset",
+    "line": "11304",
+    "source_line": "        else if ((*cur == '\"') || (*cur == '\\'') || (*cur == ']')) {",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A well-formed XML prologue followed by a DOCTYPE whose internal-subset region presents an unescaped quote or ']' character to the chunk-scanner at line 11304 while the state machine is in the neutral state (state==0), so the scanner enters the quoted/bracket state instead of bailing at an earlier dispatch.",
+    "why_winner_satisfies": "Winner seeds drive the scanner into the bracket/space sub-states the loser never reaches: at line 11261 the winner takes the ']' state True 4 times and at line 11275 the ' ' state True 12 times, and at line 11304 the winner records True hits (T=4) whereas the loser stays at T=0; the winning seed carries an intact '<?xml version=\"1.0\"?>' / '<!DOCTYPE a SYSTEM \"' structure that feeds the DTD scanner.",
+    "why_loser_doesnt": "Loser (cmplog) seeds never enter the ']' or ' ' end-detection states (L11261 T=0, L11275 T=0) and never take the blocker's True side (L11304 T=0 F=84); the loser seed's DOCTYPE is corrupted ('a S[STEM') so the scanner does not arrive at the internal-subset quote/bracket dispatch in the neutral state.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient buckets reward inputs whose comparison operands are progressively closer (Hamming/prefix distance) to the structural literals the DTD scanner expects, smoothing the path to a quote/']' arriving while state==0; cmplog alone (input-to-state substitution plus only edge feedback, no CMP_MAP gradient) gets a flat edge signal and cannot retain the partial-match progress, so it stalls at the entry of the internal-subset scan. The winner-vs-loser delta is precisely the value_profile gradient feedback."
+  },
+  {
+    "id": "libxml2_7069_h0",
+    "family": "i2s_vp/LWW_",
+    "target": "libxml2",
+    "branch_id": 7069,
+    "analysis_path": "prompts_a/libxml2_7069.analysis.json",
+    "file": "/src/libxml2/valid.c",
+    "function": "xmlFreeDocElementContent",
+    "line": "1125",
+    "source_line": "        if (cur == parent->c1)",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "Input must reach an <!ELEMENT> declaration whose content model is a multi-alternative/sequence group (e.g. mixed content '(a|b|...)' or a SEQ/OR tree) so that during the bottom-up free walk a freed child equals parent->c2 rather than parent->c1, exercising the false side at valid.c:1125.",
+    "why_winner_satisfies": "value_profile_cmplog resolves the false branch in 8/10 trials and actually reaches line 1127/1128 (parent->c2 = NULL) marked [W], i.e. it constructs element-content trees with a right child c2; its CMP_MAP gradient feedback rewards partial matches of the multi-byte DTD keyword/punctuation prefixes ('<!ELEMENT', '(', '|') letting it incrementally build the deeper content-model grammar that produces a c2 sibling.",
+    "why_loser_doesnt": "cmplog blocks in 9/10 trials with hitcount 0 on the branch; it reaches line 1125 only on the true side (c1) and never produces a content model with a second child, so parent->c2 stays unset and the false branch is never taken.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix-distance feedback) gives partial credit for byte sequences approaching the DTD content-model tokens, so value_profile_cmplog assembles the multi-child '(a|b|...)' group that cmplog (edge-bucket feedback only) cannot, yielding a c2 child and the false branch."
+  },
+  {
+    "id": "libxml2_7138_h1",
+    "family": "i2s_vp/LWW_",
+    "target": "libxml2",
+    "branch_id": 7138,
+    "analysis_path": "prompts_a/libxml2_7138.analysis.json",
+    "file": "/src/libxml2/valid.c",
+    "function": "valid.c:xmlIsDocNameChar",
+    "line": "3573",
+    "source_line": "        if ((IS_LETTER(c)) || (IS_DIGIT(c)) ||",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "Byte content that progressively matches the multi-clause comparison cascade routing into the validation path (DOCTYPE/SYSTEM keyword bytes and the attribute-type switch), so the input is rewarded for partial matches toward reaching xmlIsDocNameChar's true branch.",
+    "why_winner_satisfies": "value_profile_cmplog adds CMP_MAP gradient buckets so partial-match progress on the string/integer comparisons along the chain (switch type at xmlValidateAttributeValueInternal L3865, name-char clauses) is retained as new feedback, letting the fuzzer climb toward the true side and resolve in 8/10 trials (winner: resolved=8/10).",
+    "why_loser_doesnt": "Plain cmplog has no CMP_MAP gradient signal \u2014 only edge buckets plus I2S substitution \u2014 so it gets no credit for partial progress on the comparison cascade and stalls blocked in 9/10 trials (loser: resolved=1/10 blocked=9) with far fewer true-branch hits (avg hitcount on branch: winner=99 loser=8).",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix-distance feedback buckets) rewards inputs for partial comparison matches along the validation chain, giving the fuzzer a smooth climb toward the name-char true branch that plain cmplog's binary edge feedback does not provide."
+  },
+  {
+    "id": "harfbuzz_6025",
+    "family": "i2s_vp/LWW_",
+    "target": "harfbuzz",
+    "branch_id": 6025,
+    "analysis_path": "prompts_b/harfbuzz_6025.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+    "function": "_hb_preprocess_text_vowel_constraints(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+    "line": "94",
+    "source_line": "\t  case 0x0930u:",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "Three consecutive buffer codepoints encoding 0x0930 (RA) at the current glyph, then 0x094D (virama) at cur(1), then 0x0907 at cur(2), with idx+2 < count so the third glyph exists. In the harness input these appear as little-endian 32-bit glyph words 30 09 00 00 / 4d 09 00 00 followed by the third codepoint slot.",
+    "why_winner_satisfies": "The winner-resolving seed begins 30 09 00 00 4d 09 00 00 06 00 00 00 \u2014 the first glyph word is 0x0930 (entering case 0x0930) and the second word is 0x094D (the virama required by cur(1)), supplying the leading two operands of the three-way conjunction that the loser never satisfies; the winner takes the true side (L94 W T=1 F=14 vs L T=0 F=149).",
+    "why_loser_doesnt": "Loser-blocking seeds carry unrelated bytes at those slots (e.g. 19 09 00 00, 00 00 00 00, sn-hant/zh- ASCII tag strings) so they never co-locate 0x0930, 0x094D and 0x0907 at adjacent glyph positions; across 10 loser trials case 0x0930 stays false (L94 L T=0 F=149) and the branch is blocked for 18.80h.",
+    "mechanism_attribution": "value_profile_cmplog adds CMP_MAP gradient buckets on top of cmplog's I2S. The blocker is a conjunction of three exact 32-bit codepoint equalities; CMP_MAP's Hamming/prefix-distance feedback rewards inputs that match MORE of the three operands partially (e.g. getting cur()==0x0930 and cur(1)==0x094D before cur(2)==0x0907), giving an intermediate-credit gradient that cmplog (edge-bucket feedback only) cannot see, so vpc climbs the multi-equality gate that cmplog stalls on."
+  },
+  {
+    "id": "harfbuzz_6037",
+    "family": "i2s_vp/LWW_",
+    "target": "harfbuzz",
+    "branch_id": 6037,
+    "analysis_path": "prompts_b/harfbuzz_6037.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+    "function": "_hb_preprocess_text_vowel_constraints(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+    "line": "144",
+    "source_line": "\t  case 0x0A72u:",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A glyph stream whose current codepoint equals the exact 16-bit Gurmukhi constant 0x0A72, entered only after the outer switch has already selected the HB_SCRIPT_GURMUKHI arm; the loser must produce this same 0x0A72 codepoint that gates the case label at line 144.",
+    "why_winner_satisfies": "value_profile_cmplog resolves the branch in all 10 trials (avg 3.70h) and the per-role overlay marks the Gurmukhi arm (lines 130-163) plus the blocker case 0x0A72u as [B]/hit on the winner side, with the inner switch at line 145 taken True 7 times for W versus only 1 for L.",
+    "why_loser_doesnt": "cmplog blocks the branch in 8/10 trials (avg 20.10h, hitcount 0); having only I2S without the value_profile CMP_MAP gradient it cannot incrementally close in on the exact 0x0A72 codepoint, so it almost never satisfies the case label.",
+    "mechanism_attribution": "Both involved fuzzers carry the same input-to-state comparison-solving mutator, so that technique is held constant; the only technique delta is value_profile's CMP_MAP gradient buckets, which reward Hamming/prefix progress toward the 0x0A72 codepoint comparison and let the winner climb to the exact match the loser cannot reach by comparison-solving alone."
+  },
+  {
+    "id": "harfbuzz_6048",
+    "family": "i2s_vp/LWW_",
+    "target": "harfbuzz",
+    "branch_id": 6048,
+    "analysis_path": "prompts_b/harfbuzz_6048.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+    "function": "_hb_preprocess_text_vowel_constraints(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+    "line": "162",
+    "source_line": "\tif (matched) _output_with_dotted_circle (buffer);",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A glyph buffer whose script resolves to HB_SCRIPT_GURMUKHI and that contains an adjacent codepoint pair where buffer->cur()==0x0A72 and buffer->cur(1) is one of {0x0A3F,0x0A40,0x0A47}, so that `matched` becomes true at the blocker line 162.",
+    "why_winner_satisfies": "value_profile_cmplog (winner) uniquely reaches `case 0x0A72u:` (line 144 W T=1 vs L T=0) and takes the true side of the blocker (line 162 W T=1 vs L T=0), resolving in all 10 trials, because its CMP_MAP gradient feedback rewards inputs that progressively match the two-codepoint constraint comparison.",
+    "why_loser_doesnt": "cmplog (loser) blocks in all 10 trials and never enters the 0x0A72 arm (line 144 L T=0); it iterates the Gurmukhi loop heavily (line 131 L T=300) but only its edge-bucket feedback fires, giving no reward for partial progress toward the exact codepoint pair, so it never assembles the matched pair.",
+    "mechanism_attribution": "The only technique delta between the two involved fuzzers is value_profile: both carry the same input-to-state CMP substitution mutator, but only value_profile_cmplog adds CMP_MAP gradient buckets. The Hamming/prefix-distance value-profile feedback makes near-miss codepoint comparisons (e.g. one byte off from 0x0A72 / 0x0A3F) register as new coverage, steering the corpus toward the exact matched vowel pair that cmplog's edge-only feedback cannot distinguish from any other non-matching glyph."
+  },
+  {
+    "id": "sqlite3_14493",
+    "family": "i2s_vp/LWW_",
+    "target": "sqlite3",
+    "branch_id": 14493,
+    "analysis_path": "prompts_b/sqlite3_14493.analysis.json",
+    "file": "/src/sqlite3/bld/sqlite3.c",
+    "function": "sqlite3.c:lookupName",
+    "line": "98156",
+    "source_line": "    if( zDb ){",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A SQL statement whose column reference is a three-part schema-qualified name (X.Y.Z, e.g. db.table.column) so that lookupName is called with a non-NULL zDb; the name must fail to resolve so cnt!=1 and control reaches the error block, where 'if( zDb )' (98156) is then true.",
+    "why_winner_satisfies": "Winner-resolving seed carries repeated dotted multi-part qualifier structure (e.g. '.112/1111', 'E.E.E' runs), and the d=2 dispatch shows the winner taking case TK_DOT (L98355 T=1) which builds zDb/zTable/zColumn before calling lookupName; at d=1 the winner takes 'if( zDb )' true (L97837 T=1) and the blocker 'if( zDb )' true (L98156 T=1).",
+    "why_loser_doesnt": "Loser-blocking seeds are flat single-token or repeated-letter payloads ('SELECT bbLLLL...', 'SELECT bbbbb') with no nested X.Y dotted qualifier; the loser never builds zDb (d=1 L97837 T=0 F=20, blocker L98156 T=0 F=20) \u2014 it routes through the unqualified column path (case TK_ID, L98354 T=20).",
+    "mechanism_attribution": "The pair delta is value_profile: both fuzzers share the same input-to-state comparison-substitution mutator, but only value_profile_cmplog adds the CMP_MAP gradient (Hamming/prefix-distance buckets). Reaching the db-qualified branch requires the input to first survive several near-miss string comparisons (sqlite3StrICmp on db names, schema-name matching) and to emit a syntactically valid dotted reference; the CMP_MAP gradient rewards incremental Hamming progress toward those multi-byte comparison targets, letting vpc assemble the X.Y.Z structure that plain cmplog (edge-bucket feedback only) cannot incrementally climb toward."
+  }
+]

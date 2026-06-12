@@ -2,6 +2,55 @@
 
 A research project for analyzing fuzzing "blockers" — branches that coverage-guided fuzzers fail to reach — and diagnosing why.
 
+## ⚑ CURRENT DIRECTION — Benchmark pivot (2026-06-12)
+
+**Step 5 changed.** The old "synthesize a mini-program per feature and verify its
+dose-response" (step 5b) was abandoned for *non-local* features: corpus
+contamination, joint-necessity, scheduling, ctx/ngram coverage are properties of
+the *whole target + campaign*, not capturable in a mini-program (the repeated
+"non-synthesizable" verdicts were the symptom). **New frame:** the decisive
+branches (≥8/8 rule, already in the DB) ARE the dataset; classify them by
+decisive-shape + mechanism, then **validate each hypothesis with evidence from
+the real target + fuzzing campaign** (corpus byte-stats, seed lineage, coverage
+depth). Validated hypotheses become **mechanism labels** → the labeled branches
+are a real-world, mechanism-stratified benchmark of fuzzer-discriminating
+blockers. Synthetic harnesses are kept ONLY as an optional causal sidecar for
+*local* features.
+
+**Full design:** `docs/benchmark_pivot_spec.md`. **Other-server runbook:**
+`docs/OTHER_SERVER_TODO.md`. **Categories:** `bench/hypothesis_categories.md`.
+
+**Pipeline now (replaces step 5):**
+- `step5a_new_v3/<shape>/{signatures.json, cards.json}` — 38 decisive-shape
+  buckets (Pass-A signatures; Pass-B classifier RETIRED — the design agent does
+  classification). `tools/mechanism_family_v3.py` is the deterministic Layer-1
+  shape split.
+- `step5b_new_v3/<shape>/` — `evidence_test.json` (the **`evidence-test-author`**
+  agent's per-shape hypothesis menu + measurement descriptors + decision rules)
+  and `assignments_<server>.json` (the arbiter's per-branch verdicts).
+- `bench/` — the deterministic machinery: `tools/{joint_necessity,
+  value_distance_reached,depth_reach}.py` + `bench/tools/i2s_operand_availability.py`
+  (operand_enrichment) are the ~4 shared **measurement tools**; `tool_registry.json`
+  catalogs them; `arbitrate.py` applies each shape's rules per branch (NO LLM);
+  `build_dataset.py` merges `assignments_*.json` across servers → `dataset.jsonl`.
+- **Multi-server:** two servers hold disjoint targets' corpora. Each sets
+  `BENCH_SERVER` + `BENCH_ONDISK`, scores its own targets, writes
+  `assignments_<server>.json`; `build_dataset.py` merges. **Each server must
+  re-anchor every tool on a LOCAL target before trusting labels** (cross-target
+  transfer isn't free).
+- **Rigor guardrails:** G1 every label makes a falsifiable + *discriminating*
+  real-data prediction; G2 label-SOURCE (analysis) independent from
+  verification-SIGNAL (campaign data); G3 keep refuted/inconclusive labeled —
+  honest `inconclusive`/`decidable:false` are correct outcomes, don't chase 100%.
+- The end-goal beyond the benchmark: distil each validated feature into a
+  **static/cheap-dynamic recognizer** (gate shape + operand provenance + CFG
+  context) so an adaptive fuzzer can recognize a blocker type online and enable
+  the right technique — the benchmark is its training + validation set.
+
+The sections below describe the ORIGINAL steps 1–5b; steps 1–4 are unchanged and
+still produce the labeled branches. Step 5b's synthesize-and-verify is
+superseded by the above (kept as historical record + local-feature sidecar).
+
 ## Project Structure
 
 ```

@@ -1,0 +1,39 @@
+[
+  {
+    "id": "libpng_4002",
+    "family": "i2s_vp/L__W",
+    "target": "libpng",
+    "branch_id": 4002,
+    "analysis_path": "prompts_a/libpng_4002.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_handle_bKGD",
+    "line": "2018",
+    "source_line": "         if (buf[0] != 0 || buf[2] != 0 || buf[4] != 0)",
+    "covers_pairs": [
+      "naive>cmplog (I2S)"
+    ],
+    "what_input_feature": "A truecolor (RGB) bKGD chunk reached with bit_depth<=8 and at least one of the high-order background bytes buf[0], buf[2] or buf[4] non-zero, so that the line-2018 disjunction takes its TRUE side ('invalid color').",
+    "why_winner_satisfies": "naive produces short inputs (375-793 bytes) that error out of image decoding early and re-enter the bKGD path repeatedly while havoc randomizes the chunk payload bytes; it reaches L2018 with T=13 F=1, i.e. it lucky-hits a non-zero buf[0]/buf[2]/buf[4] many times.",
+    "why_loser_doesnt": "cmplog produces large, structurally-valid inputs (8360-8771 bytes) that pass the length/CRC roadblocks and sink execution into IDAT row decoding; at L2018 it is stuck at T=0 F=19, always seeing all-zero background bytes and never flipping a high byte non-zero.",
+    "mechanism_attribution": "This is an I2S-anti branch where the I2S fuzzer LOSES. cmplog's comparison-solving substitution clears the structural integer-CMP roadblocks (length, CRC, magic) and drives the corpus toward big valid images deep in IDAT decoding, starving the bKGD color bytes of random mutation. naive's plain havoc byte/word mutation, having no CMP introspection to chase, keeps inputs small and blindly randomizes the chunk bytes, so it lucky-flips a high background byte non-zero. The winning technique is havoc-only mutation, not any CMP-solving."
+  },
+  {
+    "id": "harfbuzz_5802",
+    "family": "i2s_vp/L__W",
+    "target": "harfbuzz",
+    "branch_id": 5802,
+    "analysis_path": "prompts_b/harfbuzz_5802.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-hebrew.cc",
+    "function": "hb-ot-shaper-hebrew.cc:compose_hebrew(hb_ot_shape_normalize_context_t const*, unsigned int, unsigned int, unsigned int*)",
+    "line": "151",
+    "source_line": "\t  if (a == 0x05E9u) { /* SHIN */",
+    "covers_pairs": [
+      "naive>cmplog (I2S)",
+      "naive>naive_ctx (ctx_coverage)"
+    ],
+    "what_input_feature": "A codepoint pair reaching compose_hebrew with b==0x05C2 (SIN DOT, selecting the case at line 150) AND a==0x05E9 (SHIN), so the line-151 equality holds and the true branch (writes *ab=0xFB2Bu) is taken. The seed encodes these as little-endian codepoints: a 0x05E9 (bytes e9 05) and a 0x05C2 (bytes c2 05).",
+    "why_winner_satisfies": "Winner-resolving seeds carry dense runs of 0xe9 bytes (0x05E9 SHIN low byte) and the 'c2 05' / '05' pattern (0x05C2 SIN DOT) \u2014 e.g. seed 1 has e9 e9 e9 e9 e9 e9 e9 e9 then c2 05, and the per-role overlay marks line 152/153 (the true-branch body) as [W] hit only by the winner set.",
+    "why_loser_doesnt": "Loser-blocking seeds reach case 0x05C2 (line 150 hit, T=46) but fail the a==0x05E9 test: at line 151 the loser shows T=0 F=46, never satisfying both the SIN-DOT case AND the SHIN base operand simultaneously; their bytes are dominated by 0x00/0xb9/0xc2 fillers without the paired SHIN+SIN-DOT codepoints aligned.",
+    "mechanism_attribution": "naive's plain havoc + token byte mutation is sufficient and is what wins: the winning seeds were found by minimizer/naive havoc ops (BytesDelete/ByteFlip/BytesRandSet, TokenReplace). cmplog LOSES because its input-to-state CMP introspection diverts energy and the equality operands here are not learnable comparison gradients that help; naive_ctx LOSES because its context-indexed coverage map fragments the edge signal, slowing arrival at this single deep switch arm. The winning technique in BOTH pairs is identical: baseline naive havoc mutation, not any introspective technique."
+  }
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "libxml2_6343",
+    "family": "i2s_vp/LWL_",
+    "target": "libxml2",
+    "branch_id": 6343,
+    "analysis_path": "prompts_a/libxml2_6343.analysis.json",
+    "file": "/src/libxml2/encoding.c",
+    "function": "xmlDetectCharEncoding",
+    "line": "958",
+    "source_line": "\tif ((in[0] == 0x00) && (in[1] == 0x00) &&",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "The 4-byte window read by xmlDetectCharEncoding(start, 4) must hold exactly in[0]==0x00, in[1]==0x00, in[2]==0x3C, in[3]==0x00 (the UCS4_2143 magic) while NOT matching any earlier 4-byte encoding gate (e.g. 00 00 00 3C for UCS4BE) tested before line 958.",
+    "why_winner_satisfies": "value_profile resolves the true side in 9/10 trials; its CMP_MAP gradient rewards inputs whose CMP operands move bucket-by-bucket toward the 00 00 3C 00 constant, and winner-resolving seeds carry runs of 0x00 bytes (e.g. offsets 0x15-0x17 = 00 00 00) that the gradient feedback assembled into the magic prefix.",
+    "why_loser_doesnt": "value_profile_cmplog blocks the true side in 8/10 trials and spends 18.00h blocked; adding the I2SRandReplace stage diverts mutation energy into splicing logged operands, and the loser-blocking seeds instead resolve the sibling UTF16BE gate (line 980, tagged [L]) so they never present the 00 00 3C 00 window to line 958.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix-distance bucket feedback) lets it climb toward the 4-byte magic constant incrementally; value_profile_cmplog adds the input-to-state substitution stage which here diverts effort and the pair regresses, so this is an I2S-hurts case where the winning technique is the CMP_MAP gradient, not comparison-solving substitution."
+  },
+  {
+    "id": "libxml2_6837",
+    "family": "i2s_vp/LWL_",
+    "target": "libxml2",
+    "branch_id": 6837,
+    "analysis_path": "prompts_a/libxml2_6837.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "parser.c:xmlParseTryOrFinish",
+    "line": "11754",
+    "source_line": "\t\t    (ctxt->input->cur[8] == '[')) {",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A '<'-led content byte stream whose bytes 1-8 do NOT spell '![CDATA[' (or a non-'<' content lead), so the 9-clause AND at L11747-11754 short-circuits to its false side and the parser keeps advancing through general START_TAG / CONTENT parsing instead of entering the CDATA-section state machine.",
+    "why_winner_satisfies": "value_profile resolves the branch in 9/10 trials; its winning seed reaches the false-side START_TAG path ([W] lines 11604-11620 and the goto-done at 11500/11639) and never enters the [L] CDATA-section block, meaning the 8-byte CDATA literal was not matched so the false side was taken.",
+    "why_loser_doesnt": "value_profile_cmplog blocks 8/10; its loser seed funnels into the [L] '<?xml' declaration and '<!DOCTYPE' / CDATA-section paths (L11555-11591, L11813-11903, L11950-11984), spending energy completing exact multi-byte literal matches and the CDATA term scan rather than diversifying content to take the false side.",
+    "mechanism_attribution": "value_profile (winner) uses CMP_MAP distance-bucket gradient feedback over edge coverage and lacks the input-to-state substitution mutator; it explores diverse content leads and rides the false side. value_profile_cmplog adds the input-to-state substitution mutator, which splices logged comparands (e.g. the '<![CDATA[', '<?xml', '<!DOCTYPE' literals it intercepts) back into the input, biasing its corpus toward completing those exact-literal gates and the CDATA state machine \u2014 diverting energy away from the false-side general-parse progress. The delta is I2S and the winner is the no-I2S variant, so the winner's progress is driven by CMP_MAP gradient feedback while I2S is a net liability here, not an asset."
+  }
+]

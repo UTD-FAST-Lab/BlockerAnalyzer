@@ -1,0 +1,42 @@
+{
+  "shape": "i2s_vp_L_W_",
+  "shape_decode": "cmp=L, vp=_, vpc=W, naive=_ : cmplog blocks, value_profile_cmplog resolves, value_profile & naive non-decisive => the VP gradient (only effective when stacked on I2S in vpc) climbs a multi-byte CMP beyond what I2S substitution alone reaches",
+  "n_branches": 7,
+  "hypotheses": [
+    {
+      "id": "vp_gradient_climbs_multibyte_cmp_beyond_i2s",
+      "label": "vpc-resolving seeds reach a multi-byte operand value strictly closer to the target than cmplog-blocking seeds; the operand is not a single spliceable literal, so I2S stalls while the CMP_MAP gradient ratchets distance down",
+      "direction": "vp_pro",
+      "from_prior": ["vp_gradient_climbs_multibyte_cmp_beyond_i2s"],
+      "measurement": {
+        "descriptor": {
+          "source": "seed_set",
+          "compute": "value_distance_reached",
+          "operand": "multibyte_literal",
+          "unit": "per_branch"
+        },
+        "registry_tool": null,
+        "registry_tool_note": "No existing tool fits. operand_enrichment (corpus_queue:byte_freq_ratio:target_vs_decoy:per_gate_offset) measures fixed-offset single-byte target/decoy presence, not graded multi-byte distance, and would mislabel a partial-match climb as a miss. joint_necessity measures struct size/token count, not operand value distance. Propose a NEW descriptor seed_set:value_distance_reached:multibyte_literal:per_branch: for each branch, locate the gate operand offset in each seed, compute the per-seed MINIMUM byte-distance (sum of per-byte |seed_byte - target_byte| over the operand_width window, scanned across plausible offsets, normalized to the closest window) to the target operand literal, then take the median over the vpc-RESOLVING seed set (vpc_dist) and over the cmplog-BLOCKING seed set (cmp_dist). Report dist_gap = cmp_dist - vpc_dist (positive => vpc closer) and vpc_dist_frac = vpc_dist / operand_width (0 = exact match reached, 1 = max distance).",
+        "metrics_used": ["vpc_dist", "cmp_dist", "dist_gap", "vpc_dist_frac"],
+        "params": {
+          "operands_per_branch": {
+            "lcms_2090": "Lab ,XYZ  (4-byte FOURCC PCS/color-space signature tokens)",
+            "libpng_4145": "ICC-signature-char ranges (printable: 32, 48-57, 65-90, 97-122) over a 4-byte word; distance = count of the 4 bytes failing the range, NOT a fixed literal",
+            "libxml2_6719": ": (0x3a) preceded by a NUL-terminated prefix match; distance = prefix mismatch bytes + (1 if no ':' adjacent)",
+            "libxml2_8100": "internal-subset lookahead terminator ('[' ... ']'/'>' completion); distance = structural-lookahead shortfall, treat as DTD-skeleton completion (weakest-fit operand)",
+            "libxml2_9841": "xmlns (att[0..4]=='x','m','l','n','s' conjunctive cascade, dispersed)",
+            "harfbuzz_5474": "size (73 69 7a 65, 4-byte feature tag)",
+            "harfbuzz_5477": "size (73 69 7a 65, 4-byte closure tag, line 813)"
+          },
+          "distance_metric": "per_byte_abs_sum_min_over_offsets (range gates: count-of-bytes-out-of-range; conjunctive cascades: count of cascade bytes unmatched at the best-aligned occurrence)"
+        }
+      },
+      "prediction": "vpc-resolving seeds sit CLOSE to the multi-byte target (vpc_dist_frac low) while cmplog-blocking seeds sit FAR (cmp_dist high), so dist_gap > 0 by a clear margin. DISCRIMINATING: if the divergence were ordinary I2S literal substitution (a single spliceable constant), cmplog's I2S mutator would itself place the literal and its blocking seeds would NOT be uniformly far -- we'd see cmp_dist near 0 on some seeds (substitution landed) or a bimodal cmp distribution, and dist_gap ~ 0. A large positive dist_gap with cmplog seeds clustered at intermediate distance (climbed partway but never exact) is the signature of a gradient-needed multi-byte gate that I2S alone cannot bridge.",
+      "rule": "dist_gap >= 1.0 AND vpc_dist_frac <= 0.34 AND cmp_dist > vpc_dist",
+      "rule_note": "dist_gap >= 1.0 = vpc seeds at least one full byte-equivalent closer; vpc_dist_frac <= 0.34 = vpc reaches within ~1 byte of a 4-byte (or one cascade-byte of a 5-element) target on median; cmp_dist > vpc_dist enforces strict ordering. All over the NEW named metrics only."
+    }
+  ],
+  "decision_order": ["vp_gradient_climbs_multibyte_cmp_beyond_i2s"],
+  "fallback": "inconclusive",
+  "notes": "COLLAPSE: all 7 branches describe ONE technique-effect (vpc CMP_MAP gradient climbs a multi-byte comparison that I2S-only cmplog stalls on) and are tested by ONE descriptor; kept as a single hypothesis. The signatures vary in GATE SHAPE -- contiguous FOURCC literals (lcms Lab/XYZ, harfbuzz 5474/5477 'size'), a range cascade (libpng ICC-char), a dispersed conjunctive equality cascade (libxml2_9841 'xmlns'), an adjacency+prefix gate (libxml2_6719 ':'), and a structural lookahead (libxml2_8100 DTD internal-subset) -- but NO real-campaign measurement discriminates 'range cascade' from 'conjunctive cascade' from 'contiguous literal'; they all reduce to 'how close did the seed set get to the multi-byte target?', so splitting them would be fuzzier, not sharper. DATA_REALITIES honored: (1) value_profile is a FEEDBACK invisible in mutation_op, so the test is over what the corpus REACHES (operand value distance), never a lineage 'gradient event'; (2) W and L seeds differ in size, so NO byte-alignment / byte_freq_ratio -- value_distance_reached scans for the best-aligned operand window per seed rather than assuming a fixed shared offset. WEAK FITS: libxml2_8100 (none_structural operand, dispersed_multibyte) has no clean fixed literal -- its 'distance' is a structural-lookahead-completion proxy and is the most likely to land in fallback=inconclusive under this rule; same caution for libxml2_6719's adjacency component. UNBUILT-TOOL CAVEAT: registry_tool=null -- the descriptor seed_set:value_distance_reached:multibyte_literal:per_branch is NOT yet built; the orchestrator must implement the min-over-offsets per-byte distance + range/cascade variants before the arbiter can score. CORPUS/SEED COVERAGE: on-disk corpora exist only for curl/harfbuzz/openthread/sqlite3, so of these 7 only harfbuzz_5474/5477 have on-disk corpora; the other 5 (lcms, libpng, libxml2 x3) must be scored from db/blockers.sqlite resolving_seeds + blocking_seeds (the 286 reps carry them). TARGETS in this shape: lcms, libpng, libxml2, harfbuzz. G2 INDEPENDENCE: the metric is operand value distance in the seed sets, computed independently of the vpc-resolves pattern that defined the shape."
+}

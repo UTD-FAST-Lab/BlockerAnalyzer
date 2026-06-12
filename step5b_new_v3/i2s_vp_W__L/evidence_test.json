@@ -1,0 +1,61 @@
+{
+  "shape": "i2s_vp_W__L",
+  "shape_code": "cmp=W, vp=_, vpc=_, naive=L  (cmplog resolves, naive blocks, value_profile & value_profile_cmplog non-decisive)",
+  "label_source": "Layer-1 resolve pattern: i2s-pro single-technique (only cmplog's I2SRandReplace is decisive; VP/vpc carry no decisive signal). The evidence test is the INDEPENDENT verification (G2): it must confirm I2S literal availability WITHOUT using the resolve pattern.",
+  "n_branches": 7,
+  "hypotheses": [
+    {
+      "id": "i2s_literal_substitution_gate",
+      "label": "A fixed-offset literal CMP gate that I2S satisfies by splicing the logged operand byte(s) into the input; cmplog's corpus is enriched for the target literal at the gate offset where naive's is not",
+      "direction": "i2s_pro",
+      "from_prior": ["i2s_single_byte_literal_gate", "i2s_multi_token_structured_assembly"],
+      "collapse_rationale": "The prior menu split single_byte_literal_gate vs multi_token_structured_assembly. No available measurement discriminates them as MECHANISMS: both are I2SRandReplace splicing logged CMP operands at fixed input offsets; the only difference is operand WIDTH/COUNT (1 byte vs several token bytes), not technique. operand_enrichment scores both identically (per-gate-offset target-byte enrichment over the corpus). Merged.",
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "note": "per-branch W (target) operand byte and L (decoy) operand byte taken from the signature operand_literal at the byte_signature offset. curl_167: GET/HEAD method + header token bytes; curl_68: scheme+authority literal bytes (pop3:// , host, port); sqlite3_14791: 'SELECT ' keyword bytes 0x53..0x20 at offsets 0x00-0x06.",
+          "target_byte_from": "signature.operand_literal",
+          "offset_from": "signature.byte_signature (contiguous_literal / single_byte / dispersed_multibyte)"
+        }
+      },
+      "prediction": "signed_target_enrich >= 1.0 (cmplog's saved corpus carries the target literal at the gate offset >=2x more than naive's, i.e. log2 enrichment positive and substantial) AND the gate has a byte-traceable fixed-offset operand (operand_enrichment returns a gate signature rather than no_gate_signature). G1: an alternative where the divergence is NOT I2S literal substitution (e.g. coverage/structural luck) predicts signed_target_enrich ~ 0 because naive would reach the literal as often as cmplog; a positive enrichment rules that out. This discriminates I2S-literal from non-literal mechanisms.",
+      "rule": "gate_signature == true AND signed_target_enrich >= 1.0"
+    },
+    {
+      "id": "i2s_relational_collision_gate",
+      "label": "A relational / structural gate (hash-bucket chain growth) with NO single byte-traceable operand: I2S substitutes name-equality operands to manufacture COLLIDING entries, so the decisive feature is multiplicity of related names, not one literal at one offset",
+      "direction": "i2s_pro",
+      "from_prior": ["i2s_hash_collision_chain_population"],
+      "collapse_rationale": "Kept SEPARATE from i2s_literal_substitution_gate precisely because the data discriminates it NEGATIVELY: its gate (insert->next != NULL chain guard) has no fixed-offset literal operand (signature operand_kind=none_structural, byte_signature=unclear). operand_enrichment cannot align a target vs decoy byte and returns no_gate_signature. That null-result IS the discriminator (the no-operand subtype), analogous to the registry's no_gate_signature path.",
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich"],
+        "params": {
+          "note": "Run the SAME operand_enrichment tool; the expectation is that it FAILS to find a fixed-offset operand. No new tool needed. (Secondary corpus-side confirmation would need distinct-name multiplicity counting, but libxml2 has NO on-disk corpus, so it cannot be scored anyway — see data_realities and notes.)"
+        }
+      },
+      "prediction": "operand_enrichment returns no_gate_signature (gate_signature == false): there is no fixed input offset whose byte value gates the branch, because the gate tests a runtime data-structure property (chain ->next) not an input literal. G1: if this branch were actually a literal-substitution gate (the competing hypothesis), operand_enrichment WOULD find an offset with positive enrichment; its failure to find one rules out the literal-substitution mechanism and confirms the relational/structural subtype. This is falsifiable: a positive gate signature would refute the relational classification.",
+      "rule": "gate_signature == false"
+    }
+  ],
+  "decision_order": ["i2s_literal_substitution_gate", "i2s_relational_collision_gate"],
+  "fallback": "inconclusive",
+  "data_realities_applied": [
+    "operand_enrichment scores ONLY targets with on-disk corpora: curl, harfbuzz, openthread, sqlite3. Of the 7 branches, only curl_167, curl_68, sqlite3_14791 are scorable. The 4 libxml2 branches (6383, 6674_h0, 6818 literal; 6402 relational) CANNOT be byte-scored — no libxml2 corpus exists. They route to fallback: inconclusive for evidence-confirmation, retaining their Layer-1 i2s-pro label as UNVERIFIED.",
+    "I2S is untagged in mutation_op (byte-identical havoc vocab across fuzzers) and value_profile is a feedback not a mutator: NO seed_lineage:event_cooccurrence 'I2S event' descriptor proposed. operand_enrichment measures the CORPUS RESULT (what bytes the saved corpus carries) not a lineage event, so it is feasible.",
+    "These are FIXED-OFFSET value gates (literal subtype), not different-SIZED structural-assembly seeds, so byte_freq_ratio alignment is valid for the literal hypothesis (unlike the joint assembly-depth shapes that require struct_size_ratio). The relational subtype is exactly the case where alignment fails — captured by its no_gate_signature prediction."
+  ],
+  "notes": {
+    "merges": "Collapsed the prior 3-cluster menu to 2 hypotheses. single_byte_literal_gate + multi_token_structured_assembly MERGED into i2s_literal_substitution_gate: no available measurement separates them as mechanisms (both are fixed-offset I2S operand splicing; operand width/count is not a mechanism boundary). hash_collision_chain_population KEPT SEPARATE as i2s_relational_collision_gate: the data discriminates it via a no_gate_signature null result (no byte-traceable operand), which is itself the discriminator.",
+    "targets": "Scorable by operand_enrichment: curl (167, 68), sqlite3 (14791) -> 3 branches get evidence confirmation. Not scorable (no on-disk corpus): libxml2 (6383, 6674_h0, 6818, 6402) -> 4 branches fall back to inconclusive/UNVERIFIED, keeping Layer-1 label without independent confirmation.",
+    "caveats": [
+      "The literal hypothesis is byte-confirmable only on curl+sqlite3. The libxml2 single-byte literals (6383 'a', 6674 '-', 6818 0x00) are mechanistically the SAME literal-substitution subtype but cannot be enrichment-scored; they are the strongest a-priori literal cases (single discriminating byte) yet remain unverified for lack of corpus.",
+      "The relational subtype (6402) is the ONLY non-literal mechanism in this shape and it is on libxml2 (no corpus), so its no_gate_signature prediction cannot even be exercised here. Its separation is established structurally (signature operand_kind=none_structural, byte_signature=unclear) rather than empirically. If a libxml2 corpus is later added, run operand_enrichment to confirm the null result.",
+      "G2 independence: operand_enrichment compares cmplog-vs-naive corpus byte frequencies, which is INDEPENDENT of the vp/vpc resolve pattern that defined the shape (vp/vpc are non-decisive '_' here anyway). It does not 'verify cmplog-resolves with cmplog-resolves' because it measures a byte-availability mechanism, not the resolve outcome.",
+      "No new descriptor proposed: both hypotheses reuse the existing operand_enrichment tool (descriptor corpus_queue:byte_freq_ratio:target_vs_decoy:per_gate_offset). The relational hypothesis is confirmed by the SAME tool's no_gate_signature path, so the orchestrator builds nothing new for this shape."
+    ]
+  }
+}

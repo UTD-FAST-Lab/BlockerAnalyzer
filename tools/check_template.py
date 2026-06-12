@@ -42,8 +42,8 @@ DEFAULT_IMAGE = "libafl-coverage-base"   # has clang-18, small
 # in addition to the base I2S/VP grid). Each variant ships a <fuzzer>_cc wrapper
 # in the libafl image, so verify_template can build any of them.
 CANON = {"naive", "cmplog", "value_profile", "value_profile_cmplog",
-         "minimizer", "fast", "naive_ctx", "naive_ngram",
-         "grimoire", "honggfuzz"}
+         "minimizer", "fast", "naive_ctx", "naive_ngram4", "naive_ngram8",
+         "grimoire", "honggfuzz", "mopt"}
 
 # Compile each scan value to assembly (deterministic, no timestamps) and sha it.
 COMPILE_SCRIPT = r"""
@@ -107,9 +107,11 @@ def main():
         fails.append(f"expected_direction must be 'WINNER > LOSER', got {direction!r}")
     else:
         w, l = m.group(1), m.group(2)
-        for who, f in (("winner", w), ("loser", l)):
-            if f not in fuzzers:
-                fails.append(f"expected_direction {who} {f!r} not in fuzzers {fuzzers}")
+        # judge_multi allows comma-separated winner/loser fuzzer lists.
+        for who, side in (("winner", w), ("loser", l)):
+            for f in side.split(","):
+                if f and f not in fuzzers:
+                    fails.append(f"expected_direction {who} {f!r} not in fuzzers {fuzzers}")
     if param and not re.search(r"\b" + re.escape(param) + r"\b", src_text):
         fails.append(f"parameter macro {param!r} does not appear in {src}")
     elif param and not re.search(r"#\s*if.*\b" + re.escape(param) + r"\b|"

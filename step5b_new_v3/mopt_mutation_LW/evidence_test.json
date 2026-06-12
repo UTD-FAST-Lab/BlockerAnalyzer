@@ -1,0 +1,39 @@
+{
+  "shape": "mopt_mutation_LW",
+  "n_branches": 1,
+  "decisive_pair": "mopt(block) vs naive(resolve)",
+  "direction": "mopt_anti",
+  "hypotheses": [
+    {
+      "id": "mopt_scheduling_keyword_assembly_deficit",
+      "label": "MOpt operator scheduling under-assembles the gate keyword that naive's havoc reaches",
+      "direction": "anti",
+      "from_prior": ["mopt_operator_scheduling_keyword_assembly_deficit"],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "token_count", "operand": "tokens", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": ["mopt_tokens", "naive_tokens", "token_lift"],
+        "params": {
+          "tokens": "SELECT",
+          "fuzzer_blocking": "mopt",
+          "fuzzer_resolving": "naive",
+          "scope": "saved corpus seeds for the branch (sqlite3 has on-disk corpus)",
+          "token_lift_def": "median naive_tokens / max(median mopt_tokens, epsilon) at the gate keyword"
+        }
+      },
+      "prediction": "mopt's saved corpus contains FEWER occurrences of the gate keyword 'SELECT' (plus its long-expression body) than naive's, i.e. mopt_tokens < naive_tokens. If MOpt's scheduling truly underweights the token-insert/replace operators needed to assemble the keyword, the keyword should be depleted in mopt's corpus relative to naive's; an alternative in which both reach the keyword equally (scheduling irrelevant) predicts mopt_tokens ~= naive_tokens.",
+      "rule": "token_lift >= 1.5 AND mopt_tokens < naive_tokens",
+      "g1_alternative_ruled_out": "the null that MOpt scheduling does not affect keyword assembly (mopt and naive corpora carry the keyword at parity); under that null token_lift ~= 1.",
+      "g2_independence": "token_count over saved corpus BYTE content is independent of the resolve/block label that defined the shape — it measures what each fuzzer's corpus contains, not whether the blocker branch fired. It does not 'verify mopt-blocks with mopt-blocks'.",
+      "decidable": true
+    }
+  ],
+  "decision_order": ["mopt_scheduling_keyword_assembly_deficit"],
+  "fallback": "inconclusive",
+  "data_realities_respected": {
+    "no_mutation_op_lineage": "MOpt scheduling (a probability distribution over operators) is INVISIBLE in mutation_op — the havoc/token vocabulary is byte-identical across all 4 fuzzers (data_reality #1). So NO seed_lineage:event_cooccurrence 'MOpt scheduling event' descriptor is proposed; the test measures only the downstream CONSEQUENCE in corpus content (token_count), never the scheduling cause directly.",
+    "corpus_available": "sqlite3 is one of the 4 targets with on-disk corpora (data_reality #4), so the seed_set token_count descriptor can score this branch.",
+    "alignment_safe": "token_count (substring occurrence) is used rather than byte_freq_ratio because winner/loser seeds differ in size (data_reality #3); no byte-offset alignment is assumed."
+  },
+  "notes": "Target sqlite3, single branch (sqlite3_14748), gate yy_reduce:157670 — input must begin with 'SELECT' (53 45 4c 45 43 54) + long well-formed expression body to reach the deep Lemon-parser reduce. CAVEAT (decidability): the underlying mechanism is MOpt's particle-swarm OPERATOR-SCHEDULING distribution, which is fundamentally non-observable in the data (data_reality #1: scheduling leaves no mutation_op trace, identical vocabulary across fuzzers). The token_count test is therefore a CONSEQUENCE proxy: it confirms the corpus-content gap (mopt corpus depleted of the keyword vs naive) but CANNOT attribute that gap to scheduling specifically vs any other corpus-trajectory difference at n=1. It is kept decidable:true because the consequence prediction IS falsifiable and IS independent of the resolve label (G1+G2 hold) — but a confirmation supports the WEAKER claim 'mopt's corpus reached the keyword less than naive's', not the strong scheduling-attribution claim. If the arbiter finds the keyword token gap non-discriminable from generic corpus content (e.g. token_lift in [0.67,1.5], or epsilon-degenerate single-branch counts), the hypothesis falls to fallback:inconclusive (G3) — an honest 'mutator-scheduling effect is non-discriminable from corpus content at n=1' beats over-claiming. No alternative hypothesis is split out: the shape hosts exactly one mechanism story, so there is nothing to collapse."
+}

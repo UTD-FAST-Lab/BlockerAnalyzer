@@ -1,0 +1,200 @@
+[
+  {
+    "id": "bloaty_11",
+    "family": "i2s_vp/_W_L",
+    "target": "bloaty",
+    "branch_id": 11,
+    "analysis_path": "prompts_a/bloaty_11.analysis.json",
+    "file": "/src/bloaty/src/bloaty.cc",
+    "function": "bloaty::Bloaty::GetObjectFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) const",
+    "line": "1556",
+    "source_line": "  if (!object_file.get()) {",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "An input whose leading magic bytes pass all three earlier format probes as non-matches (not ELF, not MachO, not WebAssembly's `\\0asm`) so object_file is still null at line 1556, while being close enough to a recognizable format (PE/COFF) that TryOpenPEFile is exercised. Concretely: bytes at offsets 0x00-0x03 NOT equal to the WASM magic 00 61 73 6d, instead drifting toward other format magics (e.g. 4c 46 / 7f 45 4c 4c 46 / 01 01 ...).",
+    "why_winner_satisfies": "value_profile winner-resolving seeds carry varied non-WASM leading bytes (seed 3 starts 4c 46 'LF', seed 4 starts 7f 45 4c 4c 46, seed 1 starts 01 01) and the per-role overlay marks lines 1557-1558 (TryOpenPEFile) as [W] winner-only and shows the blocker at L1556 taking T=60 F=0 for the winner, i.e. the winner repeatedly reaches and takes the true side.",
+    "why_loser_doesnt": "Every naive loser-blocking seed begins 00 61 73 6d (the WebAssembly '\\0asm' magic), so object_file becomes non-null at line 1552 (TryOpenWebAssemblyFile) and line 1556's true branch is never taken (winner W L1556 = T=60 F=0 vs loser L L1556 = T=0 F=120). The byte-diff confirms losers are pinned to a-s-m at offsets 0x01-0x03.",
+    "mechanism_attribution": "value_profile adds CMP_MAP feedback: the integer/string magic-byte comparisons inside each TryOpen*File probe emit a Hamming/prefix-distance bucket, so inputs that get progressively closer to (or away from) a given format magic are preserved as new corpus. This gradient lets value_profile steer leading bytes away from the WASM-magic basin that traps naive and toward a downstream-format magic, exposing the 1556 true branch. naive has only edge-hit feedback and cannot sense partial magic-byte proximity, so it stays stuck on whatever magic its corpus already matched."
+  },
+  {
+    "id": "bloaty_147",
+    "family": "i2s_vp/_W_L",
+    "target": "bloaty",
+    "branch_id": 147,
+    "analysis_path": "prompts_a/bloaty_147.analysis.json",
+    "file": "/src/bloaty/src/webassembly.cc",
+    "function": "bloaty::wasm::ReadMagic(std::basic_string_view<char, std::char_traits<char> >*)",
+    "line": "77",
+    "source_line": "  if (magic != wasm_magic) {",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "The first 4 bytes (read as uint32_t at offset 0) must NOT equal the WASM magic constant 0x6d736100 ('\\0asm'), so the comparison `magic != wasm_magic` evaluates true and ReadMagic returns false.",
+    "why_winner_satisfies": "Winner-resolving seeds carry non-magic 4-byte prefixes (e.g. 7f 45 4c 4c, 4c 46 02 04, 7f 7f 7f ff, 01 01 00 00) so the uint32 magic differs from 0x6d736100 and the true branch is taken; the source overlay marks the return-false lines [W].",
+    "why_loser_doesnt": "Every loser-blocking seed begins with the exact magic bytes 00 61 73 6d, which equals wasm_magic, so magic != wasm_magic is false and execution falls through into the version/section parsing path marked [L].",
+    "mechanism_attribution": "value_profile intercepts the integer CMP at line 77 and writes an operand-distance bucket into CMP_MAP; an input whose 4-byte prefix is farther from the magic constant produces a new CMP_MAP bucket and is preserved, giving value_profile a gradient toward the magic-mismatch (true) side that naive's plain edge feedback lacks."
+  },
+  {
+    "id": "bloaty_150",
+    "family": "i2s_vp/_W_L",
+    "target": "bloaty",
+    "branch_id": 150,
+    "analysis_path": "prompts_a/bloaty_150.analysis.json",
+    "file": "/src/bloaty/src/webassembly.cc",
+    "function": "bloaty::TryOpenWebAssemblyFile(std::unique_ptr<bloaty::InputFile, std::default_delete<bloaty::InputFile> >&)",
+    "line": "429",
+    "source_line": "  if (wasm::ReadMagic(&data)) {",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "The first 4 bytes must differ from the WebAssembly magic 00 61 73 6d ('\\0asm'); when ReadMagic(&data) compares the leading bytes against the magic constant and they mismatch, it returns false and control falls through to the 'return nullptr' false branch at line 434.",
+    "why_winner_satisfies": "Winner-resolving (false-branch) seeds carry arbitrary non-magic leading bytes (e.g. 7f 7f 7f ff, 4c 46 02 04, 7f 45 4c 4c) so the magic comparison mismatches and ReadMagic returns false; per the byte diff, W offsets 0x00-0x03 hold a varied set of values that are not the wasm magic.",
+    "why_loser_doesnt": "Loser-blocking (true-branch) seeds all begin with the exact wasm magic 00 61 73 6d ('.asm'), so ReadMagic returns true and they enter the WebAssemblyObjectFile branch (line 430) instead of the false branch; the byte diff shows L offsets 0x00-0x03 are uniformly 00/61/73/6d across all 10 loser seeds.",
+    "mechanism_attribution": "value_profile's integer-CMP interception writes a CMP_MAP bucket keyed by operand-distance for the ReadMagic comparison. Distinct degrees of mismatch against the magic constant register as new CMP_MAP buckets, so value_profile preserves intermediate inputs probing this comparison and is rewarded for exploring the magic-mismatch landscape that naive (edge-counters only) cannot distinguish, enabling it to retain the non-magic input that takes the false branch."
+  },
+  {
+    "id": "lcms_2147",
+    "family": "i2s_vp/_W_L",
+    "target": "lcms",
+    "branch_id": 2147,
+    "analysis_path": "prompts_a/lcms_2147.analysis.json",
+    "file": "/src/Little-CMS/src/cmsio0.c",
+    "function": "cmsio0.c:validDeviceClass",
+    "line": "755",
+    "source_line": "    case cmsSigNamedColorClass:",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "The 4-byte device-class signature parsed from the ICC header (input offsets 0x0c-0x0f, read into Icc->DeviceClass) must spell the exact FOURCC 'nmcl' = cmsSigNamedColorClass (0x6e 0x6d 0x63 0x6c). Only this exact 32-bit value reaches the switch arm at cmsio0.c:755; any of the other accepted class FOURCCs (e.g. 'mntr') diverts to a different case and never visits the blocker line.",
+    "why_winner_satisfies": "All three winning seeds carry 6e 6d 63 6c ('nmcl') at offset 0x0c-0x0f, exactly the cmsSigNamedColorClass constant; the winner is the only fuzzer whose 10/10 trials resolve the branch (hitcount 5) and at d=1 line 755 the W side shows T=3 (true side taken).",
+    "why_loser_doesnt": "All loser seeds carry 6d 6e 74 72 ('mntr', cmsSigDisplayClass) at offset 0x0c-0x0f, which dispatches to case cmsSigDisplayClass (d=1 L750 T=10) and never reaches the named-color case; naive blocked 10/10 with hitcount 0 on the branch.",
+    "mechanism_attribution": "value_profile adds integer-CMP interception that writes the switch comparison into CMP_MAP keyed by operand-distance bucket. As mutated bytes at 0x0c-0x0f approach the 'nmcl' constant, a closer Hamming/prefix bucket is opened and the input is preserved as corpus, giving value_profile a gradient toward the exact 4-byte FOURCC. naive has only edge counters and no such CMP feedback, so it must blindly land all four bytes by havoc and never does within budget."
+  },
+  {
+    "id": "lcms_2417",
+    "family": "i2s_vp/_W_L",
+    "target": "lcms",
+    "branch_id": 2417,
+    "analysis_path": "prompts_a/lcms_2417.analysis.json",
+    "file": "/src/Little-CMS/src/cmsxform.c",
+    "function": "cmsxform.c:GetXFormColorSpaces",
+    "line": "1025",
+    "source_line": "        if (cls == cmsSigNamedColorClass) {",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "The 4-byte device-class signature in the ICC profile header (input bytes at offsets 0x0c-0x0f) must spell the FOURCC 'nmcl' so that cmsGetDeviceClass(hProfile) returns cmsSigNamedColorClass and the equality at cmsxform.c:1025 is satisfied.",
+    "why_winner_satisfies": "Both winner-resolving seeds carry bytes 6e 6d 63 6c ('nmcl') at offsets 0x0c-0x0f, the exact FOURCC for cmsSigNamedColorClass; the W role hits the true side (L1025 W T=2) and only it reaches the named-color body at L1027-1028 (tag [W]).",
+    "why_loser_doesnt": "All loser-blocking seeds carry 6d 6e 74 72 ('mntr', monitor class) at offsets 0x0c-0x0f, which is not cmsSigNamedColorClass, so the true branch is never taken (L1025 L T=0 F=48) and the seeds stay pinned to the false side for the full 24h.",
+    "mechanism_attribution": "value_profile's integer-CMP interception writes a CMP_MAP bucket keyed by operand-distance (Hamming/prefix) for the cls == cmsSigNamedColorClass comparison; an input whose offset-0x0c bytes are closer to 'nmcl' adds a new CMP_MAP bucket and is retained, giving a gradient toward the exact 4-byte match that naive's plain edge feedback lacks."
+  },
+  {
+    "id": "libxml2_6325_h1",
+    "family": "i2s_vp/_W_L",
+    "target": "libxml2",
+    "branch_id": 6325,
+    "analysis_path": "prompts_a/libxml2_6325.analysis.json",
+    "file": "/src/libxml2/encoding.c",
+    "function": "encoding.c:UTF16LEToUTF8",
+    "line": "533",
+    "source_line": "        if ((c & 0xFC00) == 0xD800) {    /* surrogates */",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "A 16-bit code unit c reaching the comparison (c & 0xFC00) == 0xD800, i.e. a value whose top six bits move toward the 0xD800 constant; satisfying it requires the masked operand to equal 0xD800 exactly.",
+    "why_winner_satisfies": "value_profile resolved 9/10 and drove the branch true with the highest hitcount (96 vs loser 4); the integer-CMP at line 533 is intercepted into the CMP_MAP, so inputs whose (c & 0xFC00) value is closer to 0xD800 add a new distance bucket and are kept, gradient-climbing to the exact match.",
+    "why_loser_doesnt": "Plain naive has no CMP_MAP, so an input that gets c & 0xFC00 near but not equal to 0xD800 yields no new edge and is discarded; naive stayed blocked 8/10 with branch true count 0 and average hitcount 4.",
+    "mechanism_attribution": "value_profile adds an integer-CMP interception writing a (PC, operand-distance bucket) entry into the CMP_MAP; a Hamming-distance-closer (c & 0xFC00) vs 0xD800 pair is preserved as corpus, giving a gradient toward the equality that naive's plain edge feedback cannot sense."
+  },
+  {
+    "id": "libxml2_6655",
+    "family": "i2s_vp/_W_L",
+    "target": "libxml2",
+    "branch_id": 6655,
+    "analysis_path": "prompts_a/libxml2_6655.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "parser.c:xmlParseElementChildrenContentDeclPriv",
+    "line": "6524",
+    "source_line": "    if (RAW == '?') {",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "An XML DTD declaring a parenthesized element-content group whose closing ')' is immediately followed by the '?' (0x3f) occurrence quantifier, e.g. '<!ELEMENT a (b)?>'. Reaching line 6524 requires the whole '<!DOCTYPE'/'<!ELEMENT name (' prefix chain plus a parsed child name, and the true side then requires the next non-blank RAW byte to equal '?'.",
+    "why_winner_satisfies": "value_profile inputs both reach the comparison (d=1 L6524 W=T:5/F:3) and resolve its true side; CMP_MAP distance feedback on the byte CMPs guarding the structural prefix (e.g. the '<!DOCTYPE' literal match and the RAW=='(' / RAW=='?' single-byte equalities) lets near-miss inputs that are one Hamming step from the required byte get retained as corpus, ratcheting toward the exact '?' after ')'.",
+    "why_loser_doesnt": "naive's plain edge feedback gets no gradient on these byte equalities; an input that has the deep DTD prefix but the wrong trailing byte produces no new edge and is dropped, so naive sits at the false side (d=1 L6524 L=T:0/F:28, resolved only 1/10 trials) and never assembles the '?' quantifier in this position.",
+    "mechanism_attribution": "value_profile's CMP_MAP records a Hamming-distance bucket per intercepted integer CMP; the chain of single-byte comparisons (the '<!DOCTYPE'/'<!ELEMENT' literal bytes and the RAW=='(' then RAW=='?' equalities) each emit a closer-bucket signal that preserves near-match inputs, giving value_profile a coverage gradient that naive's edge-only feedback lacks. This is CMP_MAP gradient, not input-to-state substitution (the winner is value_profile, which has no I2S mutator)."
+  },
+  {
+    "id": "harfbuzz_5708_h0",
+    "family": "i2s_vp/_W_L",
+    "target": "harfbuzz",
+    "branch_id": 5708,
+    "analysis_path": "prompts_b/harfbuzz_5708.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shape.cc",
+    "function": "hb_ot_shape_planner_t::compile(hb_ot_shape_plan_t&, hb_ot_shape_plan_key_t const&)",
+    "line": "187",
+    "source_line": "\t\t     || !hb_ot_layout_has_machine_kerning (face)",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "A font blob whose kern-table region (offsets ~0x10-0x2f) holds concrete non-padding sub-table offset/length fields rather than 0x20 filler, so kerning-table parsing advances far enough to evaluate has_machine_kerning and return false.",
+    "why_winner_satisfies": "Winner seeds carry varied structural bytes at the table region (e.g. 0x10=00, 0x18=01/35, 0x1a=00/35) instead of uniform 0x20; value_profile's CMP_MAP distance feedback rewards inputs whose parsed table-length/offset comparisons move closer to satisfying the kern-table validity checks, preserving partial progress as corpus.",
+    "why_loser_doesnt": "Loser (naive) seeds are dominated by 0x20 padding across 0x06-0x2f, so the kern sub-table fields never form a valid offset chain; naive has no distance signal to incrementally close the gap and stays blocked on the true side.",
+    "mechanism_attribution": "value_profile's CMP_MAP records a Hamming/prefix-distance bucket per CMP; an input whose kern-parse comparisons get closer to passing adds a new bucket and is kept, giving a gradient toward the structurally-valid font that naive lacks."
+  },
+  {
+    "id": "harfbuzz_6006",
+    "family": "i2s_vp/_W_L",
+    "target": "harfbuzz",
+    "branch_id": 6006,
+    "analysis_path": "prompts_b/harfbuzz_6006.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+    "function": "_hb_preprocess_text_vowel_constraints(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+    "line": "67",
+    "source_line": "\t      case 0x093Au: case 0x093Bu: case 0x093Eu: case 0x0945u:",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "A glyph sequence where the current glyph codepoint is 0x0905 and the next glyph codepoint (buffer->cur(1)) equals one of the 16-bit case constants 0x093Au/0x093Bu/0x093Eu/0x0945u (and the following lines 0x0946..0x0957), reached only after the buffer script is decoded as HB_SCRIPT_DEVANAGARI.",
+    "why_winner_satisfies": "The winner-resolving seed begins with 05 09 00 00 3b 09, i.e. little-endian codepoint 0x0905 followed by 0x093B, exactly the (0x0905, 0x093Bu) pair that drives the inner switch into the blocker true side; value_profile took the branch in 9/10 trials.",
+    "why_loser_doesnt": "The loser seeds reach the 0x0905 outer case but their second codepoint never lands on a listed vowel: e.g. seed 2 is 05 09 00 00 05 09 (next codepoint 0x0905, not a vowel) and seed 3 stacks 0x093A bytes loosely (40 09 3a 3a...) without forming a clean 0x0905-then-vowel adjacency, so the inner switch falls through (F=6) and naive resolved in only 1/10.",
+    "mechanism_attribution": "value_profile intercepts the integer CMP that compares buffer->cur(1).codepoint against each 16-bit case constant and writes a Hamming-distance bucket into CMP_MAP; an input whose second codepoint is closer to a target vowel adds a new CMP_MAP bucket and is preserved, giving a gradient that walks the 16-bit value onto an exact case constant. naive lacks CMP interception so must hit the exact 16-bit value by blind havoc."
+  },
+  {
+    "id": "harfbuzz_6061_h1",
+    "family": "i2s_vp/_W_L",
+    "target": "harfbuzz",
+    "branch_id": 6061,
+    "analysis_path": "prompts_b/harfbuzz_6061.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+    "function": "_hb_preprocess_text_vowel_constraints(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+    "line": "196",
+    "source_line": "\t  case 0x0B05u:",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "Same structural requirement (codepoint 0x0B05 at buffer->cur()), reached by gradient-guided convergence of the integer compare buffer->cur().codepoint == 0x0B05 toward equality.",
+    "why_winner_satisfies": "value_profile resolves 8/10. Multiple winning seeds are stored by fuzzer=value_profile and carry 05 0b at the codepoint position (seeds d07f30cd, d13c11f6 contain `05 0b`). The codepoint==0x0B05 compare in the case dispatch feeds CMP_MAP; an input whose codepoint operand is Hamming-closer to 0x0B05 adds a new distance bucket and is preserved, climbing the gradient to an exact match.",
+    "why_loser_doesnt": "naive has no CMP_MAP feedback, so a near-miss codepoint (e.g. 0x0B0F at `0f 0b`, one nibble off) produces no new signal and is discarded; naive blocks 8/10 with avg hitcount 0 on the branch versus value_profile's nonzero hit.",
+    "mechanism_attribution": "value_profile's CMP_MAP records operand-distance buckets for the codepoint comparison, giving a smooth gradient toward the literal 0x0B05 that plain edge-coverage naive cannot follow."
+  },
+  {
+    "id": "sqlite3_14793",
+    "family": "i2s_vp/_W_L",
+    "target": "sqlite3",
+    "branch_id": 14793,
+    "analysis_path": "prompts_b/sqlite3_14793.analysis.json",
+    "file": "/src/sqlite3/bld/sqlite3.c",
+    "function": "sqlite3.c:sqlite3GetToken",
+    "line": "159623",
+    "source_line": "",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "Input bytes at the tokenizer cursor that satisfy the true-side character-class / keyword comparison at sqlite3GetToken line 159623, e.g. an identifier/keyword character run such as 'SELECT', 'CEXT', or a numeric-operator expression, rather than arbitrary punctuation/whitespace bytes.",
+    "why_winner_satisfies": "value_profile-stored winner seeds carry recognizable SQL token fragments ('SELECT 11-1133=13...', 'CEXT 1', long uppercase-letter runs) and drive the true side (L159623 W=T:4 vs L=T:0); the winner then reaches deep expression-resolution code (walkExpr, resolveExprStep) the loser never touches.",
+    "why_loser_doesnt": "naive loser-blocking seeds are scattered punctuation/whitespace-heavy bytes ('T 1; c BINARY', ';$..C..C', leading ' ;.....') that never match the token-class comparison, so L159623 stays false (T:0 F:78) and downstream expression walkers have zero invocations.",
+    "mechanism_attribution": "value_profile adds a CMP_MAP keyed by (PC, operand-distance bucket): each tokenizer character/keyword CMP that gets closer to matching adds a new bucket and the near-miss input is preserved, giving a Hamming/prefix-distance gradient that ratchets bytes toward a valid token; naive has only edge counters and no such gradient, so it must hit the exact token by blind havoc."
+  }
+]

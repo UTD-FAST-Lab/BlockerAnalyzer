@@ -1,0 +1,123 @@
+[
+  {
+    "id": "lcms_2149",
+    "family": "ctx_coverage/LW",
+    "target": "lcms",
+    "branch_id": 2149,
+    "analysis_path": "prompts_a/lcms_2149.analysis.json",
+    "file": "/src/Little-CMS/src/cmsio0.c",
+    "function": "_cmsReadHeader",
+    "line": "776",
+    "source_line": "    if (io -> Read(io, &Header, sizeof(cmsICCHeader), 1) != 1) {",
+    "covers_pairs": [
+      "naive>naive_ctx (ctx_coverage)",
+      "naive>cmplog (I2S)",
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "also_in": [
+      "i2s_vp/LWLW"
+    ],
+    "what_input_feature": "A short input whose total length is less than sizeof(cmsICCHeader) (128 bytes), so io->Read cannot return the requested 1 record and the comparison `!= 1` is true. The winning seeds are 83 and 110 bytes; the losing seeds are 7717-25258 bytes carrying a full, valid ICC header (magic 'lcms'/'acsp', signature bytes at the header offsets).",
+    "why_winner_satisfies": "Both winner-resolving seeds are well under 128 bytes (83 and 110) and their resolving mutation chains are pure havoc byte deletions (BytesDeleteMutator appears repeatedly in the leaf op), which shrink the buffer below the header size so Read fails and the true branch is taken (W: T=2 F=0 at line 776).",
+    "why_loser_doesnt": "Every loser-blocking seed is many KB long and begins with a well-formed ICC header (magic 'lcms', 'acsp APPL', size/version fields), so Read returns 1, the false branch is taken, and the seed proceeds deep into tag-table parsing (loser executes MemoryRead 23700 times and SearchOneTag/_cmsSearchTag thousands of times) \u2014 these large valid-header inputs never get shrunk below 128 bytes by the loser fuzzers.",
+    "mechanism_attribution": "The winner technique is plain havoc byte mutation (havoc-only): naive and value_profile shrink the input via BytesDeleteMutator until Read underflows below the header size. The loser fuzzers' distinguishing techniques actively keep them on the valid-header path instead: cmplog/vpc I2S substitution solves the magic/signature CMPs and rewards deeper-parsing larger inputs, and naive_ctx's call-context-folded edge map credits new (call-context, edge) pairs inside the tag loop, so both stay anchored to large structured inputs and rarely emit a short one. So this is an anti branch resolved purely by havoc shrinking, agreeing with claimed_mechanism havoc-only."
+  },
+  {
+    "id": "libpng_4072_h0",
+    "family": "ctx_coverage/LW",
+    "target": "libpng",
+    "branch_id": 4072,
+    "analysis_path": "prompts_a/libpng_4072.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_read_IDAT_data",
+    "line": "4245",
+    "source_line": "         if (png_ptr->zstream.avail_in > 0 || png_ptr->idat_size > 0)",
+    "covers_pairs": [
+      "naive>naive_ctx (ctx_coverage)"
+    ],
+    "also_in": [],
+    "what_input_feature": "A structurally valid PNG (IHDR/gAMA/sRGB header intact) whose IDAT stream contains residual compressed/leftover bytes so that after zlib returns Z_STREAM_END at L4237 the test png_ptr->zstream.avail_in > 0 || png_ptr->idat_size > 0 at L4245 is True. Reaching it requires driving the inflate do/while loop deep enough to hit Z_STREAM_END with leftover input.",
+    "why_winner_satisfies": "naive resolves 10/10 with ordinary havoc; its winning seed (id=7bc940e72a5dbe0c) keeps the PNG signature and IHDR intact and varies the IDAT-relevant header bytes (0x11=02/01/00, 0x17=45/46), and its lineage is pure havoc (BytesDeleteMutator/ByteRandMutator chain). naive spends its whole budget mutating bytes rather than expanding a context-indexed coverage map.",
+    "why_loser_doesnt": "naive_ctx folds a call-context hash into every edge-map slot, so the same edge counts as new coverage under each distinct caller chain. The deep IDAT loop (png_read_IDAT_data invoked 2750 times in L vs 136 in W) generates a flood of (call-context, edge) buckets that look novel, so naive_ctx hoards context-redundant corpus entries and starves the byte-level mutation that would manufacture the extra-data condition; it resolves only 1/10.",
+    "mechanism_attribution": "The winner naive is enabled by plain havoc byte mutation (havoc-only). The loser naive_ctx is penalized by its context-sensitive coverage feedback (CtxHook), which dilutes the map with (call-context, edge) pairs in the high-call-count inflate path and diverts energy away from solving the extra-compressed-data condition."
+  },
+  {
+    "id": "libxml2_6576",
+    "family": "ctx_coverage/LW",
+    "target": "libxml2",
+    "branch_id": 6576,
+    "analysis_path": "prompts_a/libxml2_6576.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "xmlParseCharData",
+    "line": "4610",
+    "source_line": "             (*in == 0x09) || (*in == 0x0a));",
+    "covers_pairs": [
+      "naive>naive_ctx (ctx_coverage)"
+    ],
+    "also_in": [],
+    "what_input_feature": "An XML element body containing a multi-character data run that keeps the do-while scan loop alive: printable ASCII / tab / newline content (0x20-0x7F, 0x09, 0x0A) plus at least one 0x0D carriage return followed by 0x0A so the in-loop CR handler executes `continue` and re-evaluates the loop condition at line 4609-4610 with `*in` still inside the accepted character class.",
+    "why_winner_satisfies": "Winner-resolving seeds carry long (1862/1898-byte) bodies with embedded CR/LF runs (e.g. Seed 2 bytes `0d 0d 0a` at offsets 0x07-0x09 and `0a 0a` pairs) and dense printable char data, so the loop reaches the 0xD handler and loops back to take the true side; the per-role overlay marks the 0xD/0xA continue block [W] only.",
+    "why_loser_doesnt": "naive_ctx loser-blocking seeds are short (247-527 bytes), front-loaded with binary/control noise and DTD/declaration tokens rather than long char-data bodies; they never reach the 0xD branch (loser takes it 0 times) so the loop falls through to xmlParseCharDataComplex and the true side stays blocked.",
+    "mechanism_attribution": "The winning technique is baseline naive's undiluted havoc/token budget. naive_ctx's CtxHook folds the call-context hash into the edge-map index, so the same scan-loop edges count as new coverage under many distinct call paths; this fragments the corpus and spreads mutation energy across context-duplicated edges, leaving naive_ctx unable to assemble the long CR/LF-bearing char-data run that naive builds with the same mutators. This is the context-sensitive-coverage feedback acting as a penalty on the loser."
+  },
+  {
+    "id": "libxml2_6605",
+    "family": "ctx_coverage/LW",
+    "target": "libxml2",
+    "branch_id": 6605,
+    "analysis_path": "prompts_a/libxml2_6605.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "xmlParsePITarget",
+    "line": "5129",
+    "source_line": "        ((name[1] == 'm') || (name[1] == 'M')) &&",
+    "covers_pairs": [
+      "naive>naive_ctx (ctx_coverage)"
+    ],
+    "also_in": [],
+    "what_input_feature": "An XML processing instruction whose target name parses to a 3+ char token beginning x/X then m/M then l/L, so that name[1] is 'm' or 'M'; the winner needs the literal byte run '<?xMl' (or '<?xml') where the second name char is m/M, not an arbitrary perturbation like '<?x_l'.",
+    "why_winner_satisfies": "The naive winner-resolving seed carries the literal bytes '<?xMl version=' at offsets 0x16-0x1d ('3c(<) 3f(?) 78(x) 4d(M) 6c(l) 20( )'), so xmlParsePITarget sees name[0]=='x',name[1]=='M',name[2]=='l' and the line 5129 true side is taken; W shows the blocker true side hit (T=3 F=0).",
+    "why_loser_doesnt": "naive_ctx loser seeds carry corrupted PI targets ('<?x_l' with byte 5f('_') at the name[1] position, plus xmltp/xsim variants), so name[1] is not m/M and line 5129 only ever takes the false side; the per-role overlay records the blocker exclusively as L false (T=0 F=12).",
+    "mechanism_attribution": "naive (the winner) uses a bare per-edge MaxMapFeedback, so once havoc/token mutation lands an 'x?l'->'xMl' byte that flips line 5128 to true the new edge at 5129 is immediately rewarded. naive_ctx (the loser) folds a call-context hash into the edge-map index (CtxHook), so the same parser edges are split across many (call-context, edge) slots; the feedback signal that should guide mutation toward the xMl name is diluted across contexts, the corpus fills with context-duplicate inputs that never carry a valid xml-prefixed PI target, and the branch stays blocked in all 10 trials."
+  },
+  {
+    "id": "harfbuzz_5802",
+    "family": "ctx_coverage/LW",
+    "target": "harfbuzz",
+    "branch_id": 5802,
+    "analysis_path": "prompts_b/harfbuzz_5802.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-hebrew.cc",
+    "function": "hb-ot-shaper-hebrew.cc:compose_hebrew(hb_ot_shape_normalize_context_t const*, unsigned int, unsigned int, unsigned int*)",
+    "line": "151",
+    "source_line": "\t  if (a == 0x05E9u) { /* SHIN */",
+    "covers_pairs": [
+      "naive>cmplog (I2S)",
+      "naive>naive_ctx (ctx_coverage)"
+    ],
+    "also_in": [
+      "i2s_vp/LLWW"
+    ],
+    "what_input_feature": "A codepoint pair reaching compose_hebrew with b==0x05C2 (SIN DOT, selecting the case at line 150) AND a==0x05E9 (SHIN), so the line-151 equality holds and the true branch (writes *ab=0xFB2Bu) is taken. The seed encodes these as little-endian codepoints: a 0x05E9 (bytes e9 05) and a 0x05C2 (bytes c2 05).",
+    "why_winner_satisfies": "Winner-resolving seeds carry dense runs of 0xe9 bytes (0x05E9 SHIN low byte) and the 'c2 05' / '05' pattern (0x05C2 SIN DOT) \u2014 e.g. seed 1 has e9 e9 e9 e9 e9 e9 e9 e9 then c2 05, and the per-role overlay marks line 152/153 (the true-branch body) as [W] hit only by the winner set.",
+    "why_loser_doesnt": "Loser-blocking seeds reach case 0x05C2 (line 150 hit, T=46) but fail the a==0x05E9 test: at line 151 the loser shows T=0 F=46, never satisfying both the SIN-DOT case AND the SHIN base operand simultaneously; their bytes are dominated by 0x00/0xb9/0xc2 fillers without the paired SHIN+SIN-DOT codepoints aligned.",
+    "mechanism_attribution": "naive's plain havoc + token byte mutation is sufficient and is what wins: the winning seeds were found by minimizer/naive havoc ops (BytesDelete/ByteFlip/BytesRandSet, TokenReplace). cmplog LOSES because its input-to-state CMP introspection diverts energy and the equality operands here are not learnable comparison gradients that help; naive_ctx LOSES because its context-indexed coverage map fragments the edge signal, slowing arrival at this single deep switch arm. The winning technique in BOTH pairs is identical: baseline naive havoc mutation, not any introspective technique."
+  },
+  {
+    "id": "harfbuzz_6124_h1",
+    "family": "ctx_coverage/LW",
+    "target": "harfbuzz",
+    "branch_id": 6124,
+    "analysis_path": "prompts_b/harfbuzz_6124.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+    "function": "_hb_preprocess_text_vowel_constraints(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+    "line": "409",
+    "source_line": "\t  case 0x1148Bu: case 0x1148Du:",
+    "covers_pairs": [
+      "naive>naive_ctx (ctx_coverage)"
+    ],
+    "also_in": [],
+    "what_input_feature": "Same feature: the current glyph in a TIRHUTA buffer must encode codepoint 0x1148B or 0x1148D (LE 8b/8d 14 01 00) so the switch reaches case 0x1148Bu/0x1148Du at line 409.",
+    "why_winner_satisfies": "naive (winner) also stores the 8d 14 01 00 run (winner-resolving Seed 5, fuzzer=naive, contains 8d 8d 8d 14 01 00 near offset 0x0a), reaching the blocker case via plain havoc edge-guided mutation.",
+    "why_loser_doesnt": "naive_ctx (loser) blocked seeds carry sibling/neighboring 4-byte values like ba 14 01 00 and b0 14 01 00 (e.g. loser-blocking Seed 1 fuzzer=naive_ctx) which route to other Tirhuta cases (0x114B0 etc.), so the exact 0x1148B/0x1148D codepoint is absent and line 409 true is never reached (L hits T=0).",
+    "mechanism_attribution": "The winner is the baseline naive fuzzer using havoc + edge feedback. naive_ctx adds context-sensitive coverage (the CtxHook folds the call context into the edge-map index). Here that is counter-productive: the call chain into _hb_preprocess_text_vowel_constraints is shallow and fixed (1-hop from preprocess_text_use), so context-indexing yields no new useful coverage signal but inflates the map, spending the loser's effort exploring sibling switch arms instead of converging on the specific 0x1148B/0x1148D codepoint. The winner's enabling technique is plain havoc, not context coverage."
+  }
+]

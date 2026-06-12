@@ -1,0 +1,57 @@
+{
+  "shape": "i2s_vp_LWL_",
+  "n_branches": 2,
+  "shape_semantics": "vp-PRO + vpc-anti. code over (cmp,vp,vpc,naive) = L,W,L,_ : value_profile RESOLVES; cmplog AND value_profile_cmplog both BLOCK; naive non-decisive. The decisive comparison is value_profile > value_profile_cmplog (the I2S delta HURTS): adding the I2SRandReplace stage to the value-profile feedback regresses the pair. The load-bearing, discriminable claim is the vp-PRO half: value_profile's CMP_MAP Hamming/prefix-distance gradient closes byte-distance to a multi-byte literal gate that cmplog-only and value_profile_cmplog do NOT close. The vpc-anti half (I2S literal-flood diverts the gradient by splicing logged comparands into the corpus, starving the path VP reaches) is a CORPUS-SCALE diversion claim and is noted honestly as undecidable on this shape's targets (see decidable:false below).",
+  "hypotheses": [
+    {
+      "id": "vp_gradient_distance_closure",
+      "label": "value_profile's CMP_MAP gradient incrementally closes byte-distance to a fixed multi-byte literal gate that cmplog-only and vpc never reach; the gradient (not I2S substitution) is the necessary technique, and adding I2S in vpc diverts energy so it stalls farther from the operand",
+      "direction": "vp_pro",
+      "from_prior": ["vp_gradient_i2s_literal_flood_diversion"],
+      "member_hint_branches": ["libxml2/6343", "libxml2/6837"],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "target_value_at_cmp_site", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": ["vp_min_distance", "cmp_min_distance", "vpc_min_distance", "distance_closure_ratio"],
+        "params": {
+          "comment": "NEW descriptor (not yet built). For the branch's decisive multi-byte literal gate, take the target operand value (operand_literal from the signature) and compute the MINIMUM byte-distance (Hamming over the operand-width window, or prefix/edit distance for variable-length operands) between the target value and the value found at the cmp-site offset across each fuzzer's role-seed set: (a) value_profile-RESOLVING seeds => vp_min_distance, (b) cmplog-BLOCKING seeds => cmp_min_distance, (c) value_profile_cmplog-BLOCKING seeds => vpc_min_distance. distance_closure_ratio = (min(cmp_min_distance, vpc_min_distance) - vp_min_distance) / max(cmp_min_distance, vpc_min_distance, 1).",
+          "operand_by_branch": {
+            "libxml2/6343": "0x00 0x00 0x3C 0x00 (UCS4_2143 magic, width 4, contiguous at the xmlDetectCharEncoding(start,4) window; cmp-site offset = the 4-byte detect window at encoding.c:958)",
+            "libxml2/6837": "the 8-byte '![CDATA[' literal compared at parser.c:11747-11754 (operand width 8, contiguous). NOTE the W (winner) side is the FALSE side of this AND gate: vp resolves by reaching the diverse content lead that takes the false branch, while vpc-blocking seeds are pinned NEAR the literal having spliced CDATA/doctype comparands. Distance here is measured to the literal operand; the vp-resolving seeds sit FARTHER from the exact literal (they diversify off it) while cmp/vpc-blocking seeds cluster closer to it. For 6837 the discriminating metric is therefore the SIGN/separation of distance between roles, captured by distance_closure_ratio with the false-side orientation flagged."
+          },
+          "operand_source": "signature.operand_literal / operand_width_bytes; cmp-site offset from the per-role coverage overlay or the analysis byte-diff (the W-vs-L divergent offset)",
+          "feasibility": "value_distance_reached descriptor NOT yet built (registry_tool null) -> orchestrator must build + register before this hypothesis can score. Both branches are libxml2, which has NO on-disk corpus (data_realities: corpora exist only for curl/harfbuzz/openthread/sqlite3), but both are among the 286 reps with resolving_seeds + blocking_seeds in db/blockers.sqlite, and this descriptor consumes seed_set (NOT corpus_queue), so both branches are scorable once the tool is built."
+        }
+      },
+      "prediction": "If the vp-PRO mechanism is the CMP_MAP gradient closing distance to the literal, the value_profile-RESOLVING seeds reach a value strictly CLOSER to the target operand than EITHER the cmplog-blocking or the vpc-blocking seeds: vp_min_distance < min(cmp_min_distance, vpc_min_distance) and both blocking sets have cmp_min_distance > 0 / vpc_min_distance > 0 (they approach but never land it), so distance_closure_ratio is large. A pure-I2S-substitution mechanism would predict cmp_min_distance ~ 0 (cmplog HAS I2S; one logged substitution of the magic/CDATA literal would land the value and resolve, contradicting the L label) -- the fact that cmplog approaches-but-misses is exactly the gradient's contribution. That cmplog AND vpc both miss while vp lands it rules out 'I2S substitution alone reaches the operand' AND, because vpc (which has the gradient too) ALSO misses, supports the diversion reading that adding I2S degrades the gradient's reach.",
+      "rule": "vp_min_distance < cmp_min_distance AND vp_min_distance < vpc_min_distance AND cmp_min_distance > 0 AND distance_closure_ratio >= 0.5",
+      "g1_falsifiable_by": "cmp_min_distance ~ 0 (cmplog's seeds already reach the exact operand) OR vp_min_distance >= min(cmp_min_distance, vpc_min_distance) (value_profile gets no closer than the blockers) refutes the gradient-distance-closure claim and points to an I2S-substitution or non-distance mechanism.",
+      "g2_independence": "Byte-distance to a fixed source-level operand over role seed sets is independent of the resolve pattern that defined the shape: it does not ask 'does value_profile resolve', it asks 'how close to the gate operand does each role's corpus get', a structural measurement orthogonal to the W/L labels.",
+      "decidable": true
+    },
+    {
+      "id": "vpc_anti_literal_flood_diversion",
+      "label": "Adding I2S in vpc intercepts the gate's own literal comparands (the encoding magics / '<![CDATA[','<?xml','<!DOCTYPE' tokens) and floods the corpus with exact-match completions of SIBLING/true-side gates, diverting mutation energy away from the false-side general-parse path the value_profile gradient navigates",
+      "direction": "vpc_anti",
+      "from_prior": ["vp_gradient_i2s_literal_flood_diversion"],
+      "member_hint_branches": ["libxml2/6343", "libxml2/6837"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "value_enrichment", "operand": "target_vs_decoy", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": ["sibling_literal_enrich_vpc_vs_vp"],
+        "params": {
+          "comment": "Would require comparing the vpc SAVED CORPUS against the value_profile saved corpus for enrichment in the diverting literals (sibling encoding magics for 6343; '<![CDATA[','<?xml','<!DOCTYPE' for 6837) to show vpc's corpus is flooded with these exact completions relative to vp.",
+          "build_caveat": "TWO blockers: (1) the diversion claim is CORPUS-SCALE (it is about how the WHOLE corpus is populated/starved over a run, not a per-seed property), and on-disk corpora exist ONLY for curl/harfbuzz/openthread/sqlite3 (data_realities) -- BOTH branches here are libxml2, which has NO on-disk corpus, so the vpc-vs-vp corpus enrichment cannot be computed. (2) Even with a corpus, attributing the flood to the I2S stage is not lineage-recoverable: I2S is NOT tagged in mutation_op (data_realities) -- the corpus would show enrichment but could not isolate I2S as its cause vs. ordinary havoc. The diversion story is plausible and consistent with the per-trial regression (vp 9/10 resolved vs vpc 8/10 blocked, 18.00h blocked), but the data this shape's targets expose cannot DISCRIMINATE it from any other reason vpc regresses."
+        }
+      },
+      "prediction": "If decidable, the vpc corpus would be enriched in the sibling/true-side diverting literals relative to the value_profile corpus (sibling_literal_enrich_vpc_vs_vp > 0). It is NOT decidable on libxml2 (no on-disk corpus; I2S untagged), so no rule is asserted.",
+      "rule": null,
+      "g1_falsifiable_by": "N/A -- undecidable on this shape's targets; left to fallback.",
+      "g2_independence": "Corpus token-frequency would be independent of the resolve pattern, but the measurement is infeasible here.",
+      "decidable": false
+    }
+  ],
+  "decision_order": ["vp_gradient_distance_closure"],
+  "fallback": "inconclusive",
+  "notes": "COLLAPSE record: 2 branches, both libxml2, both single-signature (one h per branch), both from the one prior cluster vp_gradient_i2s_literal_flood_diversion -- no merge/split needed at the candidate level. The cluster bundles TWO claims that I split into TWO hypotheses by decidability: (A) the vp-PRO gradient-distance-closure claim is the load-bearing, DISCRIMINABLE half and gets the full test + rule (decidable:true). (B) the vpc-anti I2S-literal-flood-DIVERSION claim is the corpus-scale half and is honestly marked decidable:false -- it is undecidable on this shape's targets for TWO independent data_realities reasons: both branches are libxml2 (NO on-disk corpus; corpora exist only for curl/harfbuzz/openthread/sqlite3) AND I2S is untagged in mutation_op (so even with a corpus the flood could not be attributed to the I2S stage rather than havoc). I therefore do NOT assert a rule for (B); it cannot move the per-branch call. TARGET / FEASIBILITY: both branches need the NEW value_distance_reached descriptor built (registry_tool null) before (A) can score; that descriptor consumes seed_set (resolving_seeds + blocking_seeds in db), which BOTH branches have as 286-reps, so once built both are scorable despite the no-corpus situation. DATA-REALITY COMPLIANCE: (A) uses seed_set value-distance, NOT seed_lineage 'I2S event' (untagged) and NOT corpus_queue byte_freq_ratio (these are multi-byte literal gates -- the false-side 6837 in particular has different-natured W vs L seeds, so byte-offset alignment is unreliable; distance-to-operand is the spec-sanctioned alternative). 6837 CAVEAT: its winner side is the FALSE side of the CDATA AND gate, so distance-to-the-literal is read with a false-side orientation (vp-resolving seeds diversify AWAY from the exact literal while blockers cluster near it); the metric still separates the roles, but the arbiter should treat 6837's vp/cmp/vpc distance ordering with the false-side flag from params. decision_order has only vp_gradient_distance_closure; a branch whose distances do not satisfy the rule (e.g. cmp_min_distance ~ 0, meaning cmplog DID reach the operand -- which would itself refute the gradient story) falls through to inconclusive rather than being force-labeled."
+}

@@ -1,0 +1,76 @@
+{
+  "shape": "ctx_coverage_LW",
+  "n_branches": 6,
+  "direction": "anti",
+  "decisive_pair": "naive_ctx (blocks) vs naive (resolves)",
+  "mechanism_thesis": "context-sensitive coverage (CtxHook folds the call-context hash into the edge-map index) HURTS on these branches: the extra context dimension inflates the coverage map so naive_ctx hoards context-redundant corpus entries and spreads its mutation budget thin, while naive's flat per-edge map stays focused and resolves. naive_ctx BLOCKS, naive RESOLVES.",
+  "hypotheses": [
+    {
+      "id": "ctx_corpus_inflation",
+      "label": "ctx inflates the corpus / map so naive_ctx hoards far more (context-redundant) entries than naive",
+      "direction": "anti",
+      "from_prior": [
+        "ctx_loop_call_context_flooding",
+        "ctx_exact_literal_signal_dilution",
+        "ctx_valid_path_corpus_anchoring"
+      ],
+      "members": [
+        "libpng_4072_h0",
+        "libxml2_6576",
+        "libxml2_6605",
+        "harfbuzz_5802",
+        "harfbuzz_6124_h1",
+        "lcms_2149"
+      ],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "corpus_size_ratio", "operand": "naive_ctx_vs_naive", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": ["corpus_count_ratio"],
+        "params": {
+          "ratio": "median(saved_corpus_count[naive_ctx]) / median(saved_corpus_count[naive])",
+          "note": "count of saved corpus entries per trial; context-redundant hoarding => naive_ctx >> naive"
+        }
+      },
+      "prediction": "corpus_count_ratio >= 1.5 (naive_ctx hoards >=1.5x the corpus naive keeps, because the same edges count as new under each call-context). A NON-ctx penalty (e.g. naive simply got luckier on byte mutation) would predict corpus_count_ratio ~ 1.0 -- no systematic corpus bloat on the blocking arm.",
+      "rule": "corpus_count_ratio >= 1.5",
+      "scope": "corpus_queue exists ONLY for curl/harfbuzz/openthread/sqlite3 (data_realities). Of the 6 members, ONLY harfbuzz_5802 and harfbuzz_6124_h1 are scorable; lcms/libpng/libxml2 fall through to the fallback.",
+      "g1_falsifiable": "could come out corpus_count_ratio ~ 1.0; rules out 'naive just won by chance' alternative",
+      "g2_independent": "measures corpus SIZE (the inflation mechanism), independent of the resolve pattern (which gate side each fuzzer takes) that defined the shape"
+    },
+    {
+      "id": "ctx_depth_inflation_at_gate",
+      "label": "a high-call-count / multi-context path at the gate is what ctx fragments (flooding) vs a shallow exact-literal gate (dilution)",
+      "direction": "anti",
+      "from_prior": [
+        "ctx_loop_call_context_flooding",
+        "ctx_exact_literal_signal_dilution"
+      ],
+      "members": [
+        "libpng_4072_h0",
+        "libxml2_6576",
+        "libxml2_6605",
+        "harfbuzz_5802",
+        "harfbuzz_6124_h1"
+      ],
+      "measurement": {
+        "descriptor": {"source": "coverage_timeseries", "compute": "depth_reach", "operand": "blocker_call_count_naive_ctx_vs_naive", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": ["call_count_lift"],
+        "params": {
+          "call_count_lift": "median(blocker_function_call_count[naive_ctx]) / median(blocker_function_call_count[naive])",
+          "source": "per-role coverage call counts at the blocker function (e.g. png_read_IDAT_data 2750@L vs 136@W)"
+        }
+      },
+      "prediction": "FLOODING members (deep high-iteration loop, e.g. libpng inflate loop) show call_count_lift >> 1 (naive_ctx re-enters the loop function far more, manufacturing the (ctx,edge) flood); DILUTION members (shallow 1-hop exact-literal gate, e.g. harfbuzz_6124) show call_count_lift ~ 1 -- the gate is shallow, the penalty is pure signal-splitting not loop flooding. An 'all members are the same flooding mechanism' alternative would predict call_count_lift >> 1 uniformly.",
+      "rule": "call_count_lift >= 3.0 (flooding sub-mechanism) vs call_count_lift < 3.0 (dilution sub-mechanism)",
+      "scope": "needs per-role / coverage call-count data at the blocker function for both arms; the cards expose this for libpng (2750 vs 136) and harfbuzz, partial elsewhere.",
+      "g1_falsifiable": "could come out uniform; separates flooding from dilution",
+      "g2_independent": "call-count at the gate function is a structural property of the path, not the resolve pattern"
+    }
+  ],
+  "decision_order": ["ctx_corpus_inflation", "ctx_depth_inflation_at_gate"],
+  "fallback": "inconclusive",
+  "decidable": true,
+  "decidable_caveat": "PARTIALLY decidable. The corpus_inflation test (the primary ctx-anti verification) is scorable on only 2 of 6 members (harfbuzz_5802, harfbuzz_6124_h1) because on-disk corpora exist only for curl/harfbuzz/openthread/sqlite3 (data_realities). lcms/libpng/libxml2 have NO corpus and fall to fallback:inconclusive. The depth_inflation test that would SEPARATE flooding (libpng) from dilution (libxml2/harfbuzz) leans on per-role call-count data that is fully present only for the cards' cited examples. Per G3, members the data cannot discriminate are carried by fallback:inconclusive rather than asserted.",
+  "notes": "MERGES: the three prior clusters (ctx_valid_path_corpus_anchoring, ctx_loop_call_context_flooding, ctx_exact_literal_signal_dilution) are ONE technique-effect at the verification level -- ctx map inflation that dilutes/starves the focused signal naive keeps. They differ in the gate they sit on (length-underflow anchoring @ lcms; deep-loop flooding @ libpng; exact-literal dilution @ libxml2/harfbuzz) but all predict the SAME primary signature: naive_ctx hoards a context-redundant corpus and loses the focused byte-mutation race. I collapsed them into ctx_corpus_inflation (the discriminable, verifiable hypothesis) and kept ctx_depth_inflation_at_gate ONLY as the one axis a measurement could still separate (flooding's deep loop vs dilution's shallow gate, via call_count_lift). TARGETS: corpus-scorable members are harfbuzz_5802, harfbuzz_6124_h1 only. data_realities respected: (a) NO seed_lineage/event measurement -- ctx, like VP, is a FEEDBACK invisible in mutation_op, so the only handle is what the corpus REACHES/HOARDS (size, call-depth), never a lineage 'ctx event'; (b) corpus_size_ratio scored only on the 4 corpus targets; (c) no byte-alignment claim (gates here are mixed length/literal/structural). CAVEAT: ctx_valid_path_corpus_anchoring (lcms_2149) is the weakest merge -- its mechanism is direction-INVERTED (ctx keeps inputs LARGE, naive SHRINKS), so corpus_count_ratio>=1.5 may hold but for a size reason; lcms has no corpus and is INCONCLUSIVE regardless. If corpus_inflation is judged purely a corpus-scale artifact non-discriminable from generic ctx overhead on the non-corpus targets, the whole shape collapses to G3 inconclusive for lcms/libpng/libxml2; only the two harfbuzz members can carry an evidence-confirmed ctx-anti label."
+}

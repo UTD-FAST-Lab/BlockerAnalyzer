@@ -1,0 +1,70 @@
+{
+  "shape": "i2s_vp_WLWL",
+  "n_branches": 106,
+  "label_source": "Layer-1 resolve pattern cmp,vp,vpc,naive = W,L,W,L (cmplog AND value_profile_cmplog resolve; value_profile AND naive block) => i2s-PRO single-technique literal-substitution family. The evidence test verifies this independently (G2): it measures the cmplog corpus's byte-frequency enrichment in the gate's target literal, NOT the resolve pattern that defined the shape.",
+  "hypotheses": [
+    {
+      "id": "i2s_fixed_offset_literal_value_gate",
+      "label": "cmplog (I2S) substitutes a logged CMP literal at a fixed gate offset, so its corpus is enriched in the target value at that offset relative to naive; value_profile/naive cannot synthesize the exact literal",
+      "direction": "i2s_pro",
+      "from_prior": ["i2s_wlwl_direct_literal_dispatch_gate"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "gate_kind": "fixed_offset_value_gate",
+          "applies_to_signatures": "operand_kind in {multibyte_literal, single_byte_constant, enum_or_code} AND byte_signature == contiguous_literal AND gate_structure in {equality, switch_case, presence_or_nonnull, length_or_count_check, inequality_or_range}",
+          "scorable_targets": ["curl", "harfbuzz", "openthread"],
+          "note": "lcms/libpng/libxml2/bloaty have no on-disk corpus (data_realities) -> tool returns no_corpus, arbiter leaves those branches inconclusive for this hypothesis"
+        }
+      },
+      "prediction": "For a fixed-offset literal value gate, the cmplog corpus is ENRICHED in the target literal at the gate offset relative to naive: signed_target_enrich > 0 (i2s-PRO direction). A pure-coverage / value-profile-only mechanism predicts NO cmplog-specific enrichment at the operand offset (signed_target_enrich ~ 0), because without I2S operand substitution cmplog's corpus byte distribution at that offset would match naive's. This is the alternative the test rules out.",
+      "rule": "signed_target_enrich >= 0.8",
+      "g1_falsifiable_by": "signed_target_enrich <= 0 (cmplog NOT enriched, or depleted, in the target literal at the gate offset) refutes i2s-PRO substitution at this gate.",
+      "g2_independence": "Measures corpus byte-frequency at the operand offset (a property of saved seeds), not whether vpc/cmplog resolved the branch. Independent of the Layer-1 resolve pattern."
+    },
+    {
+      "id": "i2s_multi_literal_scaffold_state_gate",
+      "label": "I2S assembles two or more co-dependent, dispersed CMP literals (URL scheme+port+HTTP tokens; cookie/header chains; deep multi-field ICC structure) whose accumulated downstream program state, not the substitution point itself, controls the blocked branch",
+      "direction": "i2s_pro",
+      "from_prior": ["i2s_wlwl_multi_literal_scaffold_state_gate"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "value_enrichment", "operand": "target_vs_decoy", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": ["any_anchor_token_enrich"],
+        "params": {
+          "gate_kind": "accumulated_state_dispersed_literal",
+          "applies_to_signatures": "byte_signature == dispersed_multibyte AND (gate_structure in {state_or_grammar, presence_or_nonnull} OR operand_kind in {none_structural, derived_integer})",
+          "proposed_descriptor": "corpus_queue:value_enrichment:any_of_a_token_set:per_branch -- for a branch with NO single fixed gate offset, score the MAX per-token cmplog-vs-naive enrichment over the set of recoverable anchor literals named in the analysis (e.g. 'HTTP/', 'Set-Cookie', 'Content-Type', scheme/port tokens). Reduces to operand_enrichment when exactly one contiguous anchor token exists at a fixed offset.",
+          "build_caveat": "NOT yet in tool_registry.json. operand_enrichment is offset-anchored and per data_realities returns no_gate_signature on dispersed/structural-assembly gates with different-sized W/L seeds; a multi-token, offset-agnostic enrichment scan must be built before this hypothesis is decidable. Until built, this hypothesis is UNDECIDABLE and the arbiter must fall through to inconclusive."
+        }
+      },
+      "prediction": "If accumulated state is driven by I2S literal assembly, the cmplog corpus is enriched in AT LEAST ONE of the branch's named anchor tokens relative to naive: any_anchor_token_enrich > 0. An alternative where value_profile's gradient (not I2S) assembles the scaffold predicts no cmplog-specific token enrichment.",
+      "rule": "any_anchor_token_enrich >= 0.8",
+      "g1_falsifiable_by": "any_anchor_token_enrich <= 0 for every named anchor token refutes I2S-driven scaffold assembly.",
+      "g2_independence": "Token-frequency over saved corpora, independent of the resolve pattern.",
+      "decidable": false
+    }
+  ],
+  "decision_order": ["i2s_fixed_offset_literal_value_gate", "i2s_multi_literal_scaffold_state_gate"],
+  "fallback": "inconclusive",
+  "notes": {
+    "merges": [
+      "Collapsed all 106 signatures' open mechanism_summary text -- every one describes I2SRandReplace substituting a logged CMP operand -- into ONE technique-effect (I2S literal substitution). Kept only the TWO subtypes a measurement can separate: (A) fixed-offset value gate (the branch IS the value-compare; contiguous_literal at a recoverable offset) vs (B) accumulated-state/dispersed-literal gate (the branch sits downstream of a multi-literal scaffold; dispersed_multibyte, none_structural/derived_integer operands, state_or_grammar gates).",
+      "Did NOT split A further by gate_structure (equality vs switch_case vs presence_or_nonnull vs length/inequality) or by literal kind (FOURCC vs magic vs short string vs enum vs single byte): operand_enrichment treats all of them identically as a fixed-offset value gate, so the data cannot discriminate those sub-flavors -- they are one hypothesis.",
+      "Did NOT adopt joint_necessity: that tool targets the JOINT vpc-needs-BOTH assembly-depth subtype (vpc resolves where cmplog-alone blocks). This shape is i2s-PRO single-technique -- cmplog resolves ALONE (W in slot 0) -- so the joint-necessity assembly-depth mechanism is by construction absent and that descriptor does not apply."
+    ],
+    "targets_present": {
+      "all": ["bloaty(2)", "lcms(26)", "libpng(6)", "libxml2(1)", "curl(37)", "harfbuzz(33)", "openthread(1)"],
+      "corpus_scorable": ["curl", "harfbuzz", "openthread"],
+      "no_corpus_inconclusive": ["bloaty", "lcms", "libpng", "libxml2"]
+    },
+    "data_reality_caveats": [
+      "On-disk corpora exist ONLY for curl/harfbuzz/openthread (+sqlite3, none here) -- 35 of 106 branches (lcms 26 + libpng 6 + libxml2 1 + bloaty 2) cannot be enrichment-scored and fall to inconclusive regardless of hypothesis. Roughly 71 branches (curl 37 + harfbuzz 33 + openthread 1) are scorable.",
+      "Hypothesis A is the LOAD-BEARING test: it reuses the validated operand_enrichment tool (descriptor corpus_queue:byte_freq_ratio:target_vs_decoy:per_gate_offset, anchor harfbuzz/5391, pro median +3.12) on contiguous-literal fixed-offset gates -- which is most of harfbuzz (FOURCC tags) and many curl literals (Content-Type, 127.0.0.1, HTTP/2, attachment). Of the corpus-scorable branches, the harfbuzz FOURCC gates and curl contiguous-literal gates are A; most curl URL/cookie/header branches are dispersed_multibyte B.",
+      "Hypothesis B rests on a NOT-YET-BUILT multi-token offset-agnostic enrichment descriptor: operand_enrichment is offset-anchored and per data_realities returns no_gate_signature on dispersed/structural gates with different-sized W/L seeds. Until that descriptor is built and registered, B is UNDECIDABLE and its branches (dispersed_multibyte accumulated-state, mostly curl) fall through to inconclusive. This is an honest 'no clean test built yet', NOT a claim the mechanism is absent.",
+      "I2S is untagged in mutation_op and value_profile is a feedback (not a mutator), so NO seed_lineage:event_cooccurrence 'I2S event' or 'VP gradient event' descriptor was proposed (data_realities forbid them). Both hypotheses verify via corpus byte/token frequency only."
+    ]
+  }
+}

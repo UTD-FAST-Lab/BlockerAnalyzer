@@ -1,0 +1,108 @@
+{
+  "_doc": "Catalog the evidence-test-author agent READS before designing, so it references an existing measurement tool rather than re-proposing one. The orchestrator owns this file: a new descriptor the agent emits is matched here at build time (identical -> reuse; same measurement diff threshold -> parameterize; genuinely new -> build + register). descriptor_key = source:compute:operand:unit (the closed vocab below).",
+  "descriptor_vocabulary": {
+    "source": [
+      "corpus_queue",
+      "seed_set",
+      "seed_lineage",
+      "coverage_timeseries",
+      "exec_stats",
+      "source_cfg"
+    ],
+    "compute": [
+      "byte_freq_ratio",
+      "value_enrichment",
+      "struct_size_ratio",
+      "token_count",
+      "struct_size_and_token_count",
+      "value_distance_reached",
+      "event_cooccurrence",
+      "corpus_size_ratio",
+      "plateau_time",
+      "energy_share",
+      "depth_reach"
+    ],
+    "unit": [
+      "per_gate_offset",
+      "per_branch",
+      "per_trial",
+      "per_seed"
+    ]
+  },
+  "tools": [
+    {
+      "descriptor_key": "corpus_queue:byte_freq_ratio:target_vs_decoy:per_gate_offset",
+      "name": "operand_enrichment",
+      "tool_path": "bench/tools/i2s_operand_availability.py",
+      "measures": "for each W/L gate offset, the fraction of a fuzzer's saved corpus whose byte == the target (W) vs decoy (L) value, as a cmplog-vs-naive log2 enrichment",
+      "metrics": [
+        "signed_target_enrich",
+        "decoy_enrich"
+      ],
+      "applies_to": "fixed-offset VALUE gates \u2014 i2s literal substitution, both pro (enrich>0) and anti (deplete<0)",
+      "anchor_branch": "harfbuzz/5391",
+      "review_status": "validated (pro median +3.12 / anti -0.55, 88% threshold separation)",
+      "scope_limits": "skips structural/length gates (returns no_gate_signature); needs >=3 W and >=3 L seeds in DB; on-disk corpus target only"
+    },
+    {
+      "descriptor_key": "seed_set:struct_size_and_token_count:tokens:per_branch",
+      "name": "joint_necessity",
+      "tool_path": "bench/tools/joint_necessity.py",
+      "measures": "median seed size + structural-token (e.g. sfnt tag) count for the vpc-RESOLVING vs cmplog-BLOCKING vs value_profile-BLOCKING seed sets",
+      "metrics": [
+        "size_lift",
+        "tag_lift",
+        "vp_tags",
+        "cmp_tags",
+        "vpc_tags"
+      ],
+      "applies_to": "joint-necessity ASSEMBLY-DEPTH subtype (vpc-needs-both; vpc builds a larger structure than I2S-only reaches)",
+      "anchor_branch": "harfbuzz/6814",
+      "review_status": "validated (anchor joint_confirmed; 7/22 harfbuzz assembly-depth confirmed)",
+      "scope_limits": "blind to the VALUE-PRECISION joint subtype (vpc ~ cmplog size); --tokens is target-specific (font tags here, SQL keywords for sqlite3)"
+    },
+    {
+      "descriptor_key": "seed_set:value_distance_reached:operand_literal:per_branch",
+      "name": "value_distance_reached",
+      "tool_path": "bench/tools/value_distance_reached.py",
+      "measures": "per arm, the MIN over the arm's seeds of (min over sliding windows of Hamming(window, target_operand)/width); numeric mode = magnitude gap for inequality gates. The winner (vp/vpc) lands CLOSE to the gate operand, losers (cmplog/naive) stall.",
+      "metrics": [
+        "vp_min_distance",
+        "vpc_min_distance",
+        "cmp_min_distance",
+        "naive_min_distance",
+        "distance_gap",
+        "distance_closure_ratio",
+        "winner_closer"
+      ],
+      "applies_to": "vp-gradient families (CMP_MAP climbs a Hamming gradient to a gate operand) \u2014 the 16 value_distance_reached hypotheses; also the joint VALUE-PRECISION subtype",
+      "anchor_branch": "sqlite3/14437",
+      "review_status": "validated (anchor vpc reaches '<<' dist 0 vs cmp/naive 0.5; 4/4 local anchors winner_closer=true). /code-review DONE (fixes applied)",
+      "scope_limits": "operand value per branch from signature.operand_literal / agent params (target-specific); short operands (width<=2) chance-alignment prone (flagged via caveat); reads on-disk seeds so on-disk-corpus targets only; basin_escape/modality variants NOT covered (need a v2)"
+    },
+    {
+      "descriptor_key": "seed_set:depth_reach:branch_line:per_branch",
+      "name": "depth_reach",
+      "tool_path": "bench/tools/depth_reach.py",
+      "measures": "runs winner-resolving vs loser-blocking seeds through the libafl-<target>-cov image, reads the branch line's per-seed-normalized execution count + blocked-side count from llvm-cov",
+      "metrics": [
+        "depth_lift",
+        "side_lift",
+        "winner_depth",
+        "loser_depth",
+        "winner_deeper"
+      ],
+      "applies_to": "ctx/ngram ITERATION-DEPTH subtype (winner corpus drives the branch deeper per seed)",
+      "anchor_branch": "harfbuzz/6585",
+      "review_status": "reviewed + fixes (deterministic seed order, on-disk filter for per-seed denom, robust count parse, tmp cleanup, timeout catch, line-count MAX). Validated iteration-depth ctx (7/20).",
+      "scope_limits": "BLIND to the ctx context-reach subtype (standard cov binary has no per-call-context counters) -> those stay inconclusive; Docker per-branch (~30-60s); needs the target's cov image"
+    }
+  ],
+  "data_realities": [
+    "I2S is NOT tagged in mutation_op \u2014 the havoc mutator vocabulary is byte-identical across all 4 fuzzers. ANY descriptor of the form seed_lineage:event_cooccurrence on an 'I2S event' is INFEASIBLE. Do not propose it.",
+    "value_profile (CMP_MAP) is a FEEDBACK, not a mutator \u2014 it is invisible in mutation_op too. Its effect is measurable only via corpus admission / what the corpus reaches (size, tokens, value-distance), never via a lineage 'gradient event'.",
+    "joint / structural-assembly gates have different-SIZED winning vs blocking seeds, so byte-alignment (byte_freq_ratio) fails \u2014 use struct_size_ratio / token_count / value_distance_reached.",
+    "on-disk corpora exist ONLY for curl, harfbuzz, openthread, sqlite3 \u2014 descriptors needing corpus/seeds only score those targets.",
+    "seed-dependent tools need resolving_seeds + blocking_seeds in db/blockers.sqlite for the branch (the 286 reps have them)."
+  ]
+}

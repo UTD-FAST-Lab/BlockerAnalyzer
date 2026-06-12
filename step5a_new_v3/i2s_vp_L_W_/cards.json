@@ -1,0 +1,128 @@
+[
+  {
+    "id": "lcms_2090",
+    "family": "i2s_vp/L_W_",
+    "target": "lcms",
+    "branch_id": 2090,
+    "analysis_path": "prompts_a/lcms_2090.analysis.json",
+    "file": "/src/Little-CMS/src/cmscnvrt.c",
+    "function": "cmscnvrt.c:AddConversion",
+    "line": "458",
+    "source_line": "            if (!cmsPipelineInsertStage(Result, cmsAT_END, _cmsStageAllocLab2XYZ(Result ->ContextID)))",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "The decoded ICC profile must drive the InPCS=cmsSigLabData / OutPCS=cmsSigXYZData combination at AddConversion (the 'Lab -> XYZ' switch arm at line 458). This requires the 4-byte color-space / PCS signature fields in the profile header (e.g. the data-color-space token around offset 0x10 such as 'Lab ') and the device-class token (offset 0x0c) to land on the exact FOURCC values that select the Lab-input case and an XYZ output connection space.",
+    "why_winner_satisfies": "value_profile_cmplog resolves the branch in 9/10 trials and hits the true side; the CMP_MAP gradient gives Hamming/prefix-distance feedback on the 4-byte signature compares, letting the fuzzer climb partial matches of the Lab/XYZ FOURCC tokens incrementally rather than needing a single exact substitution, so it lands the Lab->XYZ arm and takes line 459 ([W]).",
+    "why_loser_doesnt": "cmplog (I2S only) resolves the branch in just 2/10 trials and is blocked in 8; its loser seeds park on signature tokens like 'mntr'+'RGB' or 'MCHF' (offsets 0x0c-0x13) that do NOT select the Lab-input/XYZ-output arm, and without value-profile gradient feedback it cannot reward the partial progress toward the exact Lab/XYZ FOURCC needed, so it falls through to line 460 ([L]).",
+    "mechanism_attribution": "The single technique delta between winner and loser is value_profile. value_profile adds CMP_MAP gradient buckets that reward Hamming/prefix similarity on the multi-byte FOURCC signature comparisons; this lets value_profile_cmplog incrementally solve the Lab/XYZ color-space-signature gate that cmplog's exact I2S substitution alone fails to reach reliably."
+  },
+  {
+    "id": "libpng_4145",
+    "family": "i2s_vp/L_W_",
+    "target": "libpng",
+    "branch_id": 4145,
+    "analysis_path": "prompts_a/libpng_4145.analysis.json",
+    "file": "/src/libpng/png.c",
+    "function": "png.c:is_ICC_signature_char",
+    "line": "1809",
+    "source_line": "   return it == 32 || (it >= 48 && it <= 57) || (it >= 65 && it <= 90) ||",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "An iCCP chunk whose embedded profile-signature 4-byte word decodes to four characters each passing is_ICC_signature_char (== 32, 48-57, 65-90, or 97-122). The winner seeds carry an iCCP chunk (offset 0x35-0x38 = 69 43 43 50) with signature/payload bytes in the printable-ASCII run (45='E', 31='1'); reaching the colorspace/ICC validation path requires sustaining many byte-CMPs against ICC constants so the true side of line 1809 is taken for all four sub-bytes.",
+    "why_winner_satisfies": "value_profile_cmplog seeds have 45(E) repeated across offsets 0x27-0x33 and 31(1) at 0x3b-0x3f, with the iCCP chunk type 69 43 43 50; on the blocker line the winner takes the true side (T=8 F=16) where the loser never does (T=0 F=24), meaning its signature bytes satisfy the ICC-char range and it resolves 9/10 trials.",
+    "why_loser_doesnt": "cmplog seeds carry a gAMA chunk (67 41 4d 41) and an iTXt chunk (69 54 58 74) with non-signature payload bytes (00, b1, 8f, 0b, fc) at the diffing offsets; they never take the true side of the blocker (T=0 F=24) and the branch stays blocked in 9/10 trials at avg 18.78h.",
+    "mechanism_attribution": "Both fuzzers already carry cmplog input-to-state substitution, so the comparison-solving mutator is held constant; the only technique delta is value_profile's CMP_MAP gradient. The per-byte CMP_MAP Hamming/prefix-distance buckets reward inputs that get progressively closer to the ICC-signature character ranges across the four is_ICC_signature_char sub-comparisons, giving value_profile_cmplog a gradient toward the all-valid-signature word that plain cmplog (edge-bucket feedback only, no gradient) lacks."
+  },
+  {
+    "id": "libxml2_6719",
+    "family": "i2s_vp/L_W_",
+    "target": "libxml2",
+    "branch_id": 6719,
+    "analysis_path": "prompts_a/libxml2_6719.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "parser.c:xmlParseQNameAndCompare",
+    "line": "8986",
+    "source_line": "    if ((*cmp == 0) && (*in == ':')) {",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A closing tag whose leading bytes replicate the stored element prefix exactly (so the prefix-compare loop drives *cmp to NUL) AND are immediately followed by a ':' byte, satisfying both clauses of `(*cmp == 0) && (*in == ':')`.",
+    "why_winner_satisfies": "value_profile_cmplog winner seeds carry a ':' byte right after the matched name run: seed 4 contains `<?xml:` (3c 3f 78 6d 6c 3a) and the W byte-set at offset 0x1f includes 3a(:)x2 while 0x1d/0x21 show name-like bytes preceding it; the blocker true side fires for W (L8986 W T=22) and execution proceeds into the W-only success arm at 8987-8999.",
+    "why_loser_doesnt": "cmplog loser seeds keep the version-string layout (`<?xml version=` with no ':' in the prefix-adjacent window) so the prefix run terminates against non-':' bytes (offset 0x1f loser is 31(1)x6); the true side never fires for L (L8986 L T=0, F=21), leaving the branch blocked.",
+    "mechanism_attribution": "value_profile_cmplog adds the CMP_MAP gradient feedback that cmplog lacks; the two byte comparisons (`*in == *cmp` prefix-match loop and `*in == ':'`) feed Hamming/prefix-distance buckets that reward partial progress toward the matching prefix and toward the ':' literal, letting VPC ratchet a seed into the QName-with-colon shape that pure I2S/havoc in cmplog does not reliably assemble."
+  },
+  {
+    "id": "libxml2_8100",
+    "family": "i2s_vp/L_W_",
+    "target": "libxml2",
+    "branch_id": 8100,
+    "analysis_path": "prompts_a/libxml2_8100.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "parser.c:xmlParseTryOrFinish",
+    "line": "12008",
+    "source_line": "                if ((!terminate) && (!xmlParseLookupInternalSubset(ctxt)))",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A DTD whose internal subset opens with '<!DOCTYPE a SYSTEM \"...\"' followed by a '[' and is then driven far enough that xmlParseLookupInternalSubset locates the closing ']' / '>' delimiter of the subset; the parser must be in XML_PARSER_DTD state with a lookahead-complete internal subset, not merely an opened-but-unterminated one.",
+    "why_winner_satisfies": "value_profile_cmplog seeds carry well-formed DTD prologs ('<?xml version=\"1.0\"?>' then '<!DOCTYPE a SYSTEM \"dtds/1...' / 'dtd://') and build up richer subset bodies (xlink namespace strings, multiple declarations), so the buffered lookahead reaches the internal-subset terminator and xmlParseLookupInternalSubset returns true, taking the false branch into xmlParseInternalSubset.",
+    "why_loser_doesnt": "cmplog seeds stall on near-miss DTD bytes ('dtds~1', 'S[STEM', 'DOCTYPE\\n', 'dt.s=1') that either corrupt the DOCTYPE keyword or never complete the internal subset, so xmlParseLookupInternalSubset keeps returning 0 (true branch, goto done) and the parser re-enters the loop without progressing.",
+    "mechanism_attribution": "value_profile_cmplog adds CMP_MAP Hamming/prefix-distance gradient feedback on top of the I2S that both fuzzers already share; the gradient rewards inputs that get incrementally closer to satisfying the byte-comparison-driven lookahead inside xmlParseLookupInternalSubset, giving the winner a smooth path to a complete internal subset that cmplog (edge-bucket feedback only) cannot climb."
+  },
+  {
+    "id": "libxml2_9841",
+    "family": "i2s_vp/L_W_",
+    "target": "libxml2",
+    "branch_id": 9841,
+    "analysis_path": "prompts_a/libxml2_9841.analysis.json",
+    "file": "/src/libxml2/valid.c",
+    "function": "xmlValidateOneNamespace",
+    "line": "4660",
+    "source_line": "    if (attrDecl == NULL) {",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "An XML document with a DTD (DOCTYPE/SYSTEM) and a namespace declaration (xmlns:prefix) whose attribute name is NOT declared in the DTD's attribute table, so the xmlGetDtdQAttrDesc/xmlGetDtdAttrDesc lookups all return NULL and xmlValidateOneNamespace sees attrDecl == NULL. Reaching the validation call first requires passing the byte-exact 'xmlns' prefix comparison cascade (att[0..4] == 'x','m','l','n','s') in the SAX2 attribute path.",
+    "why_winner_satisfies": "value_profile_cmplog resolves the branch in 8/10 trials. Its winning seeds carry a DOCTYPE/SYSTEM DTD and reach xmlValidateOneNamespace with attrDecl NULL: on the d=1 chain the blocker line L4660 shows W taking both sides (T=9 F=9) while the loser only ever takes the false side (T=0 F=27). The CMP_MAP gradient feedback rewards partial matches on the multi-byte 'xmlns' equality cascades, letting the winner climb att[0]=='x'..att[4]=='s' (L1235/L1236, L1724/L1725) which W hits (T=18 F=0 / T=9 F=0) but the loser stalls on (T=6 F=6, T=0 F=0).",
+    "why_loser_doesnt": "cmplog resolves the branch in 0/10 trials, blocked in 8. cmplog has the same I2S mutator but lacks value_profile's CMP_MAP gradient, so it cannot accumulate partial-credit feedback on the conjunctive 'xmlns' byte comparisons: at L1724 the loser is T=0 F=0 (never reaches the test true) and at L1235 it is split T=6 F=6, never driving the namespace-validation call where attrDecl == NULL can be observed taking its true side (L4660 loser T=0 F=27).",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix-distance buckets on intercepted CMPs) is the single technique delta between value_profile_cmplog (winner) and cmplog (loser); both already have the same input-to-state substitution mutator, so that comparison-solving capability is held constant. The gradient gives partial-match feedback on the multi-byte 'xmlns' equality cascade, letting the winner assemble the namespace-decl path that the loser cannot."
+  },
+  {
+    "id": "harfbuzz_5474",
+    "family": "i2s_vp/L_W_",
+    "target": "harfbuzz",
+    "branch_id": 5474,
+    "analysis_path": "prompts_b/harfbuzz_5474.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-layout-common.hh",
+    "function": "OT::FeatureParams::sanitize(hb_sanitize_context_t*, unsigned int) const",
+    "line": "688",
+    "source_line": "    if (tag == HB_TAG ('s','i','z','e'))",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A 4-byte feature-record tag equal to the ASCII literal 'size' (73 69 7a 65) reaching the FeatureParams::sanitize tag dispatch, satisfying the exact 32-bit equality tag == HB_TAG('s','i','z','e').",
+    "why_winner_satisfies": "The winner-resolving seed (value_profile_cmplog) contains the byte run 73 69 7a 65 ('size') at offset 0x39, so the true branch at line 688 is taken and resolution occurs; the value_profile CMP_MAP gradient feedback rewards inputs that are Hamming-closer to the 'size' constant, steering the corpus toward the full 4-byte match.",
+    "why_loser_doesnt": "The loser-blocking cmplog seeds carry 'GSUB'/'GPOS' tags (47 53 55 42 / 47 50 4f 53) but never the 'size' tag; at the blocker the loser side takes the false branch (T=0 F=54) on every reached execution, so without the gradient signal cmplog stalls before assembling the exact 'size' constant.",
+    "mechanism_attribution": "Both fuzzers already have I2S (cmplog); the only added technique in the winner is value_profile's CMP_MAP gradient feedback, which buckets partial-match (Hamming/prefix) distance to the compared constant as new coverage, giving an intermediate climbing signal toward the 32-bit 'size' equality that bare cmplog lacks."
+  },
+  {
+    "id": "harfbuzz_5477",
+    "family": "i2s_vp/L_W_",
+    "target": "harfbuzz",
+    "branch_id": 5477,
+    "analysis_path": "prompts_b/harfbuzz_5477.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-layout-common.hh",
+    "function": "OT::Feature::sanitize(hb_sanitize_context_t*, OT::Record_sanitize_closure_t const*) const",
+    "line": "812",
+    "source_line": "    if (featureParams == 0 && closure &&",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A FeatureList record whose tag bytes spell 'size' (0x73 0x69 0x7a 0x65) reaching OT::Feature::sanitize, so that the line-813 equality closure->tag == HB_TAG('s','i','z','e') holds and the true side of the line-812 compound gate is entered.",
+    "why_winner_satisfies": "The winner-resolving seed (value_profile_cmplog, trial=2) contains the literal byte run 73 69 7a 65 ('size') at offset 0x39, satisfying the closure->tag == HB_TAG('s','i','z','e') equality, and the per-role overlay marks lines 815-826 (the size-feature fixup body) as winner-only [W].",
+    "why_loser_doesnt": "None of the five loser-blocking seeds (cmplog) contain the byte run for 'size'; they carry GSUB/GPOS/GSHB table tags instead, so closure->tag never equals HB_TAG('s','i','z','e') and the line-812 gate stays false (L shows T=0 F=54 at line 812).",
+    "mechanism_attribution": "Both cmplog and value_profile_cmplog already have the input-to-state substitution mutator, so comparison-solving via substitution is NOT the differentiator. The winner adds value_profile: the CMP_MAP gradient buckets the Hamming/prefix distance of the 4-byte tag comparison at line 813, rewarding inputs that progressively match more bytes of 'size' and guiding the search to the exact literal that cmplog-only fails to assemble within budget."
+  }
+]

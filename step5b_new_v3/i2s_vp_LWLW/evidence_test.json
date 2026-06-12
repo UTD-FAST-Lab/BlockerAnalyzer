@@ -1,0 +1,90 @@
+{
+  "shape": "i2s_vp_LWLW",
+  "n_branches": 14,
+  "label_source": "Layer-1 shape code cmp,vp,vpc,naive = L,W,L,W: cmplog AND value_profile_cmplog BLOCK; value_profile AND naive RESOLVE. value_profile resolving alongside naive (and vpc blocking alongside cmplog) isolates the discriminator to the I2S stage: anti-synergy where I2SRandReplace hurts BOTH I2S-bearing arms. The independent test must show I2S-anti without re-reading the resolve pattern (G2).",
+  "hypotheses": [
+    {
+      "id": "i2s_decoy_substitution_overfit",
+      "label": "I2S substitutes a fixed-offset structural literal (decoy) that pins the loser corpus to the valid-structure path and away from the winner's free-byte target",
+      "direction": "anti",
+      "from_prior": ["i2s_corpus_capture_structural_overfit"],
+      "members": ["harfbuzz_5323", "harfbuzz_5353", "harfbuzz_5784"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "note": "decoy = the structural literal I2S copies in (sfnt header 00 01 00 00 + GSUB/GPOS/MATH FOURCCs at offset 0x0c for 5323/5353; Hebrew mark codepoints e.g. 0x05B7/0x05BC for 5784). target = the winner's free leading-byte / fall-through bytes."
+        }
+      },
+      "prediction": "On the I2S-bearing (cmplog/vpc) corpus vs naive corpus, the decoy structural literal is ENRICHED (decoy_enrich > 0) while the winner-target byte is DEPLETED (signed_target_enrich < 0). A pro-I2S 'magic-gate' alternative would predict the opposite (signed_target_enrich > 0, the I2S arm enriches the gate-satisfying byte). A no-effect/random alternative predicts signed_target_enrich ~ 0. So a clearly NEGATIVE signed enrichment falsifiably picks anti-decoy-substitution over both.",
+      "rule": "signed_target_enrich < -0.3",
+      "decidable": true
+    },
+    {
+      "id": "i2s_homogenizes_corpus_starves_state_diversity",
+      "label": "I2S operand substitution collapses corpus composition onto a few CMP-matched byte patterns, inflating/homogenizing the I2S-arm corpus so it cannot build the diverse runtime state (linked-list population) the structural predicate needs",
+      "direction": "anti",
+      "from_prior": ["i2s_corpus_homogenization_starves_state_diversity"],
+      "members": ["openthread_13300", "openthread_13302"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "corpus_size_ratio", "operand": "composition", "unit": "per_trial"},
+        "registry_tool": null,
+        "metrics_used": ["corpus_size_ratio", "composition_entropy_ratio"],
+        "params": {
+          "note": "NEW descriptor. corpus_size_ratio = median saved-corpus size of the I2S arm (cmplog/vpc) / non-I2S arm (naive/value_profile) per trial. composition_entropy_ratio = byte-value Shannon entropy of the I2S arm corpus / non-I2S arm corpus (homogenization => I2S arm collapses onto few values => ratio < 1). openthread HAS an on-disk corpus (data_realities). The repetitive '5c 78 30 30' run cited for 13302 is the homogenization signature.",
+          "source": "corpus_queue",
+          "compute": "corpus_size_ratio",
+          "unit": "per_trial"
+        }
+      },
+      "prediction": "The I2S arm's corpus is inflated AND its byte-composition entropy is collapsed relative to the non-I2S arm (corpus_size_ratio >= 1.3 AND composition_entropy_ratio < 0.85). A 'no homogenization' alternative (I2S merely slower) predicts comparable composition entropy (ratio ~ 1) — so a LOW entropy ratio falsifiably distinguishes homogenization from generic slowness. G2-clean: it reads corpus composition, never the resolve pattern.",
+      "rule": "corpus_size_ratio >= 1.3 AND composition_entropy_ratio < 0.85",
+      "decidable": true
+    },
+    {
+      "id": "i2s_no_operand_budget_drain",
+      "label": "Gate is a table-/state-machine-derived or range value with NO fixed-offset input-byte CMP operand; I2S substitution finds nothing to copy and its overhead dilutes the havoc budget that would otherwise land the codepoint by random exploration",
+      "direction": "anti",
+      "from_prior": ["i2s_no_operand_budget_drain", "i2s_overhead_off_path_diversion"],
+      "members": ["harfbuzz_5619", "harfbuzz_5664", "harfbuzz_5968", "harfbuzz_5989", "harfbuzz_6253", "harfbuzz_5958_h0", "harfbuzz_5576"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich"],
+        "params": {
+          "note": "These gates are derived_integer / enum_or_code / range / structural with no contiguous fixed-offset literal (operand_literal null; byte_signature unclear/single_byte/dispersed). operand_enrichment returns no_gate_signature on them (scope_limit: skips structural/non-fixed-offset gates). The 'budget drain' and 'off-path diversion' subtypes are MERGED here: no per-branch signature measurement separates 'wasted budget' from 'wasted budget routed into a deep subtree' — both predict the SAME corpus observation (no decoy enrichment, no target byte signal), so collapsing them is honest. 5958_h0 has a literal (0x0E0E/0x0E0F) but it is the WINNER's target, not an I2S decoy substituted at a fixed gate offset; I2S diverts energy rather than enriching a competing decoy, so no byte_freq_ratio test discriminates it from generic drain — placed here, not in decoy-substitution."
+        }
+      },
+      "prediction": "operand_enrichment returns no_gate_signature OR signed_target_enrich ~ 0 (no decoy enriched, no target depleted) — confirming there is no fixed-offset operand for I2S to act on. This is NON-DISCRIMINATING from the null/underpowered case by design: there is no positive corpus signature of 'budget drain' measurable from a per-branch signature, only the absence of an operand signal. Marked decidable:false so it falls to inconclusive rather than being asserted on absence-of-evidence.",
+      "rule": "false",
+      "decidable": false
+    },
+    {
+      "id": "i2s_anchors_large_valid_blocks_truncation",
+      "label": "I2S (and ctx) anchor the corpus to large valid-header inputs; the branch needs an input shorter than a 128-byte minimum that only plain havoc byte-deletion produces",
+      "direction": "anti",
+      "from_prior": ["i2s_anchors_large_valid_input_blocks_truncation"],
+      "members": ["lcms_2149"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "corpus_size_ratio", "operand": "seed_length", "unit": "per_trial"},
+        "registry_tool": null,
+        "metrics_used": ["median_seed_length_ratio"],
+        "params": {
+          "note": "The mechanism (I2S arm holds LONGER seeds, winner needs < 128-byte truncation) is in principle seed-length measurable, BUT lcms has NO on-disk corpus (data_realities: corpora exist ONLY for curl, harfbuzz, openthread, sqlite3). No real-data measurement is available for this single lcms branch, so it cannot be tested."
+        }
+      },
+      "prediction": "Would predict median_seed_length(I2S arm) >> median_seed_length(naive arm) and naive winners below the 128-byte header minimum — but UNMEASURABLE: lcms has no corpus. Falls to inconclusive.",
+      "rule": "false",
+      "decidable": false
+    }
+  ],
+  "decision_order": [
+    "i2s_decoy_substitution_overfit",
+    "i2s_homogenizes_corpus_starves_state_diversity",
+    "i2s_no_operand_budget_drain",
+    "i2s_anchors_large_valid_blocks_truncation"
+  ],
+  "fallback": "inconclusive",
+  "notes": "COLLAPSE: started from 5 prior clusters, kept 2 decidable + 1 explicitly-undecidable merged hypothesis + 1 undecidable singleton. (1) DECIDABLE via operand_enrichment (anti, signed < -0.3): the 3 structural-overfit branches (5323/5353/5784) have a fixed-offset decoy literal I2S copies in (FOURCC tags / Hebrew mark codepoints), so byte_freq_ratio CAN show decoy-enrich-with-target-deplete. (2) DECIDABLE via a NEW corpus_size_ratio descriptor: the 2 openthread homogenization branches (13300/13302) have an on-disk corpus and a homogenization signature (repetitive byte runs), so corpus inflation + composition-entropy collapse is measurable. NON-DISCRIMINABLE / decidable:false: (3) the 7 no-operand branches (5619/5664/5968/5989/6253/5958_h0 + the 5576 off-path-diversion singleton MERGED in) — their gates are table/state-machine-derived, range, or enum with no fixed-offset CMP operand, so operand_enrichment returns no_gate_signature and there is no positive corpus signature of 'budget drain'; per G3 we do not assert a mechanism on absence-of-evidence, so they go inconclusive. 'budget drain' vs 'off-path diversion' are merged because no per-branch SIGNATURE measurement separates them (both = no operand signal); separating them would need exec-path/coverage-subtree profiling, not a per-branch signature. (4) lcms_2149 (truncation/anchor) is in principle seed-LENGTH measurable but lcms has NO on-disk corpus (data_realities), so it is unmeasurable and goes inconclusive. data_realities respected: no seed_lineage 'I2S event' (untagged); no byte-alignment on different-sized structural seeds (decoy test scoped to fixed-offset literal gates only); corpus-based tests scoped to harfbuzz/openthread (corpus-bearing); lcms excluded for lack of corpus. Targets covered: harfbuzz (decidable for 3 of 10), openthread (decidable for 2 of 2); lcms (0 of 1)."
+}

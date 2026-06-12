@@ -1,0 +1,218 @@
+[
+  {
+    "id": "bloaty_301",
+    "family": "i2s_vp/_WLW",
+    "target": "bloaty",
+    "branch_id": 301,
+    "analysis_path": "prompts_a/bloaty_301.analysis.json",
+    "file": "/src/bloaty/third_party/abseil-cpp/absl/strings/numbers.cc",
+    "function": "numbers.cc:absl::(anonymous namespace)::safe_parse_sign_and_base(std::basic_string_view<char, std::char_traits<char> >*, int*, bool*)",
+    "line": "659",
+    "source_line": "    if (start >= end) {",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A byte region parsed as a number where, after leading/trailing whitespace is consumed and exactly one sign char (0x2b '+' or 0x2d '-') is consumed at start[0], start advances to meet end \u2014 i.e. a sign-only token with nothing after the sign.",
+    "why_winner_satisfies": "The winning value_profile seed contains a long contiguous run of 0x2b ('+') bytes (offsets 0x1d-0x2b) feeding the parser; once the sign is consumed start immediately equals end, so line 659 takes the true branch (W shows T=6 F=0 at 659 vs L T=0 F=12). value_profile reaches it via CMP_MAP gradient feedback on the start>=end / isspace comparisons plus havoc, with no I2S stage.",
+    "why_loser_doesnt": "The value_profile_cmplog loser seeds embed a sign (0x2d '-') but surrounded by digits and other content (e.g. 'elf -444444440'), so after consuming the sign there are still bytes before end; line 659 always falls through (L T=0 F=12) and the downstream base-parsing/safe_parse_positive_int path executes 24x while it never runs in W (0 hits).",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs that bring the start>=end and whitespace/sign comparisons closer to matching, preserving the sign-only-token corpus member; the input-to-state delta added in vpc does not help here because the gate is a pointer-arithmetic relation (start>=end) with no input-byte literal to substitute, so vpc's extra per-exec CMP-buffer cost yields no benefit and it loses, leaving CMP_MAP gradient as the technique that distinguishes the winner."
+  },
+  {
+    "id": "lcms_2137",
+    "family": "i2s_vp/_WLW",
+    "target": "lcms",
+    "branch_id": 2137,
+    "analysis_path": "prompts_a/lcms_2137.analysis.json",
+    "file": "/src/Little-CMS/src/cmsio0.c",
+    "function": "cmsio0.c:_validatedVersion",
+    "line": "729",
+    "source_line": "    if (*pByte > 0x09) *pByte = (cmsUInt8Number) 0x09;",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "The first byte of the ICC Header.version field at file offset 0x08 must be greater than 0x09 (e.g. 0x0a or 0x29) rather than a small valid version major number like 0x03; the input is otherwise a short, structurally-loose buffer rather than a large well-formed multi-tag profile.",
+    "why_winner_satisfies": "Both value_profile winner seeds carry a byte > 0x09 at offset 0x08 (seed1 = 0x0a, seed2 = 0x29) so *pByte > 0x09 is true; the seeds are small (505 and 1832 bytes) loosely-structured buffers produced by plain havoc byte mutation, letting a high byte land in the version slot.",
+    "why_loser_doesnt": "All value_profile_cmplog blocking seeds hold the valid version byte 0x03 at offset 0x08 inside a complete 'lcms'-magic ICC header and are huge (25244 / 10346 bytes); I2S substitution drove them toward structurally-valid headers whose version major stays <= 0x09, so the branch condition is false.",
+    "mechanism_attribution": "havoc-only: the winner value_profile reaches the >0x09 side by ordinary havoc byte mutation dropping a high byte into the version field, with no comparison-introspection mutator available to it. The loser value_profile_cmplog's extra input-to-state substitution stage splices logged comparand bytes (magic 'lcms', valid version) back into the input, pulling its corpus toward valid headers that keep the version byte small and never trip the branch \u2014 so the input-to-state delta actively diverts the loser away from this side (I2S-hurts), and the winner's success rests on plain havoc, not on any comparison-solving technique."
+  },
+  {
+    "id": "libpng_4072_h1",
+    "family": "i2s_vp/_WLW",
+    "target": "libpng",
+    "branch_id": 4072,
+    "analysis_path": "prompts_a/libpng_4072.analysis.json",
+    "file": "/src/libpng/pngrutil.c",
+    "function": "OSS_FUZZ_png_read_IDAT_data",
+    "line": "4245",
+    "source_line": "         if (png_ptr->zstream.avail_in > 0 || png_ptr->idat_size > 0)",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "The same condition: a valid PNG whose IDAT stream leaves avail_in>0 or idat_size>0 after Z_STREAM_END, taking the True branch at L4245. The discriminating bytes are header/IDAT-size fields (offsets 0x11 and 0x17), not a magic-constant CMP that I2S could substitute.",
+    "why_winner_satisfies": "value_profile resolves 8/10 using naive's havoc stack (no I2SRandReplace). Three of its four winning seeds carry varied 0x11 (00/01/02) and 0x17 (45/46) bytes, exercising the extra-data path with ordinary mutation throughput rather than I2S substitution.",
+    "why_loser_doesnt": "value_profile_cmplog adds a per-execution CmpLog buffer plus the I2SRandReplace stage on top of value_profile. The blocker is not gated by an exact integer/string comparand that I2S can copy from input to state, so I2S provides no traction here; instead its per-execution CMP-record overhead lowers throughput and it resolves 0/10 (blocked 10/10, avg blocked 23.10h).",
+    "mechanism_attribution": "The winner value_profile is enabled by havoc-only byte mutation reaching the loop-deep extra-data state. The loser value_profile_cmplog is penalized by its I2S/CmpLog overhead, which yields no comparison-solving benefit on this non-CMP-gated branch while taxing throughput."
+  },
+  {
+    "id": "harfbuzz_5350",
+    "family": "i2s_vp/_WLW",
+    "target": "harfbuzz",
+    "branch_id": 5350,
+    "analysis_path": "prompts_b/harfbuzz_5350.analysis.json",
+    "file": "/src/harfbuzz/src/hb-common.cc",
+    "function": "hb_script_get_horizontal_direction",
+    "line": "652",
+    "source_line": "    case HB_SCRIPT_OLD_UYGHUR:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "An input whose script-tag field is driven to the exact 4-byte FOURCC for HB_SCRIPT_OLD_UYGHUR so the switch ((hb_tag_t) script) at hb-common.cc:586 dispatches to the case HB_SCRIPT_OLD_UYGHUR arm at line 652 (true side), returning HB_DIRECTION_RTL.",
+    "why_winner_satisfies": "value_profile resolves the branch in all 10 trials (avg 52 hits) within 0.70h; its CMP_MAP distance-bucket feedback rewards inputs whose script-tag operand grows closer (matching-prefix length) to the OLD_UYGHUR constant, so havoc bytes that incrementally approach the FOURCC are retained as corpus and the tag is solved without the per-execution cost of the I2S/CmpLog stage.",
+    "why_loser_doesnt": "value_profile_cmplog blocks the branch in 9/10 trials (avg 0 hits, 22.10h blocked); it adds the per-execution CmpLog buffer + I2SRandReplace stage on top of value_profile, but that extra per-execution cost slows throughput on this deep call chain without delivering the tag, so it never drives the script field to the OLD_UYGHUR constant within budget.",
+    "mechanism_attribution": "The winner is value_profile, which has no input-to-state substitution mutator; its enabling technique is the CMP_MAP gradient (matching-prefix / Hamming-distance bucket feedback) that incrementally rewards script-tag bytes approaching the OLD_UYGHUR constant. Adding the I2S+CmpLog stage (the value_profile_cmplog loser) only adds per-execution overhead here, so the divergence is attributable to value_profile's CMP_MAP gradient working unencumbered, not to comparison substitution."
+  },
+  {
+    "id": "harfbuzz_5623",
+    "family": "i2s_vp/_WLW",
+    "target": "harfbuzz",
+    "branch_id": 5623,
+    "analysis_path": "prompts_b/harfbuzz_5623.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shape-fallback.cc",
+    "function": "hb-ot-shape-fallback.cc:recategorize_combining_class(unsigned int, unsigned int)",
+    "line": "51",
+    "source_line": "\tcase 0x0E36u:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A 4-byte little-endian codepoint field holding exactly 0x0E36 (bytes 36 0e 00 00), so that recategorize_combining_class is called with u==0x0E36 and the switch dispatches to case 0x0E36u at line 51, taking the true side.",
+    "why_winner_satisfies": "value_profile resolves all 10 trials and the winner-resolving seeds embed the literal codepoint 36 0e at the parsed field (Seed 1 has 36 0e 00 00 at offset 0x0c; Seed 5 has 36 0e at offset 0x20); the byte-diff at offset 0x36 shows the value 36 concentrated on the W side. value_profile's CMP_MAP gradient rewards inputs whose comparison operand grows closer (Hamming/prefix bucket) to the constant 0x0E36, climbing the integer-equality gate without needing I2S substitution.",
+    "why_loser_doesnt": "value_profile_cmplog blocks all 10 trials with hitcount 0 on the branch; the loser-blocking seeds carry other codepoints (e.g. 37 0e, 31 0e, 32 0e, 35 0f) at the codepoint field and never place 0x0E36. Adding the extra input-to-state substitution mutator to value_profile diverts mutation effort/corpus budget away from the CMP_MAP gradient climb that value_profile uses to find 0x0E36, so vpc fails to match the exact constant.",
+    "mechanism_attribution": "The winner value_profile is enabled by its CMP_MAP gradient: each integer-CMP callback writes a (PC, operand-distance bucket) entry, so inputs that bring the codepoint operand closer to 0x0E36 register new buckets and are preserved, ratcheting toward the exact match. The loser vpc differs only by also carrying the extra input-to-state substitution stage; that extra technique does not help and the divergence is attributable to value_profile's CMP_MAP gradient-driven match."
+  },
+  {
+    "id": "harfbuzz_5683",
+    "family": "i2s_vp/_WLW",
+    "target": "harfbuzz",
+    "branch_id": 5683,
+    "analysis_path": "prompts_b/harfbuzz_5683.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shape-normalize.cc",
+    "function": "hb-ot-shape-normalize.cc:decompose_current_character(hb_ot_shape_normalize_context_t const*, bool)",
+    "line": "195",
+    "source_line": "    if (space_type != hb_unicode_funcs_t::NOT_SPACE &&",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A font/buffer input whose current codepoint passes the _hb_glyph_info_is_unicode_space guard at line 191 yet has space_fallback_type == NOT_SPACE at line 194, so the line-195 comparison `space_type != NOT_SPACE` evaluates false. This requires bytes that drive a real glyph-decomposition path (kern/GPOS/GSUB table structure) rather than degenerate ASCII-space runs that resolve to a true space type.",
+    "why_winner_satisfies": "value_profile winner-resolving seeds carry structured table tags (kern at offset 0x0c, the 0x00 0x01 0x00 0x00 sfnt-version header) and diverse non-space codepoints; the per-role overlay shows the winner set taking the line-195 false side (W F=16) and the line-196 short-circuit chain, exercising the branch 38 times on average.",
+    "why_loser_doesnt": "value_profile_cmplog blocking seeds are dominated by 0x20 (ASCII space) and 0x18 byte runs that resolve to an actual space type, so at line 195 space_type != NOT_SPACE is true (L T=12 F=0) and control diverts into the space-fallback block at 196-202; the loser never lands on the false side, blocking 10/10 trials for 23.9h.",
+    "mechanism_attribution": "The winner is value_profile, whose CMP_MAP gradient (Hamming/prefix distance buckets) rewards inputs that incrementally approach valid table-structure CMPs, steering the corpus toward well-formed non-space glyph inputs that reach line 195 with a non-space codepoint. The loser value_profile_cmplog adds input-to-state substitution, which copies intercepted comparison operands (e.g. the 0x0020 space codepoint compared at line 196 and unicode-space class constants) directly into the input, biasing vpc's corpus toward space-classified codepoints that satisfy line 195's != NOT_SPACE TRUE side and thus block the false branch. So the divergence is attributable to the I2S delta but the technique that *helps* is CMP_MAP gradient on the value_profile arm."
+  },
+  {
+    "id": "harfbuzz_5761",
+    "family": "i2s_vp/_WLW",
+    "target": "harfbuzz",
+    "branch_id": 5761,
+    "analysis_path": "prompts_b/harfbuzz_5761.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-arabic-joining-list.hh",
+    "function": "hb-ot-shaper-use.cc:has_arabic_joining(hb_script_t)",
+    "line": "32",
+    "source_line": "    case HB_SCRIPT_OLD_UYGHUR:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "An input that drives plan->props.script through the use-shaper data path so the script enum lands on the HB_SCRIPT_OLD_UYGHUR switch-case at line 32 (true side, return true), rather than the MONGOLIAN/NKO/default arms the loser reaches; the controlling value is the script enum derived from parsed font/table bytes, not a literal that can be substituted directly into a CMP.",
+    "why_winner_satisfies": "value_profile reaches the true side in all 10 trials with hitcount 26 on the branch; its CMP_MAP gradient feedback rewards inputs whose CMP operands move closer to a matching script tag, walking the corpus toward OLD_UYGHUR without an I2S stage diverting energy.",
+    "why_loser_doesnt": "value_profile_cmplog resolves only 1/10 and is blocked 9/10 at avg 22h, hitting MONGOLIAN/NKO/default instead; its added I2SRandReplace mutator spends mutation energy on direct operand substitution that cannot reach a script enum computed indirectly from font tables, diluting the corpus and starving the CMP_MAP gradient that actually works.",
+    "mechanism_attribution": "The winner is enabled by the CMP_MAP gradient (Hamming/prefix-distance bucket feedback) shared by both fuzzers; the loser's only extra technique is the I2S substitution mutator, and since this delta is the sole difference, adding it hurts here \u2014 it pollutes/dilutes the corpus and energy budget rather than helping reach an indirectly-computed switch value, so the operative winning technique is the CMP_MAP gradient running undiluted in value_profile."
+  },
+  {
+    "id": "harfbuzz_5865",
+    "family": "i2s_vp/_WLW",
+    "target": "harfbuzz",
+    "branch_id": 5865,
+    "analysis_path": "prompts_b/harfbuzz_5865.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-indic.cc",
+    "function": "hb-ot-shaper-indic.cc:initial_reordering_consonant_syllable(hb_ot_shape_plan_t const*, hb_face_t*, hb_buffer_t*, unsigned int, unsigned int)",
+    "line": "937",
+    "source_line": "      } while (j > start && !is_consonant (info[j]));",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "An input decoding to an Indic consonant-syllable cluster of multiple glyphs containing a joiner (ZWJ/ZWNJ) at position i>start with a consonant somewhere before it, so the line-937 do-while (decrementing j from the joiner) exits via its false condition because is_consonant(info[j]) becomes true. The seeds are little-endian glyph-index records; the recurring 0c 20 00 00 / 09 00 00 dwords plus 0xa4 bytes encode the Indic glyph stream that set_indic_properties classifies into consonants + joiners.",
+    "why_winner_satisfies": "value_profile resolved 10/10 with avg 32 hits on the branch; its CMP_MAP Hamming/prefix-distance gradient incrementally rewards inputs whose CMP operands approach the glyph-classification thresholds, building well-formed multi-glyph consonant syllables. Winner seeds carry repeated 0c 20 00 00 and 09 00 00 structural dwords and 0xa4 runs that produce the consonant+joiner stream the loop needs; the loop at 937 is reached and exits false (T=7 F=12 on one count line).",
+    "why_loser_doesnt": "value_profile_cmplog blocked 8/10 (resolved 0/10) despite sharing the same CMP_MAP gradient; its extra I2SRandReplace stage substitutes whole CMP operands, displacing the gradient's incremental corpus growth so it rarely assembles the multi-consonant joiner syllable. Loser seeds are shorter, joiner-poor records (e.g. dense 0c 20 00 00 / 47 0c 00 00 dwords) that take the line-937 true side (T=4 F=3) and never satisfy the consonant-before-joiner exit; the enclosing function fires only 2 times for L vs 27 for W.",
+    "mechanism_attribution": "The winner value_profile is enabled by the CMP_MAP gradient (Hamming/prefix-distance bucket feedback) without input-to-state substitution. The divergence is anti-I2S: the only technique value_profile_cmplog adds over value_profile is the per-execution CmpLog buffer plus input-to-state operand substitution, and that addition HURTS \u2014 the literal operand replacement disrupts the steady gradient-driven assembly of the structured Indic syllable. So the technique enabling the winner is CMP_MAP gradient."
+  },
+  {
+    "id": "harfbuzz_6124_h0",
+    "family": "i2s_vp/_WLW",
+    "target": "harfbuzz",
+    "branch_id": 6124,
+    "analysis_path": "prompts_b/harfbuzz_6124.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+    "function": "_hb_preprocess_text_vowel_constraints(hb_ot_shape_plan_t const*, hb_buffer_t*, hb_font_t*)",
+    "line": "409",
+    "source_line": "\t  case 0x1148Bu: case 0x1148Du:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A 4-byte little-endian codepoint 0x1148D (bytes 8d 14 01 00) or 0x1148B (8b 14 01 00) positioned as the current glyph in a TIRHUTA-script buffer, so the switch on buffer->cur().codepoint hits case 0x1148Bu/0x1148Du (line 409 true).",
+    "why_winner_satisfies": "value_profile (winner) seeds carry the literal run 8d 14 01 00 (= 0x1148D LE) repeated across the input (e.g. winner-resolving Seed 1 at offset 0x00), so the switch dispatch lands on the blocker case; line 409 takes its true side T=14 for W.",
+    "why_loser_doesnt": "value_profile_cmplog (loser) blocked seed carries 81 14 01 00 (0x11481, a sibling case at line 406), not the 8b/8d 14 01 00 run; the CMP_MAP/I2S machinery steers the loser toward neighboring Tirhuta codepoints rather than the specific 0x1148B/0x1148D value, so line 409 true is never taken (T=0 for L).",
+    "mechanism_attribution": "The winner is the baseline value_profile fuzzer; it discovers the required literal 4-byte codepoint by plain havoc byte mutation. Adding the I2SRandReplace mutator in value_profile_cmplog is an anti-divergence: the loser's I2S substitution latches onto whichever sibling Tirhuta operand it last logged (0x11481/0x114AA), diluting the havoc budget so the exact 0x1148B/0x1148D value is found less often. The enabling technique for the winner is therefore lucky havoc, not I2S."
+  },
+  {
+    "id": "harfbuzz_6162",
+    "family": "i2s_vp/_WLW",
+    "target": "harfbuzz",
+    "branch_id": 6162,
+    "analysis_path": "prompts_b/harfbuzz_6162.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper.hh",
+    "function": "hb-ot-shape-normalize.cc:hb_ot_shaper_categorize(hb_ot_shape_planner_t const*)",
+    "line": "300",
+    "source_line": "    case HB_SCRIPT_PHAGS_PA:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "A font whose parsed script property (planner->props.script) resolves to one of the Unicode-5.0+ scripts handled by the shared USE case block at line 300 (HB_SCRIPT_PHAGS_PA). This requires valid OpenType table magic (e.g. GSUB/GPOS) plus script/script-tag bytes that decode to a USE-routed script rather than DFLT/latn, so the categorize switch lands on the line-300 arm.",
+    "why_winner_satisfies": "value_profile winning seeds carry structured table-ish byte runs (e.g. ascii 'darf', repeated 0x06/0x64/0x6e fields and embedded tags like 'h-hans', 'h-min') that drive the script property into the USE case block; the W-only overlay marks line 300 and the entire downstream USE block (lines 303-398) as hit, and the branch averages 34 hits for the winner.",
+    "why_loser_doesnt": "value_profile_cmplog blocking seeds are dominated by literal magic-table tokens 'GSUB'/'GPOS' at offset 0x0c with long 0x20/0x5a/0x47 filler runs; they resolve to scripts handled by earlier arms (the L-only overlay hits the Indic/Telugu block at 231-244 and the Myanmar block at 249-262, never line 300), so the loser blocks on this branch in 9/10 trials with 0 hits.",
+    "mechanism_attribution": "The winner value_profile uses the CMP_MAP gradient: each script-tag / table-magic CMP writes a Hamming/prefix-distance bucket, and an input that is one bucket closer to a USE-routed script tag is preserved, letting the corpus incrementally walk the operand toward the line-300 USE block. The loser value_profile_cmplog additionally carries the input-to-state comparison-substitution mutator (the only technique delta), which swaps whole CMP operands toward the nearest matching literal (the GSUB/GPOS magic and the DFLT/latn anchor arms), over-committing the corpus to the earlier high-frequency literal case arms and starving exploration of the line-300 USE case; thus the gradient-only fuzzer wins. The winner-enabling technique is the CMP_MAP gradient, not the comparison-substitution mutator."
+  },
+  {
+    "id": "harfbuzz_6210",
+    "family": "i2s_vp/_WLW",
+    "target": "harfbuzz",
+    "branch_id": 6210,
+    "analysis_path": "prompts_b/harfbuzz_6210.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-shaper.hh",
+    "function": "hb-ot-shape-normalize.cc:hb_ot_shaper_categorize(hb_ot_shape_planner_t const*)",
+    "line": "380",
+    "source_line": "    case HB_SCRIPT_OLD_UYGHUR:",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "The 4-byte script tag dispatched by the switch on (hb_tag_t) planner->props.script must hold one of the Unicode-14.0/15.0 values whose case-arm falls through to line 380 (HB_SCRIPT_OLD_UYGHUR and siblings). The winner inputs supply a short header whose leading bytes (e.g. 75 0f 01 / 88 0f 01 / 80 0f 01 at offsets 0x00-0x02) drive props.script into that USE-shaper case group rather than the default/DFLT/latn arms.",
+    "why_winner_satisfies": "value_profile winner seeds carry a concentrated low-byte head pattern at offsets 0x00-0x02 (75/88/80 then 0f then 01) and are short (10-73 bytes); the CMP_MAP distance-bucket feedback rewards each input whose script-tag CMP operand gets closer to a target case constant, ratcheting props.script into the Old Uyghur case so the true branch is hit 26 times.",
+    "why_loser_doesnt": "value_profile_cmplog loser seeds are large (56-323 bytes) well-formed-looking sfnt tables beginning 00 01 00 00 with GSUB/GPOS directory tags; they resolve a chosen_script of DFLT/latn or an earlier (lower-Unicode) script case, never reaching the line-380 case group, and stay blocked for 22.10h.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix distance-bucket feedback on the switch-dispatch CMP) incrementally rewards inputs whose script-tag operand approaches a line-380 case constant. The loser adds an input-to-state substitution stage on top, but that extra substitution diverts the mutation budget toward solving the GSUB/GPOS table-tag comparisons (the only literals it can lift from the corpus), pulling it away from the script-tag dispatch; the winning technique here is the CMP_MAP gradient, not the substitution stage."
+  },
+  {
+    "id": "harfbuzz_6263",
+    "family": "i2s_vp/_WLW",
+    "target": "harfbuzz",
+    "branch_id": 6263,
+    "analysis_path": "prompts_b/harfbuzz_6263.analysis.json",
+    "file": "/src/harfbuzz/src/hb-unicode.hh",
+    "function": "hb_unicode_funcs_t::space_fallback_type(unsigned int)",
+    "line": "224",
+    "source_line": "      default:\t    return NOT_SPACE;\t/* U+1680 OGHAM SPACE MARK */",
+    "covers_pairs": [
+      "value_profile>value_profile_cmplog (I2S)"
+    ],
+    "what_input_feature": "An input whose decoded codepoint u reaches space_fallback_type but does NOT equal any enumerated switch case literal (0x0020, 0x00A0, 0x2000, 0x2006, 0x3000, ...), so the switch on u takes the `default:` arm at line 224 instead of a `case` arm.",
+    "why_winner_satisfies": "value_profile resolves the default arm in 10/10 trials with hitcount 38 and W reaches line 224 ([W] 224, d=1 L 224 W=T:16/F:1); its CMP_MAP gradient feedback rewards producing unicode-space codepoints that route into space_fallback_type, but lacking I2SRandReplace it is not snapped onto the exact case literals, so non-enumerated space codepoints survive in the corpus and trip the default arm.",
+    "why_loser_doesnt": "value_profile_cmplog blocks the default arm in 10/10 trials with hitcount 0; its I2SRandReplace mutator substitutes the switch comparand u with the exact literal operands of the case comparisons (0x0020, 0x00A0, 0x2006 are exactly the cases its loser seeds land on, [L] 225/226/233, d=1 L 225/226/233), driving every space input onto an enumerated `case` and away from `default`.",
+    "mechanism_attribution": "The single technique delta is I2S, present in the loser and absent in the winner. value_profile's CMP_MAP gradient feedback lets it accumulate diverse unicode-space codepoints without forcing exact equality matches; the loser's added input-to-state substitution rewrites u with the exact case-literal operands seen in the switch comparisons, collapsing inputs onto enumerated cases and starving the default arm. The winner's enabling technique is therefore CMP_MAP gradient exploration unhampered by literal-snapping."
+  }
+]

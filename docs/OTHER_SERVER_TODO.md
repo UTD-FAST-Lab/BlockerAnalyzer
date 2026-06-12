@@ -1,0 +1,140 @@
+# Other-server TODO — score the benchmark on YOUR targets
+
+You are Claude on the **second server** of the BlockerAnalyzer benchmark pivot.
+Server "s4" (curl/harfbuzz/openthread/sqlite3) already built the shared pipeline
+and scored its targets. Your job: run the **same deterministic pipeline** on
+**your** targets (lcms / libxml2 / libpng / bloaty) and push your results back so
+the two halves merge into one dataset.
+
+Read `docs/benchmark_pivot_spec.md` first for the full design. This file is the
+operational checklist. **Nothing here regenerates hypotheses or rebuilds tools —
+the design (`step5b_new_v3/*/evidence_test.json`) and the tools are shared and
+fixed.** You only *measure + arbitrate* on your corpora.
+
+## 0. What you have vs what was shipped
+
+- **You have (local, NOT in git):** your `db/blockers.sqlite` (your targets'
+  branches + seeds), your corpora at `out/` (symlink to your campaign root).
+- **Shipped to you (the shared layer — see the file manifest at the bottom):**
+  the 38 `evidence_test.json` design specs, the measurement tools, the arbiter,
+  the dataset builder, the registry, this doc, and s4's `assignments_s4.json`.
+
+## 1. Configure (env, no code edits)
+
+```bash
+export BENCH_SERVER=sB                              # your server tag
+export BENCH_ONDISK=lcms,libxml2,libpng,bloaty      # YOUR on-disk targets
+```
+The arbiter/build_dataset read these; they default to s4's targets otherwise.
+
+## 2. Make sure your branches have enough seeds (>=3 resolving AND >=3 blocking)
+
+The measurement tools need >=3 resolving + >=3 blocking seeds per branch.
+**Lesson from s4:** the initial `seed_bisect` at `--fallback-ranks 3` captured
+only 1-2 resolving seeds for hard branches even though they resolved in 8-10
+trials. Re-bisect at rank 10 to recover them (idempotent, `ON CONFLICT UPDATE`):
+
+```bash
+# find YOUR branches with <3 resolving or <3 blocking seeds, write per-target CSVs
+# (filter csvs/blocker_representatives*.csv to those branch_ids), then:
+python3 tools/seed_bisect.py run --target <T> --queue-base ./out \
+    --branches-from-csv csvs/sparse_<T>.csv --fallback-ranks 10
+```
+The 10-bucket bisection is ~log-cost per trial; expect ~10-40 min/target on a
+slow FS. (s4's harfbuzz took ~40 min for 36 branches × 9 trial-queues.)
+
+## 3. RE-ANCHOR each tool on one of YOUR targets  ← THE CRITICAL GATE
+
+A tool validated on harfbuzz is **not** automatically trustworthy on libxml2 —
+s4 saw the `operand_enrichment` separation weaken on sqlite3, and per-target
+calibration is the spec's known risk. **Before mass-running, validate each tool
+on a known branch of yours and confirm the expected direction; re-tune the
+threshold in the arbiter's canonical rules if the separation is weaker.**
+
+- `bench/tools/i2s_operand_availability.py branch --target libxml2 --branch-id <a known i2s-pro branch>`
+  → expect `signed_target_enrich > 0` (pro) / `< 0` (anti). If the band is
+  compressed vs s4's +3.12/-0.55, loosen the rule thresholds.
+- `bench/tools/value_distance_reached.py branch --target <T> --branch-id <vp-gradient branch> --value <operand> --winners value_profile,value_profile_cmplog --losers cmplog,naive`
+  → expect `winner_closer=true`, `distance_gap` > 0.
+- `bench/tools/joint_necessity.py branch --target <T> --branch-id <vpc-both branch>`
+  → expect `joint_confirmed` (or `i2s_necessary_value_subtype`).
+- `bench/tools/joint_necessity.py branch --target libxml2 --branch-id <grimoire branch> --winner-fuzzer grimoire --loser-fuzzer cmplog --tokens '<?xml,<!DOCTYPE,...'`
+  → expect grimoire `tag_lift >= 1`.
+- `bench/tools/depth_reach.py ...` (ctx/ngram) — re-anchor on a local ctx branch.
+
+Per-target structural tokens are already wired in `bench/arbitrate.py:shape_tokens`
+for libxml2 (XML/DTD) and lcms (ICC tags); add your targets if missing.
+
+## 4. Pre-run operand_enrichment (corpus-heavy → do it once in study mode)
+
+```bash
+# build a label CSV of YOUR local i2s_vp branches with >=3 W & >=3 L seeds, then:
+python3 bench/tools/i2s_operand_availability.py study --label-csv csvs/arb_oe_labels.csv \
+    --out csvs/arb_operand_enrich.csv --sample 8000 --head 256
+```
+(See `bench/_rescore_after_bisect.sh` for the exact label-CSV builder s4 used —
+copy it, it's target-agnostic.)
+
+## 5. Arbitrate → your assignments
+
+```bash
+BENCH_SERVER=sB BENCH_ONDISK=lcms,libxml2,libpng,bloaty python3 bench/arbitrate.py --all
+```
+This writes `step5b_new_v3/<shape>/assignments_sB.json` (your branches only;
+non-local → skipped). It reuses the cached `operand_enrichment` + runs
+`joint_necessity` / `value_distance_reached` / `depth_reach` per branch.
+
+Expected coverage on your side: **i2s/vp ~194 branches + grimoire ~32 + ctx ~36**
+are the bulk. ctx/ngram use `depth_reach` (built; verifies the iteration-depth subtype, context-reach subtype stays inconclusive).
+
+## 6. Merge to the full dataset
+
+Pull s4's `step5b_new_v3/*/assignments_s4.json` (shipped), then:
+```bash
+python3 bench/build_dataset.py        # merges assignments_*.json across servers
+```
+`build_dataset` enumerates ALL signature branches and prefers `validated` over
+`inconclusive`, so the output `bench/dataset.jsonl` is the combined benchmark.
+Push your `assignments_sB.json` back so s4 can also rebuild the merged set.
+
+## 7. (Optional, LAST) re-design only RESISTANT shapes
+
+Only after seeds + tools are complete: if a shape comes back with a *wall* of
+inconclusive (menu likely missed a mechanism), re-invoke the
+`evidence-test-author` agent on that shape with the inconclusive branches'
+evidence (spec §8.4, bounded ≤2 rounds). **Do NOT chase 100% assignment** —
+honest `inconclusive` (the test ran, mechanism didn't hold) and `decidable:false`
+(corpus-scale / non-discriminable) are correct outcomes (guardrail G3).
+
+## Gotchas
+- The shared `step5a_new_v3/*/signatures.json` lists BOTH servers' branches; the
+  arbiter filters to `BENCH_ONDISK` and queries YOUR db, so non-local rows are
+  simply skipped — no conflict.
+- Don't edit `evidence_test.json` rules; reconcile metric-name mismatches via the
+  arbiter's canonical-rule fallbacks (already handle value_distance + token
+  families), not by rewriting agent output.
+- `out/` and `db/` are local; never commit them. Only `assignments_sB.json` +
+  any new `csvs/*` you want to share travel back.
+
+---
+
+## File manifest — what s4 must ship you (the shared layer)
+
+```
+step5a_new_v3/<shape>/{signatures.json, cards.json}     # 38 shapes — branch source + design input
+step5b_new_v3/<shape>/evidence_test.json                # 38 — the design specs (the rules you apply)
+step5b_new_v3/<shape>/assignments_s4.json               # s4's results (for the final merge; can come later)
+bench/tools/joint_necessity.py                          # measurement tools
+bench/tools/value_distance_reached.py
+bench/tools/depth_reach.py                              # ctx/ngram (built; needs your libafl-<target>-cov Docker images)
+bench/arbitrate.py                                      # the deterministic arbiter
+bench/build_dataset.py                                  # dataset assembler/merger
+bench/tool_registry.json                                # tool catalog (reference)
+bench/_rescore_after_bisect.sh                          # the OE-label + rescore chain (copy/adapt)
+bench/tools/i2s_operand_availability.py                       # operand_enrichment (Leg-1 tool)
+docs/benchmark_pivot_spec.md                            # full design
+docs/OTHER_SERVER_TODO.md                               # this file
+.claude/agents/evidence-test-author.md                  # design agent (only for §7 re-design)
+```
+NOT needed: s4's `db/`, `out/`, `csvs/arb_operand_enrich.csv` (you regenerate
+these on your own corpora/DB).

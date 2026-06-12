@@ -1,0 +1,128 @@
+[
+  {
+    "id": "bloaty_34",
+    "family": "i2s_vp/WL_L",
+    "target": "bloaty",
+    "branch_id": 34,
+    "analysis_path": "prompts_a/bloaty_34.analysis.json",
+    "file": "/src/bloaty/src/elf.cc",
+    "function": "elf.cc:bloaty::(anonymous namespace)::ElfFile::Initialize()",
+    "line": "475",
+    "source_line": "    default:",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "Bytes 0x00-0x03 must equal the literal magic 7f 45 4c 46 (\\177ELF) so the memcmp guard at line 452 passes, AND byte 0x05 (ident[EI_DATA]) must hold a value other than ELFDATA2LSB(1) or ELFDATA2MSB(2) so the switch at line 468 falls through to the default arm at line 475.",
+    "why_winner_satisfies": "Winning cmplog seeds keep the magic 7f 45 4c 46 at offsets 0x00-0x03 and place a non-{1,2} value at offset 0x05 (e.g. seed 1 has 0x30, seed 2 has 0x00, seed 3 has 0xe7), so EI_DATA misses both case labels and hits default.",
+    "why_loser_doesnt": "Loser naive seeds also keep the magic but set offset 0x05 to either 0x01 or 0x02 in every sample, so EI_DATA always matches case ELFDATA2LSB or ELFDATA2MSB and the switch never reaches default.",
+    "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLog buffer for the switch comparison on ident[EI_DATA] and substitutes the recorded compared operand at the input offset, but unlike a single magic-number gate the winning move is to make the byte NOT equal the case labels; I2S surfaces the magic prefix (7f 45 4c 46) keeping line 452 satisfied while the switch on a single byte is escaped via a non-matching value, a combination cmplog reaches and naive's blind havoc rarely lands while preserving the magic."
+  },
+  {
+    "id": "curl_152",
+    "family": "i2s_vp/WL_L",
+    "target": "curl",
+    "branch_id": 152,
+    "analysis_path": "prompts_b/curl_152.analysis.json",
+    "file": "/src/curl/lib/http.c",
+    "function": "Curl_http_bodysend",
+    "line": "2615",
+    "source_line": "    if(!Curl_checkheaders(data, STRCONST(\"Content-Type\"))) {",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "The input must carry the ASCII literal 'Content-Type:' (bytes 43 6f 6e 74 65 6e 74 2d 54 79 70 65 3a) positioned where the harness feeds it to Curl_checkheaders, so the request reaches HTTPREQ_POST processing and exercises the !Curl_checkheaders(\"Content-Type\") gate at line 2615.",
+    "why_winner_satisfies": "The cmplog winner seed embeds the exact literal 'Content-Type:' contiguously at offsets 0x24-0x32 ('....GContent-Typ' then 'e:'), the same string constant compared inside Curl_checkheaders, letting the harness drive the POST path that reaches and evaluates the blocker.",
+    "why_loser_doesnt": "The naive loser seeds contain no 'Content-Type' substring; their header-region bytes are short fragments like 'pOARAMETER' or '%op..----' with no occurrence of the 14-byte magic string, so the comparison inside Curl_checkheaders is never satisfied and they sit on the true side / never reach the gate as resolved.",
+    "mechanism_attribution": "cmplog intercepts the strcmp/memcmp comparing the header name against the 'Content-Type' constant and records both operands in the CmpLogObserver buffer; I2SRandReplace then substitutes the constant operand into the input at matching offsets, planting the literal that naive's blind havoc/token stack must hit by chance and does not."
+  },
+  {
+    "id": "curl_289",
+    "family": "i2s_vp/WL_L",
+    "target": "curl",
+    "branch_id": 289,
+    "analysis_path": "prompts_b/curl_289.analysis.json",
+    "file": "/src/curl/lib/mprintf.c",
+    "function": "mprintf.c:dprintf_formatf",
+    "line": "735",
+    "source_line": "      is_neg = (p->data.num.as_signed < (mp_intmax_t)0) ? 1 : 0;",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "A '%d'-class (FORMAT_INT, non-CHAR, non-OCTAL, non-HEX, non-UNSIGNED) decimal conversion whose argument value, parsed from the harness input, is < 0 so that p->data.num.as_signed < 0 evaluates true at line 735.",
+    "why_winner_satisfies": "Winner cmplog seeds carry a structured header (00 01 00 00 00 19 ...) plus '%'-format bytes that drive an INT conversion with a negative operand; the per-role overlay marks the negative-handling block (lines 738-741, 781, 788) as winner-only [W], and the DIVERGENT BRANCHES line 735 shows W=T:5 F:20 while L never takes the true side (T:0).",
+    "why_loser_doesnt": "Naive loser seeds reach line 735 (the case-FORMAT_INT path is hit, L F:40) but every integer conversion they construct is non-negative, so is_neg stays 0 and the true branch is never taken; naive must blindly mutate bytes into a value whose signed interpretation is negative.",
+    "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer, where the as_signed<0 comparison and the upstream format/parameter CMPs are recorded, and substitutes operand bytes into the input so it constructs a negative-valued %d conversion; naive lacks any CMP introspection and only stumbles onto a negative value by chance, which it managed in only 1/10 trials."
+  },
+  {
+    "id": "curl_291",
+    "family": "i2s_vp/WL_L",
+    "target": "curl",
+    "branch_id": 291,
+    "analysis_path": "prompts_b/curl_291.analysis.json",
+    "file": "/src/curl/lib/mprintf.c",
+    "function": "mprintf.c:dprintf_formatf",
+    "line": "780",
+    "source_line": "      if(is_neg || (p->flags & FLAGS_SHOWSIGN) || (p->flags & FLAGS_SPACE))",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "The fuzz input must form a format directive routed to FORMAT_INT decimal conversion (base 10) whose signed value is negative, so is_neg becomes 1 and the sign-prefix guard at line 780 takes its true side; this requires a coherent %d/%i spec with an argument byte sequence decoding to a negative integer.",
+    "why_winner_satisfies": "Winner-resolving seeds carry a structured header/URL-like prefix (e.g. bytes 00 01 00 00 00 19 then a 'WS'/'po' tag, ':/', '127.0.0.1:9001', '850') that drives the parser into the decimal-integer arm; the W-only overlay shows lines 738-741 (negative-to-positive conversion) and 781 (--width) hit, and the DIVERGENT BRANCHES table shows line 735/736 reaching is_neg true (T=5) and line 787 OUTCHAR('-') reached only under W.",
+    "why_loser_doesnt": "Loser-blocking seeds are short (34-36 bytes) and dominated by literal '%'/'A'/'+' bytes (e.g. %`%a, %A, %C@%, %%Cb%ca) that route into the FLAGS_CHAR ('%c') arm and string formatting rather than a base-10 integer with a negative value; the L overlay never reaches lines 738-741 or 781, and line 736 is_neg shows T=0 F=40 for L.",
+    "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes intercepted CMP operands into the input at matching offsets, letting it construct the precise parser-routing bytes (tag/colon/path/numeric fields) that produce a negative decimal integer; naive lacks CMP interception and must hit this multi-byte structural condition by blind havoc, which it does only 1/10 trials."
+  },
+  {
+    "id": "harfbuzz_5483",
+    "family": "i2s_vp/WL_L",
+    "target": "harfbuzz",
+    "branch_id": 5483,
+    "analysis_path": "prompts_b/harfbuzz_5483.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-layout-common.hh",
+    "function": "OT::ClassDef::get_class(unsigned int) const",
+    "line": "2000",
+    "source_line": "    case 4: return u.format4.get_class (glyph_id);",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "The ClassDef table's 16-bit big-endian 'format' field (the switch operand u.format) must equal the exact value 4, reached through a well-formed GDEF table containing a glyph-class ClassDef of format 4.",
+    "why_winner_satisfies": "The winning cmplog seed carries the literal 'GDEF' table tag and structured table bytes including a 00 04 word; it resolves the branch in all 10/10 trials with avg hitcount 162 and only this case-4 arm taken (L2000 T=54 F=0).",
+    "why_loser_doesnt": "The naive loser seeds are tiny (6-63 bytes) and random/zero-filled with no GDEF tag or format==4 selector; they never reach case 4 and instead fall through to the default arm (L2002 T=1620 F=0), blocked in all 10/10 trials.",
+    "mechanism_attribution": "cmplog intercepts the switch comparison against 4 via __sanitizer_cov_trace_cmp, logging the constant operand; I2SRandReplace then substitutes the literal 4 into the format-field offset of the input, which blind havoc byte mutation in naive cannot reliably hit at the exact 16-bit offset."
+  },
+  {
+    "id": "harfbuzz_5494",
+    "family": "i2s_vp/WL_L",
+    "target": "harfbuzz",
+    "branch_id": 5494,
+    "analysis_path": "prompts_b/harfbuzz_5494.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-layout-common.hh",
+    "function": "OT::Device::get_y_delta(hb_font_t*, OT::VariationStore const&, float*) const",
+    "line": "3579",
+    "source_line": "    case 1: case 2: case 3:",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "A font binary that parses far enough to reach OT::Device::get_y_delta with the Device sub-table's u.b.format field holding one of the small magic values 1, 2, or 3, requiring valid table tags (e.g. 'MATH') and structural offsets so the deep MATH/BASE call chain reaches the device record.",
+    "why_winner_satisfies": "Both winner-resolving seeds contain the literal ASCII tag 'MATH' at offset 0x0c and well-formed leading sfnt header bytes (00 01 00 00 ...), so the parser descends the MathValueRecord -> Device::get_y_delta chain and the format byte lands in {1,2,3}, taking the true arm (W hits the branch with T-side counts e.g. T=6 F=88).",
+    "why_loser_doesnt": "Loser-blocking seeds are short, malformed fragments (6-64 bytes, e.g. '87 0e 0d 0e 22 0e') lacking a coherent table directory and the 'MATH' tag, so they never reach get_y_delta with a 1/2/3 format value; at the blocker the loser shows T=0 F=470 (true side never taken).",
+    "mechanism_attribution": "cmplog's I2SRandReplace reads CMP operands captured at the format switch comparison and substitutes the constant 1/2/3 (and intermediate tag/offset comparisons such as the 'MATH' fourcc) directly into the input, letting it satisfy the magic-value gate; naive has no CMP introspection and must hit the exact bytes by blind havoc, which it never achieves in 10 trials."
+  },
+  {
+    "id": "harfbuzz_5562",
+    "family": "i2s_vp/WL_L",
+    "target": "harfbuzz",
+    "branch_id": 5562,
+    "analysis_path": "prompts_b/harfbuzz_5562.analysis.json",
+    "file": "/src/harfbuzz/src/hb-ot-layout.cc",
+    "function": "hb_ot_layout_table_select_script",
+    "line": "573",
+    "source_line": "  if (g.find_script_index (HB_OT_TAG_DEFAULT_LANGUAGE, script_index)) {",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "A well-formed sfnt font blob (header 00 01 00 00) with a GPOS or GSUB table (FOURCC 'GPOS'/'GSUB') whose ScriptList carries the 'dflt' script tag, so that g.find_script_index(HB_OT_TAG_DEFAULT_LANGUAGE,...) returns true at line 573 after the earlier script_tags[i], DFLT and latn lookups all miss.",
+    "why_winner_satisfies": "Winner-resolving seeds carry the sfnt version 00 01 00 00 at offset 0, a GPOS/GSUB FOURCC at offset 0x0c (47 50 4f 53 'GPOS' / 47 53 55 42 'GSUB'), and structured ScriptList bytes (runs of 53 'S'), so the table parses and a script lookup reaches and satisfies line 573 (W shows T=5 at branch 573 and resolves the [W]-tagged true-side lines 574-577).",
+    "why_loser_doesnt": "Loser-blocking seeds are short, near-random buffers (6-64 bytes, no sfnt header, no GPOS/GSUB FOURCC) so the table never parses into a populated ScriptList; the loser never reaches the true side of 573 (L shows T=0 F=74 at branch 573) and falls through to the NO_SCRIPT_INDEX return.",
+    "mechanism_attribution": "cmplog's I2SRandReplace reads intercepted CMP operands (the sfnt table-tag and script-tag comparisons) from the CmpLogObserver buffer and substitutes the expected literal ('GPOS'/'GSUB' FOURCC, 'dflt' tag) into the input at matching offsets, building the structured table that naive's blind havoc cannot assemble."
+  }
+]

@@ -1,0 +1,58 @@
+{
+  "shape": "i2s_vp__WLW",
+  "n_branches": 13,
+  "shape_semantics": "code cmp,vp,vpc,naive = _,W,L,W: value_profile AND naive resolve, value_profile_cmplog BLOCKS, cmplog non-decisive. ANTI-SYNERGY -- adding the I2S stage to value_profile (vpc = both techniques) HURTS: vpc loses to vp-alone and to naive. The verification question for every branch is WHY the extra I2S delta blocks what vp-alone resolves.",
+  "hypotheses": [
+    {
+      "id": "decoy_overcommit_wrong_literal",
+      "label": "vpc's I2S substitution pins the corpus to a WRONG decoy literal (sibling case / enumerated case / valid-range boundary), flooding the loser corpus with a value that blocks the target arm",
+      "direction": "anti_i2s",
+      "from_prior": [
+        "i2s_wrong_literal_overcommit_starves_target_arm",
+        "vp_gradient_literal_climb_i2s_budget_diversion"
+      ],
+      "applies_to_branches": [
+        "harfbuzz_5350",
+        "harfbuzz_5623",
+        "harfbuzz_5683",
+        "harfbuzz_5761",
+        "harfbuzz_6124_h0",
+        "harfbuzz_6162",
+        "harfbuzz_6210",
+        "harfbuzz_6263"
+      ],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["decoy_enrich", "signed_target_enrich"],
+        "params": {
+          "compare": "value_profile_cmplog_vs_value_profile",
+          "decoy_source": "the sibling / enumerated-case / boundary literal named in why_loser_doesnt (e.g. MONGOLIAN/NKO tag for 5761, 0x11481 sibling for 6124_h0, the 0x0020/0x00A0/0x2006 case literals for 6263, the GSUB/GPOS table tags for 6162/6210, 0x20 space-class for 5683)",
+          "target_value": "the W-resolving operand named in why_winner_satisfies"
+        }
+      },
+      "prediction": "vpc's corpus is ENRICHED for the decoy literal relative to vp (decoy_enrich > 0) while NOT enriched for the target value (signed_target_enrich <= 0). G1-discriminating: pure overhead/throughput drain (the rival hypothesis) predicts NO directional byte-frequency difference between vpc and vp corpora at the gate offset (decoy_enrich ~ 0) -- it slows the loser without steering it to any specific value. G2-independent: it scores corpus BYTE frequencies at the gate offset, not the vpc resolve/block outcome that defined the shape.",
+      "rule": "decoy_enrich > 0.8 AND signed_target_enrich < 0.3"
+    }
+  ],
+  "non_discriminable": [
+    {
+      "id": "corpus_scale_overhead_drain",
+      "label": "non-literal / derived-relation gate: I2S has no input-byte literal to substitute, so vpc pays pure CmpLog per-exec overhead and loses on throughput -- no value-level signature to measure",
+      "from_prior": ["vp_gradient_nonliteral_gate_i2s_overhead_drain"],
+      "covers_branches": ["bloaty_301", "lcms_2137", "libpng_4072_h1"],
+      "decidable": false,
+      "candidate_descriptor": {"source": "corpus_queue", "compute": "corpus_size_ratio", "operand": "vpc_vs_vp", "unit": "per_branch"},
+      "why_non_discriminable": "The only candidate signal is corpus-scale scheduling (vpc corpus inflated/throttled vs vp). (1) corpus_size is a global per-trial quantity confounded by every other branch and by raw exec count -- it cannot attribute a per-branch block to the I2S delta, and an inflated corpus is equally consistent with benign exploration. (2) For bloaty_301 (start>=end pointer relation, none_structural) and libpng_4072_h1 (derived idat_size length field) the gate has NO fixed-offset literal, so operand_enrichment returns no_gate_signature -- there is nothing for I2S to enrich toward, by construction. (3) data_realities: I2S is untagged in mutation_op and value_profile is a feedback, so NO seed_lineage 'I2S-overhead event' or 'gradient event' is measurable. The anti-synergy here is a scheduling/throughput effect, which the step5b_new_v2 finding flagged as non-synthesizable and which is likewise non-discriminable from real campaign data. Honest fallback per G3: inconclusive."
+    }
+  ],
+  "decision_order": ["decoy_overcommit_wrong_literal"],
+  "fallback": "inconclusive",
+  "data_realities_respected": [
+    "on-disk corpora exist ONLY for curl/harfbuzz/openthread/sqlite3 -> the decoy test scores ONLY the 8 harfbuzz branches; bloaty_301, lcms_2137, libpng_4072_h1 have no corpus and route to fallback inconclusive regardless of merit.",
+    "operand_enrichment needs a fixed-offset VALUE gate (skips structural/length) and >=3 W and >=3 L seeds -- branches failing this (the structural/length gates) return no_gate_signature and fall to inconclusive.",
+    "I2S and value_profile are both invisible in mutation_op (no lineage event) -- no descriptor of the overhead-drain hypothesis is proposed.",
+    "anti-synergy budget-diversion vs wrong-decoy-overcommit are the SAME observable when a concrete decoy literal exists (corpus pinned to wrong value); they are MERGED into decoy_overcommit_wrong_literal. They diverge only when there is NO decoy literal, in which case the branch is already in the non-discriminable bucket."
+  ],
+  "notes": "COLLAPSE: the 3 prior clusters (overhead_drain / budget_diversion / wrong_literal_overcommit) reduce to ONE discriminable test + ONE non-discriminable bucket. Rationale: 'budget diversion toward competing CMPs' and 'overcommit to a wrong sibling literal' are indistinguishable in real corpus data WHEN a concrete decoy literal is namable -- both leave the vpc corpus pinned to a non-target value at the gate offset, which operand_enrichment's decoy_enrich measures directly. They are therefore merged into decoy_overcommit_wrong_literal. The pure non-literal-gate overhead-drain cluster (and any diversion case with no decoy literal) has no byte-level signature and only a global corpus-scale signal, which is confounded and non-attributable -> decidable:false -> inconclusive (G3 honesty). DISCRIMINABLE TARGETS: 8 harfbuzz branches with fixed-offset value/switch gates and on-disk corpora (5350,5623,5683,5761,6124_h0,6162,6210,6263); of these, the switch/codepoint gates with a clearly namable decoy (5623,5683,6124_h0,6263) are the cleanest, while the indirectly-computed script-enum gates (5350,5761,6162,6210) may return no_gate_signature if the script tag is not at a fixed input offset -> those fall to inconclusive. NON-DISCRIMINABLE: bloaty_301 (pointer-relation, no corpus), lcms_2137 (no corpus -- though its >0x09 version-byte gate WOULD be a clean decoy test if lcms had on-disk corpora; flagged as a corpus-coverage gap, not a mechanism gap), libpng_4072_h1 (derived length field, no corpus). G2: every test scores corpus byte frequencies, independent of the vpc resolve pattern that defined the shape."
+}

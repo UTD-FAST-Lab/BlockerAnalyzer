@@ -1,0 +1,45 @@
+{
+  "shape": "i2s_vp_LWW_",
+  "n_branches": 9,
+  "label_source": "Layer-1 resolve pattern cmp,vp,vpc,naive = L,W,W,_ : cmplog BLOCKS, value_profile + value_profile_cmplog RESOLVE, naive non-decisive. The only technique delta between the involved winner (vp/vpc) and loser (cmplog) is value_profile's CMP_MAP gradient feedback (both carry the same I2S substitution mutator). So the shape's mechanism is unanimous across all 9 branches: VP CMP_MAP gradient. This test is the INDEPENDENT verification (G2) of that VP-gradient claim.",
+  "hypotheses": [
+    {
+      "id": "vp_gradient_value_distance_climb",
+      "label": "value_profile's CMP_MAP Hamming/prefix-distance gradient drives the corpus to smaller residual value-distance at the gating comparison site(s), so vp/vpc reach the comparison target where cmplog (edge-only, no gradient) stalls at a larger distance",
+      "direction": "vp_pro",
+      "from_prior": ["vp_gradient_single_literal_climb", "vp_gradient_multi_comparison_assembly"],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "gradient_cmp_site", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": ["vp_min_distance", "cmp_min_distance", "distance_closure_ratio"],
+        "params": {
+          "cmp_sites": "per-branch gradient comparison operand(s): libpng_3833 greenx vs 100000(0x000186A0); harfbuzz_6025 cur/cur1/cur2 vs {0x0930,0x094D,0x0907}; harfbuzz_6037 cur vs 0x0A72; harfbuzz_6048 cur/cur1 vs {0x0A72,0x0A3F,0x0A40,0x0A47}; sqlite3_14493 schema/name string compares en route to non-null zDb; libxml2_* DTD-scanner state-literal compares",
+          "distance_metric": "min over resolving-seed-set vs blocking-seed-set of Hamming/prefix residual to the target value; for multi-operand conjunctions take the aggregate (min residual over all required operands)",
+          "scope": "harfbuzz_6025, harfbuzz_6037, harfbuzz_6048, sqlite3_14493 only (on-disk corpus targets); libpng/libxml2 branches carry no on-disk corpus and fall to fallback"
+        }
+      },
+      "prediction": "vp_min_distance < cmp_min_distance with distance_closure_ratio = cmp_min_distance / max(vp_min_distance, eps) >= 1.5 : the vp-resolving seed set lands measurably CLOSER (smaller residual Hamming/prefix distance) to the gating comparison value than the cmplog-blocking seed set. This is discriminating: if the divergence were driven by something OTHER than VP gradient (e.g. an I2S substitution advantage, or a structural-assembly depth the loser also reaches), the two seed sets would close the comparison distance comparably (distance_closure_ratio ~ 1.0) -- I2S substitution is byte-identical across both fuzzers, so an I2S story predicts NO distance gap. A larger vp residual closure is the signature uniquely attributable to the CMP_MAP gradient.",
+      "rule": "distance_closure_ratio >= 1.5 AND vp_min_distance < cmp_min_distance"
+    },
+    {
+      "id": "vp_gradient_depth_reach_corroborant",
+      "label": "corroborating coverage signal: value_profile/vpc reach a deeper point past the gated comparison earlier than cmplog, target-independently (no corpus needed)",
+      "direction": "vp_pro",
+      "from_prior": ["vp_gradient_single_literal_climb", "vp_gradient_multi_comparison_assembly"],
+      "measurement": {
+        "descriptor": {"source": "coverage_timeseries", "compute": "depth_reach", "operand": "gated_branch", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": ["vp_reach_frac", "cmp_reach_frac", "reach_lift"],
+        "params": {
+          "gated_branch": "the blocker branch true-side reach fraction over the 10 trials per fuzzer (already encoded by the LWW_ shape: vp/vpc resolve >=8/10, cmplog blocks >=8/10)",
+          "note": "this metric is derivable for ALL 9 branches from coverage_timeseries (libpng/libxml2 included), so it backstops the corpus-only distance test where the corpus is absent"
+        }
+      },
+      "prediction": "reach_lift = vp_reach_frac - cmp_reach_frac >= 0.5 : vp/vpc reaches the gated branch true side in a clear majority more trials than cmplog. WEAKER as standalone evidence (G2 risk: it is close to the resolve pattern that DEFINED the shape, so it does not independently confirm the GRADIENT mechanism -- it only re-states the divergence). Use ONLY as a corroborant for the value_distance test, and as the sole signal for the no-corpus branches where it cannot stand as independent verification.",
+      "rule": "reach_lift >= 0.5"
+    }
+  ],
+  "decision_order": ["vp_gradient_value_distance_climb", "vp_gradient_depth_reach_corroborant"],
+  "fallback": "inconclusive",
+  "notes": "COLLAPSE: the prior v2 Pass-B split into vp_gradient_single_literal_climb (single comparison: libpng_3833 magnitude threshold, harfbuzz_6037 exact 0x0A72 literal) and vp_gradient_multi_comparison_assembly (conjunctions/state-machines/grammar-trees/cascades: the 7 libxml2/harfbuzz/sqlite3 branches) is COLLAPSED into ONE hypothesis here. Both subtypes share exactly ONE discriminable measurement -- value_distance_reached at the gating cmp-site. No real campaign-data measurement can separate 'one comparison' from 'N comparisons': both manifest identically as the vp-resolving seed set reaching a smaller residual Hamming/prefix distance to the gating value(s) than the cmplog-blocking set (for a conjunction we just aggregate over the required operands). Splitting on comparison COUNT is a source-CFG distinction, not a fuzzer-behavior one the seeds can witness. Fewer sharper hypotheses beat two fuzzy ones, so they merge.\n\nMECHANISM (unanimous): all 9 mechanism_summary entries attribute the divergence to value_profile's CMP_MAP gradient (Hamming/prefix-distance buckets) rewarding partial-match progress that cmplog's edge-only feedback discards. The two involved fuzzers are identical except for value_profile, so I2S is held constant -- the value_distance gap (not an I2S byte-substitution gap) is the falsifiable fingerprint.\n\nNEW DESCRIPTOR / UNBUILT TOOL: seed_set:value_distance_reached:gradient_cmp_site:per_branch is NOT in bench/tool_registry.json (registry has only operand_enrichment = byte_freq_ratio fixed-offset, and joint_necessity = struct_size_and_token_count for the JOINT assembly-depth subtype). Neither fits: operand_enrichment is byte-alignment at a FIXED offset (these gradient operands are dispersed/derived -- greenx is fixed-point-derived, the harfbuzz operands sit at variable glyph indices, the sqlite3/libxml2 ones are assembled dotted/state structures), and joint_necessity measures struct size+token count for a vpc>BOTH joint, not a vp/vpc>cmplog single-technique gradient. So registry_tool=null on both hypotheses; the orchestrator must BUILD the value_distance_reached tool (compute is already in the descriptor_vocabulary). The depth_reach corroborant tool is also unbuilt (compute depth_reach is in-vocab too).\n\nDATA_REALITIES respected: (1) value_profile is a FEEDBACK not a mutator -- invisible in mutation_op; its effect is read off the corpus/what-it-reaches (value-distance), which is exactly value_distance_reached, NOT any seed_lineage 'gradient event' (forbidden). (2) On-disk corpora exist ONLY for curl, harfbuzz, openthread, sqlite3, so the primary distance test scores only harfbuzz_6025/6037/6048 + sqlite3_14493 (4 of 9). The 5 libpng/libxml2 branches (libpng_3833, libxml2_6792, libxml2_6800, libxml2_7069_h0, libxml2_7138_h1) have NO on-disk corpus -> they cannot run the distance test; the depth_reach corroborant covers them but is NOT independent of the resolve pattern (G2), so for those branches the arbiter should treat depth_reach as supporting-only and let fallback=inconclusive carry any that lack a confirmed distance signal. (3) These are dispersed_multibyte/derived operands, so byte-alignment byte_freq_ratio fails -- value_distance_reached is the correct compute. (4) seed-dependent: needs resolving_seeds + blocking_seeds in db/blockers.sqlite (the 286 reps have them).\n\nTARGETS in scope for the decisive distance test: harfbuzz (3 branches), sqlite3 (1 branch). Out of corpus scope (depth_reach only): libpng (1), libxml2 (4)."
+}

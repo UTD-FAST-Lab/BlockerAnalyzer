@@ -1,0 +1,325 @@
+[
+  {
+    "id": "lcms_2143",
+    "family": "i2s_vp/LWWL",
+    "target": "lcms",
+    "branch_id": 2143,
+    "analysis_path": "prompts_a/lcms_2143.analysis.json",
+    "file": "/src/Little-CMS/src/cmsio0.c",
+    "function": "cmsio0.c:validDeviceClass",
+    "line": "751",
+    "source_line": "    case cmsSigOutputClass:",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)",
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "The 4-byte profile DeviceClass field at input offsets 0x0c-0x0f must spell the FOURCC 'prtr' (0x70 0x72 0x74 0x72 = cmsSigOutputClass). The switch in validDeviceClass routes to the line-751 case-arm only when cl == 'prtr'; loser inputs carry a different but valid FOURCC ('mntr' = cmsSigDisplayClass) that resolves at line 750 instead, never hitting the line-751 true side.",
+    "why_winner_satisfies": "Every winner-resolving seed has bytes 70 72 74 72 ('prtr') at offsets 0x0c-0x0f; the BYTE DIFF concentrates W at 0x0c=70(p)x11 and 0x0d=72(r)x11, and the DIVERGENT BRANCHES show the case cmsSigOutputClass arm taken by W (T=11 F=0) while case cmsSigDisplayClass is not.",
+    "why_loser_doesnt": "Every loser-blocking seed has bytes 6d 6e 74 72 ('mntr') at offsets 0x0c-0x0f; the BYTE DIFF concentrates L at 0x0c=6d(m)x20 and 0x0d=6e(n)x20, so the switch routes them to case cmsSigDisplayClass (L 750 T=20 F=0) and the line-751 true side stays blocked (L 751 T=0 F=20).",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient feedback: the switch on cl compiles to integer CMPs against the FOURCC constants; each CMP callback writes a Hamming-distance bucket into CMP_MAP, so an input whose DeviceClass dword is closer to 'prtr' than any seen before adds a new bucket and is preserved as corpus, letting VP ratchet the field from 'mntr' toward 'prtr' byte by byte. naive and cmplog (without the CMP_MAP distance signal) have no gradient toward the exact 4-byte literal and stall on the unrelated valid class 'mntr'."
+  },
+  {
+    "id": "libxml2_6436",
+    "family": "i2s_vp/LWWL",
+    "target": "libxml2",
+    "branch_id": 6436,
+    "analysis_path": "prompts_a/libxml2_6436.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "parser.c:xmlFatalErr",
+    "line": "371",
+    "source_line": "        case XML_ERR_CONDSEC_INVALID_KEYWORD:",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)",
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A well-formed prologue (<?xml version=\"1.0\"?> + <!DOCTYPE a SYSTEM \"dtds/1...\">) that drives the parser deep into an external/internal subset conditional section (<![ ... [), where the keyword token between '<![' and '[' is neither INCLUDE nor IGNORE, so xmlParseConditionalSections takes its else arm and raises XML_ERR_CONDSEC_INVALID_KEYWORD.",
+    "why_winner_satisfies": "Winner-resolving seeds carry the intact magic prefix (06 00 00 00) plus a valid '<?xml version=\"1.0\"?>' declaration and a '<!DOCTYPE a SYSTEM \"dtds/1...' line, so the parser stays well-formed long enough to enter conditional-section parsing and hit the else branch at parser.c:6892-6896; the W overlay marks lines 371-373 and 6892-6896 as winner-only, and the blocker line shows W T=12 vs L T=0.",
+    "why_loser_doesnt": "Loser-blocking seeds corrupt the early bytes (e.g. '...=127772&xml', a NUL inside 'xm.', or a mangled magic 05/57/4d header) so the parser aborts on an earlier error (XML_ERR_DOCUMENT_EMPTY, XML_ERR_XMLDECL_NOT_FINISHED, XML_ERR_ENTITYREF_SEMICOL_MISSING etc., all hot in L) before ever reaching the conditional-section keyword check, leaving the true side of line 371 unvisited (L T=0).",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient feedback: each integer/string CMP on the path to the conditional-section keyword writes a Hamming/prefix-distance bucket, so inputs that get progressively closer to a valid prologue and a recognizable keyword token are retained as corpus even before fully matching. This incremental distance reward lets value_profile and value_profile_cmplog climb the multi-stage parser gate that naive/cmplog (lacking the CMP_MAP bucket signal) cannot, which is the shared value_profile delta across both decisive pairs."
+  },
+  {
+    "id": "libxml2_6466",
+    "family": "i2s_vp/LWWL",
+    "target": "libxml2",
+    "branch_id": 6466,
+    "analysis_path": "prompts_a/libxml2_6466.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "xmlParseCharRef",
+    "line": "2352",
+    "source_line": "\twhile (RAW != ';') { /* loop blocked by count */",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)",
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A decimal character reference of the form '&#' followed by one-or-more ASCII decimal digits ('0'-'9') and then a ';' terminator, so the scanning loop at parser.c:2352 reads digits each iteration (L2359 true) and finally sees RAW == ';' to exit the loop (the globally-blocked false side).",
+    "why_winner_satisfies": "The value_profile / value_profile_cmplog winners resolve the branch in 8/10 trials and actually hit the false (exit) side: at the blocker line the winner shows F=53 hits where the loser shows F=0, and the winner reaches L2372 'if (RAW == ';')' with F=35 while the loser has F=77 only on the true side; the CMP_MAP gradient over the single-byte 'RAW != ;' compare and the digit-range compares at L2359 steadily rewards inputs whose bytes approach ';' (0x3b) and stay in the decimal-digit range.",
+    "why_loser_doesnt": "naive and cmplog blocked the branch in 10/10 and 8/10 trials respectively; at the blocker the loser only ever takes the true side (W F=53 vs L F=0) because its char-ref bytes never form a complete '&#<digits>;' that terminates the loop \u2014 e.g. loser seed 5 contains 'h&#I' where the byte after '&#' is 'I' (non-digit), driving the invalid-charref error break instead of digit-scan-then-';'.",
+    "mechanism_attribution": "value_profile's CMP_MAP records a Hamming/operand-distance bucket for the single-byte comparison RAW != ';' (and the digit-range compares at L2359). Inputs that bring the scanned byte closer to ';' (0x3b) or into '0'-'9' produce new CMP_MAP buckets and are preserved as corpus, giving a gradient toward a well-formed '&#<digits>;' that naive (edge-only) and cmplog (I2S substitution, but ';' is a constant not derived from a logged operand pair the input lacks) do not get. The delta in BOTH decisive pairs is value_profile, isolating CMP_MAP gradient as the enabling technique."
+  },
+  {
+    "id": "libxml2_6687",
+    "family": "i2s_vp/LWWL",
+    "target": "libxml2",
+    "branch_id": 6687,
+    "analysis_path": "prompts_a/libxml2_6687.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "xmlParseExternalSubset",
+    "line": "7137",
+    "source_line": "    while ((ctxt->instate != XML_PARSER_EOF) && (RAW != 0)) {",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)",
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "Bytes that form a structurally valid DTD external-subset body so the parse loop at parser.c:7137 advances through markup declarations and conditional sections rather than tripping the XML_ERR_EXT_SUBSET_NOT_FINISHED error path; the winning side is the false branch (loop continues/exits without halting). This requires the byte stream after the DOCTYPE/SYSTEM header to satisfy the multi-byte token comparisons ('<','!','[' for conditional sections; '<','!'/'?' for markup decls) that gate xmlParseConditionalSections and xmlParseMarkupDecl.",
+    "why_winner_satisfies": "Winner-resolving seeds carry the intact header '<?xml version=\"1' / '<!DOCTYPE a SYSTEM \"dtds/1' and the W-only coverage reaches line 7140 xmlParseConditionalSections, showing the loop body actually parses a conditional section rather than halting. value_profile's CMP_MAP gradient retained the intermediate near-match inputs that incrementally satisfy the byte-comparison gates inside the loop.",
+    "why_loser_doesnt": "Loser-blocking seeds take the true branch and never exit the loop cleanly; one loser seed has its leading bytes corrupted to 'c8 c8 c8 c8 31 32 37 ec ff ff ff', breaking the structured prefix. naive/cmplog lack the CMP_MAP near-match feedback, so they cannot climb the gradient toward a body that drives the loop to the winning side and instead stall on the xmlFatalErr/xmlHaltParser path at 7144-7146.",
+    "mechanism_attribution": "value_profile (and value_profile_cmplog) add CMP_MAP gradient feedback: each intercepted CMP writes a Hamming/prefix-distance bucket, so an input whose operand pair is closer to matching the gated byte comparisons is preserved as corpus. This lets the VP variants ratchet toward a well-formed DTD body. cmplog's I2S alone is insufficient (cmplog loses to value_profile_cmplog), confirming the decisive technique is the value_profile CMP_MAP gradient, not I2S substitution."
+  },
+  {
+    "id": "libxml2_6924_h0",
+    "family": "i2s_vp/LWWL",
+    "target": "libxml2",
+    "branch_id": 6924,
+    "analysis_path": "prompts_a/libxml2_6924.analysis.json",
+    "file": "/src/libxml2/tree.c",
+    "function": "xmlNewNs",
+    "line": "739",
+    "source_line": "    if ((prefix != NULL) && (xmlStrEqual(prefix, BAD_CAST \"xml\"))) {",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)",
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "Input bytes that satisfy the multi-byte string equality gates on the path to xmlNewNs \u2014 the 'xmlns'/'xml:' attribute-name comparisons (att[0]=='x' && att[1]=='m' && att[2]=='l' && att[3]=='n' && att[4]=='s') and xmlStrEqual checks \u2014 so the parser issues a namespace declaration and calls xmlNewNs, then takes the false branch because prefix != 'xml'.",
+    "why_winner_satisfies": "The value_profile winners drive each character-by-character CMP closer to matching via the CMP_MAP distance buckets, so partially-correct namespace tokens are retained and refined until the full 'xmlns' literal is assembled; their branch hitcount climbs to 89 (vp>naive) and 15 (vpc>cmplog) versus the loser's ~1-4, showing repeated successful calls into xmlNewNs.",
+    "why_loser_doesnt": "naive and cmplog get no per-CMP closeness gradient: a partly-correct 'xmlns' token earns no new coverage bucket, so the multi-byte equality is only solved by blind luck \u2014 losers stay blocked in 8/10 trials with branch hitcount of 1-4.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient: each intercepted integer/string CMP writes a (PC, operand-distance bucket) entry, and an input closer to matching adds a new bucket and is preserved, giving a hill-climbing signal that solves the xmlns/xmlStrEqual roadblocks that naive/cmplog must brute-force."
+  },
+  {
+    "id": "libxml2_6925_h0",
+    "family": "i2s_vp/LWWL",
+    "target": "libxml2",
+    "branch_id": 6925,
+    "analysis_path": "prompts_a/libxml2_6925.analysis.json",
+    "file": "/src/libxml2/tree.c",
+    "function": "xmlNewNs",
+    "line": "766",
+    "source_line": "    if (prefix != NULL)",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)",
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "An XML element carrying a default-namespace declaration `xmlns=\"<uri>\"` (no prefix). The SAX attribute path must recognize the literal token x-m-l-n-s on an unprefixed attribute name (SAX2.c L1170/L1724 character gates name[0..5]=='xmlns') and pass a NULL prefix into xmlNewNs at SAX2.c:1214.",
+    "why_winner_satisfies": "value_profile's CMP_MAP gradient feedback rewards inputs that get progressively closer on the byte-wise comparisons that gate the xmlns recognition path (the chained name[0]=='x' && name[1]=='m' ... equality cascade), so it incrementally assembles the literal `xmlns` attribute name and reaches the call site that passes prefix==NULL; the winner resolves the false branch with much higher hitcount (15 vs 1, and 89 vs 4).",
+    "why_loser_doesnt": "naive and cmplog lack the CMP_MAP distance signal; naive must hit the multi-byte `xmlns` literal by blind havoc, and cmplog's I2S substitution only fires when an operand value already appears in the input bytes, so neither gets steady credit for partial progress toward the unprefixed-xmlns token and they sit blocked (8/10).",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient (Hamming/prefix-distance buckets) gives partial-match coverage credit on the xmlns name-comparison cascade, letting it climb the gate that naive/cmplog cannot get steady feedback on."
+  },
+  {
+    "id": "libxml2_6926_h0",
+    "family": "i2s_vp/LWWL",
+    "target": "libxml2",
+    "branch_id": 6926,
+    "analysis_path": "prompts_a/libxml2_6926.analysis.json",
+    "file": "/src/libxml2/tree.c",
+    "function": "xmlFreeNs",
+    "line": "835",
+    "source_line": "    if (cur->prefix != NULL) xmlFree((char *) cur->prefix);",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)",
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "A well-formed XML document whose tree contains a namespace declaration with a non-NULL prefix (e.g. an element like '<b k:9' introducing a prefixed name), so that xmlFreeNs is later invoked on an xmlNs whose cur->prefix != NULL and the false side of the if at tree.c:835 is taken.",
+    "why_winner_satisfies": "value_profile / value_profile_cmplog resolve the branch in 9-10/10 trials and hit the branch many more times (winner hitcount 15-89 vs loser 1-4); their CMP_MAP gradient feedback rewards inputs that get progressively closer to satisfying the integer/string comparisons gating XML parsing, so they assemble the prefixed-namespace tree state that drives xmlFreeNs.",
+    "why_loser_doesnt": "cmplog and naive block the branch in 8/10 trials with branch hitcount of only 1 and 4; their loser-blocking seeds keep mutating the leading length/header bytes (e.g. corrupted '06 00 00 00' / 'ff 7f ff ff' prefixes) and never stabilize the parse path that constructs and then frees a prefix-bearing namespace.",
+    "mechanism_attribution": "CMP_MAP gradient: value_profile and value_profile_cmplog write each intercepted CMP into a distance-bucketed CMP_MAP and preserve any input that brings a comparand pair closer to matching, giving a hill-climbing gradient over the parser comparisons that naive (no CMP_MAP) and plain cmplog (CMP buffer only, no gradient feedback) lack."
+  },
+  {
+    "id": "libxml2_6948_h0",
+    "family": "i2s_vp/LWWL",
+    "target": "libxml2",
+    "branch_id": 6948,
+    "analysis_path": "prompts_a/libxml2_6948.analysis.json",
+    "file": "/src/libxml2/tree.c",
+    "function": "xmlSearchNs",
+    "line": "6182",
+    "source_line": "\t\tif ((cur->prefix == NULL) && (nameSpace == NULL) &&",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)",
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "An element with a default namespace attribute (xmlns=\"URI\" with no prefix), so a parsed nsDef node has cur->prefix==NULL while the lookup is performed with nameSpace==NULL, and cur->href!=NULL \u2014 satisfying the 6182/6183 true conjunction.",
+    "why_winner_satisfies": "value_profile / vpc winning seeds carry the literal xmlns= default-namespace token (e.g. value_profile seed 5 shows lns=\"1.0 and the naive_ctx seed shows xlins markup); the CMP_MAP distance feedback rewards inputs that get progressively closer to the well-formed xmlns attribute and namespace-URI string compares, so value_profile's corpus accumulates inputs that actually construct a default-namespace nsDef.",
+    "why_loser_doesnt": "naive and cmplog stay on the false side (L6182 T=0 F=180): their blocking seeds carry only a prefixed/no-namespace structure, so the parsed nsDef never has prefix==NULL with nameSpace==NULL, and execution falls through to the prefixed compare at 6185 (L T=180 F=0) instead of returning at 6184.",
+    "mechanism_attribution": "value_profile's CMP_MAP Hamming/prefix-distance feedback preserves inputs that move the namespace-related CMP operands closer to matching, gradient-climbing the string/structure needed to emit a default namespace decl that naive/cmplog edge-only feedback cannot reward."
+  },
+  {
+    "id": "libxml2_7143_h0",
+    "family": "i2s_vp/LWWL",
+    "target": "libxml2",
+    "branch_id": 7143,
+    "analysis_path": "prompts_a/libxml2_7143.analysis.json",
+    "file": "/src/libxml2/valid.c",
+    "function": "valid.c:xmlValidateNmtokensValueInternal",
+    "line": "3779",
+    "source_line": "    if (!xmlIsDocNameChar(doc, val))",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)",
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "A DTD declaring an attribute of type NMTOKENS or ENUMERATION (so xmlValidateNmtokensValueInternal is invoked) whose attribute value's first non-blank character is NOT a doc NameChar, driving the !xmlIsDocNameChar test true and the early return(0) at line 3780.",
+    "why_winner_satisfies": "value_profile/value_profile_cmplog winners resolve the branch (10/10 and 8/10) and hit the true side (W: line 3780 [W], L3779 T=29 F=0), i.e. they synthesise an attribute value whose leading char is rejected by xmlIsDocNameChar; the CMP_MAP gradient over the character-class comparisons inside xmlIsDocNameChar lets value_profile incrementally evolve a byte that lands in the rejected class.",
+    "why_loser_doesnt": "naive and cmplog losers stay blocked (8/10) and instead take the false side, falling into the xmlIsDocNameChar acceptance loop at line 3782 onward (L marks 3782-3810, L3779 T=0 F=58); their attribute values keep starting with an accepted NameChar so the true branch is never reached.",
+    "mechanism_attribution": "value_profile (and value_profile_cmplog) add a CMP_MAP keyed by operand-distance buckets; the integer-CMP comparisons that implement xmlIsDocNameChar's character-class test produce new distance buckets as a candidate byte approaches a value outside the accepted NameChar set, preserving intermediate inputs as corpus and letting the fuzzer climb to a rejected leading character. The single-technique delta in both pairs is value_profile (vpc vs cmplog and vp vs naive both add only the CMP_MAP gradient)."
+  },
+  {
+    "id": "libxml2_7317_h0",
+    "family": "i2s_vp/LWWL",
+    "target": "libxml2",
+    "branch_id": 7317,
+    "analysis_path": "prompts_a/libxml2_7317.analysis.json",
+    "file": "/src/libxml2/xmlsave.c",
+    "function": "xmlsave.c:xmlNsDumpOutput",
+    "line": "603",
+    "source_line": "\tif (cur->prefix != NULL) {",
+    "covers_pairs": [
+      "value_profile_cmplog>cmplog (value_profile)",
+      "value_profile>naive (value_profile)"
+    ],
+    "what_input_feature": "An XML element bearing a namespace declaration whose prefix is NULL (a default namespace, e.g. xmlns=\"...\"), rather than a prefixed namespace (xmlns:foo=\"...\"). The serializer reaches line 603 and the cur->prefix!=NULL test is FALSE, so it writes the 5-byte \"xmlns\" at line 607 instead of \"xmlns:\"+prefix at 604-605.",
+    "why_winner_satisfies": "value_profile / value_profile_cmplog winners resolve the false side (only [W] hits line 607 'xmlns'); their CMP_MAP gradient feedback rewards inputs that drive the parser progressively closer to constructing a namespace node with prefix==NULL, so they synthesize a well-formed default-namespace declaration that round-trips into the dump path with cur->prefix NULL.",
+    "why_loser_doesnt": "naive and cmplog losers only ever take the true side (line 603 BLOCKER shows W F=43 vs L T=11, and [L] marks lines 604-605 'xmlns:'); they reach xmlNsDumpOutput only with prefixed namespaces, so cur->prefix is non-NULL and the false branch is never executed (loser hitcount on branch = 0/1).",
+    "mechanism_attribution": "CMP_MAP gradient: value_profile's per-CMP Hamming/prefix-distance buckets give partial credit on the comparison sequence that the parser must satisfy to construct a default-namespace node, letting it ratchet toward the prefix==NULL structure that naive (no gradient) and cmplog (gradient absent) cannot incrementally discover."
+  },
+  {
+    "id": "sqlite3_14437",
+    "family": "i2s_vp/LWWL",
+    "target": "sqlite3",
+    "branch_id": 14437,
+    "analysis_path": "prompts_b/sqlite3_14437.analysis.json",
+    "file": "/src/sqlite3/bld/sqlite3.c",
+    "function": "sqlite3.c:sqlite3VdbeExec",
+    "line": "86940",
+    "source_line": "case OP_ShiftLeft:              /* same as TK_LSHIFT, in1, in2, out3 */",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)",
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A syntactically valid SQL statement (a SELECT with an expression) that lexes a shift token (<< or >>), so the parser emits an OP_ShiftLeft/OP_ShiftRight VDBE opcode and the interpreter dispatches into the shift case at line 86940. This requires correct multi-byte SQL keyword and operator tokens, not just any bytes.",
+    "why_winner_satisfies": "All winner-resolving seeds begin with the literal keyword 'SELECT' and carry repeated structured token runs ('+:L', '+#L'), i.e. a real SQL expression that reaches the VDBE; the winner takes the true branch (T=4) and only the winner enters the case body (line 86950 fires T=4 for W, T=0 for L).",
+    "why_loser_doesnt": "Loser-blocking seeds are short malformed fragments ('SELEEC .`', '\"\"/\"\" ', '``g..;') that never lex into a SELECT with a shift expression; the loser's coverage shows T=0 at the OP_ShiftLeft case and the whole VDBE opcode dispatch row is T=0 F=40 for L versus T=4 for W.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs whose CMP operands move closer to matching (matching-prefix length for the string CMPs in SQL's keyword/token tables, Hamming-distance bucket for integer CMPs). This lets value_profile incrementally assemble the valid SELECT-with-shift syntax that the parser requires, whereas naive (and cmplog without value_profile) get no partial-match credit and stall on the all-or-nothing keyword/operator comparisons. Both decisive pairs add exactly value_profile, isolating CMP_MAP gradient as the enabling technique."
+  },
+  {
+    "id": "sqlite3_14475",
+    "family": "i2s_vp/LWWL",
+    "target": "sqlite3",
+    "branch_id": 14475,
+    "analysis_path": "prompts_b/sqlite3_14475.analysis.json",
+    "file": "/src/sqlite3/bld/sqlite3.c",
+    "function": "sqlite3.c:lookupName",
+    "line": "97837",
+    "source_line": "  if( zDb ){",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)",
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "SQL text that parses as a three-part qualified name 'X.Y.Z' (two dots) reaching the TK_DOT case in resolveExprStep, so lookupName is called with zDb != 0; reaching the true side of `if( zDb )` at line 97837.",
+    "why_winner_satisfies": "The winner-resolving seed is 'SELECT M.L. .L.4 ...' with multiple '.' (0x2e) separators producing dotted X.Y.Z tokens; per-role overlay shows the winner alone hits lines 97838-97861 (the zDb body) and line 98387 lookupName call after the TK_DOT path, and the blocker count shows W T=1 vs L T=0 at L97837.",
+    "why_loser_doesnt": "Loser-blocking seeds are 'SELECT CC........' / 'SELECT+SSE++++++' with no two-dot qualified-name structure, so the parser yields TK_ID (or no dotted name) and lookupName is called with zDb==0; the overlay marks the zDb-body lines as not-hit for L and the blocker shows L T=0 F=20.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient feedback rewards inputs whose CMP operands get closer to producing the dotted-name token structure: each near-match on the byte comparisons in the tokenizer/parser adds a new CMP_MAP distance bucket, preserving partial-progress seeds so the rare two-dot qualified-name layout is assembled incrementally. Naive/cmplog (without CMP_MAP) lack this gradient and only rarely stumble onto the structure via havoc."
+  },
+  {
+    "id": "sqlite3_14479",
+    "family": "i2s_vp/LWWL",
+    "target": "sqlite3",
+    "branch_id": 14479,
+    "analysis_path": "prompts_b/sqlite3_14479.analysis.json",
+    "file": "/src/sqlite3/bld/sqlite3.c",
+    "function": "sqlite3.c:lookupName",
+    "line": "97941",
+    "source_line": "    if( zDb==0 && zTab!=0 && cntTab==0 ){",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)",
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A SQL statement whose column expression names a table/column that survives lookupName's SrcList scan so cntTab becomes non-zero before line 97941 (e.g. a qualified reference like 'M.L' whose table prefix matches a SrcList table name via sqlite3StrICmp), making zDb==0 && zTab!=0 && cntTab==0 false.",
+    "why_winner_satisfies": "The winner-resolving seed begins 'SELECT M.L' \u2014 a dotted table.column token. Per-role coverage shows the winner alone walks the zDb/table-matching block (97847-97861) and the rowid path at 98025, and at the blocker line 97941 it takes the false side (T=0 F=1 for W), i.e. cntTab incremented so the trigger-fallback guard is false.",
+    "why_loser_doesnt": "Loser-blocking seeds carry degenerate column tokens ('SELECT CC...', 'SELECT+SS...') that do not match any SrcList table, so cntTab stays 0; the loser exclusively reaches the double-quoted-string / error path at 98116-98162 and at line 97941 takes only the true side (T=0 F=20 for L) \u2014 the trigger/upsert fallback.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient feedback: the sqlite3StrICmp calls comparing the input column/table token against schema names emit Hamming/matching-prefix distance buckets; an input whose token is closer to a real table/column name produces a new CMP_MAP bucket and is preserved, letting value_profile climb toward a token that fully matches and increments cntTab, which naive (edge-only) cannot gradient toward."
+  },
+  {
+    "id": "sqlite3_14589",
+    "family": "i2s_vp/LWWL",
+    "target": "sqlite3",
+    "branch_id": 14589,
+    "analysis_path": "prompts_b/sqlite3_14589.analysis.json",
+    "file": "/src/sqlite3/bld/sqlite3.c",
+    "function": "sqlite3.c:sqlite3ExprCodeTarget",
+    "line": "103568",
+    "source_line": "",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)",
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A SELECT statement whose result expression is a chain of relational/arithmetic operators (the winning seed is `SELECT \\t22&22%22>>22...`), so sqlite3ExprCodeTarget is invoked on an operator-node Expr that drives the codegen path through line 103568 on its TRUE side, rather than a trivial integer literal.",
+    "why_winner_satisfies": "The winning seed (value_profile_cmplog, 51 bytes) is `SELECT` followed by `22&22%22>>22222...` \u2014 a long expression with `&`, `%`, `>` operators feeding the expression-codegen walk, and the branch is hit (avg hitcount on branch winner=8, loser=0).",
+    "why_loser_doesnt": "The loser-blocking seeds are bare/short queries (`SELECT 1;`, `SELECT 1:C:...`) with no operator-expression chain, so sqlite3ExprCodeTarget's operator arm at 103568 never takes its TRUE side (loser hitcount=0).",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient feedback: each integer/relational CMP inside the expression evaluation writes a (PC, operand-distance bucket) entry; an input whose operand pair is closer to matching adds a new CMP_MAP bucket and is preserved as corpus, letting value_profile incrementally build the operator-laden expression that reaches the codegen arm. naive and plain cmplog lack the CMP_MAP distance feedback and never get the gradient reward, so they stall on trivial SELECTs."
+  },
+  {
+    "id": "sqlite3_14623",
+    "family": "i2s_vp/LWWL",
+    "target": "sqlite3",
+    "branch_id": 14623,
+    "analysis_path": "prompts_b/sqlite3_14623.analysis.json",
+    "file": "/src/sqlite3/bld/sqlite3.c",
+    "function": "sqlite3.c:sqlite3TwoPartName",
+    "line": "111036",
+    "source_line": "",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)",
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "An input that the SQL parser accepts deeply enough to call sqlite3TwoPartName and take its true branch at line 111036 \u2014 i.e. byte sequences forming valid SQL keyword/identifier tokens (e.g. a statement beginning 'vacuum'/SELECT-like text and ';'-delimited clauses) that satisfy the chained integer/string comparisons in the lexer and parser CMPs leading to the blocker.",
+    "why_winner_satisfies": "Both winning-resolving seeds begin with recognizable SQL token bytes ('vacuum') and ';'-delimited clause structure, and the blocker line is hit only by W (W=T=2 F=2 vs L=T=0 F=20). The fuzzers that resolve it are exactly the two carrying value_profile feedback; value_profile preserves intermediate inputs whose lexer/parser CMP operands are progressively closer to matching, building a gradient toward the full token sequence the parser requires.",
+    "why_loser_doesnt": "The loser-blocking seeds are short, malformed fragments ('SELEEC .`', '\"\"/\"\"', random byte runs) that fail early lexer/parser comparisons and never reach the blocker's true side (L hits L111036 only T=0 F=20). naive and cmplog lack the CMP_MAP distance bucket, so they receive no smooth 'getting closer' reward and cannot ratchet toward the multi-comparison parser path.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient: each intercepted integer/string comparison in the SQLite lexer/parser writes an operand-distance (Hamming / matching-prefix) bucket; an input whose CMP operands are closer to matching adds a new bucket and is kept as corpus, letting the fuzzer climb the chain of comparisons gating sqlite3TwoPartName. naive (no CMP_MAP) and cmplog (CMP buffer feeds I2S substitution, not distance feedback) lack this gradient, so adding value_profile is the decisive delta in both pairs."
+  },
+  {
+    "id": "sqlite3_14675",
+    "family": "i2s_vp/LWWL",
+    "target": "sqlite3",
+    "branch_id": 14675,
+    "analysis_path": "prompts_b/sqlite3_14675.analysis.json",
+    "file": "/src/sqlite3/bld/sqlite3.c",
+    "function": "sqlite3.c:sqlite3Vacuum",
+    "line": "138735",
+    "source_line": "",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)",
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "An input that lexes/parses into a VACUUM statement reaching sqlite3Vacuum and satisfying the line-138735 condition on its true side; the seed begins with the 'vacuum' keyword plus additional structured trailing bytes (';', token bytes) that complete the parse path into the VACUUM reduce action.",
+    "why_winner_satisfies": "Both winner-resolving seeds begin with the literal 'vacuum'/';vacuum' keyword and carry substantial structured trailing bytes (e.g. seed aa08bf50: ';vacuum\\n\\nEL.;...' 139 bytes; seed 8cb368bd: 'vacuum''m''d''''''' 115 bytes). value_profile's CMP_MAP records operand-distance buckets for the integer/string comparisons in the lexer/parser, so partial-match inputs that are progressively closer to a valid VACUUM-reduce parse are preserved as corpus, climbing the gradient to take the true branch (winner avg hitcount on branch=4 / =2).",
+    "why_loser_doesnt": "Loser-blocking seeds either are the bare 6-byte 'vacuum' (seed 84fc92d4) or 'vacuum' plus short noisy suffixes (seeds a68a9e5a, c8a20ace, f035a5db) that take the false side of L138735 (loser hitcount on branch=0; L138735 shows T=0 F=4). naive and cmplog lack the CMP_MAP distance feedback, so they get no partial-progress credit toward the parser comparisons that gate the true branch and remain blocked ~9/10 trials for 15-18h.",
+    "mechanism_attribution": "value_profile's CMP_MAP gradient: each intercepted CMP writes a (PC, operand-distance bucket) entry, and an input producing a closer-than-seen comparison pair adds a new bucket and is kept. This Hamming/prefix-distance feedback lets value_profile incrementally build the parser comparisons gating sqlite3Vacuum's true branch; naive and cmplog (the losers) lack CMP_MAP, which is the single technique delta in both decisive pairs."
+  },
+  {
+    "id": "sqlite3_14765",
+    "family": "i2s_vp/LWWL",
+    "target": "sqlite3",
+    "branch_id": 14765,
+    "analysis_path": "prompts_b/sqlite3_14765.analysis.json",
+    "file": "/src/sqlite3/bld/sqlite3.c",
+    "function": "sqlite3.c:yy_reduce",
+    "line": "157966",
+    "source_line": "",
+    "covers_pairs": [
+      "value_profile>naive (value_profile)",
+      "value_profile_cmplog>cmplog (value_profile)"
+    ],
+    "what_input_feature": "A byte sequence that parses into the specific SQL grammar production whose reduce action is dispatched at yy_reduce:157966 \u2014 i.e. real SQL keyword tokens (e.g. 'vacuum', ';') laid out so the LALR parser reaches that reduce rule, rather than malformed/garbage token streams that fault out earlier.",
+    "why_winner_satisfies": "Both winner-resolving seeds carry literal SQL keyword bytes: Seed 1 begins ';vacuum\\n\\n' and Seed 2 begins 'vacuum' followed by quote/semicolon punctuation, so they tokenize into a recognized statement that drives the parser to the true side of L157966 (W: T=2 F=17).",
+    "why_loser_doesnt": "Loser-blocking seeds are short, malformed token soup ('SELEEC .`', '\"\"/\"\" ', 'T 1; c BINARY...') that never tokenize into the production reaching the reduce action \u2014 the false side dominates (L: T=0 F=131) so the true branch is never taken across naive/cmplog runs.",
+    "mechanism_attribution": "value_profile adds CMP_MAP gradient feedback: each integer/string CMP records a Hamming/prefix-distance bucket, so a partial keyword match (e.g. progressively matching 'vacuum') is rewarded with a new coverage bucket and preserved as corpus. This lets value_profile / value_profile_cmplog climb toward the exact token strings the grammar needs, whereas naive and cmplog (lacking CMP_MAP) get no gradient on these keyword comparisons and stall."
+  }
+]

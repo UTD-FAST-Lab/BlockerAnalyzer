@@ -1,0 +1,128 @@
+[
+  {
+    "id": "libxml2_6383",
+    "family": "i2s_vp/W__L",
+    "target": "libxml2",
+    "branch_id": 6383,
+    "analysis_path": "prompts_a/libxml2_6383.analysis.json",
+    "file": "/src/libxml2/entities.c",
+    "function": "xmlGetPredefinedEntity",
+    "line": "307",
+    "source_line": "        case 'a':",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "A parsed entity-reference name (passed as `name` to xmlGetPredefinedEntity) whose first byte name[0] equals 'a' (0x61), so the switch(name[0]) selects `case 'a':`; concretely the predefined entity names &amp; or &apos; reaching the function via xmlSAX2GetEntity.",
+    "why_winner_satisfies": "The cmplog winner repeatedly reaches and resolves the 'a'-case: it takes the true side 63 times (W T=63 F=0 at line 307) and the enclosing function shows hitcount 130 on the branch for the winner, indicating the entity-name dispatch lands on 'a' and exercises the amp/apos xmlStrEqual comparisons (lines 308/310 hit only on the W side).",
+    "why_loser_doesnt": "The naive loser never selects `case 'a':` (L T=0 F=479 at line 307); every one of its 479 invocations falls through to `default:` (L T=479 F=0 at line 317), so name[0] is never 'a' and the amp/apos comparison lines 308/310 are never reached (T=0 F=0 for the loser).",
+    "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer, which captures the operands of the switch dispatch on name[0] and the xmlStrEqual(name, \"amp\"/\"apos\") string comparisons, then substitutes the logged constant operand ('a', \"amp\", \"apos\") into the input bytes at the offsets where the current name appears, manufacturing entity names that route through `case 'a':`; naive has only blind havoc/token mutation and no CMP introspection, so it must stumble onto the exact first byte by chance and almost never does."
+  },
+  {
+    "id": "libxml2_6402",
+    "family": "i2s_vp/W__L",
+    "target": "libxml2",
+    "branch_id": 6402,
+    "analysis_path": "prompts_a/libxml2_6402.analysis.json",
+    "file": "/src/libxml2/hash.c",
+    "function": "xmlHashAddEntry3",
+    "line": "572",
+    "source_line": "\t    for (insert = &(table->table[key]); insert->next != NULL;",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "An XML document that registers at least two distinct named entries (name/name2/name3 triples) in xmlHashAddEntry3 whose computed key collides into the same bucket, so the bucket already holds a linked chain (table->table[key] has a non-NULL ->next) when a later entry is added.",
+    "why_winner_satisfies": "cmplog resolves the branch in 8/10 trials with avg hitcount 1 on the branch; its I2SRandReplace mutator substitutes logged comparison operands from the chain-walk equality checks (insert->name == name) back into input bytes, producing several distinct-yet-related names that accumulate in one bucket and grow the ->next chain so the for-loop guard's true side is taken.",
+    "why_loser_doesnt": "naive resolves only 1/10 trials with avg hitcount 0; its havoc/token mutators flip bytes blindly and tend to produce a single distinct name or no collision, so the bucket stays empty (insert == NULL via valid == 0) or holds exactly one entry with ->next == NULL, leaving the true branch untaken.",
+    "mechanism_attribution": "cmplog's I2SRandReplace reads the CmpLogObserver buffer recorded at the name-equality comparisons in the chain-walk and splices a matched operand into the input at the offset where it appeared, generating extra hash entries that share a bucket; this comparison-introspection capability is exactly what naive lacks, explaining the cmplog>naive divergence."
+  },
+  {
+    "id": "libxml2_6674_h0",
+    "family": "i2s_vp/W__L",
+    "target": "libxml2",
+    "branch_id": 6674,
+    "analysis_path": "prompts_a/libxml2_6674.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "xmlParseMarkupDecl",
+    "line": "6969",
+    "source_line": "\t        case '-':",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "A '<!' followed by a '-' byte at the NXT(2) position, so the switch on NXT(2) selects case '-' and calls xmlParseComment. The single discriminating byte is the '-' (0x2d) immediately after '<!'.",
+    "why_winner_satisfies": "cmplog intercepts the switch comparison on NXT(2) against the constant '-' as a CMP callback; I2SRandReplace can read that operand and substitute the literal '-' at the matching input offset after '<!', flipping an existing '<!E'/'<!A' markup decl into '<!--'.",
+    "why_loser_doesnt": "naive has only havoc/token mutators and no CMP introspection; its corpus seeds carry '<!DOCTYPE'/SYSTEM markup (case 'E'/'A'/'N' arms) and it never lands the exact '-' byte at NXT(2) within budget, so case '-' stays at T=0 for all 10 trials.",
+    "mechanism_attribution": "cmplog's I2SRandReplace substitutes the logged switch operand '-' at the NXT(2) byte offset, which plain naive havoc cannot reliably hit; this is the input-to-state comparison-solving technique distinguishing cmplog from naive."
+  },
+  {
+    "id": "libxml2_6818",
+    "family": "i2s_vp/W__L",
+    "target": "libxml2",
+    "branch_id": 6818,
+    "analysis_path": "prompts_a/libxml2_6818.analysis.json",
+    "file": "/src/libxml2/parser.c",
+    "function": "parser.c:xmlParseTryOrFinish",
+    "line": "11539",
+    "source_line": "\t\tif (cur == 0) {",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "The byte at the parser cursor when it reaches XML_PARSER_START with avail>=2 (i.e. the first content byte after the 4-byte encoding-detection prefix is consumed) must be 0x00, so that the comparison `cur == 0` at parser.c:11539 evaluates true and takes the document-empty/halt path.",
+    "why_winner_satisfies": "cmplog winner seeds carry embedded NUL bytes near the cursor region (e.g. Seed 3 has 00 at offset 0x2b, Seed 4 has 00 at offset 0x28), and on the branch the winner takes the true side (W L11539 T=8 F=0) reaching lines 11540-11551 marked [W]. cmplog's I2SRandReplace can read the intercepted `cur == 0` operand and splice a 0x00 byte at the matching input offset.",
+    "why_loser_doesnt": "naive never resolves (0/10, blocked=10/10); at the branch it takes only the false side (L L11539 T=0 F=73), so its cursor byte is non-zero at the moment the START case is evaluated. naive seeds contain NUL bytes only at non-cursor offsets (e.g. Seed 1 at 0x02-0x03, Seed 3 at 0x00-0x02) that get consumed or shifted out of the decisive cursor position; naive has no CMP introspection to deliberately place 0x00 there.",
+    "mechanism_attribution": "cmplog intercepts the single-byte comparison `cur == 0` via __sanitizer_cov_trace_cmp and records operand 0 in the CmpLogObserver buffer; I2SRandReplace then substitutes 0x00 into the input at the offset feeding the cursor, deterministically driving the true branch. naive can only reach 0x00 by blind havoc, which is improbable at the exact cursor position."
+  },
+  {
+    "id": "curl_167",
+    "family": "i2s_vp/W__L",
+    "target": "curl",
+    "branch_id": 167,
+    "analysis_path": "prompts_b/curl_167.analysis.json",
+    "file": "/src/curl/lib/http.c",
+    "function": "Curl_http_range",
+    "line": "2858",
+    "source_line": "    if(((httpreq == HTTPREQ_GET) || (httpreq == HTTPREQ_HEAD)) &&",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "The harness input must parse into a well-formed HTTP request whose method maps to HTTPREQ_GET or HTTPREQ_HEAD and which enables a range (data->state.use_range), so the true branch at http.c:2858 fires; this requires non-zero method/URL/header tokens at specific offsets (e.g. the 'po'/'://127.0.0'/method bytes) rather than an all-zero buffer.",
+    "why_winner_satisfies": "Winner cmplog seeds carry concentrated ASCII request structure \u2014 bytes like '70 6f' ('po'), '33 3a 2f 2f 31 32 37 2e 30 2e 30' ('3://127.0.0'), '38 35 30' ('850'), and '47 70 72 6f 6d 3a 20' ('Gprom: ') \u2014 that decode to a GET/HEAD request with range state, so use_range is true at 2852 and the GET/HEAD test at 2858 takes T, reaching free()/aprintf at 2861-2863 ([W] lines).",
+    "why_loser_doesnt": "The naive loser seed is almost entirely zero bytes (offsets 0x06,0x07,0x09-0x12,0x24-0x31 all 0x00 where the winner has ASCII), so it does not decode to a GET/HEAD method; it reaches use_range true (L2852 T=1) but fails the GET/HEAD test, taking F at 2858 into the POST/PUT else-if at 2865 ([L] lines).",
+    "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer (recording the operands of the httpreq==HTTPREQ_GET/HEAD integer compares and the strcmp/memcmp of method/header tokens) and substitutes the matching constant operand into the input at the compared offset, manufacturing the exact method/token bytes that naive can only reach by blind havoc."
+  },
+  {
+    "id": "curl_68",
+    "family": "i2s_vp/W__L",
+    "target": "curl",
+    "branch_id": 68,
+    "analysis_path": "prompts_b/curl_68.analysis.json",
+    "file": "/src/curl/lib/fopen.c",
+    "function": "Curl_fopen",
+    "line": "59",
+    "source_line": "  if(stat(filename, &sb) == -1 || !S_ISREG(sb.st_mode)) {",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "A structurally valid protocol request (e.g. a pop3://host:port URL plus mail-style headers) that survives curl's URL/protocol parsing and reaches the cookie/HSTS save code path, which then calls Curl_fopen and takes the T side of the stat()==-1 || !S_ISREG guard.",
+    "why_winner_satisfies": "Winner seeds contain a parseable scheme+authority (pop3://127.0.0.1:9001/850) and RFC822-style From:/To: headers, giving the well-formed protocol structure needed to reach Curl_fopen and resolve the T side (the cov overlay marks line 64 'goto fail' [W] and the T-side branch at line 59 fires only for W).",
+    "why_loser_doesnt": "Loser seeds are short/degenerate byte runs (e.g. a 10-byte zero-padded blob, or repetitive +./-/% noise) that do not parse into a valid scheme+authority, so curl never drives the save path to the resolving outcome; on the loser side line 59 is hit 51 times on F only and the F-side return CURLE_OK (line 63 [L]) dominates.",
+    "mechanism_attribution": "cmplog's I2SRandReplace reads the post-execution CmpLogObserver buffer and substitutes one CMP operand for the other at matching input offsets, letting it plant the literal scheme/authority and field bytes that curl's parser compares against; naive only has havoc/token mutators with no CMP introspection, so it rarely synthesizes the structured prefix needed to reach the guard's T side."
+  },
+  {
+    "id": "sqlite3_14791",
+    "family": "i2s_vp/W__L",
+    "target": "sqlite3",
+    "branch_id": 14791,
+    "analysis_path": "prompts_b/sqlite3_14791.analysis.json",
+    "file": "/src/sqlite3/bld/sqlite3.c",
+    "function": "sqlite3.c:sqlite3GetToken",
+    "line": "159609",
+    "source_line": "",
+    "covers_pairs": [
+      "cmplog>naive (I2S)"
+    ],
+    "what_input_feature": "Bytes at offsets 0x00-0x06 must spell the SQL token 'SELECT ' (53 45 4c 45 43 54 20) followed by a lexically valid arithmetic-token stream (digits, '+','-','.', '\\r') so sqlite3GetToken classifies the next character into the token class whose true branch at line 159609 is exercised.",
+    "why_winner_satisfies": "All 5 cmplog winner seeds start with the exact bytes '53 45 4c 45 43 54 20' (SELECT followed by space) and continue with '8+3' arithmetic plus repeating digit/'+'/'-'/'.' bytes; the byte-diff shows offsets 0x00-0x06 are uniformly S,E,L,E,C,T,space across all 9 winner instances.",
+    "why_loser_doesnt": "Loser naive seeds are short malformed strings (e.g. '111E.T', '1ES...', '9999EEEE...') that never reconstruct the 'SELECT ' prefix or a valid arithmetic token sequence, so the tokenizer never reaches the true side at 159609.",
+    "mechanism_attribution": "cmplog intercepts the integer/string CMP callbacks inside sqlite3GetToken's character-class comparisons and records both operands; I2SRandReplace then substitutes the expected token bytes (SELECT keyword chars and operator chars) into the input, building the valid token stream that naive's blind havoc cannot assemble."
+  }
+]
