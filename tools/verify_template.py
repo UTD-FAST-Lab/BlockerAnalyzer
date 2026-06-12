@@ -62,9 +62,20 @@ DEFAULT_IMAGE = "libafl-base"
 CONTAINER_SCRIPT = r"""
 set -u
 mkdir -p /w/seeds
-# Neutral seed wide enough for multi-byte gates (>=8 bytes covers the magic
-# templates); harness size guards handle shorter knobs.
-printf 'AAAAAAAAAAAAAAAA' > /w/seeds/s0
+# Seeding policy: if the template dir ships a `seeds/` directory (mounted at
+# /tpl/seeds), use those structured seed files verbatim. This is required for
+# harnesses whose mechanism lives PAST a deep gauntlet (e.g. the anchored
+# structure-preservation port: the test isolates trap behavior only if the
+# starting input already satisfies magic + whitelist sites, so the fuzzers do
+# not spend the whole budget — confounded by I2S — just reaching the trap).
+# Otherwise fall back to a neutral 16-byte seed (covers multi-byte magic
+# gates; harness size guards handle shorter knobs). Backward-compatible:
+# templates with no seeds/ dir behave exactly as before.
+if [ -d /tpl/seeds ] && [ -n "$(ls -A /tpl/seeds 2>/dev/null)" ]; then
+  cp /tpl/seeds/* /w/seeds/
+else
+  printf 'AAAAAAAAAAAAAAAA' > /w/seeds/s0
+fi
 "${FUZZER}_${CCEXT}" --libafl "-D${PARAM}=${VAL}" "/tpl/${SRC}" -o /w/harness 2>/w/build.log
 if [ ! -x /w/harness ]; then echo "BUILD_FAIL"; sed -n '1,40p' /w/build.log; exit 3; fi
 cd /w
@@ -111,10 +122,14 @@ def parse_direction(params):
     return m.group(1), m.group(2)
 
 
-def run_cell(image, tpl_dir, src, param, val, fuzzer, trials, duration, ccext):
-    """One container: build harness at -Dparam=val, run `trials` trials."""
+def run_cell(image, tpl_dir, src, param, val, fuzzer, trials, duration, ccext,
+             name=None):
+    """One container: build harness at -Dparam=val, run `trials` trials.
+    `name` (optional) names the container so `docker ps` shows what each
+    one is responsible for."""
     cmd = [
         "docker", "run", "--rm", "--entrypoint", "bash",
+        *(["--name", name] if name else []),
         "-v", f"{tpl_dir.resolve()}:/tpl:ro",
         "-e", f"PARAM={param}", "-e", f"VAL={val}", "-e", f"FUZZER={fuzzer}",
         "-e", f"TRIALS={trials}", "-e", f"DURATION={duration}",
@@ -144,6 +159,52 @@ def run_cell(image, tpl_dir, src, param, val, fuzzer, trials, duration, ccext):
 
 def med(xs):
     return statistics.median(xs) if xs else 0.0
+
+
+def judge_multi(scan_values, winners, losers, per_fuzzer_med, per_fuzzer_trials):
+    """Generalized verdict for a decisive-fuzzer SET (multi-fuzzer ordering).
+    winners/losers = lists of fuzzer names predicted W / L (the non-'_' decisive
+    set). Acceptance = the WEAKEST winner still beats the STRONGEST loser at the
+    high knob, with the dose-response holding for every fuzzer. Reduces EXACTLY
+    to judge() when len(winners)==len(losers)==1. '_' (non-decisive) fuzzers are
+    not passed in and not scored."""
+    if not winners or not losers:
+        return "inconclusive", {"reason": "decisive set lacks a W and/or an L fuzzer"}
+    lo, hi = scan_values[0], scan_values[-1]
+    w_hi = min(per_fuzzer_med[hi][f] for f in winners)   # weakest winner
+    l_hi = max(per_fuzzer_med[hi][f] for f in losers)    # strongest loser
+    w_lo = min(per_fuzzer_med[lo][f] for f in winners)
+    l_lo = max(per_fuzzer_med[lo][f] for f in losers)
+    if all(per_fuzzer_med[sv][f] == 0 for sv in scan_values for f in (*winners, *losers)):
+        return "inconclusive", {"reason": "no crashes anywhere; harness inert"}
+
+    margin_hi = w_hi > l_hi
+    losers_drop = all(per_fuzzer_med[hi][f] < per_fuzzer_med[lo][f]
+                      or per_fuzzer_med[hi][f] == 0 for f in losers)
+    winners_hold = all(per_fuzzer_med[hi][f] > 0
+                       and per_fuzzer_med[hi][f] >= 0.5 * max(per_fuzzer_med[lo][f],
+                                                              per_fuzzer_med[hi][f])
+                       for f in winners)
+    ratio_hi = w_hi / max(l_hi, 0.5)
+    w_trials = [x for f in winners for x in per_fuzzer_trials[hi][f]]
+    l_trials = [x for f in losers for x in per_fuzzer_trials[hi][f]]
+    strict_hi = bool(w_trials) and bool(l_trials) and min(w_trials) > max(l_trials)
+    signals = {"winners": winners, "losers": losers,
+               "weakest_winner_high": w_hi, "strongest_loser_high": l_hi,
+               "ratio_high": round(ratio_hi, 2), "margin_at_high": margin_hi,
+               "losers_degrade": losers_drop, "winners_hold_high": winners_hold,
+               "strict_per_trial_at_high": strict_hi}
+    if not margin_hi:
+        if l_hi > w_hi:
+            return "refuted", {**signals, "reason": "a loser out-crashes a winner at high end"}
+        return "inconclusive", {**signals, "reason": "no separation at high end"}
+    strong = losers_drop and winners_hold and (ratio_hi >= 3 or l_hi == 0)
+    if strong and strict_hi:
+        return "reproduced", signals
+    if strong:
+        return "reproduced_in_median", signals
+    return "partially_reproduced", {**signals,
+                                    "reason": "weakest winner > strongest loser but weak margin"}
 
 
 def judge(scan_values, winner, loser, per_fuzzer_med, per_fuzzer_trials):
