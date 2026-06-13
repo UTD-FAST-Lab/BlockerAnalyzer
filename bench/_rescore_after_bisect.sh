@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -e
-cd /home/miao/work/BlockerAnalyzer
+# Portable: cd to the repo root (this script lives in bench/), so it runs on
+# either server regardless of checkout path.
+cd "$(dirname "$0")/.."
+# Server tag + on-disk targets come from the environment so server B can run
+# this verbatim: BENCH_SERVER=sB BENCH_ONDISK=lcms,libxml2,libpng,bloaty ./bench/_rescore_after_bisect.sh
+: "${BENCH_SERVER:=s4}"
+export BENCH_SERVER
 # NOTE: run this AFTER seed_bisect has finished (do not rely on a pgrep wait —
 # matching a process by command-string self-matches any shell holding that string).
 echo "[rescore] bisection done; rebuilding OE label set (now-seeded branches included)"
@@ -38,8 +44,8 @@ print(f"[rescore] OE labels: {len(rows)} branches | arms {dict(armc)}")
 PY
 echo "[rescore] re-running operand_enrichment study (corpus reload)..."
 python3 bench/tools/i2s_operand_availability.py study --label-csv csvs/arb_oe_labels.csv --out csvs/arb_operand_enrich.csv --sample 8000 --head 256
-echo "[rescore] arbiter --all"
-BENCH_SERVER=s4 python3 bench/arbitrate.py --all
+echo "[rescore] arbiter --all (server=$BENCH_SERVER)"
+python3 bench/arbitrate.py --all
 echo "[rescore] build_dataset"
 python3 bench/build_dataset.py
 echo "[rescore] DONE"
