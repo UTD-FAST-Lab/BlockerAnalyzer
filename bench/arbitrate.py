@@ -170,6 +170,17 @@ def depth_arms(shape, bid, con):
     return (w, l) if wn >= 2 and ln >= 2 else (None, None)
 
 
+def branch_seed_counts(bid, con):
+    """Total resolving / blocking seeds across all fuzzers for a branch.
+    A low count (<3 either side) is the seed-starvation signature that the
+    rank-10 re-bisect recovers (runbook step 2) -> a FIXABLE inconclusive."""
+    nw = con.execute("select count(*) from resolving_seeds where branch_id=?",
+                     (bid,)).fetchone()[0]
+    nl = con.execute("select count(*) from blocking_seeds where branch_id=?",
+                     (bid,)).fetchone()[0]
+    return nw, nl
+
+
 def run_tool(tool, target, bid, extra):
     cmd = list(TOOL_CMD[tool]) + ["--target", target, "--branch-id", str(bid)] + extra
     try:
@@ -344,6 +355,8 @@ def arbitrate_shape(shape):
         sig["_depth_winner"], sig["_depth_loser"] = dw, dl
         cache = {}
         label = None
+        n_decidable = 0   # hypotheses we actually attempted (decidable + has a rule)
+        n_scorable = 0    # of those, how many produced metrics (met is not None)
         for hid in order:
             h = hyp_by_id.get(hid)
             if not h or h.get("decidable") is False:
@@ -351,6 +364,7 @@ def arbitrate_shape(shape):
             rule = h.get("rule")
             if not rule:
                 continue
+            n_decidable += 1
             meas = h.get("measurement") or {}
             compute = (meas.get("descriptor") or {}).get("compute") if isinstance(meas, dict) else None
             is_vd = (meas.get("registry_tool") == "value_distance_reached"
@@ -361,6 +375,7 @@ def arbitrate_shape(shape):
                                    force_vd=is_vd, force_jn=is_jn_pair, force_depth=is_depth)
             if met is None:
                 continue  # unscorable by this hypothesis (no operand / unbuilt tool)
+            n_scorable += 1
             applied = rule
             ok = eval_rule(rule, met)
             if ok is None and is_vd and "distance_gap" in met:
@@ -376,8 +391,35 @@ def arbitrate_shape(shape):
                                                       if not k.startswith("_") and k != "gate_offsets"}}
                 break
         if label is None:
+            # Distinguish the two epistemically different inconclusives (G3):
+            #  - rule_not_met : a rule WAS scored and evaluated false -> honest,
+            #                   the mechanism is not supported by campaign data.
+            #  - unmeasurable : no decidable hypothesis could be measured. Split
+            #                   seed-starved (FIXABLE via rank-10 re-bisect) from
+            #                   genuinely-unmeasurable (no operand / unbuilt tool).
+            #  - decidable_false_only : every hypothesis is decidable:false
+            #                   (corpus-scale / non-discriminable by design).
+            if n_decidable == 0:
+                kind, reason = ("decidable_false_only",
+                                "all hypotheses decidable:false (corpus-scale / non-discriminable)")
+            elif n_scorable > 0:
+                kind, reason = ("rule_not_met",
+                                f"tested: {n_scorable}/{n_decidable} rule(s) scored, none held "
+                                "(mechanism not supported by campaign data)")
+            else:
+                nw, nl = branch_seed_counts(bid, con)
+                if nw < 3 or nl < 3:
+                    kind, reason = ("seed_starved",
+                                    f"unscorable: insufficient seeds (W={nw}, L={nl}; need >=3 each) "
+                                    "-> rank-10 re-bisect candidate")
+                else:
+                    kind, reason = ("unmeasurable",
+                                    "unscorable: measurement unavailable (no operand / unbuilt tool) "
+                                    f"though seeds present (W={nw}, L={nl})")
             assignments.append({"branch": sid, "target": target, "status": "inconclusive",
-                                "reason": "no hypothesis rule matched / unscorable"})
+                                "reason": reason,
+                                "diag": {"kind": kind, "n_decidable": n_decidable,
+                                         "n_scorable": n_scorable}})
         else:
             assignments.append(label)
     con.close()
