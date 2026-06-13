@@ -45,7 +45,12 @@ SERVER = os.environ.get("BENCH_SERVER", "s4")
 # pre-run in STUDY mode (one corpus load per target) into this CSV; the arbiter
 # reads the cache instead of invoking it per branch. joint_necessity and
 # value_distance_reached read small SEED sets, so per-branch subprocess is fine.
-OE_CACHE_CSV = ROOT / "csvs" / "arb_operand_enrich.csv"
+# Per-server OE cache: each server pre-runs the corpus-heavy study on its OWN
+# corpora and writes a server-tagged file, so the caches never collide in shared
+# git. Falls back to the legacy unsuffixed name for single-server / pre-split runs.
+OE_CACHE_CSV = ROOT / "csvs" / f"arb_operand_enrich_{SERVER}.csv"
+if not OE_CACHE_CSV.exists():
+    OE_CACHE_CSV = ROOT / "csvs" / "arb_operand_enrich.csv"
 OE_CACHE = {}
 TOOL_CMD = {
     "joint_necessity": ["python3", "bench/tools/joint_necessity.py", "branch"],
@@ -318,7 +323,12 @@ def shape_tokens(shape, target):
         return "acsp,mntr,scnr,prtr,XYZ ,Lab ,RGB ,GRAY,CMYK,mft2,mAB ,mBA ,curv,para,text"
     if target == "sqlite3":
         return "SELECT,CREATE,TABLE,INSERT,WHERE,FROM,VALUES,INDEX,PRAGMA,<<,||"
-    return None  # joint_necessity default (sfnt tags) for harfbuzz/others
+    if target == "libpng":
+        # PNG structural chunk-type codes (the grammar tokens a grammar-aware
+        # mutator/grimoire places). bloaty (ELF/Mach-O binaries) has no
+        # token-family branches in the signature set, so it stays on the default.
+        return "IHDR,PLTE,IDAT,IEND,tRNS,gAMA,cHRM,sRGB,iCCP,tEXt,zTXt,iTXt,bKGD,pHYs,sBIT,hIST,tIME"
+    return None  # joint_necessity default (sfnt tags) for harfbuzz/bloaty/others
 
 
 def branch_target(con, bid):
