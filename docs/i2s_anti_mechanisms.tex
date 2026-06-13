@@ -1,0 +1,274 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{enumitem}
+
+\definecolor{kw}{RGB}{0,90,160}
+\definecolor{cmt}{RGB}{110,110,110}
+\definecolor{gatehl}{RGB}{200,30,30}
+
+\lstdefinestyle{src}{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{kw}\bfseries,
+  commentstyle=\color{cmt}\itshape,
+  numberstyle=\tiny\color{cmt},
+  numbers=left, numbersep=6pt,
+  frame=single, framesep=4pt,
+  breaklines=true, showstringspaces=false,
+  columns=fullflexible,
+}
+\lstdefinestyle{bytes}{
+  basicstyle=\ttfamily\small,
+  frame=single, framesep=4pt,
+  breaklines=true, showstringspaces=false,
+}
+
+\newcommand{\ste}{\texttt{signed\_target\_enrich}}
+\newcommand{\de}{\texttt{decoy\_enrich}}
+
+\title{Three Ways Input-to-State Mutation \emph{Hurts}:\\
+A Byte-Level Account of the I2S-Anti Mechanisms}
+\author{BlockerAnalyzer benchmark --- I2S-anti family}
+\date{2026-06-13}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+In the BlockerAnalyzer benchmark, 41 decisive blocker branches are labeled
+\emph{I2S-anti}: branches the input-to-state (I2S / cmplog) fuzzer
+\emph{fails} to reach while a non-I2S arm (naive havoc or value-profile)
+succeeds. All three I2S-anti sub-mechanisms share one measured signature ---
+on the real campaign corpus, the cmplog arm is \emph{depleted} of the byte
+value the winning arm reaches --- but they differ in \emph{why}. This note
+defines the measurement at the byte level, then walks one specific branch per
+mechanism with its real gate offset(s), byte values, and corpus statistics.
+\end{abstract}
+
+\section{The shared measurement: \texttt{operand\_enrichment}}
+
+Every I2S-anti label is decided by one tool,
+\texttt{i2s\_operand\_availability.py} (registry name
+\texttt{operand\_enrichment}), run directly on the two campaign corpora.
+The tool reads no source and assumes no mechanism; it measures bytes:
+
+\begin{enumerate}[itemsep=2pt]
+  \item \textbf{Gate signature.} Compare the branch's \emph{resolving} (W)
+  seeds against its \emph{blocking} (L) seeds. The \emph{gate offsets} are the
+  byte positions at which W and L seeds systematically disagree (consensus
+  purity $\ge$ threshold). At each gate offset, the W-consensus byte is the
+  \textbf{target} pattern, the L-consensus byte is the \textbf{decoy} pattern.
+  \item \textbf{Corpus fractions.} For each fuzzer $F\in\{\textrm{cmplog},
+  \textrm{naive}\}$, scan $F$'s saved corpus and compute
+  \texttt{target\_frac}$_F$ (fraction whose head matches the full target
+  pattern at all gate offsets) and \texttt{decoy\_frac}$_F$ (fraction matching
+  the decoy pattern).
+  \item \textbf{Signed enrichment.}
+  \[
+    \texttt{signed\_target\_enrich}=\log_2\!\frac{\texttt{target\_frac}_{\textrm{cmplog}}}
+    {\texttt{target\_frac}_{\textrm{naive}}},\qquad
+    \texttt{decoy\_enrich}=\log_2\!\frac{\texttt{decoy\_frac}_{\textrm{cmplog}}}
+    {\texttt{decoy\_frac}_{\textrm{naive}}}.
+  \]
+\end{enumerate}
+
+\noindent A value \ste{}$<0$ means cmplog's corpus contains the target byte
+\emph{less} often than naive's --- I2S is steering bytes \emph{away} from the
+value that resolves the branch. All three labels require
+\ste{}$<-0.3$; they are separated by the decisive \emph{shape} (which fuzzers
+win/lose) and by \emph{what} the decoy is.
+
+\begin{table}[h]\centering
+\caption{The three I2S-anti mechanisms at a glance. Shape code is over
+$[\text{cmplog},\text{vp},\text{vpc},\text{naive}]$ with W=win / L=loss /
+\_=non-decisive.}
+\label{tab:overview}
+\begin{tabular}{@{}llll@{}}
+\toprule
+label & shape & decoy is\ldots & rule \\
+\midrule
+\texttt{i2s\_decoy\_substitution\_target\_depletion} & \texttt{LW\_W} &
+  a competing real operand & \ste{}$<-0.3$ \emph{and} gate present \\
+\texttt{i2s\_anti\_structural\_byte\_corruption}     & \texttt{LWWW} &
+  --- (blind overwrite) & \ste{}$<-0.3$ \\
+\texttt{i2s\_decoy\_substitution\_overfit}           & \texttt{LWLW} &
+  a structural ``stay-valid'' literal & \ste{}$<-0.3$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ======================================================================
+\section{Mechanism 1 --- \texttt{target\_depletion}: a rival operand wins the harvest}
+\label{sec:depletion}
+\textbf{Example branch: \texttt{libpng\_3977}} (validated, $n=23$ for this label).
+
+The gate is a single byte. \texttt{operand\_enrichment} found
+\texttt{gate\_offsets} $=[236]$, \texttt{gate\_width} $=1$. The branch is the
+\texttt{cHRM} (chromaticity) chunk handler comparing a parsed fixed-point value
+to the error sentinel:
+
+\begin{lstlisting}[style=src,language=C,
+  caption={\texttt{/src/libpng/pngrutil.c:1283}, \texttt{OSS\_FUZZ\_png\_handle\_cHRM}.
+  The gate byte at input offset 236 feeds \texttt{xy.bluex}.},label={lst:libpng}]
+   if (xy.redx   == PNG_FIXED_ERROR ||
+       xy.redy   == PNG_FIXED_ERROR ||
+       xy.greenx == PNG_FIXED_ERROR ||
+       xy.greeny == PNG_FIXED_ERROR ||
+       xy.bluex  == PNG_FIXED_ERROR ||   /* <-- decisive branch 3977 */
+       xy.bluey  == PNG_FIXED_ERROR)
+      /* error path: chunk rejected */
+\end{lstlisting}
+
+At offset 236 the resolving seeds carry the \textbf{target byte
+\texttt{0x00}}; the blocking seeds carry the \textbf{decoy byte \texttt{0x65}}
+(ASCII \texttt{'e'}). The decoy is not random: it is the exponent character of
+ASCII numeric literals (\texttt{"1.0e0"}, \texttt{"65.535"}) that cmplog
+harvests from \emph{other} string/number comparisons in the PNG parser and
+splices in via \texttt{I2SRandReplace}:
+
+\begin{lstlisting}[style=bytes,caption={Hex window over bytes 228--244 around
+  the gate byte (in brackets at offset 236). Top: a resolving (W) seed. Bottom:
+  a blocking (L) cmplog seed --- note the embedded ASCII float 1.0e0 whose
+  e (0x65) lands exactly on the gate.},label={lst:libpngbytes}]
+W (resolving, naive)  : 02 02 02 02 02 75 30 00 [00] ea 60 20 00 79 98 00 00
+L (blocking,  cmplog) : 2f 62 61 72 00 31 2e 30 [65] 30 00 36 35 2e 35 33 35
+                                       (  "1.0e0"  )         ( "65.535" )
+\end{lstlisting}
+
+\begin{table}[h]\centering
+\caption{\texttt{libpng\_3977} operand\_enrichment metrics
+(\texttt{--sample 8000 --head 256}). cmplog is depleted of the target
+\texttt{0x00} and enriched in the decoy \texttt{0x65}.}
+\label{tab:libpng}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+quantity & cmplog & naive \\
+\midrule
+corpus size scanned                 & 4561   & 4447   \\
+\texttt{target\_frac} (byte \texttt{0x00} @236) & 0.0886 & 0.1565 \\
+\texttt{decoy\_frac}  (byte \texttt{0x65} @236) & 0.6290 & 0.3929 \\
+\midrule
+\multicolumn{3}{@{}l}{$\ste=\log_2(0.0886/0.1565)=\mathbf{-0.821}$ \quad(target depleted)}\\
+\multicolumn{3}{@{}l}{$\de=\log_2(0.6290/0.3929)=\mathbf{+0.679}$ \quad(decoy enriched)}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Reading:} a real, abundant competing operand (the textual
+\texttt{0x65}) exists at the same byte position. cmplog logs it and
+RandReplaces it in, \emph{pinning} 63\% of its corpus to the decoy and dropping
+the target \texttt{0x00} to 8.9\% (vs.\ 15.7\% for naive, which never harvests
+the decoy and drifts onto the target freely). The extra rule clause
+\texttt{skip != 'no\_gate\_signature'} guarantees a genuine two-operand
+competition, not noise.
+
+% ======================================================================
+\section{Mechanism 2 --- \texttt{byte\_corruption}: blind RandReplace clobbers an assembled byte}
+\label{sec:corruption}
+\textbf{Example branch: \texttt{harfbuzz\_5831}} (validated; server-a target).
+
+Shape \texttt{LWWW}: cmplog is the \emph{sole} loser (naive, value\_profile,
+and vpc all win) --- the clean fingerprint of ``only the I2S mutator breaks
+this.'' Here there is no clever rival operand. Naive havoc \emph{assembles} the
+correct structural byte; cmplog's \texttt{I2SRandReplace} blindly overwrites
+that exact position with a logged value, \emph{destroying} the byte rather than
+redirecting it to a single dominant decoy.
+
+\begin{table}[h]\centering
+\caption{\texttt{harfbuzz\_5831} operand\_enrichment metrics. The target byte
+is depleted in cmplog ($\ste<0$); decoy fractions are small in absolute terms
+(diffuse corruption), not one dominant rival.}
+\label{tab:hb5831}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+quantity & cmplog & naive \\
+\midrule
+\texttt{target\_frac} & 0.2113 & 0.3799 \\
+\texttt{decoy\_frac}  & 0.0293 & 0.0030 \\
+\midrule
+\multicolumn{3}{@{}l}{$\ste=\mathbf{-0.882}$ \quad(target byte clobbered out of cmplog's corpus)}\\
+\multicolumn{3}{@{}l}{$\de=\mathbf{+2.64}$ \quad(weak, low-absolute --- diffuse, not a single decoy)}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Reading:} the structural byte is present in 38\% of naive's
+corpus but only 21\% of cmplog's --- I2S keeps overwriting it. Contrast with
+Mechanism~1: there the decoy is a \emph{single abundant} value
+(\texttt{decoy\_frac}$=0.63$); here the decoy mass is small and scattered
+(\texttt{decoy\_frac}$=0.029$), the signature of \emph{corruption} (random
+clobber) rather than \emph{competition} (capture by one rival).
+
+% ======================================================================
+\section{Mechanism 3 --- \texttt{overfit}: capture by a ``stay-valid'' literal, never exploring the free byte}
+\label{sec:overfit}
+\textbf{Example branch: \texttt{harfbuzz\_5323}} (validated; server-a target).
+
+Shape \texttt{LWLW}: both I2S carriers (cmplog and, by the shape, the
+value-profile arm) lose; the winning gate is a \emph{free byte} that naive/VP
+can hit by random mutation. cmplog instead gets \emph{captured} by a
+\emph{structural literal} elsewhere in the input --- it keeps splicing that
+literal to keep the input well-formed, and as a result \emph{never randomizes}
+the free-byte target. It ``overfits'' to structural validity.
+
+\begin{table}[h]\centering
+\caption{\texttt{harfbuzz\_5323} operand\_enrichment metrics --- the extreme
+case. cmplog's corpus is half the structural decoy; naive's has almost none.}
+\label{tab:hb5323}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+quantity & cmplog & naive \\
+\midrule
+\texttt{target\_frac} & 0.0816 & 0.5083 \\
+\texttt{decoy\_frac}  & 0.5075 & 0.0004 \\
+\midrule
+\multicolumn{3}{@{}l}{$\ste=\mathbf{-2.64}$ \quad(target free-byte present in 51\% of naive vs 8\% of cmplog)}\\
+\multicolumn{3}{@{}l}{$\de=\mathbf{+10.4}$ \quad(structural literal dominates cmplog, near-absent in naive)}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Reading:} this is the strongest anti-signal in the family.
+cmplog spends 51\% of its corpus re-asserting the structural literal
+(\texttt{decoy\_frac}$_{\textrm{cmplog}}=0.5075$ vs.\
+$0.0004$ for naive) and collapses the winning free byte to 8\% (vs.\ 51\% for
+naive). Where Mechanism~1 is \emph{two operands competing} and Mechanism~2 is
+\emph{one byte being corrupted}, Mechanism~3 is \emph{a validity trap}: I2S is
+``succeeding'' at keeping the input structurally valid and thereby starving the
+one position that actually matters.
+
+% ======================================================================
+\section{Side-by-side}
+\begin{table}[h]\centering
+\caption{The discriminating contrast. All three have \ste{}$<0$ (target
+depleted in cmplog); the \emph{decoy} statistics separate them.}
+\label{tab:contrast}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+ & \textbf{M1 depletion} & \textbf{M2 corruption} & \textbf{M3 overfit} \\
+ & \texttt{libpng\_3977} & \texttt{harfbuzz\_5831} & \texttt{harfbuzz\_5323} \\
+\midrule
+shape                         & \texttt{LW\_W} & \texttt{LWWW} & \texttt{LWLW} \\
+\ste{}                        & $-0.82$ & $-0.88$ & $-2.64$ \\
+\de{}                         & $+0.68$ & $+2.64$ & $+10.4$ \\
+\texttt{decoy\_frac} cmplog   & 0.629 & 0.029 & 0.508 \\
+\texttt{decoy\_frac} naive    & 0.393 & 0.003 & 0.0004 \\
+decoy character               & one abundant rival & diffuse / none & one structural literal \\
+winner gate                   & competing operand & assembled byte & free byte \\
+one-line                      & rival wins harvest & byte clobbered & validity trap \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Provenance note.} \texttt{libpng\_3977} is a server-sB target;
+its gate offset, target/decoy bytes, and seed windows above were extracted
+directly from the on-disk campaign corpus. \texttt{harfbuzz\_5831} and
+\texttt{harfbuzz\_5323} are server-a targets; their metric values are taken
+verbatim from \texttt{step5b\_new\_v3/*/assignments\_s4.json}, but their
+per-offset byte windows are computed on server a's corpus and are not
+reproduced here.
+
+\end{document}
