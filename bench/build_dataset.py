@@ -103,6 +103,7 @@ def main():
                               "shape_source": f"step5b_new_v3/{shp}/evidence_test.json"},
                 "evidence": {"status": asg.get("status"), "rule": asg.get("rule"),
                              "metrics": asg.get("metrics"), "reason": asg.get("reason"),
+                             "diag": asg.get("diag"),
                              "report": f"step5b_new_v3/{shp}/assignments_{srv}.json"},
                 "server": srv,
             })
@@ -118,6 +119,14 @@ def main():
     byfam = collections.Counter(r["mechanism"]["label"] for r in val)
     print("\nvalidated by mechanism label:")
     for k, v in byfam.most_common():
+        print(f"  {v:3d}  {k}")
+    # inconclusive breakdown by diagnostic kind (G3 transparency: separate honest
+    # "rule scored, didn't hold" from FIXABLE seed-starvation and not-yet-scored)
+    inc = [r for r in rows if r["evidence"]["status"] == "inconclusive"]
+    bykind = collections.Counter((r["evidence"].get("diag") or {}).get("kind", "not_scored")
+                                 for r in inc)
+    print(f"\ninconclusive by diagnostic kind ({len(inc)} total):")
+    for k, v in bykind.most_common():
         print(f"  {v:3d}  {k}")
 
 

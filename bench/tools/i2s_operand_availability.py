@@ -148,20 +148,30 @@ def offset_freqs_from_cache(heads, gate):
             "n": max(seen.values()) if seen else 0}
 
 
-def analyze_branch(target, branch_id, sample, head, purity, cache=None):
+def analyze_branch(target, branch_id, sample, head, purity, cache=None,
+                   winner="cmplog", loser="naive"):
+    """Enrichment of the target operand in the WINNER fuzzer's corpus vs the
+    LOSER's, at the branch's gate offsets. Default winner/loser = cmplog/naive
+    (the canonical I2S-pro/anti contrast). For vpc-only-winner shapes (_LWL etc.)
+    cmplog is non-decisive, so the canonical contrast measures the wrong arms;
+    pass winner=value_profile_cmplog, loser=value_profile to isolate the I2S
+    contribution over the VP-only blocker. The signed_target_enrich field is
+    arm-agnostic in NAME, so the arbiter's rule keeps working unchanged."""
     gate, nw, nl = gate_signature(target, branch_id, head, purity)
     if not gate:
         return {"target": target, "branch_id": branch_id, "skip": "no_gate_signature",
-                "n_w_seeds": nw, "n_l_seeds": nl}
+                "n_w_seeds": nw, "n_l_seeds": nl,
+                "winner_fuzzer": winner, "loser_fuzzer": loser}
     if cache is None:
-        cache = {"cmplog": load_corpus_sample(target, "cmplog", sample, head),
-                 "naive": load_corpus_sample(target, "naive", sample, head)}
-    cm = offset_freqs_from_cache(cache["cmplog"], gate) if cache.get("cmplog") else None
-    nv = offset_freqs_from_cache(cache["naive"], gate) if cache.get("naive") else None
+        cache = {winner: load_corpus_sample(target, winner, sample, head),
+                 loser: load_corpus_sample(target, loser, sample, head)}
+    cm = offset_freqs_from_cache(cache[winner], gate) if cache.get(winner) else None
+    nv = offset_freqs_from_cache(cache[loser], gate) if cache.get(loser) else None
     if not cm or not nv:
         return {"target": target, "branch_id": branch_id, "skip": "no_corpus",
-                "gate_offsets": sorted(gate)}
-    # per-offset log2 enrichment of target/decoy byte in cmplog vs naive corpus
+                "gate_offsets": sorted(gate),
+                "winner_fuzzer": winner, "loser_fuzzer": loser}
+    # per-offset log2 enrichment of target/decoy byte in winner vs loser corpus
     offs = sorted(set(cm["target_freq"]) & set(nv["target_freq"]))
     t_enr = [math.log2((cm["target_freq"][o] + EPS) / (nv["target_freq"][o] + EPS)) for o in offs]
     d_enr = [math.log2((cm["decoy_freq"][o] + EPS) / (nv["decoy_freq"][o] + EPS)) for o in offs]
@@ -169,8 +179,10 @@ def analyze_branch(target, branch_id, sample, head, purity, cache=None):
     decoy = statistics.median(d_enr) if d_enr else 0.0
     return {
         "target": target, "branch_id": branch_id,
+        "winner_fuzzer": winner, "loser_fuzzer": loser,
         "gate_offsets": offs, "gate_width": len(offs),
         "n_w_seeds": nw, "n_l_seeds": nl,
+        # column names retain cmplog_/naive_ for backward-compat (= winner_/loser_)
         "cmplog_target_frac": round(statistics.median(list(cm["target_freq"].values())) if cm["target_freq"] else 0, 5),
         "naive_target_frac": round(statistics.median(list(nv["target_freq"].values())) if nv["target_freq"] else 0, 5),
         "cmplog_decoy_frac": round(statistics.median(list(cm["decoy_freq"].values())) if cm["decoy_freq"] else 0, 5),
@@ -192,10 +204,17 @@ def main():
     b.add_argument("--sample", type=int, default=15000)
     b.add_argument("--head", type=int, default=48)
     b.add_argument("--purity", type=float, default=0.6)
+    b.add_argument("--winner-fuzzer", default="cmplog",
+                   help="corpus enriched in the operand (default cmplog; "
+                        "use value_profile_cmplog for vpc-only-winner shapes)")
+    b.add_argument("--loser-fuzzer", default="naive",
+                   help="contrast corpus lacking the winner's I2S advantage "
+                        "(default naive; use value_profile to isolate I2S in vpc shapes)")
 
     s = sub.add_parser("study")
     s.add_argument("--label-csv", required=True,
-                   help="CSV with columns: label,target,branch_id (label in {pro,anti})")
+                   help="CSV columns: label,target,branch_id [,winner,loser]. "
+                        "Optional per-row winner/loser override the cmplog/naive default.")
     s.add_argument("--out", required=True)
     s.add_argument("--sample", type=int, default=15000)
     s.add_argument("--head", type=int, default=48)
@@ -205,7 +224,9 @@ def main():
 
     if args.cmd == "branch":
         print(json.dumps(analyze_branch(args.target, args.branch_id,
-                                        args.sample, args.head, args.purity), indent=1))
+                                        args.sample, args.head, args.purity,
+                                        winner=args.winner_fuzzer,
+                                        loser=args.loser_fuzzer), indent=1))
         return
 
     import csv
@@ -213,25 +234,31 @@ def main():
     with open(args.label_csv) as fh:
         for r in csv.DictReader(fh):
             t = r["target"].strip()
+            # per-row arm override (default to the canonical cmplog/naive contrast)
+            winner = (r.get("winner") or "").strip() or "cmplog"
+            loser = (r.get("loser") or "").strip() or "naive"
             by_target.setdefault(t, []).append(
-                (r["label"].strip(), int(r["branch_id"])))
+                (r["label"].strip(), int(r["branch_id"]), winner, loser))
 
     rows = []
     for target, items in by_target.items():
-        # load this target's cmplog/naive corpus sample ONCE, reuse for all branches
-        print(f"== loading {target} corpus sample (cmplog,naive) ...", flush=True)
-        cache = {"cmplog": load_corpus_sample(target, "cmplog", args.sample, args.head),
-                 "naive": load_corpus_sample(target, "naive", args.sample, args.head)}
-        ncm = len(cache["cmplog"] or []); nnv = len(cache["naive"] or [])
-        print(f"   {target}: cmplog={ncm} naive={nnv} heads cached", flush=True)
-        for label, bid in items:
-            res = analyze_branch(target, bid, args.sample, args.head, args.purity, cache=cache)
+        # load each distinct fuzzer corpus sample for this target ONCE (the corpus
+        # is shared across branches); arms vary per row (cmplog/naive vs vpc/vp).
+        needed = sorted({a for _, _, w, l in items for a in (w, l)})
+        print(f"== loading {target} corpus samples ({','.join(needed)}) ...", flush=True)
+        cache = {fz: load_corpus_sample(target, fz, args.sample, args.head) for fz in needed}
+        print("   " + " ".join(f"{fz}={len(cache[fz] or [])}" for fz in needed)
+              + " heads cached", flush=True)
+        for label, bid, winner, loser in items:
+            res = analyze_branch(target, bid, args.sample, args.head, args.purity,
+                                 cache=cache, winner=winner, loser=loser)
             res["label"] = label
             rows.append(res)
             tag = res.get("skip") or f"signed={res.get('signed_target_enrich')}"
-            print(f"  [{label:4s}] {target}/{bid}: {tag}", flush=True)
+            print(f"  [{label:4s}] {target}/{bid} ({winner}/{loser}): {tag}", flush=True)
 
-    keys = ["label", "target", "branch_id", "signed_target_enrich", "decoy_enrich", "anti_score",
+    keys = ["label", "target", "branch_id", "winner_fuzzer", "loser_fuzzer",
+            "signed_target_enrich", "decoy_enrich", "anti_score",
             "cmplog_target_frac", "naive_target_frac", "cmplog_decoy_frac",
             "naive_decoy_frac", "gate_width", "gate_offsets", "n_w_seeds", "n_l_seeds",
             "cmplog_corpus_n", "naive_corpus_n", "skip"]
