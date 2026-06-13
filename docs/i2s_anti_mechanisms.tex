@@ -261,16 +261,23 @@ would subtype these honestly, but the present I2S-anti member set is too small
 branch, so it is left as a noted refinement rather than a new mechanism.
 
 % ======================================================================
-\section{Mechanism 3 --- \texttt{overfit}: capture by a ``stay-valid'' literal, never exploring the free byte}
+\section{Mechanism 3 --- \texttt{overfit}: structural over-fitting that starves a \emph{semantic} (exotic-script) gate}
 \label{sec:overfit}
 \textbf{Example branch: \texttt{harfbuzz\_5323}} (validated; server-a target).
 
-Shape \texttt{LWLW}: both I2S carriers (cmplog and, by the shape, the
-value-profile arm) lose; the winning gate is a \emph{free byte} that naive/VP
-can hit by random mutation. cmplog instead gets \emph{captured} by a
-\emph{structural literal} elsewhere in the input --- it keeps splicing that
-literal to keep the input well-formed, and as a result \emph{never randomizes}
-the free-byte target. It ``overfits'' to structural validity.
+Shape \texttt{LWLW}: both I2S carriers (cmplog and the value-profile-cmplog arm)
+lose; naive and value-profile win. \textbf{Unlike M1/M2 the decisive gate is not
+an input byte at all} --- \texttt{harfbuzz\_5323} is
+\texttt{hb\_script\_get\_horizontal\_direction:594}, \texttt{case
+HB\_SCRIPT\_THAANA}, so the branch resolves iff the \emph{decoded text carries
+Thaana-script codepoints} (\texttt{U+0780--07BF}), a \emph{semantic} property
+harfbuzz computes from the text, with no fixed input offset. cmplog \emph{does
+reach} the branch (it is a genuine blocker, hit-status $2/8/0$ --- reaches the
+\texttt{switch} every trial, returns \texttt{LTR} for its non-RTL text); what it
+fails to do is \emph{produce} exotic-script text, because its \texttt{I2SRandReplace}
+keeps splicing harvested structural literals (font table tags, magic) that bias
+the corpus toward structurally-valid, ASCII/Latin fonts. It ``overfits'' to
+structural validity and thereby starves the script the gate needs.
 
 \begin{table}[h]\centering
 \caption{\texttt{harfbuzz\_5323} operand\_enrichment metrics --- the extreme
@@ -291,12 +298,12 @@ quantity & cmplog & naive \\
 
 \noindent\textbf{Reading:} this is the strongest anti-signal in the family.
 cmplog spends 51\% of its corpus re-asserting the structural literal
-(\texttt{decoy\_frac}$_{\textrm{cmplog}}=0.5075$ vs.\
-$0.0004$ for naive) and collapses the winning free byte to 8\% (vs.\ 51\% for
-naive). Where Mechanism~1 is \emph{two operands competing} and Mechanism~2 is
-\emph{one byte being corrupted}, Mechanism~3 is \emph{a validity trap}: I2S is
-``succeeding'' at keeping the input structurally valid and thereby starving the
-one position that actually matters.
+(\texttt{decoy\_frac}$_{\textrm{cmplog}}=0.5075$ vs.\ $0.0004$ for naive). But
+note what the byte statistic actually is here: a \emph{correlate}, not the gate
+(see the correction below). Where Mechanism~1 is \emph{two operands competing}
+and Mechanism~2 is \emph{one byte being corrupted}, Mechanism~3 is \emph{a
+validity trap}: I2S ``succeeds'' at keeping the input structurally valid and
+thereby starves the exotic-script text the semantic gate requires.
 
 \paragraph{Byte-level proof (server a).} Recomputing the gate directly on
 harfbuzz's corpus identifies the structural decoy concretely: it is the
@@ -329,16 +336,47 @@ whichever registered tag the OpenType \texttt{CMP} checks expose
 table directory well-formed --- precisely why the signature is ``structural''
 rather than a single magic number.
 
-\paragraph{A caveat on reading the gate tool here.} Run at the default consensus
-purity ($0.6$), \texttt{operand\_enrichment} reports a 3-offset,
-\emph{non-contiguous} gate (\texttt{[11,14,15]}, decoy bytes \texttt{" OS"}) ---
-a \emph{fragment} of the tag, not the whole field. This is structural to the
-measurement, not a contradiction: the gate keeps only offsets where \emph{both}
-W and L seeds reach consensus, but the resolving side here is heterogeneous
-naive input with \emph{no} consensus at offsets 12--13, so those positions drop
-out and only the \texttt{O,S} tail of \texttt{GPOS} survives. The full 4-byte
-tag is recovered by dumping the cmplog (L) seeds directly (above) or by the
-corpus-fraction test --- both shown here.
+\paragraph{Correction: \texttt{GPOS} is a \emph{correlate}, not the decisive
+operand.} The byte tool finds the bytes that most \emph{discriminate} the two
+corpora; here those are the font table tags. But the branch's source
+(\texttt{hb-common.cc:594}) is the \texttt{HB\_SCRIPT\_THAANA} case of a
+script-direction \texttt{switch} --- the decisive condition is the text's
+\emph{script}, which has no fixed input offset. Coverage proves it: in the
+resolving (naive) per-role dump the THAANA case at line 594 is hit \textbf{34}
+times and every earlier RTL case (\texttt{ARABIC}/\texttt{HEBREW}/\texttt{SYRIAC})
+\textbf{0}, so the resolving text is unambiguously Thaana; in the blocking
+(cmplog) dump line 594 is \textbf{0} --- not because cmplog fails to reach the
+\texttt{switch} (it does, every trial) but because its text is never Thaana, so
+it returns \texttt{LTR}. \texttt{GPOS} co-varies with blocking only because
+cmplog's I2S simultaneously (i) injects font structure and (ii) suppresses exotic
+scripts; the tag is the visible side-effect, not the cause. \emph{General lesson:
+for a \textbf{semantic-property} gate the byte-frequency tool necessarily reports
+a structural correlate, never the operand --- the label fires for the right
+reason (cmplog's corpus is depleted of what resolves) but the byte-level "decoy"
+is a proxy.}
+
+\paragraph{The \texttt{overfit} cluster is heterogeneous.} Five of the seven
+\texttt{overfit}-labelled branches are harfbuzz \emph{exotic-Unicode} gates
+(\texttt{hb\_script\_get\_horizontal\_direction} $\times2$, combining-class
+recategorisation, Hebrew compose, Hangul compose) --- one coherent
+``exotic-script starvation'' mechanism. The remaining two
+(\texttt{openthread\_13300/13302}, \texttt{LinkedList::PopAfter}/\texttt{Find}
+over the address-resolver cache) share only the \texttt{LWLW} \emph{shape}: they
+are a stateful data-structure depth blocker with \emph{no} decoy
+(\texttt{decoy\_enrich}$\approx0.08$), and cmplog reaches them ($2/8/0$) exactly
+as it reaches the harfbuzz members. No byte or reachability metric separates the
+two mechanisms (the \texttt{decoy\_enrich} of the five harfbuzz members ranges
+$-3.3$ to $+10.4$, straddling the OpenThread value), so the pair is correctly
+left \emph{inconclusive} (guardrail G3) rather than forced under a label whose
+mechanism they do not share --- a worked example of the deterministic benchmark's
+ceiling: mechanisms that differ only \emph{semantically} cannot be auto-split.
+
+\paragraph{A note on the gate tool's offsets.} Run at the default consensus
+purity ($0.6$) the tool reports a 3-offset, \emph{non-contiguous} gate
+(\texttt{[11,14,15]}, decoy bytes \texttt{" OS"}) --- a \emph{fragment} of the
+tag: it keeps only offsets where \emph{both} W and L seeds reach consensus, and
+the heterogeneous naive side has none at offsets 12--13. The full 4-byte tag is
+recovered by dumping the cmplog (L) seeds or the corpus-fraction test above.
 
 % ======================================================================
 \section{Side-by-side}
@@ -356,9 +394,10 @@ shape                         & \texttt{LW\_W} & \texttt{LWWW} & \texttt{LWLW} \
 \de{}                         & $+0.68$ & $+2.64$ & $+10.4$ \\
 \texttt{decoy\_frac} cmplog   & 0.629 & 0.029 & 0.508 \\
 \texttt{decoy\_frac} naive    & 0.393 & 0.003 & 0.0004 \\
-decoy character               & one abundant rival & diffuse / none & one structural literal \\
-winner gate                   & competing operand & assembled byte & free byte \\
-one-line                      & rival wins harvest & byte clobbered & validity trap \\
+decoy character               & one abundant rival & diffuse / none & structural literal (\emph{correlate}) \\
+winner gate                   & input byte (operand) & assembled byte & \emph{semantic} script property (no byte) \\
+gate is causal byte?          & yes & yes & no --- byte ``decoy'' is a proxy \\
+one-line                      & rival wins harvest & byte clobbered & validity trap starves a script \\
 \bottomrule
 \end{tabular}
 \end{table}
