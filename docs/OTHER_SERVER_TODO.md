@@ -11,6 +11,30 @@ operational checklist. **Nothing here regenerates hypotheses or rebuilds tools �
 the design (`step5b_new_v3/*/evidence_test.json`) and the tools are shared and
 fixed.** You only *measure + arbitrate* on your corpora.
 
+> **⚠ RE-RUN REQUIRED (2026-06-13) if you already scored once.** Two tool fixes
+> landed after the first multi-server merge, so `assignments_sB.json` produced
+> before this date must be regenerated:
+> 1. **Deterministic corpus sampling.** `load_corpus_sample` used `random.sample`,
+>    so `signed_target_enrich` depended on RNG state and was *not reproducible*
+>    across runs (it flipped borderline labels — e.g. a corpus > the sample cap
+>    gave ste −0.589 vs −0.293 on two runs). It now sorts + even-strides
+>    (no RNG), and the cap was raised to `--sample 20000`. Re-run the OE study so
+>    your cache is stable.
+> 2. **OE cache is now server-suffixed.** The arbiter reads
+>    `csvs/arb_operand_enrich_<SERVER>.csv` (falling back to the unsuffixed name),
+>    and `_rescore_after_bisect.sh` now WRITES that suffixed file. So a re-run
+>    overwrites *your* `arb_operand_enrich_sB.csv` and the arbiter picks it up.
+>    (Before this fix a re-run wrote the unsuffixed file while the arbiter kept
+>    reading your stale suffixed cache — no effect.)
+>
+> To re-run: `git pull`, then
+> `export BENCH_SERVER=sB BENCH_ONDISK=lcms,libxml2,libpng,bloaty` and
+> `./bench/_rescore_after_bisect.sh` (now env-respecting + deterministic). Sanity:
+> run `i2s_operand_availability.py branch ...` twice — output must be byte-identical.
+> Then push the refreshed `assignments_sB.json` back. Note: degenerate `ste≈17`
+> values in the first run came from near-zero `naive_frac` (log2 of ~EPS); the
+> full-corpus deterministic read will stabilize the magnitude (the label holds).
+
 ## 0. What you have vs what was shipped
 
 - **You have (local, NOT in git):** your `db/blockers.sqlite` (your targets'

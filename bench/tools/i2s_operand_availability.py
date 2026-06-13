@@ -105,18 +105,26 @@ def gate_signature(target, branch_id, head, purity, max_seeds=200):
 
 
 def load_corpus_sample(target, fuzzer, sample, head, trials=(1, 2, 3)):
-    """Read head bytes of a fixed random sample of fuzzer's corpus ONCE, into
-    memory, so every branch of this target reuses the same sample (the corpus is
-    shared across all branches of a target — re-globbing per branch was the
-    bottleneck)."""
+    """Read head bytes of a fuzzer's corpus ONCE, into memory, so every branch of
+    this target reuses the same sample (the corpus is shared across all branches
+    of a target — re-globbing per branch was the bottleneck).
+
+    DETERMINISTIC subsampling (was random.sample): the previous random draw made
+    `signed_target_enrich` depend on the global RNG state, which differs between
+    study-mode and branch-mode invocations (gate_signature shuffles the RNG first).
+    For a corpus larger than `sample`, that flipped the label of branches sitting
+    near a rule threshold (e.g. openthread, corpus 14k > 8k: ste -0.589 vs -0.293
+    across runs). We now sort the files and take an even stride, so the subset —
+    and hence every metric — is byte-stable regardless of call order or target."""
     files = []
     for tr in trials:
         files += glob.glob(str(QUEUE_BASE / target / fuzzer / f"trial{tr}" / "queue" / "*"))
-    files = [f for f in files if os.path.isfile(f)]
+    files = sorted(f for f in files if os.path.isfile(f))
     if not files:
         return None
     if len(files) > sample:
-        files = random.sample(files, sample)
+        step = len(files) / sample           # even, deterministic stride (no RNG)
+        files = [files[int(i * step)] for i in range(sample)]
     heads = []
     for f in files:
         try:

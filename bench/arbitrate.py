@@ -41,6 +41,24 @@ DB = ROOT / "db" / "blockers.sqlite"
 ONDISK = {t.strip() for t in os.environ.get("BENCH_ONDISK", "curl,harfbuzz,openthread,sqlite3").split(",") if t.strip()}
 SERVER = os.environ.get("BENCH_SERVER", "s4")
 
+# Manual demotions: branches whose byte-rule label is a KNOWN mechanism mismatch
+# the byte tool cannot self-correct. openthread 13300/13302 are stateful
+# LinkedList ops (PopAfter/Find over the AddressResolver cache); they share the
+# LWLW shape and trip the over-broad `ste < -0.3` overfit rule, but they have NO
+# decoy (decoy_enrich~=0.08) so "decoy substitution" does not apply, and cmplog
+# reaches the branch (2/8/0) exactly like the genuine harfbuzz members, so no
+# byte/reachability metric separates them. Their true mechanism
+# (state-diversity homogenization) has an unscorable hypothesis -> honest
+# inconclusive (G3) is the correct outcome. See docs/i2s_anti_mechanisms.tex.
+MANUAL_DEMOTE = {
+    13300: "mechanism mismatch: stateful LinkedList op (PopAfter), no decoy "
+           "(decoy_enrich~0.08); decoy-substitution claim does not hold; true "
+           "state-diversity hypothesis is unscorable",
+    13302: "mechanism mismatch: stateful LinkedList op (Find), no decoy "
+           "(decoy_enrich~0.08); decoy-substitution claim does not hold; true "
+           "state-diversity hypothesis is unscorable",
+}
+
 # operand_enrichment is corpus-heavy (reloads the whole corpus per call), so it is
 # pre-run in STUDY mode (one corpus load per target) into this CSV; the arbiter
 # reads the cache instead of invoking it per branch. joint_necessity and
@@ -400,6 +418,12 @@ def arbitrate_shape(shape):
                          "rule": applied, "metrics": {k: met[k] for k in met
                                                       if not k.startswith("_") and k != "gate_offsets"}}
                 break
+        if bid in MANUAL_DEMOTE:
+            assignments.append({"branch": sid, "target": target, "status": "inconclusive",
+                                "reason": MANUAL_DEMOTE[bid],
+                                "diag": {"kind": "manual_demote", "n_decidable": None,
+                                         "n_scorable": None}})
+            continue
         if label is None:
             # Distinguish the two epistemically different inconclusives (G3):
             #  - rule_not_met : a rule WAS scored and evaluated false -> honest,

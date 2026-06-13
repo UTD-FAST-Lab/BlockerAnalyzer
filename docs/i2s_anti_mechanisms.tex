@@ -202,6 +202,64 @@ Mechanism~1: there the decoy is a \emph{single abundant} value
 (\texttt{decoy\_frac}$=0.029$), the signature of \emph{corruption} (random
 clobber) rather than \emph{competition} (capture by one rival).
 
+\paragraph{Byte-level proof (server a).} Mechanism~2 is \emph{defined} by the
+absence of a single decoy, so --- unlike M1 and M3 --- there is no clean
+``target $\to$ one decoy'' byte to exhibit; the evidence \emph{is} the
+diffuseness. Recomputed on harfbuzz's corpus, the gate is wide and scattered
+(\texttt{gate\_width}$=29$, offsets 71--187) --- itself a tell that no single
+byte is decisive. The assembled structural byte is depleted in cmplog and
+present in naive (per-offset median \texttt{target\_frac} $0.20$ vs.\ $0.34$,
+reproducing the assignment's $0.21/0.38$), but the bytes cmplog writes there do
+\emph{not} concentrate on any replacement:
+
+\begin{lstlisting}[style=bytes,caption={Byte distribution at gate offset 71
+  (assembled target \texttt{0x00}) over the 8000-input corpora. naive peaks on
+  the target; cmplog is spread over 211 distinct values with no dominant
+  substitute --- the fingerprint of blind corruption, not a decoy.},
+  label={lst:hb5831bytes}]
+naive  @71 : 0x00=0.39  0xff=0.03  0x05=0.03  0x01=0.03  ...   (236 distinct)
+cmplog @71 : 0x00=0.32  0x10=0.12  0x01=0.07  0x04=0.06  ...   (211 distinct)
+\end{lstlisting}
+
+\noindent Across the 29 gate offsets the \emph{largest single non-target byte}
+in cmplog reaches only $\approx 0.12$ (median), versus the one dominant decoy of
+M1 ($0.63$) and M3 ($0.51$): nothing to capture, nothing re-asserted, only
+scatter. Seed length corroborates the assembly story --- cmplog's blocking seeds
+are short (10--61\,B, one $405$\,B outlier) while the resolving naive seeds run
+60--188\,B: cmplog \emph{truncates / fails to assemble} the record rather than
+substituting one wrong value into a complete one. This is why M2, alone among
+the three, has no clean two-row decoy window: corruption is diffuse by
+construction.
+
+\paragraph{Caveat: why naive resolves despite its own noise, and what that
+implies for the label.} A fair objection: naive's corpus is \emph{also} noisy at
+the gate --- at offset 71 it has \emph{more} distinct bytes (236 vs.\ 211) and
+only a slightly higher target share ($0.39$ vs.\ $0.32$). So ``naive is
+cleaner'' is \emph{not} why it wins. Resolution does not require a low-noise
+corpus; it requires \emph{one} input that assembles the structure and is
+\emph{kept} by coverage feedback. The discriminator here is structural
+completeness, visible in seed length: naive's resolving seeds run 60--188\,B
+while cmplog's blocking seeds are 10--61\,B (one $405$\,B outlier) --- and
+\emph{all} 29 gate offsets lie at byte $\ge 71$, so eight of cmplog's nine
+blocking seeds are shorter than the \emph{first} gate offset. Naive's plain
+havoc occasionally completes the record and coverage latches the long input;
+cmplog's \texttt{I2SRandReplace} overwrites bytes mid-assembly, so its corpus
+stays short and broken and never latches a resolving input. The per-byte scatter
+is the residue of that repeated clobber, not the cause.
+
+\noindent This refines the label rather than contradicting it. The winner/loser
+median seed-length ratio is $\approx 1.7$ for \texttt{harfbuzz\_5831}
+(cmplog truncated) --- the \emph{opposite} sign from the M3 overfit case below,
+where cmplog's blocking seeds are \emph{longer} (ratio $\approx 0.4$, bloated
+``stay-valid'' inputs). \texttt{operand\_enrichment} cannot see this: it reports
+\ste{}$<0$ for both. So \texttt{harfbuzz\_5831} sits between pure in-place
+byte-corruption and an \emph{assembly/truncation failure} --- the byte is
+depleted because the record never completes, not (only) because a complete
+record is clobbered. A \texttt{size\_lift} (winner-vs-loser seed size) clause
+would subtype these honestly, but the present I2S-anti member set is too small
+($n\!=\!8$ for this label) to fit such a split without over-anchoring on a single
+branch, so it is left as a noted refinement rather than a new mechanism.
+
 % ======================================================================
 \section{Mechanism 3 --- \texttt{overfit}: capture by a ``stay-valid'' literal, never exploring the free byte}
 \label{sec:overfit}
@@ -240,6 +298,48 @@ naive). Where Mechanism~1 is \emph{two operands competing} and Mechanism~2 is
 ``succeeding'' at keeping the input structurally valid and thereby starving the
 one position that actually matters.
 
+\paragraph{Byte-level proof (server a).} Recomputing the gate directly on
+harfbuzz's corpus identifies the structural decoy concretely: it is the
+\textbf{first OpenType table tag} --- the 4-byte field at input offsets
+\texttt{[12:16]}, immediately after the 12-byte \texttt{sfnt} header
+(\texttt{sfntVersion}(4)+\texttt{numTables}(2)+\texttt{searchRange}(2)+%
+\texttt{entrySelector}(2)+\texttt{rangeShift}(2)). In cmplog's blocking seeds
+those four bytes spell a \emph{registered} tag --- \texttt{GPOS},
+\texttt{GSUB}, or \texttt{MATH}; in the resolving (naive) seeds the same
+position is unstructured:
+
+\begin{lstlisting}[style=bytes,caption={Hex window over bytes 8--23. The 4-byte
+  table tag (brackets, offsets 12--15) is the literal \texttt{GPOS}
+  (\texttt{47 50 4f 53}) in the cmplog seed and random in the naive seed. The
+  following 8 bytes are the table record's \texttt{checkSum} and
+  \texttt{offset}.},label={lst:hb5323bytes}]
+W (resolving, naive)  : ea 00 00 ff [00 1b 00 00] 63 61 72 66 15 03 00 0e
+L (blocking,  cmplog) : 21 20 1e 20 [47 50 4f 53] 00 01 00 0d 00 00 00 10
+                                    (   "GPOS"  )  (checkSum)  (tbl off)
+\end{lstlisting}
+
+\noindent At corpus scale the tag is overwhelmingly an I2S artifact. Of
+cmplog's 8000-input sample, \textbf{50.3\%} carry exactly \texttt{GPOS} at
+offsets 12--15 and \textbf{82.9\%} carry \emph{some} printable table tag there;
+for naive the figures are \textbf{0.0\%} and \textbf{6.1\%}. This reproduces the
+tool's \texttt{decoy\_frac} ($0.508$ vs.\ $0.0004$) at the byte level. Crucially,
+the ``literal'' is a \emph{tag field}, not one fixed constant: cmplog harvests
+whichever registered tag the OpenType \texttt{CMP} checks expose
+(\texttt{GPOS}/\texttt{GSUB}/\texttt{MATH}) and re-asserts it to keep the font's
+table directory well-formed --- precisely why the signature is ``structural''
+rather than a single magic number.
+
+\paragraph{A caveat on reading the gate tool here.} Run at the default consensus
+purity ($0.6$), \texttt{operand\_enrichment} reports a 3-offset,
+\emph{non-contiguous} gate (\texttt{[11,14,15]}, decoy bytes \texttt{" OS"}) ---
+a \emph{fragment} of the tag, not the whole field. This is structural to the
+measurement, not a contradiction: the gate keeps only offsets where \emph{both}
+W and L seeds reach consensus, but the resolving side here is heterogeneous
+naive input with \emph{no} consensus at offsets 12--13, so those positions drop
+out and only the \texttt{O,S} tail of \texttt{GPOS} survives. The full 4-byte
+tag is recovered by dumping the cmplog (L) seeds directly (above) or by the
+corpus-fraction test --- both shown here.
+
 % ======================================================================
 \section{Side-by-side}
 \begin{table}[h]\centering
@@ -267,8 +367,11 @@ one-line                      & rival wins harvest & byte clobbered & validity t
 its gate offset, target/decoy bytes, and seed windows above were extracted
 directly from the on-disk campaign corpus. \texttt{harfbuzz\_5831} and
 \texttt{harfbuzz\_5323} are server-a targets; their metric values are taken
-verbatim from \texttt{step5b\_new\_v3/*/assignments\_s4.json}, but their
-per-offset byte windows are computed on server a's corpus and are not
-reproduced here.
+verbatim from \texttt{step5b\_new\_v3/*/assignments\_s4.json}, and their
+byte-level evidence (Listings~\ref{lst:hb5831bytes} and~\ref{lst:hb5323bytes})
+was extracted directly from server a's on-disk campaign corpus
+(\texttt{cmplog}/\texttt{naive} queues, \texttt{--sample 8000}). The slight
+differences between the reproduced per-offset fractions and the assignment's
+stored values are sampling noise from the random corpus draw.
 
 \end{document}

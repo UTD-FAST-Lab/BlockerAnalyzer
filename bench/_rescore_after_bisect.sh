@@ -43,7 +43,7 @@ w.writerow(['label','target','branch_id','winner','loser']); w.writerows(rows)
 print(f"[rescore] OE labels: {len(rows)} branches | arms {dict(armc)}")
 PY
 echo "[rescore] re-running operand_enrichment study (corpus reload)..."
-python3 bench/tools/i2s_operand_availability.py study --label-csv csvs/arb_oe_labels.csv --out csvs/arb_operand_enrich.csv --sample 8000 --head 256
+python3 bench/tools/i2s_operand_availability.py study --label-csv csvs/arb_oe_labels.csv --out "csvs/arb_operand_enrich_${BENCH_SERVER}.csv" --sample 20000 --head 256
 echo "[rescore] arbiter --all (server=$BENCH_SERVER)"
 python3 bench/arbitrate.py --all
 echo "[rescore] build_dataset"
