@@ -1,0 +1,43 @@
+# rq3/Dockerfile.harfbuzz — harfbuzz built with a FuzzBench fuzzer toolchain, using
+# the SAME pinned commit (cb47dca, == LibAFL_Experiments == FuzzBench benchmark) and
+# the SAME single seed as the prior campaign. Build context = /home/miao/work/fuzzbench.
+#   docker build --build-arg FUZZER=aflplusplus -f rq3/Dockerfile.harfbuzz \
+#       -t rq3-harfbuzz-aflplusplus /home/miao/work/fuzzbench
+ARG FUZZER=aflplusplus
+FROM rq3-toolchain-${FUZZER} AS build
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+
+RUN apt-get update && apt-get install -y ragel pkg-config
+RUN git clone https://github.com/harfbuzz/harfbuzz.git $SRC/harfbuzz && \
+    git -C $SRC/harfbuzz checkout cb47dca74cbf6d147aac9cf3067f249555aa68b1
+WORKDIR $SRC/harfbuzz
+
+# FuzzBench's benchmark build.sh (fuzzer-agnostic: links $LIB_FUZZING_ENGINE via meson).
+COPY benchmarks/harfbuzz_hb-shape-fuzzer/build.sh $SRC/build.sh
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench FUZZER_LIB=/libAFLDriver.a FUZZ_TARGET=/out/hb-shape-fuzzer
+# Run build() from the SOURCE dir (WORKDIR $SRC/harfbuzz) — FuzzBench build.sh
+# assumes cwd == source (meson reads ./meson.build). PYTHONPATH makes the import work.
+RUN mkdir -p /out && python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.build()"
+
+# Same single seed as the prior campaign (the harfbuzz clusterfuzz testcase font).
+RUN mkdir -p /seeds && \
+    cp /src/harfbuzz/test/fuzzing/fonts/clusterfuzz-testcase-minimized-hb-shape-fuzzer-5656511058018304 /seeds/seed
+
+# ── runtime ──────────────────────────────────────────────────────────────────
+FROM gcr.io/fuzzbench/base-image AS run
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+ENV PATH="$PATH:/out" LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/out"
+ENV AFL_SKIP_CPUFREQ=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 AFL_TESTCACHE_SIZE=2
+RUN apt-get update && apt-get install -y libbfd-dev libunwind-dev libjemalloc2 2>/dev/null || true
+COPY --from=build /out /out
+COPY --from=build /seeds /seeds
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench OUT=/out FUZZ_TARGET=/out/hb-shape-fuzzer DURATION=86400
+WORKDIR /out
+CMD timeout --kill-after=10 --signal=INT ${DURATION} \
+      python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.fuzz('/seeds','/corpus','/out/hb-shape-fuzzer')"; exit 0

@@ -1,0 +1,53 @@
+# rq3/Dockerfile.openthread — openthread built with a FuzzBench fuzzer toolchain,
+# using the SAME pinned commit (2550699, == LibAFL_Experiments == FuzzBench benchmark
+# openthread_ot-ip6-send-fuzzer) and the SAME single seed as the prior campaign.
+# Build context = /home/miao/work/fuzzbench.
+#   docker build --build-arg FUZZER=aflplusplus -f rq3/Dockerfile.openthread \
+#       -t rq3-openthread-aflplusplus /home/miao/work/fuzzbench
+ARG FUZZER=aflplusplus
+FROM rq3-toolchain-${FUZZER} AS build
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+
+RUN apt-get update && apt-get install -y cmake ninja-build
+RUN git clone https://github.com/openthread/openthread $SRC/openthread && \
+    git -C $SRC/openthread checkout 25506997f286fdbfa72725f4cee78c922c896255
+WORKDIR $SRC/openthread
+
+# FuzzBench's benchmark build.sh delegates to openthread's tests/fuzz/oss-fuzz-build
+# (cmake/ninja, OT_FUZZ_TARGETS=ON; links $LIB_FUZZING_ENGINE for the fuzz target).
+COPY benchmarks/openthread_ot-ip6-send-fuzzer/build.sh $SRC/build.sh
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench FUZZER_LIB=/libAFLDriver.a FUZZ_TARGET=/out/ot-ip6-send-fuzzer
+# Run build() from the SOURCE dir (WORKDIR $SRC/openthread) — FuzzBench build.sh
+# assumes cwd == source (oss-fuzz-build reads ./tests/fuzz). PYTHONPATH makes the import work.
+RUN mkdir -p /out && python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.build()"
+
+# Same single seed as the prior campaign (first packet from openthread's own fuzz
+# corpus — a real captured IPv6/Thread payload). Falls back to a minimal IPv6 header
+# if the corpus directory is missing. Verbatim from LibAFL_Experiments Dockerfile.openthread.
+RUN mkdir -p /seeds && \
+    if ls $SRC/openthread/tests/fuzz/corpora/ot-ip6-send-fuzzer/* >/dev/null 2>&1; then \
+        cp "$(ls $SRC/openthread/tests/fuzz/corpora/ot-ip6-send-fuzzer/* | head -1)" \
+            /seeds/seed.ip6; \
+    else \
+        printf '\x60\x00\x00\x00\x00\x00\x3b\x40\xfe\x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\xfe\x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02' \
+            > /seeds/seed.ip6; \
+    fi
+
+# ── runtime ──────────────────────────────────────────────────────────────────
+FROM gcr.io/fuzzbench/base-image AS run
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+ENV PATH="$PATH:/out" LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/out"
+ENV AFL_SKIP_CPUFREQ=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 AFL_TESTCACHE_SIZE=2
+RUN apt-get update && apt-get install -y libbfd-dev libunwind-dev libjemalloc2 2>/dev/null || true
+COPY --from=build /out /out
+COPY --from=build /seeds /seeds
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench OUT=/out FUZZ_TARGET=/out/ot-ip6-send-fuzzer DURATION=86400
+WORKDIR /out
+CMD timeout --kill-after=10 --signal=INT ${DURATION} \
+      python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.fuzz('/seeds','/corpus','/out/ot-ip6-send-fuzzer')"; exit 0

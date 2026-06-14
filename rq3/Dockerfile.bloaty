@@ -1,0 +1,53 @@
+# rq3/Dockerfile.bloaty — bloaty built with a FuzzBench fuzzer toolchain, using the
+# SAME pinned commit (52948c1, == LibAFL_Experiments == FuzzBench benchmark) and the
+# SAME single seed (tests/testdata/fuzz_corpus/a69662c2...) as the prior campaign.
+# Build context = /home/miao/work/fuzzbench.
+#   docker build --build-arg FUZZER=aflplusplus -f rq3/Dockerfile.bloaty \
+#       -t rq3-bloaty-aflplusplus /home/miao/work/fuzzbench
+ARG FUZZER=aflplusplus
+FROM rq3-toolchain-${FUZZER} AS build
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+
+# bloaty uses cmake + ninja + g++; libz-dev per the FuzzBench/LibAFL recipe.
+RUN apt-get update && apt-get install -y cmake ninja-build g++ libz-dev pkg-config
+
+# Clone at the FuzzBench-pinned commit WITH submodules (bloaty vendors abseil/re2/
+# capstone/protobuf as git submodules; cmake fails without them).
+RUN git clone https://github.com/google/bloaty.git $SRC/bloaty && \
+    git -C $SRC/bloaty checkout 52948c107c8f81045e7f9223ec02706b19cfa882 && \
+    git -C $SRC/bloaty submodule update --init --recursive
+# FuzzBench's build.sh does `cd $WORK` and cmakes `$SRC/bloaty` via env vars (not cwd),
+# so cwd at build() time is not load-bearing; mirror the benchmark Dockerfile's
+# `WORKDIR bloaty` for fidelity. $WORK (/work) already exists in the toolchain image.
+WORKDIR $SRC/bloaty
+
+# FuzzBench's benchmark build.sh (fuzzer-agnostic: links $LIB_FUZZING_ENGINE via the
+# CMake fuzz_target target). It cmakes in $WORK, ninjas, and `cp fuzz_target $OUT`,
+# so the produced binary in /out is named `fuzz_target`.
+COPY benchmarks/bloaty_fuzz_target/build.sh $SRC/build.sh
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench FUZZER_LIB=/libAFLDriver.a FUZZ_TARGET=/out/fuzz_target
+# Run build() — build.sh uses $WORK/$SRC/$OUT env vars, PYTHONPATH makes the import work.
+RUN mkdir -p /out && python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.build()"
+
+# Same single seed as the prior campaign (the bloaty fuzz_corpus ELF testcase).
+RUN mkdir -p /seeds && \
+    cp $SRC/bloaty/tests/testdata/fuzz_corpus/a69662c2423b5a1d1859f7981c9e88c4f821b0b7 /seeds/seed.elf
+
+# ── runtime ──────────────────────────────────────────────────────────────────
+FROM gcr.io/fuzzbench/base-image AS run
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+ENV PATH="$PATH:/out" LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/out"
+ENV AFL_SKIP_CPUFREQ=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 AFL_TESTCACHE_SIZE=2
+RUN apt-get update && apt-get install -y libbfd-dev libunwind-dev libjemalloc2 2>/dev/null || true
+COPY --from=build /out /out
+COPY --from=build /seeds /seeds
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench OUT=/out FUZZ_TARGET=/out/fuzz_target DURATION=86400
+WORKDIR /out
+CMD timeout --kill-after=10 --signal=INT ${DURATION} \
+      python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.fuzz('/seeds','/corpus','/out/fuzz_target')"; exit 0

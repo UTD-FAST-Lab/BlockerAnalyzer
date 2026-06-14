@@ -1,0 +1,69 @@
+# rq3/Dockerfile.libxml2 — libxml2 built with a FuzzBench fuzzer toolchain, using the
+# SAME pinned commit (c7260a4, == LibAFL_Experiments == FuzzBench benchmark) and the
+# SAME single seed (first in-tree-generated seed/xml/*, with an inline XML fallback)
+# as the prior campaign. Build context = /home/miao/work/fuzzbench.
+#   docker build --build-arg FUZZER=aflplusplus -f rq3/Dockerfile.libxml2 \
+#       -t rq3-libxml2-aflplusplus /home/miao/work/fuzzbench
+ARG FUZZER=aflplusplus
+FROM rq3-toolchain-${FUZZER} AS build
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+
+RUN apt-get update && apt-get install -y \
+    make autoconf automake libtool pkg-config zlib1g-dev liblzma-dev wget
+# Build requires automake 1.16.x (matches the FuzzBench benchmark Dockerfile).
+RUN wget -q http://mirrors.kernel.org/ubuntu/pool/main/a/automake-1.16/automake_1.16.5-1.3_all.deb && \
+    (apt-get install -y ./automake_1.16.5-1.3_all.deb || true)
+
+# Clone at the FuzzBench-pinned commit. FuzzBench's build.sh has NO leading `cd`
+# (it runs ./autogen.sh from cwd), so cwd at build() time must be the SOURCE dir
+# itself, $SRC/libxml2 (mirrors the benchmark Dockerfile's `WORKDIR libxml2`).
+RUN git clone https://gitlab.gnome.org/GNOME/libxml2.git $SRC/libxml2 && \
+    git -C $SRC/libxml2 checkout c7260a47f19e01f4f663b6a56fbdc2dafd8a6e7e
+WORKDIR $SRC/libxml2
+
+# FuzzBench's benchmark build.sh (fuzzer-agnostic: configures the static lib, builds
+# fuzz/{fuzz,xml}.o, links $LIB_FUZZING_ENGINE, generates seed/xml + copies *.dict).
+COPY benchmarks/libxml2_xml/build.sh $SRC/build.sh
+# Patch: configure with --without-threads. libxml2's xmlInitThreadsInternal() calls
+# pthread_* unconditionally, but the FuzzBench build.sh link line never links pthread
+# and FUZZER_LIB=/libAFLDriver.a doesn't pull it in (FuzzBench's utils.py RESETS
+# CFLAGS/CXXFLAGS, so a Dockerfile ENV won't survive). The weak pthread symbols then
+# resolve to NULL and LLVMFuzzerInitialize → xmlInitParser → xmlInitThreadsInternal
+# segfaults (call to 0x0) at startup, crashing the AFL fork server. --without-threads
+# removes the pthread dependency entirely (single-process fuzzing doesn't need it).
+RUN sed -i 's/^    --disable-shared \\/    --disable-shared \\\n    --without-threads \\/' $SRC/build.sh && \
+    grep -q -- '--without-threads' $SRC/build.sh
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench FUZZER_LIB=/libAFLDriver.a FUZZ_TARGET=/out/xml
+# Run build() from the SOURCE dir (WORKDIR $SRC/libxml2) — FuzzBench build.sh
+# runs ./autogen.sh from cwd then make, cd fuzz, link. PYTHONPATH makes the import work.
+RUN mkdir -p /out && python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.build()"
+
+# Single meaningful seed: the first XML produced by libxml2's own in-tree seed
+# generator (built into $SRC/libxml2/fuzz/seed/xml by build.sh). Keeping one seed
+# isolates fuzzer capability from corpus richness; XML is a permissive text format,
+# so the inline fallback is also a valid starting point.
+RUN mkdir -p /seeds && \
+    if ls $SRC/libxml2/fuzz/seed/xml/* >/dev/null 2>&1; then \
+        cp "$(ls $SRC/libxml2/fuzz/seed/xml/* | head -1)" /seeds/seed.xml; \
+    else \
+        printf '<?xml version="1.0"?><root><a x="1">hi</a></root>' > /seeds/seed.xml; \
+    fi
+
+# ── runtime ──────────────────────────────────────────────────────────────────
+FROM gcr.io/fuzzbench/base-image AS run
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+ENV PATH="$PATH:/out" LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/out"
+ENV AFL_SKIP_CPUFREQ=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 AFL_TESTCACHE_SIZE=2
+RUN apt-get update && apt-get install -y libbfd-dev libunwind-dev libjemalloc2 2>/dev/null || true
+COPY --from=build /out /out
+COPY --from=build /seeds /seeds
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench OUT=/out FUZZ_TARGET=/out/xml DURATION=86400
+WORKDIR /out
+CMD timeout --kill-after=10 --signal=INT ${DURATION} \
+      python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.fuzz('/seeds','/corpus','/out/xml')"; exit 0

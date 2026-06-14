@@ -1,0 +1,54 @@
+# rq3/Dockerfile.lcms — Little-CMS built with a FuzzBench fuzzer toolchain, using the
+# SAME pinned commit (f0d9632, == LibAFL_Experiments == FuzzBench benchmark) and the
+# SAME single seed (testbed/ibm-t61.icc) as the prior campaign. Build context =
+# /home/miao/work/fuzzbench.
+#   docker build --build-arg FUZZER=aflplusplus -f rq3/Dockerfile.lcms \
+#       -t rq3-lcms-aflplusplus /home/miao/work/fuzzbench
+ARG FUZZER=aflplusplus
+FROM rq3-toolchain-${FUZZER} AS build
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+
+RUN apt-get update && apt-get install -y make automake libtool wget pkg-config
+
+# Clone at the FuzzBench-pinned commit. FuzzBench's build.sh does `cd Little-CMS`,
+# so the clone dir name (Little-CMS) IS the build WORKDIR.
+RUN git clone https://github.com/mm2/Little-CMS.git $SRC/Little-CMS && \
+    git -C $SRC/Little-CMS checkout f0d963261b28253999e239a844ac74d5a8960f40
+# build.sh does `cd Little-CMS`, so cwd at build() time must be $SRC (the PARENT
+# of the clone), not the clone itself. (Differs from harfbuzz whose build.sh had
+# no `cd` and ran meson from cwd directly.)
+WORKDIR $SRC
+
+# FuzzBench's benchmark build.sh + its OSS-Fuzz harness. build.sh compiles the
+# harness ($SRC/cms_transform_fuzzer.cc) against the static lib and links $FUZZER_LIB,
+# then `cp -r /opt/seeds $OUT/`, so the seeds dir must exist at /opt/seeds.
+COPY benchmarks/lcms_cms_transform_fuzzer/build.sh $SRC/build.sh
+COPY benchmarks/lcms_cms_transform_fuzzer/cms_transform_fuzzer.cc $SRC/cms_transform_fuzzer.cc
+COPY benchmarks/lcms_cms_transform_fuzzer/seeds /opt/seeds
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench FUZZER_LIB=/libAFLDriver.a FUZZ_TARGET=/out/cms_transform_fuzzer
+# Run build() from $SRC (WORKDIR $SRC) — FuzzBench build.sh `cd Little-CMS` then
+# autogen/configure/make. PYTHONPATH makes the fuzzer import work.
+RUN mkdir -p /out && python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.build()"
+
+# Same single seed as the prior campaign (the lcms testbed ICC profile).
+RUN mkdir -p /seeds && \
+    cp $SRC/Little-CMS/testbed/ibm-t61.icc /seeds/seed.icc
+
+# ── runtime ──────────────────────────────────────────────────────────────────
+FROM gcr.io/fuzzbench/base-image AS run
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+ENV PATH="$PATH:/out" LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/out"
+ENV AFL_SKIP_CPUFREQ=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 AFL_TESTCACHE_SIZE=2
+RUN apt-get update && apt-get install -y libbfd-dev libunwind-dev libjemalloc2 2>/dev/null || true
+COPY --from=build /out /out
+COPY --from=build /seeds /seeds
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench OUT=/out FUZZ_TARGET=/out/cms_transform_fuzzer DURATION=86400
+WORKDIR /out
+CMD timeout --kill-after=10 --signal=INT ${DURATION} \
+      python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.fuzz('/seeds','/corpus','/out/cms_transform_fuzzer')"; exit 0

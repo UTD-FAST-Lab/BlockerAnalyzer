@@ -1,0 +1,87 @@
+# rq3/Dockerfile.libpng — libpng built with a FuzzBench fuzzer toolchain, using the
+# SAME pinned commit (cd0ea2a, == LibAFL_Experiments == FuzzBench benchmark) and the
+# SAME single seed (pngtest.png) as the prior campaign. Build context =
+# /home/miao/work/fuzzbench.
+#   docker build --build-arg FUZZER=aflplusplus -f rq3/Dockerfile.libpng \
+#       -t rq3-libpng-aflplusplus /home/miao/work/fuzzbench
+#
+# TRICKY: the FuzzBench libpng benchmark has NO build.sh of its own — it delegates
+# to libpng's in-tree contrib/oss-fuzz/build.sh, which (a) uses RELATIVE paths
+# (scripts/pnglibconf.dfa, ./configure, .libs/libpng16.a) so cwd MUST be the libpng
+# source dir, and (b) references $SRC/libpng/... absolutely for the harness/dict and
+# links -lz, so libpng must live at $SRC/libpng with system zlib (zlib1g-dev) present.
+# We point $SRC/build.sh at the contrib script and set WORKDIR=$SRC/libpng so cwd is
+# right when FuzzBench's build_benchmark runs `bash -ex $SRC/build.sh` (it does NOT
+# chdir). fuzzer.build() sets $CC/$CXX/$CFLAGS/$OUT and copies $FUZZER_LIB →
+# /usr/lib/libFuzzingEngine.a (= -lFuzzingEngine in build.sh).
+ARG FUZZER=aflplusplus
+FROM rq3-toolchain-${FUZZER} AS build
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+
+RUN apt-get update && apt-get install -y \
+    make autoconf automake libtool pkg-config zlib1g-dev wget ca-certificates
+
+# Clone libpng at the FuzzBench-pinned commit (benchmark.yaml: cd0ea2a) into
+# $SRC/libpng — the path the contrib/oss-fuzz/build.sh hard-codes. Also clone zlib
+# next to it (mirrors the FuzzBench + LibAFL_Experiments Dockerfiles); the contrib
+# build.sh links the SYSTEM zlib via -lz, but we reproduce the clone for parity.
+RUN git clone https://github.com/glennrp/libpng.git $SRC/libpng && \
+    git -C $SRC/libpng checkout cd0ea2a7f53b603d3d9b5b891c779c430047b39a
+RUN git clone --depth 1 --branch v1.2.13 https://github.com/madler/zlib.git $SRC/zlib
+
+# FuzzBench's build_benchmark runs `$SRC/build.sh` with NO chdir, and the contrib
+# script uses RELATIVE paths — so cwd must be the libpng source dir (WORKDIR below).
+# We mirror libpng's in-tree contrib/oss-fuzz/build.sh inline (disable STDIO/WARNING/
+# WRITE, autoreconf, configure with the OSS_FUZZ_ prefix, build libpng16.la, link the
+# harness) with ONE fix: the contrib link line omits pthread, so the static libc++
+# pulled in by afl-clang-fast++ fails with undefined `pthread_*` (exactly the libxml2
+# Rq3 pthread quirk). We append `-pthread -ldl` to the final harness link only; the
+# library build is byte-for-byte the contrib recipe.
+RUN printf '%s\n' \
+  '#!/bin/bash -eu' \
+  'cd $SRC/libpng' \
+  'cat scripts/pnglibconf.dfa | \' \
+  '  sed -e "s/option STDIO/option STDIO disabled/" \' \
+  '      -e "s/option WARNING /option WARNING disabled/" \' \
+  '      -e "s/option WRITE enables WRITE_INT_FUNCTIONS/option WRITE disabled/" \' \
+  '> scripts/pnglibconf.dfa.temp' \
+  'mv scripts/pnglibconf.dfa.temp scripts/pnglibconf.dfa' \
+  'autoreconf -f -i' \
+  './configure --with-libpng-prefix=OSS_FUZZ_' \
+  'make -j$(nproc) clean' \
+  'make -j$(nproc) libpng16.la' \
+  '$CXX $CXXFLAGS -std=c++11 -I. \' \
+  '     $SRC/libpng/contrib/oss-fuzz/libpng_read_fuzzer.cc \' \
+  '     -o $OUT/libpng_read_fuzzer \' \
+  '     -lFuzzingEngine .libs/libpng16.a -lz -pthread -ldl' \
+  > $SRC/build.sh && chmod +x $SRC/build.sh
+WORKDIR $SRC/libpng
+
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench FUZZER_LIB=/libAFLDriver.a FUZZ_TARGET=/out/libpng_read_fuzzer
+# Run build() from WORKDIR $SRC/libpng — the contrib build.sh autoreconf/configure/make
+# from cwd, then links $OUT/libpng_read_fuzzer against -lFuzzingEngine (= $FUZZER_LIB,
+# copied to /usr/lib/libFuzzingEngine.a by build_benchmark) + .libs/libpng16.a + -lz.
+RUN mkdir -p /out && python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.build()"
+
+# Same single seed as the prior campaign (libpng's own reference test image).
+RUN mkdir -p /seeds && \
+    cp $SRC/libpng/pngtest.png /seeds/seed.png
+
+# ── runtime ──────────────────────────────────────────────────────────────────
+FROM gcr.io/fuzzbench/base-image AS run
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+ENV PATH="$PATH:/out" LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/out"
+ENV AFL_SKIP_CPUFREQ=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 AFL_TESTCACHE_SIZE=2
+RUN apt-get update && apt-get install -y libbfd-dev libunwind-dev libjemalloc2 2>/dev/null || true
+COPY --from=build /out /out
+COPY --from=build /seeds /seeds
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench OUT=/out FUZZ_TARGET=/out/libpng_read_fuzzer DURATION=86400
+WORKDIR /out
+CMD timeout --kill-after=10 --signal=INT ${DURATION} \
+      python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.fuzz('/seeds','/corpus','/out/libpng_read_fuzzer')"; exit 0

@@ -1,0 +1,70 @@
+# rq3/Dockerfile.curl — curl built with a FuzzBench fuzzer toolchain, using the
+# SAME pinned source + SAME single seed as the prior LibAFL_Experiments campaign.
+#
+# Build context MUST be /home/miao/work/fuzzbench (so `COPY fuzzers` works):
+#   docker build --build-arg FUZZER=aflplusplus \
+#       -f <repo>/rq3/Dockerfile.curl -t rq3-curl-aflplusplus /home/miao/work/fuzzbench
+#
+# FUZZER ∈ {aflplusplus, honggfuzz, libfuzzer, libafl}; the rq3-toolchain-<FUZZER>
+# image (fuzzbench/fuzzers/<FUZZER>/builder.Dockerfile on oss-fuzz-base/base-builder)
+# must already be built.
+ARG FUZZER=aflplusplus
+
+# ── build stage: toolchain + LibAFL-pinned curl + fuzzer.build() ─────────────
+FROM rq3-toolchain-${FUZZER} AS build
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+
+# curl-fuzzer + curl at the EXACT commits the prior experiments pinned
+# (curl-fuzzer dd486c1, curl a20f74a — note: NOT FuzzBench's --depth-1 HEAD).
+RUN git clone https://github.com/curl/curl-fuzzer.git /src/curl_fuzzer && \
+    git -C /src/curl_fuzzer checkout dd486c1e5910e722e43c451d4de928ac80f5967d
+RUN git clone https://github.com/curl/curl.git /src/curl && \
+    git -C /src/curl checkout a20f74a16ae1e89be170eeaa6059b37e513392a4
+RUN $SRC/curl_fuzzer/scripts/ossfuzzdeps.sh
+
+# compile_fuzzer.sh runs `make check` (exec's the fuzzers as unit tests) — neuter it.
+RUN sed -i 's|make check.*|true|' /src/curl_fuzzer/scripts/compile_fuzzer.sh
+
+# OSS-Fuzz build.sh that fuzzer.build() -> utils.build_benchmark() invokes.
+RUN printf '#!/bin/bash -eu\ncd $SRC/curl_fuzzer && ./ossfuzz.sh\n' > $SRC/build.sh && \
+    chmod +x $SRC/build.sh
+
+# FuzzBench fuzzer package (provides fuzzer.build()/fuzz()).
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench
+# FUZZER_LIB is the fuzzing engine the build links; aflplusplus = aflpp_driver.
+ENV FUZZER_LIB=/libAFLDriver.a
+ENV FUZZ_TARGET=/out/curl_fuzzer_http
+RUN mkdir -p /out
+
+# Build curl with the fuzzer's canonical logic (tracepc + cmplog + dict for afl++).
+RUN cd /fuzzbench && python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.build()"
+
+# Same SINGLE seed as the prior campaign (isolate fuzzer capability from corpus
+# richness): first file of the OSS-Fuzz seed corpus, else a minimal HTTP/1.0 GET.
+RUN mkdir -p /seeds && \
+    if [ -f /out/curl_fuzzer_http_seed_corpus.zip ]; then \
+        mkdir -p /tmp/cs && unzip -q -o /out/curl_fuzzer_http_seed_corpus.zip -d /tmp/cs && \
+        cp "$(find /tmp/cs -type f | sort | head -1)" /seeds/seed.http && rm -rf /tmp/cs; \
+    else printf 'GET / HTTP/1.0\r\nHost: example.com\r\n\r\n' > /seeds/seed.http; fi
+
+# ── runtime stage (mirrors fuzzbench/fuzzers/<f>/runner.Dockerfile) ──────────
+FROM gcr.io/fuzzbench/base-image AS run
+ARG FUZZER
+ENV FUZZER=${FUZZER}
+ENV PATH="$PATH:/out" LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/out"
+ENV AFL_SKIP_CPUFREQ=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 AFL_TESTCACHE_SIZE=2
+# Union of the 4 fuzzers' runtime deps (honggfuzz: libbfd/libunwind; libafl: jemalloc).
+RUN apt-get update && apt-get install -y libbfd-dev libunwind-dev libjemalloc2 2>/dev/null || true
+COPY --from=build /out /out
+COPY --from=build /seeds /seeds
+COPY fuzzers /fuzzbench/fuzzers
+RUN python3 -m pip install --upgrade pip >/dev/null 2>&1; python3 -m pip install pyyaml
+ENV PYTHONPATH=/fuzzbench OUT=/out FUZZ_TARGET=/out/curl_fuzzer_http
+ENV DURATION=86400
+WORKDIR /out
+# fuzz(input_corpus, output_corpus, target_binary) -> writes corpus under /corpus.
+CMD timeout --kill-after=10 --signal=INT ${DURATION} \
+      python3 -c "from fuzzers.${FUZZER} import fuzzer; fuzzer.fuzz('/seeds','/corpus','/out/curl_fuzzer_http')"; exit 0
