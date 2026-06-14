@@ -35,6 +35,30 @@ fixed.** You only *measure + arbitrate* on your corpora.
 > values in the first run came from near-zero `naive_frac` (log2 of ~EPS); the
 > full-corpus deterministic read will stabilize the magnitude (the label holds).
 
+> **⚠ RE-RUN ALSO REQUIRED (2026-06-14) — two NEW tools + a target-routing fix.**
+> `git pull` then re-arbitrate (`arbitrate.py --all`). Three changes land:
+> 1. **Two new measurement tools — and their candidates are almost all YOUR
+>    targets.** `bench/tools/corpus_size_ratio.py` (corpus inflation /
+>    homogenization) and `bench/tools/token_count.py` (grimoire `<GAP>` literal
+>    erasure) are now built + wired into the arbiter. They were previously the
+>    `*` unbuilt tools behind 4 *decidable* empty clusters whose members are
+>    libxml2/libpng/lcms. **s4 scored 0 of them (no corpus); you score the real
+>    ones.** Re-anchor both (§3) and re-arbitrate. Neither needs Docker — pure
+>    corpus/seed reads (cheaper than `depth_reach`).
+> 2. **branch_id target-routing fix (load-bearing for you).** `branch_id` is
+>    globally unique, but 4 shapes carried a *stale/wrong* target-prefix in their
+>    signature ids — e.g. `libxml2_6210`/`libxml2_6616` are really **harfbuzz**
+>    branches (s4), and `bloaty_301`/`bloaty_141` are really **curl** (s4). The
+>    arbiter + `build_dataset` now resolve target from `branches.target` (the DB),
+>    not the id prefix. **Effect on you:** those mis-prefixed rows that *look* like
+>    your targets (libxml2/bloaty) are correctly skipped as s4's — so you won't
+>    waste a scan reading the wrong corpus, and you won't emit a bogus
+>    `assignments_sB.json` row for a branch that isn't yours. (Requires the
+>    `branches` row to exist in YOUR db; it always does for your own branches.)
+> 3. **Arbiter merge is now deterministic** (`sorted(needed)`) and
+>    `corpus_size_ratio` is memoized per (target, arm-pair) so a 100k-file corpus
+>    is scanned once, not per branch. No action — just faster + stable diffs.
+
 ## 0. What you have vs what was shipped
 
 - **You have (local, NOT in git):** your `db/blockers.sqlite` (your targets'
@@ -85,9 +109,29 @@ threshold in the arbiter's canonical rules if the separation is weaker.**
 - `bench/tools/joint_necessity.py branch --target libxml2 --branch-id <grimoire branch> --winner-fuzzer grimoire --loser-fuzzer cmplog --tokens '<?xml,<!DOCTYPE,...'`
   → expect grimoire `tag_lift >= 1`.
 - `bench/tools/depth_reach.py ...` (ctx/ngram) — re-anchor on a local ctx branch.
+- `bench/tools/corpus_size_ratio.py branch --target libxml2 --branch-id <any> --winner-fuzzer cmplog --loser-fuzzer naive`
+  → expect `corpus_count_ratio` > 1 (the I2S arm hoards more saved seeds; s4 saw
+  harfbuzz cmplog/naive ≈ 2.7×). Also test the **ctx** arm pair
+  `--winner-fuzzer naive_ctx --loser-fuzzer naive` (the `ctx_coverage_LW` rule
+  wants `corpus_count_ratio >= 1.5`). This tool is **branch-independent**
+  (whole-corpus arm comparison) and reads the on-disk queue directly — no DB
+  seeds, no Docker. If your corpora don't show inflation, the inflation/
+  homogenization hypotheses honestly stay inconclusive (G3 — fine, not a tuning
+  failure). `composition_entropy_ratio < 0.85` (LWLW homogenization) is the
+  stricter clause; confirm the entropy ratio is a sane ~0.5–1.5 on a known branch.
+- `bench/tools/token_count.py branch --target libpng --branch-id 3892 --literal 0x03 --winner-fuzzer naive --loser-fuzzer grimoire`
+  (and `--target libxml2 --branch-id 6597 --literal 0x09`) — these are the **real
+  `grimoire_structural_LW` members**, so this is a direct anchor *and* score.
+  Expect `naive_literal_count >= 1 AND literal_presence_ratio < 1` (grimoire's
+  `<GAP>` stage depletes the literal; the rule fires at `< 0.34`). Needs the
+  branch's resolving (naive) + blocking (grimoire) seeds bisected first (§2);
+  reads on-disk seed bytes, no Docker.
 
 Per-target structural tokens are already wired in `bench/arbitrate.py:shape_tokens`
-for libxml2 (XML/DTD) and lcms (ICC tags); add your targets if missing.
+for libxml2 (XML/DTD) and lcms (ICC tags); add your targets if missing. The new
+tools' shape→arm pairs (`CS_ARMS`, `TC_ARMS`) and gate literals (from each
+signature's `operand_literal`) are already wired for the shared shapes — nothing
+to add unless you introduce a new shape.
 
 ## 4. Pre-run operand_enrichment (corpus-heavy → do it once in study mode)
 
@@ -110,6 +154,10 @@ non-local → skipped). It reuses the cached `operand_enrichment` + runs
 
 Expected coverage on your side: **i2s/vp ~194 branches + grimoire ~32 + ctx ~36**
 are the bulk. ctx/ngram use `depth_reach` (built; verifies the iteration-depth subtype, context-reach subtype stays inconclusive).
+`corpus_size_ratio` (ctx_coverage_LW, i2s_vp_LWLW/L__W) + `token_count`
+(grimoire_structural_LW) now also run in `--all` — these target YOUR branches
+specifically (s4 had no corpus for them), so expect a few extra labels iff your
+corpora show the inflation / literal-erasure the rules predict.
 
 ## 6. Merge to the full dataset
 
@@ -151,11 +199,14 @@ step5b_new_v3/<shape>/assignments_s4.json               # s4's results (for the 
 bench/tools/joint_necessity.py                          # measurement tools
 bench/tools/value_distance_reached.py
 bench/tools/depth_reach.py                              # ctx/ngram (built; needs your libafl-<target>-cov Docker images)
+bench/tools/corpus_size_ratio.py                        # NEW (2026-06-14) corpus inflation/homogenization (no Docker)
+bench/tools/token_count.py                              # NEW (2026-06-14) grimoire <GAP> literal erasure (no Docker)
 bench/arbitrate.py                                      # the deterministic arbiter
 bench/build_dataset.py                                  # dataset assembler/merger
 bench/tool_registry.json                                # tool catalog (reference)
 bench/_rescore_after_bisect.sh                          # the OE-label + rescore chain (copy/adapt)
 bench/tools/i2s_operand_availability.py                       # operand_enrichment (Leg-1 tool)
+tests/test_bench_tools.py                               # tool/arbiter/dataset invariants (pytest; corpus checks skip w/o corpora)
 docs/benchmark_pivot_spec.md                            # full design
 docs/OTHER_SERVER_TODO.md                               # this file
 .claude/agents/evidence-test-author.md                  # design agent (only for §7 re-design)
