@@ -157,7 +157,7 @@ def offset_freqs_from_cache(heads, gate):
 
 
 def analyze_branch(target, branch_id, sample, head, purity, cache=None,
-                   winner="cmplog", loser="naive"):
+                   winner="cmplog", loser="naive", agg="median"):
     """Enrichment of the target operand in the WINNER fuzzer's corpus vs the
     LOSER's, at the branch's gate offsets. Default winner/loser = cmplog/naive
     (the canonical I2S-pro/anti contrast). For vpc-only-winner shapes (_LWL etc.)
@@ -183,8 +183,18 @@ def analyze_branch(target, branch_id, sample, head, purity, cache=None,
     offs = sorted(set(cm["target_freq"]) & set(nv["target_freq"]))
     t_enr = [math.log2((cm["target_freq"][o] + EPS) / (nv["target_freq"][o] + EPS)) for o in offs]
     d_enr = [math.log2((cm["decoy_freq"][o] + EPS) / (nv["decoy_freq"][o] + EPS)) for o in offs]
-    signed = statistics.median(t_enr) if t_enr else 0.0
-    decoy = statistics.median(d_enr) if d_enr else 0.0
+    # Aggregation across gate offsets:
+    #   median (default) — robust, but DILUTES a single-operand gate when head is
+    #     large and the offset set is padded with downstream-correlated positions.
+    #   max  — sign-preserving max-magnitude (the single most-differentiating
+    #     offset = the I2S operand); recovers operands the median washes out, and
+    #     is direction-aware (strong + for pro gates, strong - for anti/depletion).
+    def _agg(xs):
+        if not xs:
+            return 0.0
+        return max(xs, key=abs) if agg == "max" else statistics.median(xs)
+    signed = _agg(t_enr)
+    decoy = _agg(d_enr)
     return {
         "target": target, "branch_id": branch_id,
         "winner_fuzzer": winner, "loser_fuzzer": loser,
@@ -218,6 +228,10 @@ def main():
     b.add_argument("--loser-fuzzer", default="naive",
                    help="contrast corpus lacking the winner's I2S advantage "
                         "(default naive; use value_profile to isolate I2S in vpc shapes)")
+    b.add_argument("--agg", choices=("median", "max"), default="max",
+                   help="per-offset enrichment aggregation: max (DEFAULT, 2026-06-14) = "
+                        "sign-preserving max-magnitude = the single most-differentiating "
+                        "(I2S operand) offset; median = legacy robust-but-dilutes-at-large-head")
 
     s = sub.add_parser("study")
     s.add_argument("--label-csv", required=True,
@@ -227,6 +241,9 @@ def main():
     s.add_argument("--sample", type=int, default=15000)
     s.add_argument("--head", type=int, default=48)
     s.add_argument("--purity", type=float, default=0.6)
+    s.add_argument("--agg", choices=("median", "max"), default="max",
+                   help="per-offset enrichment aggregation: max (DEFAULT, 2026-06-14) = "
+                        "sign-preserving max-magnitude (I2S operand offset); median = legacy")
     args = ap.parse_args()
     random.seed(7)
 
@@ -234,7 +251,7 @@ def main():
         print(json.dumps(analyze_branch(args.target, args.branch_id,
                                         args.sample, args.head, args.purity,
                                         winner=args.winner_fuzzer,
-                                        loser=args.loser_fuzzer), indent=1))
+                                        loser=args.loser_fuzzer, agg=args.agg), indent=1))
         return
 
     import csv
@@ -259,7 +276,7 @@ def main():
               + " heads cached", flush=True)
         for label, bid, winner, loser in items:
             res = analyze_branch(target, bid, args.sample, args.head, args.purity,
-                                 cache=cache, winner=winner, loser=loser)
+                                 cache=cache, winner=winner, loser=loser, agg=args.agg)
             res["label"] = label
             rows.append(res)
             tag = res.get("skip") or f"signed={res.get('signed_target_enrich')}"

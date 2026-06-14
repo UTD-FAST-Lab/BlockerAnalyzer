@@ -35,6 +35,19 @@ fixed.** You only *measure + arbitrate* on your corpora.
 > values in the first run came from near-zero `naive_frac` (log2 of ~EPS); the
 > full-corpus deterministic read will stabilize the magnitude (the label holds).
 
+> **⚠ RE-RUN REQUIRED (2026-06-14b) — operand_enrichment aggregation: median → max.**
+> `i2s_operand_availability.py` now aggregates per-offset enrichment with
+> **sign-preserving max-magnitude** (the single most-differentiating = I2S operand
+> offset), default `--agg max`. The old `median` DILUTED single-operand gates once
+> `--head` was large (the gate-offset set is padded with downstream-correlated
+> positions whose weak enrichment dragged the median down — e.g. a real operand at
+> log2 6–18 reported as ~0.36). On server B this recovered **+26 validated branches
+> (264 → 290)** with **0 lost / 0 sign-flips** (strict superset). To adopt: `git pull`,
+> re-run your OE study (both arms) — the rescore chain picks up `--agg max` by
+> default — then re-arbitrate + rebuild. `--agg median` still reproduces the old
+> numbers. UNTIL you re-run, the merged set is mixed (server-B max, your targets
+> median); the per-server caches are independent so nothing breaks meanwhile.
+
 > **⚠ RE-RUN ALSO REQUIRED (2026-06-14) — two NEW tools + a target-routing fix.**
 > `git pull` then re-arbitrate (`arbitrate.py --all`). Three changes land:
 > 1. **Two new measurement tools — and their candidates are almost all YOUR

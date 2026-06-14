@@ -70,6 +70,15 @@ OE_CACHE_CSV = ROOT / "csvs" / f"arb_operand_enrich_{SERVER}.csv"
 if not OE_CACHE_CSV.exists():
     OE_CACHE_CSV = ROOT / "csvs" / "arb_operand_enrich.csv"
 OE_CACHE = {}
+# vp-arm OE: a SECOND study pass with winner=value_profile (vs naive), letting the
+# i2s_vp_WW_L "both CMP arms enrich" rule test the value_profile arm INDEPENDENTLY
+# (vp_signed_target_enrich) rather than assume it from shape membership. Same
+# per-server tagging + legacy fallback. Absent file -> WW_L vp term simply
+# unscorable (honest inconclusive), no effect on any other shape.
+OE_VP_CACHE_CSV = ROOT / "csvs" / f"arb_operand_enrich_vp_{SERVER}.csv"
+if not OE_VP_CACHE_CSV.exists():
+    OE_VP_CACHE_CSV = ROOT / "csvs" / "arb_operand_enrich_vp.csv"
+OE_VP_CACHE = {}
 TOOL_CMD = {
     "joint_necessity": ["python3", "bench/tools/joint_necessity.py", "branch"],
     "value_distance_reached": ["python3", "bench/tools/value_distance_reached.py", "branch"],
@@ -101,10 +110,27 @@ def load_oe_cache():
                     pass
         d["skip"] = r.get("skip") or None
         OE_CACHE[bid] = d
+    if OE_VP_CACHE_CSV.exists():
+        for r in _csv.DictReader(open(OE_VP_CACHE_CSV)):
+            try:
+                bid = int(r["branch_id"])
+            except (KeyError, ValueError):
+                continue
+            d = {}
+            for src, dst in (("signed_target_enrich", "vp_signed_target_enrich"),
+                             ("decoy_enrich", "vp_decoy_enrich")):
+                v = r.get(src, "")
+                if v not in ("", None):
+                    try:
+                        d[dst] = float(v)
+                    except ValueError:
+                        pass
+            OE_VP_CACHE[bid] = d
 # metric name -> the tool that emits it (canonical names the tools actually print)
 METRIC_TOOL = {}
 for m in ("signed_target_enrich", "decoy_enrich", "cmplog_target_frac",
-          "naive_target_frac", "cmplog_decoy_frac", "naive_decoy_frac"):
+          "naive_target_frac", "cmplog_decoy_frac", "naive_decoy_frac",
+          "vp_signed_target_enrich", "vp_decoy_enrich"):
     METRIC_TOOL[m] = "operand_enrichment"
 for m in ("size_lift", "tag_lift", "token_lift", "vp_tags", "cmp_tags", "vpc_tags",
           "winner_tags", "loser_tags", "i2s_necessary", "assembly_necessary"):
@@ -148,6 +174,26 @@ ALIAS = {
     r"\bdist_gap\b": "distance_gap", r"\bvp_dist\b": "vp_min_distance",
     r"\bcmp_dist\b": "cmp_min_distance", r"\bnaive_dist\b": "naive_min_distance",
     r"\bvpc_dist\b": "vpc_min_distance",
+    # --- operand_enrichment name reconciliation (2026-06-14) ----------------
+    # Several shapes' authored rules reference OE metric names the tool never
+    # emits; map each to the vocabulary operand_enrichment ACTUALLY emits (the
+    # SAME `skip == 'no_gate_signature'` / flat `signed_target_enrich` form the
+    # design already uses in other shapes). Pure name plumbing — thresholds and
+    # intent are preserved; the design's evidence_test.json is left untouched.
+    #
+    # `gate_signature == true/false` (i2s_vp_W__L) -> the tool signals gate
+    # presence via `skip` (== 'no_gate_signature' when no fixed-offset gate).
+    # \b before gate_signature so it does NOT match inside `no_gate_signature`.
+    r"\bgate_signature\s*==\s*false\b": "(skip == 'no_gate_signature')",
+    r"\bgate_signature\s*==\s*true\b": "(skip != 'no_gate_signature')",
+    # `signed_target_enrich == no_gate_signature` (i2s_vp_LWWW) -> same `skip` test.
+    r"\bsigned_target_enrich\s*==\s*no_gate_signature\b": "(skip == 'no_gate_signature')",
+    # Per-arm namespaced OE (i2s_vp_WW_L). cmplog arm -> the flat cmplog-vs-naive
+    # `signed_target_enrich` (OE_CACHE); value_profile arm -> `vp_signed_target_enrich`
+    # from the dedicated vp-vs-naive study (OE_VP_CACHE). Both arms are now MEASURED
+    # independently, honoring the authored per-arm rule + threshold.
+    r"\bcmplog\.signed_target_enrich\b": "signed_target_enrich",
+    r"\bvalue_profile\.signed_target_enrich\b": "vp_signed_target_enrich",
 }
 
 
@@ -262,8 +308,14 @@ def metrics_for_rule(rule, target, bid, shape, sig, cache, force_vd=False, force
     metric names don't match the tool's canonical output (so a canonical fallback
     can score it)."""
     needed = set()
+    # detect tools on the ALIAS-normalized rule (same reconciliation eval_rule
+    # applies), so a rule written in reconciled-away names — e.g. `gate_signature
+    # == false` -> `skip == 'no_gate_signature'` — still fetches the right tool.
+    rule_norm = rule
+    for pat, repl in ALIAS.items():
+        rule_norm = re.sub(pat, repl, rule_norm)
     for name, tool in METRIC_TOOL.items():
-        if re.search(r"\b" + re.escape(name) + r"\b", rule):
+        if re.search(r"\b" + re.escape(name) + r"\b", rule_norm):
             needed.add(tool)
     if force_vd:
         needed.add("value_distance_reached")
@@ -271,7 +323,7 @@ def metrics_for_rule(rule, target, bid, shape, sig, cache, force_vd=False, force
         needed.add("joint_necessity")
     if force_depth:
         needed.add("depth_reach")
-    if re.search(r"\bskip\b", rule) and not (force_jn or force_depth):
+    if re.search(r"\bskip\b", rule_norm) and not (force_jn or force_depth):
         needed.add("operand_enrichment")  # `skip` is the operand tool's field — but
         # NOT for token/depth families (they emit their own skip; don't force OE there)
     merged = {}
@@ -283,6 +335,8 @@ def metrics_for_rule(rule, target, bid, shape, sig, cache, force_vd=False, force
                 return None  # not in the pre-run cache (no seeds / non-local)
             cache[tool] = OE_CACHE[bid]
             merged.update(cache[tool])
+            if bid in OE_VP_CACHE:      # vp-arm enrichment (WW_L both-arms rule)
+                merged.update(OE_VP_CACHE[bid])
             continue
         if tool not in cache:
             extra = []
