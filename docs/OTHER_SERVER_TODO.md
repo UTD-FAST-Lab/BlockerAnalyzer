@@ -59,6 +59,19 @@ fixed.** You only *measure + arbitrate* on your corpora.
 >    `corpus_size_ratio` is memoized per (target, arm-pair) so a 100k-file corpus
 >    is scanned once, not per branch. No action — just faster + stable diffs.
 
+> **⚠ RE-ARBITRATE REQUIRED (2026-06-14) — branch_id collision residue.**
+> `branch_id` is NOT globally unique across servers (each DB numbers independently),
+> so `bloaty_57` (yours) and `curl_57` (s4) are DIFFERENT branches. An earlier
+> build_dataset/arbitrate bug resolved target from the local DB by bare id, so each
+> server SCORED the OTHER server's colliding branches against its OWN (wrong) corpus
+> and wrote them into its assignments. Code is now fixed (commit `da8ff06`: the
+> signature-id PREFIX is authoritative + a DB-consistency guard), **but the fix is
+> code-only — committed assignments still carry the residue.** s4 already re-ran and
+> cleared 92 bogus entries; **you must `git pull` then re-run `arbitrate.py --all`**
+> to drop your s4-prefixed residue (~78 entries), then rebuild + push. Verify:
+> `grep -hoE '"branch": "(curl|harfbuzz|openthread|sqlite3)_[0-9]+' step5b_new_v3/*/assignments_sB.json | wc -l`
+> must be **0** after re-arbitrating.
+
 ## 0. What you have vs what was shipped
 
 - **You have (local, NOT in git):** your `db/blockers.sqlite` (your targets'
