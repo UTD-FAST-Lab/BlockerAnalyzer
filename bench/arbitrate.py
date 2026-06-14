@@ -74,7 +74,10 @@ TOOL_CMD = {
     "joint_necessity": ["python3", "bench/tools/joint_necessity.py", "branch"],
     "value_distance_reached": ["python3", "bench/tools/value_distance_reached.py", "branch"],
     "depth_reach": ["python3", "bench/tools/depth_reach.py", "branch"],
+    "corpus_size_ratio": ["python3", "bench/tools/corpus_size_ratio.py", "branch"],
+    "token_count": ["python3", "bench/tools/token_count.py", "branch"],
 }
+CS_MEMO = {}   # (target, arm-pair) -> corpus_size_ratio result; branch-independent, scan once
 BUILT = {"operand_enrichment", *TOOL_CMD}
 
 
@@ -116,6 +119,22 @@ CANONICAL_TOKEN = "tag_lift >= 1.0 and winner_tags >= 2"
 CANONICAL_DEPTH = "depth_lift >= 2.0 and winner_deeper == True"
 for m in ("depth_lift", "side_lift", "winner_depth", "loser_depth", "winner_deeper"):
     METRIC_TOOL[m] = "depth_reach"
+for m in ("corpus_count_ratio", "corpus_size_ratio", "size_ratio_cmp_over_naive",
+          "composition_entropy_ratio"):
+    METRIC_TOOL[m] = "corpus_size_ratio"
+for m in ("naive_literal_count", "grimoire_literal_count", "literal_presence_ratio",
+          "winner_literal_count", "loser_literal_count"):
+    METRIC_TOOL[m] = "token_count"
+# exact-literal-presence arm pairs (grimoire <GAP> erasure): winner=literal-preserving
+# (naive, resolving), loser=grimoire (blocking). Literal comes from the signature.
+TC_ARMS = {"grimoire_structural_LW": ("naive", "grimoire")}
+# corpus-scale arm pairs per shape: (winner=hypothesized inflating/homogenizing arm,
+# loser=flat baseline). Whole-corpus comparison, branch-independent.
+CS_ARMS = {"ctx_coverage_LW": ("naive_ctx", "naive"),
+           "ngram_coverage_LW": ("naive_ngram4", "naive"),
+           "i2s_vp_LWLW": ("cmplog", "naive"),
+           "i2s_vp_L__W": ("cmplog", "naive"),
+           "i2s_vp_WWLW": ("value_profile_cmplog", "value_profile")}
 for m in ("vp_min_distance", "vpc_min_distance", "cmp_min_distance",
           "naive_min_distance", "distance_gap", "distance_closure_ratio",
           "winner_closer"):
@@ -256,7 +275,7 @@ def metrics_for_rule(rule, target, bid, shape, sig, cache, force_vd=False, force
         needed.add("operand_enrichment")  # `skip` is the operand tool's field — but
         # NOT for token/depth families (they emit their own skip; don't force OE there)
     merged = {}
-    for tool in needed:
+    for tool in sorted(needed):  # deterministic merge order (stable assignments JSON)
         if tool not in BUILT:
             return None  # unscorable: needs an unbuilt tool
         if tool == "operand_enrichment":
@@ -292,7 +311,26 @@ def metrics_for_rule(rule, target, bid, shape, sig, cache, force_vd=False, force
                 if not (dw and dl):
                     return None  # not a ctx/ngram comparison this tool can score
                 extra = ["--winner-fuzzer", dw, "--loser-fuzzer", dl]
-            cache[tool] = run_tool(tool, target, bid, extra)
+            if tool == "corpus_size_ratio":
+                cw, cl = sig.get("_cs_winner"), sig.get("_cs_loser")
+                if not (cw and cl):
+                    return None  # no corpus-pair defined for this shape
+                extra = ["--winner-fuzzer", cw, "--loser-fuzzer", cl]
+            if tool == "token_count":
+                lit = sig.get("operand_literal")
+                tw, tl = sig.get("_tc_winner"), sig.get("_tc_loser")
+                if not (lit and tw and tl):
+                    return None  # no gate literal or no token-arm pair for this shape
+                extra = ["--literal", str(lit), "--winner-fuzzer", tw, "--loser-fuzzer", tl]
+            if tool == "corpus_size_ratio":
+                # branch-INDEPENDENT (whole-corpus arm comparison) -> memoize per
+                # (target, arm-pair) so a 100k-file corpus is scanned once, not per branch.
+                ck = (target, tuple(extra))
+                if ck not in CS_MEMO:
+                    CS_MEMO[ck] = run_tool(tool, target, bid, extra)
+                cache[tool] = CS_MEMO[ck]
+            else:
+                cache[tool] = run_tool(tool, target, bid, extra)
         r = cache[tool]
         if r.get("_error"):
             return None
@@ -371,7 +409,12 @@ def arbitrate_shape(shape):
         m = re.match(r"([a-z0-9]+)_(\d+)", sid)
         if not m:
             continue
-        target, bid = m.group(1), int(m.group(2))
+        bid = int(m.group(2))
+        # branch_id is globally unique; resolve target from the DB, not the
+        # signature-id prefix (a few shapes carry a stale/wrong prefix, e.g.
+        # bloaty_301 is really curl branch 301 -> would mis-route ONDISK + the
+        # tool's --target to a corpus that isn't this branch's).
+        target = branch_target(con, bid) or m.group(1)
         if target not in ONDISK:
             continue  # other server's target — it writes its own assignments file
         sig = dict(sig)
@@ -381,6 +424,10 @@ def arbitrate_shape(shape):
         sig["_jn_winner"], sig["_jn_loser"] = jw, jl
         dw, dl = depth_arms(shape, bid, con)         # ctx/ngram depth families
         sig["_depth_winner"], sig["_depth_loser"] = dw, dl
+        cw, cl = CS_ARMS.get(shape, (None, None))    # corpus-scale inflation/homogenization
+        sig["_cs_winner"], sig["_cs_loser"] = cw, cl
+        tw, tl = TC_ARMS.get(shape, (None, None))    # exact-literal-presence (grimoire <GAP>)
+        sig["_tc_winner"], sig["_tc_loser"] = tw, tl
         cache = {}
         label = None
         n_decidable = 0   # hypotheses we actually attempted (decidable + has a rule)
