@@ -74,10 +74,14 @@ def main():
         data = json.loads(af.read_text())
         server = data.get("server", af.stem.split("assignments_")[-1])
         for a in data.get("assignments", []):
-            m = re.match(r"[a-z0-9]+_(\d+)", a["branch"])
+            m = re.match(r"([a-z0-9]+)_(\d+)", a["branch"])
             if not m:
                 continue
-            key = (int(m.group(1)), shape)
+            # key on the FULL signature id (target prefix + branch_id), NOT the
+            # bare integer — branch_id collides across servers (bloaty_57 vs
+            # curl_57). Drop any _hN joint-half suffix so _h0/_h1 of one mechanism
+            # still collapse to one key.
+            key = (f"{m.group(1)}_{m.group(2)}", shape)
             cur = assigned.get(key)
             chosen = best(cur[0] if cur else None, a)
             assigned[key] = (chosen, server if chosen is a else (cur[1] if cur else server))
@@ -92,7 +96,7 @@ def main():
     #    unlike the old dedup which mixed the enumerated shape with a different
     #    preferred-validated assignment). Unscored axis -> inconclusive.
     rows = []
-    seen = set()            # (bid, shape) — collapses _h0/_h1 within a shape
+    seen = set()            # (sig_id, shape) — collapses _h0/_h1 within a shape
     for sf in sorted((ROOT / "step5a_new_v3").glob("*/signatures.json")):
         shape = sf.parent.name
         decisive = shape_decode(shape)
@@ -102,15 +106,24 @@ def main():
             if not m:
                 continue
             bid = int(m.group(2))
-            key = (bid, shape)
+            # branch_id is NOT globally unique across servers, so trust the
+            # signature-id PREFIX for target and key on the full id (prefix+bid).
+            # The local DB is authoritative ONLY for this server's own targets;
+            # for a non-local (other-server) prefix a same-id local branch would
+            # supply the wrong loc/seeds, so only read the DB when the prefix is
+            # one of our on-disk targets AND the row actually exists as that
+            # target (else loc/seeds stay blank — the owning server fills them).
+            target = m.group(1)
+            key = (f"{target}_{bid}", shape)
             if key in seen:
                 continue
             seen.add(key)
-            br = con.execute("select target, file, function, line from branches where branch_id=?",
-                             (bid,)).fetchone()
-            # branch_id is globally unique; trust the DB target, not the signature-id
-            # prefix (a few shapes carry a stale/wrong prefix, e.g. bloaty_301 = curl).
-            target = br[0] if br else m.group(1)
+            br = None
+            if target in ONDISK:
+                br = con.execute("select target, file, function, line from branches where branch_id=?",
+                                 (bid,)).fetchone()
+                if br and br[0] != target:
+                    br = None  # bare-id collision with a different local target
             loc = ({"file": br[1], "function": br[2], "line": br[3]} if br else {})
             a = assigned.get(key)
             asg = a[0] if a else {"status": "inconclusive", "reason": "not scored by any server"}
@@ -118,7 +131,7 @@ def main():
             rows.append({
                 "branch_id": bid, "target": target, "loc": loc,
                 "shape": shape, "decisive_shape": decisive,
-                "per_arm_seeds": {k: v for k, v in (seeds.get(bid) or {}).items()},
+                "per_arm_seeds": {k: v for k, v in ((seeds.get(bid) if br else None) or {}).items()},
                 "mechanism": {"label": asg.get("hypothesis"),
                               "direction": asg.get("direction"),
                               "shape_source": f"step5b_new_v3/{shape}/evidence_test.json"},

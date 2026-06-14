@@ -410,13 +410,23 @@ def arbitrate_shape(shape):
         if not m:
             continue
         bid = int(m.group(2))
-        # branch_id is globally unique; resolve target from the DB, not the
-        # signature-id prefix (a few shapes carry a stale/wrong prefix, e.g.
-        # bloaty_301 is really curl branch 301 -> would mis-route ONDISK + the
-        # tool's --target to a corpus that isn't this branch's).
-        target = branch_target(con, bid) or m.group(1)
+        # branch_id is NOT globally unique across servers — each server's DB
+        # assigns ids independently, so the bare integer collides (bloaty_57 and
+        # curl_57 are different branches on the two servers). The signature-id
+        # PREFIX is the authoritative target; trust it to decide ownership and
+        # only score branches whose prefix is one of THIS server's on-disk
+        # targets. (Reverts the earlier `branch_target(con, bid) or prefix`
+        # resolution, which misread a cross-server id collision as a stale
+        # prefix and mis-routed e.g. curl_57 onto this server's bloaty 57 corpus.
+        # All local-prefix signatures here are DB-consistent — see the guard.)
+        target = m.group(1)
         if target not in ONDISK:
             continue  # other server's target — it writes its own assignments file
+        # Safety: the prefix claims a local target, but our DB must actually hold
+        # this branch_id as that target; if not, the prefix is genuinely stale —
+        # skip rather than score the wrong corpus.
+        if branch_target(con, bid) != target:
+            continue
         sig = dict(sig)
         sig["_operand"] = parse_operand(sig)
         sig["_tokens"] = shape_tokens(shape, target)

@@ -106,8 +106,11 @@ def rows():
 
 
 def test_dataset_no_duplicate_branch_shape(rows):
-    keys = [(r["branch_id"], r["shape"]) for r in rows]
-    assert len(keys) == len(set(keys)), "a (branch_id, shape) axis must be one row"
+    # branch_id is NOT globally unique across servers (bloaty_57 vs curl_57 are
+    # different branches), so identity is (target, branch_id, shape) — one row per
+    # that axis. A bare (branch_id, shape) can legitimately recur across targets.
+    keys = [(r["target"], r["branch_id"], r["shape"]) for r in rows]
+    assert len(keys) == len(set(keys)), "a (target, branch_id, shape) axis must be one row"
 
 
 def test_dataset_label_status_consistency(rows):
