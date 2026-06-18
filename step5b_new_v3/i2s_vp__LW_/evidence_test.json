@@ -29,14 +29,14 @@
       "rule": "signed_target_enrich > 0 AND decoy_enrich < 0.5",
       "feasible_branches": ["libxml2_6193"],
       "infeasible_branches": ["libxml2_8138", "libxml2_9435"],
-      "status_note": "KEEP / carry-forward per superset rule. This is the prior hypothesis verbatim (rule unchanged, no relaxed threshold). At round-0 scoring on the libxml2 corpus it returned rule_not_met for 6193 (the fixed-offset byte_freq_ratio model is mismatched: the gate compares a derived name[] buffer from xmlSplitQName, not a raw byte at a stable input offset, so the literal does not enrich at one gate offset). It is retained UNCHANGED so any other server / future libxml2 corpus re-scores it, and tried FIRST in decision_order, but the new value-distance hypothesis below is the primary discriminator for this shape."
+      "status_note": "KEEP / carry-forward per superset rule. Prior hypothesis verbatim (rule unchanged, no relaxed threshold). At round-0 scoring it returned rule_not_met for 6193 (the fixed-offset byte_freq_ratio model is mismatched: the gate compares a derived name[] buffer from xmlSplitQName, not a raw byte at a stable input offset, so the literal does not enrich at one gate offset). Retained UNCHANGED so any other server / future libxml2 corpus re-scores it; tried THIRD in decision_order."
     },
     {
       "id": "i2s_lands_literal_vp_gradient_stalls_distance",
       "label": "vpc's I2S lands AT the exact multibyte literal; value_profile's Hamming gradient stalls a measurable distance short of it",
       "direction": "pro",
-      "from_prior": [],
-      "carry_forward": false,
+      "from_prior": ["i2s_lands_literal_vp_gradient_stalls_distance"],
+      "carry_forward": true,
       "measurement": {
         "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "operand_literal", "unit": "per_branch"},
         "registry_tool": "value_distance_reached",
@@ -56,37 +56,71 @@
           "loser_arm_for_winner_closer": "value_profile"
         }
       },
-      "prediction": "G1 (genuinely DIFFERENT mechanism than the refuted byte_freq_ratio enrichment): the i2s-pro / gradient-blind story predicts vpc's seeds reach the exact 6-byte 'xmlns\\0' literal (vpc_min_distance ~ 0) while value_profile's prefix-Hamming gradient stalls a measurable distance short of the NUL-terminated 6-way equality chain (vp_min_distance substantially > 0), so winner_closer=true and distance_gap is large. The DISCRIMINATED ALTERNATIVE the refuted enrichment test could not rule out: that value_profile's CMP_MAP gradient actually DOES climb to within a byte of the literal (so vpc has no real distance advantage) -- if so vp_min_distance would be ~0, distance_gap ~ 0, winner_closer=false, REFUTING gradient-blind. Unlike byte_freq_ratio this uses a SLIDING WINDOW (no fixed-offset assumption), so it survives the derived-name[] / xmlSplitQName-output offset problem that made the enrichment test mismatched for this gate.",
+      "prediction": "G1 (genuinely DIFFERENT mechanism than the byte_freq_ratio enrichment): the i2s-pro / gradient-blind story predicts vpc's seeds reach the exact 6-byte 'xmlns\\0' literal (vpc_min_distance ~ 0) while value_profile's prefix-Hamming gradient stalls a measurable distance short of the NUL-terminated 6-way equality chain (vp_min_distance substantially > 0), so winner_closer=true and distance_gap is large. DISCRIMINATED ALTERNATIVE: that value_profile's CMP_MAP gradient actually DOES climb to within a byte of the literal (so vpc has no real distance advantage) -- if so vp_min_distance ~ 0, distance_gap ~ 0, winner_closer=false. Uses a SLIDING WINDOW (no fixed-offset assumption), so it survives the derived-name[] / xmlSplitQName-output offset problem that made the enrichment test mismatched.",
       "rule": "winner_closer == true AND distance_gap >= 0.2 AND vpc_min_distance <= 0.05",
       "feasible_branches": ["libxml2_6193"],
       "infeasible_branches": ["libxml2_8138", "libxml2_9435"],
-      "caveat": "operand width 6 is above the width<=2 chance-alignment flag, so this is not chance-prone. value_distance_reached reads on-disk seeds; libxml2 has no on-disk corpus on s4 -- the OWNING server (sB holds libxml2) scores this. Specified for ALL servers per cross-server rule; not marked unscorable for a corpus merely absent on the running server."
+      "status_note": "KEEP / carry-forward per superset rule (added in the prior round). Verbatim rule, no relaxed threshold. Tried SECOND in decision_order.",
+      "caveat": "operand width 6 is above the width<=2 chance-alignment flag. value_distance_reached reads on-disk seeds; libxml2 has no on-disk corpus on s4 -- the OWNING server (sB holds libxml2) scores this. Specified for ALL servers per cross-server rule."
+    },
+    {
+      "id": "i2s_xmlns_token_present_vp_corpus_lacks",
+      "label": "the 'xmlns' attribute-name token appears in vpc's resolving corpus but is absent/depleted in value_profile's blocking corpus",
+      "direction": "pro",
+      "from_prior": [],
+      "carry_forward": false,
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "token_count", "operand": "operand_literal", "unit": "per_branch"},
+        "registry_tool": "joint_necessity",
+        "arm_repointing": {
+          "winner_arm": "value_profile_cmplog",
+          "loser_arm": "value_profile",
+          "note": "joint_necessity natively computes a per-arm structural-TOKEN count (vp_tags / cmp_tags / vpc_tags) over the vpc-RESOLVING vs value_profile-BLOCKING seed sets via the --tokens knob. Here --tokens is repointed from font/SQL tags to the single XML token 'xmlns' (the gate's structural literal). The discriminating metrics are vpc_tags (xmlns present in winner corpus) vs vp_tags (xmlns absent/depleted in loser corpus) and their ratio tag_lift. size_lift is auxiliary context, NOT in the rule."
+        },
+        "metrics_used": ["vpc_tags", "vp_tags", "tag_lift"],
+        "params": {
+          "tokens": {
+            "libxml2_6193": "xmlns"
+          },
+          "applicable_branches": ["libxml2_6193"]
+        }
+      },
+      "prediction": "G1 (genuinely DIFFERENT measurement than either prior test -- a corpus-level TOKEN OCCURRENCE COUNT, not a fixed-offset byte frequency and not a Hamming distance to an operand): the i2s-pro story predicts the literal 'xmlns' token is PRESENT in vpc's resolving corpus (vpc_tags >= 1 per resolving seed) because I2SRandReplace splices the logged per-character 'xmlns' comparands into the input, while value_profile's gradient-only search cannot synthesize the contiguous token, so it is largely ABSENT from the blocking corpus (vp_tags ~ 0). This is OFFSET-FREE (counts the token anywhere in the seed, so it survives the derived name[]-buffer offset problem that broke operand_enrichment) and CONTENT-PRESENCE based (not a distance metric, so it discriminates the case value_distance_reached cannot resolve when the literal sits in a derived buffer rather than a window of raw input). DISCRIMINATED ALTERNATIVE: if value_profile actually DOES land the 'xmlns' token via its gradient, vp_tags would be ~ vpc_tags and tag_lift ~ 1, REFUTING the gradient-blind story.",
+      "rule": "vpc_tags >= 1 AND vp_tags < 0.3 AND tag_lift >= 2.0",
+      "feasible_branches": ["libxml2_6193"],
+      "infeasible_branches": ["libxml2_8138", "libxml2_9435"],
+      "decidable": true,
+      "novelty_note": "THIRD, genuinely-new mechanism+measurement for the rule_not_met branch 6193, using a BUILT-but-not-yet-tried-here tool (joint_necessity / token_count). NOT a relaxed-threshold re-run of either prior: operand_enrichment measured fixed-offset byte frequency (failed: no stable gate offset); value_distance_reached measured Hamming distance over sliding windows of raw input (the value lands in a DERIVED name[] buffer, so a raw-window distance can miss it). This test counts the 'xmlns' attribute-name token's presence anywhere in the seed, which is exactly how the literal appears in the raw input regardless of where xmlSplitQName later places it -- the measurement model that fits the gate's actual derived-buffer structure. Placed FIRST in decision_order as the primary discriminator.",
+      "caveat": "joint_necessity reads on-disk seeds; libxml2 has no on-disk corpus on s4 -- the OWNING server (sB) scores this. Specified for ALL servers per cross-server rule. 'xmlns' is a 5-char token, well above the chance-occurrence floor for a 5-byte contiguous string in arbitrary corpus bytes."
     }
   ],
   "decision_order": [
-    "i2s_multibyte_literal_splice_vp_gradient_blind",
-    "i2s_lands_literal_vp_gradient_stalls_distance"
+    "i2s_xmlns_token_present_vp_corpus_lacks",
+    "i2s_lands_literal_vp_gradient_stalls_distance",
+    "i2s_multibyte_literal_splice_vp_gradient_blind"
   ],
   "fallback": "inconclusive",
   "data_realities_respected": [
-    "On-disk corpora exist ONLY for curl/harfbuzz/openthread/sqlite3 on s4; libxml2 lives on server B. Both feasible measurements (operand_enrichment, value_distance_reached) read seeds/corpus, so they are scored by the OWNING server (sB), NOT marked decidable:false here for a corpus absent on the running server (cross-server rule 4).",
-    "operand_enrichment skips structural/length gates and needs a fixed-offset VALUE gate with a contiguous target literal at a STABLE offset. libxml2_6193's gate compares a derived name[] buffer (xmlSplitQName output), so the literal is not at a fixed input offset -- this is why the fixed-offset enrichment rule did not hold and why value_distance_reached (sliding window, no fixed-offset assumption) is the better-matched second test.",
-    "value_distance_reached needs operand_literal + operand_width from the signature; libxml2_6193 supplies 'xmlns\\0' / width 6 (above the width<=2 chance-alignment flag).",
-    "I2S is NOT lineage-tagged and value_profile is a feedback not a mutator: neither hypothesis uses seed_lineage:event_cooccurrence on an 'I2S event' or a 'gradient event'. Both measure corpus/seed CONTENT (byte enrichment, distance-to-operand), which is the only feasible window onto these effects.",
-    "joint/structural gates have different-sized W vs L seeds so byte-alignment fails -- relevant to libxml2_9435 (state_or_grammar / dispersed_multibyte structural namespace-assembly gate), which is excluded from both byte-aligned tests."
+    "On-disk corpora exist ONLY for curl/harfbuzz/openthread/sqlite3 on s4; all 3 branches here are libxml2, which lives on server B. All three feasible measurements (operand_enrichment, value_distance_reached, joint_necessity/token_count) read seeds/corpus, so they are scored by the OWNING server (sB), NOT marked decidable:false here for a corpus absent on the running server (cross-server rule 4).",
+    "operand_enrichment skips structural/length gates and needs a fixed-offset VALUE gate with a contiguous target literal at a STABLE offset. libxml2_6193's gate compares a derived name[] buffer (xmlSplitQName output), so the literal is not at a fixed input offset -- this is why the fixed-offset enrichment rule did not hold; value_distance_reached (sliding window) and joint_necessity/token_count (offset-free token presence) are the better-matched re-tests.",
+    "joint_necessity's --tokens knob is target-specific (font tags for harfbuzz, SQL keywords for sqlite3); here it is repointed to the XML structural token 'xmlns'. The struct_size_and_token_count tool counts token OCCURRENCE in seed bytes regardless of offset, sidestepping the derived-buffer offset problem; size_lift is auxiliary context only and is NOT in the rule (this gate is a fixed-width literal, not a larger-structure-assembly joint).",
+    "I2S is NOT lineage-tagged and value_profile is a feedback not a mutator: NONE of the three hypotheses use seed_lineage:event_cooccurrence on an 'I2S event' or a 'gradient event'. All measure corpus/seed CONTENT (byte enrichment / distance-to-operand / token presence), the only feasible window onto these effects.",
+    "joint/structural gates have different-sized W vs L seeds so byte-alignment fails -- relevant to libxml2_9435 (state_or_grammar / dispersed_multibyte structural namespace-assembly gate), excluded from all three content tests here.",
+    "seed-dependent tools need >=3 W and >=3 L seeds in db/blockers.sqlite. libxml2_6193 currently has enough to score; libxml2_8138 (W=1 L=7) and libxml2_9435 (W=2 L=30) are below the floor (seed_starved -> re-bisect, not decidable:false)."
   ],
   "unscorable_seed_starved": {
     "branches": ["libxml2_8138", "libxml2_9435"],
     "disposition": "rebisect_then_rescore",
     "decidable": "pending_data",
-    "note": "These two are NOT decidable:false (no honest mechanism verdict). They are seed_starved: libxml2_8138 has W=1 L=7 and libxml2_9435 has W=2 L=30 in db/blockers.sqlite, below operand_enrichment / value_distance_reached's >=3-W,>=3-L floor. The deficit is a DATA-COLLECTION gap, not a non-discriminable mechanism -- route both to rank-10 re-bisection (tools/seed_bisect.py) to recover >=3 W seeds, then re-score. Until then they ride fallback:inconclusive as pending_data, distinct from a permanent decidable:false. Their mechanisms are plausibly discriminable once seeds exist: 8138 is a single_byte high-bit/IS_CHAR decode gate (operand_literal=null -> needs value_distance_reached on the decoded lead-byte sequence, or remains decidable:false if no stable operand emerges); 9435 is a structural namespace-assembly gate better matched to joint_necessity (struct_size_and_token_count) than to either byte-aligned tool."
+    "note": "NOT decidable:false (no honest mechanism verdict). They are seed_starved: libxml2_8138 has W=1 L=7 and libxml2_9435 has W=2 L=30 in db/blockers.sqlite, below the >=3-W,>=3-L floor of every seed/corpus tool. The deficit is a DATA-COLLECTION gap, not a non-discriminable mechanism -- route both to rank-10 re-bisection (tools/seed_bisect.py) to recover >=3 W seeds, then re-score. Until then they ride fallback:inconclusive as pending_data, distinct from a permanent decidable:false. Plausible matched tests once seeds exist: 8138 is a single_byte high-bit/IS_CHAR decode gate (operand_literal=null -> the failing val is produced by multibyte UTF-8 decoding, not a constant byte; if no stable operand emerges it then becomes decidable:false -- a decode-derived value has no corpus-content signature for any built tool); 9435 is a structural namespace-assembly gate better matched to joint_necessity (struct_size_and_token_count with --tokens xmlns) than to byte-aligned tools."
   },
   "notes": {
-    "priors_kept": "KEPT the single prior hypothesis i2s_multibyte_literal_splice_vp_gradient_blind verbatim (same rule, no relaxed threshold) per the superset/monotonic rule, tried FIRST in decision_order so the confirmed-elsewhere case re-validates.",
-    "new_mechanism": "ADDED one new hypothesis for the rule_not_met branch libxml2_6193: i2s_lands_literal_vp_gradient_stalls_distance. It is a GENUINELY DIFFERENT mechanism+measurement than the refuted one -- value-DISTANCE-to-operand via sliding window (registry tool value_distance_reached), not fixed-offset byte-frequency enrichment. It directly addresses WHY the enrichment test failed (the gate compares a derived name[] buffer, so there is no stable gate offset to enrich; sliding-window distance has no fixed-offset assumption) and discriminates the alternative the enrichment test could not (whether VP's gradient actually reaches the literal).",
-    "decidable_false_subgroup": "None marked permanently decidable:false in this round. The two unscorable branches (8138, 9435) are seed_starved -> rebisect_then_rescore (pending_data), per cross-server rule: a data-collection gap is not a non-discriminable mechanism. If re-bisection cannot recover >=3 W seeds for 8138 (single_byte, operand_literal=null -- no stable operand for any byte-aligned tool), it then legitimately becomes decidable:false; 9435 would route to joint_necessity. Recorded honestly rather than forced into a label.",
-    "g1_novelty": "The new hypothesis is falsifiable (winner_closer could come out false) and discriminating (vp_min_distance ~ 0 would refute gradient-blind). It is not a relaxed-threshold re-run of the refuted enrichment rule -- it is a different metric family (Hamming distance to operand vs corpus byte frequency at a fixed offset).",
-    "g2_independence": "Both measurements read corpus/seed CONTENT (byte enrichment / distance-to-operand-literal), independent of the resolve pattern (whether vpc reached the gate's resolving side) that DEFINED the shape -- no verifying-vpc-resolves-with-vpc-resolves.",
-    "collapse_rationale": "All 3 branches share the I2S-exact-sequence-vs-VP-gradient-blind story but they do NOT collapse into one scorable test: only 6193 has a fixed contiguous operand_literal ('xmlns\\0') that either byte-aligned tool can target. 8138 (single_byte, null operand) and 9435 (structural, dispersed_multibyte) lack a stable operand and are additionally seed_starved, so they cannot share 6193's measurement and are routed separately."
+    "priors_kept": "KEPT BOTH prior hypotheses verbatim per the superset/monotonic rule: i2s_multibyte_literal_splice_vp_gradient_blind (operand_enrichment, KEEP) and i2s_lands_literal_vp_gradient_stalls_distance (value_distance_reached, KEEP). Rules unchanged, no relaxed thresholds. They re-score on any server/future libxml2 corpus so confirmed-elsewhere branches re-validate.",
+    "new_mechanism": "ADDED ONE new hypothesis for the rule_not_met branch libxml2_6193: i2s_xmlns_token_present_vp_corpus_lacks. It uses joint_necessity's token_count (a BUILT tool NOT yet tried on this shape), measuring offset-free presence of the 'xmlns' attribute-name token in the vpc-resolving vs value_profile-blocking corpora. Placed FIRST in decision_order as the primary discriminator because it is the only one of the three whose measurement model fits the gate's actual structure (a derived name[] buffer with no stable raw-input offset), which is precisely why operand_enrichment (fixed offset) returned rule_not_met and why a raw-window distance can also miss the literal.",
+    "why_genuinely_different": "operand_enrichment = byte FREQUENCY at a FIXED gate offset (failed: gate has no stable offset). value_distance_reached = Hamming DISTANCE over SLIDING WINDOWS of raw input to the operand (can miss a value that materializes in a derived buffer). token_count = OCCURRENCE COUNT of the contiguous 'xmlns' token ANYWHERE in the seed (matches how the literal actually appears in raw input). Three distinct metric families over three distinct measurement models -- not a threshold relaxation of one.",
+    "decidable_false_subgroup": "None marked permanently decidable:false this round. The two unscorable branches (8138, 9435) are seed_starved -> rebisect_then_rescore (pending_data); a data-collection gap is not a non-discriminable mechanism. If re-bisection cannot recover >=3 W seeds for 8138 (single_byte, operand_literal=null, decode-derived value with no corpus-content signature), it then legitimately becomes decidable:false; 9435 would route to joint_necessity (struct_size_and_token_count).",
+    "g1_novelty": "The new hypothesis is falsifiable (tag_lift could come out ~1, vp_tags could come out high) and discriminating (vp_tags ~ vpc_tags would refute gradient-blind). Not a relaxed-threshold re-run of either refuted prior -- a different metric family (token occurrence) over a different measurement model (offset-free corpus content).",
+    "g2_independence": "All three measurements read corpus/seed CONTENT (byte enrichment / distance-to-operand / token presence), independent of the resolve pattern (whether vpc reached the gate's resolving side) that DEFINED the shape -- no verifying-vpc-resolves-with-vpc-resolves.",
+    "collapse_rationale": "All 3 branches share the I2S-exact-sequence-vs-VP-gradient-blind story but do NOT collapse into one scorable test: only 6193 has a fixed contiguous operand_literal ('xmlns') that a content test can target. 8138 (single_byte, null operand, decode-derived) and 9435 (structural, dispersed_multibyte) lack a stable operand and are additionally seed_starved, so they cannot share 6193's measurement and are routed separately (re-bisect)."
   }
 }

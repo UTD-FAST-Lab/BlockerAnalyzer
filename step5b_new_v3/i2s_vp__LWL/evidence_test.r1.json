@@ -1,0 +1,98 @@
+{
+  "shape": "i2s_vp__LWL",
+  "shape_decode": "cmp,vp,vpc,naive = _,L,W,L. value_profile_cmplog RESOLVES; value_profile AND naive BLOCK; cmplog NON-decisive. The winner is the only decisive arm carrying I2SRandReplace (the resolve is attributed to the I2S inside vpc), so this is an i2s-pro shape whose winner is vpc rather than plain cmplog.",
+  "n_branches": 90,
+  "round": 1,
+  "hypotheses": [
+    {
+      "id": "i2s_exact_literal_gate",
+      "label": "vpc resolves an exact-literal equality gate because its I2SRandReplace splices the logged comparand literal into a fixed input offset, which value_profile's Hamming/CMP_MAP gradient cannot land",
+      "direction": "pro",
+      "decidable": true,
+      "frozen": true,
+      "from_prior": [
+        "i2s_binary_format_magic_gate",
+        "i2s_text_token_exact_match"
+      ],
+      "measurement": {
+        "descriptor": {
+          "source": "corpus_queue",
+          "compute": "byte_freq_ratio",
+          "operand": "target_vs_decoy",
+          "unit": "per_gate_offset"
+        },
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "winner_arm": "value_profile_cmplog",
+          "loser_arms": ["value_profile", "naive"],
+          "arm_repointing": "THIS SHAPE'S WINNER IS vpc, NOT cmplog. operand_enrichment as built computes cmplog-vs-naive log2 enrichment. Repoint it to measure the SAME byte_freq_ratio on the vpc-RESOLVING corpus (the I2S-bearing winner) vs the union of the value_profile- and naive-BLOCKING corpora (the non-I2S losers). signed_target_enrich = log2( freq(target literal byte @ gate offset in vpc corpus) / freq(same byte in vp+naive corpora) ). This is a PARAM change (which corpus dirs feed W vs L), not a new tool: the measurement, metrics, and gate-offset extraction are identical.",
+          "gate_offset_source": "per-branch W/L decisive seed bytes already in db/blockers.sqlite (resolving_seeds vs blocking_seeds); the gate offset + target literal come from the branch's operand_literal / byte diff, exactly as the validated harfbuzz/5391 anchor.",
+          "scope": "scored ONLY for targets with on-disk corpora and a FIXED-OFFSET contiguous literal: harfbuzz + curl here. lcms/libxml2/bloaty/libpng lack on-disk corpus (data_reality) and fall to fallback:inconclusive for the evidence-confirmation guardrail, though they still carry the shape's Layer-1 label."
+        }
+      },
+      "prediction": "signed_target_enrich > 0 (strictly): the exact target literal at the gate offset is MORE frequent in the vpc-resolving corpus than in the vp/naive-blocking corpora, because only the I2S-bearing winner can place the all-or-nothing constant. An ALTERNATIVE mechanism predicts differently: if vpc resolved via value_profile's gradient alone (not I2S substitution), the literal would accrete byte-by-byte in the value_profile corpus too and signed_target_enrich would be ~0 (no winner-over-loser enrichment, since vp is a loser arm). If vpc resolved by some structural/length route rather than landing THIS literal, the tool returns no_gate_signature. So a positive sign is a discriminating confirmation of I2S literal substitution, not merely of 'vpc wins'.",
+      "rule": "signed_target_enrich >= 1.0",
+      "rule_notes": "Threshold 1.0 (>=2x relative frequency, log2) is conservative vs the validated pro median of +3.12 at the operand_enrichment anchor; > 0 alone is the falsifiable boundary, 1.0 guards against corpus-frequency noise. FROZEN: 78 branches confirmed under this rule in the prior round; carried forward unchanged so they re-validate (superset/monotonic)."
+    },
+    {
+      "id": "i2s_structural_token_assembly",
+      "label": "vpc resolves a presence/assembly gate not by landing ONE literal at a fixed offset but by splicing a CHAIN of logged structural tokens (FOURCC/keyword sequence) so the vpc-resolving seeds carry MORE structural tokens and a LARGER valid container than the vp/naive-blocking seeds; the gate fires on the assembled structure, not a single comparand",
+      "direction": "pro",
+      "decidable": true,
+      "from_prior": [],
+      "novelty_note": "Genuinely different mechanism from the refuted i2s_exact_literal_gate for these branches: the prior single-offset byte_freq_ratio FAILED here (these gates are byte_signature=dispersed_multibyte, operand_kind=presence_or_nonnull, no fixed offset to enrich). The new claim is multi-token STRUCTURAL ASSEMBLY DEPTH (a sequence of structural tokens / a larger valid container must be built), measured by token-count + size in the resolving vs blocking seed sets, NOT byte frequency at one offset. This is not a relaxed-threshold re-test of the prior rule.",
+      "measurement": {
+        "descriptor": {
+          "source": "seed_set",
+          "compute": "struct_size_and_token_count",
+          "operand": "tokens",
+          "unit": "per_branch"
+        },
+        "registry_tool": "joint_necessity",
+        "metrics_used": ["token_lift", "size_lift", "vp_tags", "vpc_tags"],
+        "params": {
+          "mode": "analyze_pair",
+          "winner_arm": "value_profile_cmplog",
+          "loser_arms": ["value_profile", "naive"],
+          "arm_repointing": "joint_necessity was built for the LLWL joint shape (cmplog-blocking vs vp-blocking vs vpc-resolving). HERE cmplog is NON-decisive, so do NOT use the i2s_necessary (cmp_tags vs vp_tags) verdict. Use analyze_pair with W = vpc-resolving seeds, L = union of value_profile- and naive-BLOCKING seeds. token_lift = mean structural-token count in W minus in L; size_lift = median(W size)/median(L size). The struct_size_and_token_count computation is identical; only the W/L arm membership is repointed.",
+          "tokens_per_target": {
+            "harfbuzz": "sfnt/OpenType table tags + sfnt version magic: 00010000,cmap,GSUB,GSUN,GPOS,morx,COLR,post (the joint_necessity font-tag default), i.e. the token CHAIN harfbuzz_5745 must assemble (TrueType magic + cmap + GSUN), not a single tag",
+            "curl": "HTTP protocol structural tokens: 'HTTP/','POP3','\\r\\n','Content-Type:','Transfer-Encoding:','GET ','POST ' — the multi-token header block curl_427 must assemble so Curl_http_readwrite_headers completes",
+            "libxml2": "XML/DTD structural keyword tokens supplied by the OWNING server (sB): '<!DOCTYPE','<!ATTLIST',' ID',' ID ','xmlns','xml:id','version=','id=\"' — the ATTLIST/ID/xmlns declaration CHAIN that libxml2_6233/6740/6929/6936/7249 must assemble. The token vocabulary is target-specific; sB supplies it at score time, same convention as font tags here / SQL keywords for sqlite3."
+          },
+          "scope": "Members: libxml2_6233, libxml2_6740, libxml2_6929, libxml2_6936, libxml2_7249, curl_427, harfbuzz_5745. On-disk-corpus + token-vocab present on s4 for curl_427 and harfbuzz_5745 (evidence-scorable here). libxml2 (5 branches) are sB targets: VALID test, the owning server arbitrates with its XML token vocab (do NOT mark decidable:false for absence-of-corpus-on-running-server per cross-server rule)."
+        }
+      },
+      "prediction": "token_lift > 0 AND vp_tags ~ 0: the vpc-resolving seeds carry MORE structural tokens (a longer assembled chain) than the vp/naive-blocking seeds, AND value_profile alone places ~none of them (its Hamming gradient cannot land discrete multi-byte tokens). DISCRIMINATING vs the alternatives: (1) if value_profile's gradient assembled the structure too, vp_tags would be high and token_lift ~ 0 -> this is NOT I2S-exclusive structural assembly (refutes the hypothesis); (2) if the gate fired on a single fixed-offset literal (the prior i2s_exact_literal_gate mechanism), token_lift over a multi-token vocabulary would be ~0 and operand_enrichment (not this) would already have confirmed it -> so a positive token_lift specifically picks out the MULTI-token assembly mechanism that the single-offset test could not see. size_lift > 1 corroborates that the winner builds a larger valid container.",
+      "rule": "token_lift >= 1.0 AND vp_tags < 0.5",
+      "rule_notes": "token_lift >= 1.0 = the vpc-resolving seed set carries on average >=1 more structural token than the blocking set (a real assembled chain, not noise). vp_tags < 0.5 enforces I2S-exclusivity (value_profile places fewer than half a token on average). Both must hold (AND) so the confirmation is of I2S structural assembly, not merely 'winner seeds are bigger'. size_lift reported for audit but not gating (size alone is not discriminating)."
+    },
+    {
+      "id": "i2s_cursor_relative_single_byte",
+      "label": "vpc resolves a single-byte equality gate whose target byte sits at a CONTENT-DEPENDENT cursor position (not a fixed input offset): RAW=='?' after an element Name, or a sub-0x20 control char inside CDATA",
+      "direction": "pro",
+      "decidable": false,
+      "from_prior": [],
+      "members": ["libxml2_6643", "libxml2_6809"],
+      "decidable_false_reason": "No built measurement can discriminate the mechanism here. (1) operand_enrichment is a FIXED-OFFSET byte_freq_ratio, but the target byte's position is data-dependent (the parse cursor after a variable-length element Name for 6643; a variable position inside CDATA content for 6809) — there is no stable gate offset to enrich. (2) Even relaxing to whole-seed byte frequency, the literals are single bytes ('?'=0x3f; whitespace 0x0A/0x0D/0x09) that occur abundantly in ANY XML/text corpus regardless of fuzzer, and the registry explicitly flags width<=2 operands as chance-alignment-prone — so an enrichment signal would not distinguish I2S substitution from baseline byte frequency. (3) value_distance_reached needs a multi-byte operand to form a Hamming gradient; a 1-byte equality has no usable distance signal. No built tool separates 'I2S placed this byte' from 'this common byte was already there', so an honest inconclusive is the correct outcome (G3).",
+      "measurement": null,
+      "prediction": null,
+      "rule": null
+    }
+  ],
+  "decision_order": ["i2s_exact_literal_gate", "i2s_structural_token_assembly"],
+  "fallback": "inconclusive",
+  "seed_starved": {
+    "branches": ["lcms_2334", "curl_263", "harfbuzz_5362"],
+    "action": "rank-10 re-bisect candidates — unscorable for INSUFFICIENT SEEDS (W=1; need >=3 W and >=3 L), NOT for a mechanism gap. Route to re-bisection; do not assign a mechanism hypothesis. (lcms_2334 is additionally an sB target with no on-disk corpus on s4.) After re-bisect yields >=3 W seeds, lcms_2334/curl_263 (single-byte/derived gates) likely test under i2s_exact_literal_gate or i2s_cursor_relative_single_byte; harfbuzz_5362 (dispersed font-tag chain) under i2s_structural_token_assembly."
+  },
+  "data_realities_respected": [
+    "No seed_lineage 'I2S event' descriptor used (I2S is untagged in mutation_op) — confirmation is via corpus byte-frequency (literal gate) or seed-set token-count/size (assembly gate), the only observables of I2S substitution.",
+    "Structural-assembly gates have DIFFERENT-sized winning vs blocking seeds, so byte-alignment (byte_freq_ratio) is NOT used for i2s_structural_token_assembly — it uses struct_size_and_token_count (joint_necessity), exactly as data_realities prescribe for assembly gates.",
+    "on-disk corpora exist only for curl/harfbuzz/openthread/sqlite3 on s4 -> on s4 only curl + harfbuzz branches are evidence-scorable; lcms/libxml2/bloaty/libpng are owning-server (sB) or label-only and arbitrated by their server, NOT marked decidable:false for corpus-absence (cross-server rule).",
+    "value_profile (CMP_MAP) is a feedback not a mutator — its effect is captured via what the corpus reaches (literal frequency, token count, size), never a lineage gradient event. The vp_tags ~ 0 prediction in i2s_structural_token_assembly is exactly this corpus-reach observable.",
+    "seed-dependent tools need resolving_seeds + blocking_seeds in db/blockers.sqlite (>=3 each); the 3 seed_starved branches fail this and are routed to re-bisect, not scored."
+  ],
+  "notes": "ROUND-1 re-design of i2s_vp__LWL (78 confirmed FROZEN + 12 unlabeled). PRIORS KEPT: i2s_exact_literal_gate carried forward verbatim (frozen:true) so the 78 confirmed branches re-validate (superset/monotonic guardrail). It already absorbed the prior v2 binary-magic + text-token clusters. NEW MECHANISMS: (A) i2s_structural_token_assembly — the 7 rule_not_met branches that the single-offset enrichment rule FAILED on are NOT exact-literal-at-fixed-offset gates; they are dispersed_multibyte / presence_or_nonnull gates that fire only after a CHAIN of structural tokens is assembled (libxml2: DTD+ATTLIST+ID/xmlns declaration sequence; curl_427: complete HTTP header block; harfbuzz_5745: sfnt magic + cmap + GSUN tag chain). The new mechanism = I2S multi-token structural assembly depth, measured by joint_necessity's struct_size_and_token_count (token_lift + vp_tags + size_lift) repointed to W=vpc-resolving vs L=vp+naive-blocking. This is novel (G1): a different observable (token COUNT over a vocabulary, not byte frequency at one offset) and a different discriminator (vp_tags~0 rules out value_profile-gradient assembly). It is NOT a relaxed re-test of the refuted rule — the refuted rule measured a single fixed offset, which structurally cannot fire here. Scorable on s4 for curl_427 + harfbuzz_5745; the 5 libxml2 members are valid for sB to arbitrate with its XML token vocab. DECIDABLE:FALSE sub-group (G3): i2s_cursor_relative_single_byte = libxml2_6643 ('?'=0x3f after element Name) + libxml2_6809 (control char 0x0A/0x0D/0x09 in CDATA). These are single-byte gates at a CONTENT-DEPENDENT cursor with no fixed offset, and 1-byte literals are chance-alignment-prone (registry caveat) + abundant in any XML corpus — no built tool can separate I2S substitution from baseline byte frequency, so an honest inconclusive is correct rather than inventing a label. SEED_STARVED (re-bisect, no hypothesis): lcms_2334, curl_263, harfbuzz_5362 (W=1 < 3) — unscorable for lack of seeds, routed to rank-10 re-bisection. G2 (independence): both decidable hypotheses measure corpus/seed-set content (literal frequency; structural-token count/size) — observables orthogonal to the resolve-pattern that DEFINED the shape; a non-I2S winner would show neither enrichment nor a token_lift with vp_tags~0. SUMMARY: 1 prior KEPT (78 frozen), 1 NEW decidable mechanism (7 branches), 1 NEW decidable:false sub-group (2 branches), 3 seed_starved re-bisect (no label). 90 total accounted for."
+}

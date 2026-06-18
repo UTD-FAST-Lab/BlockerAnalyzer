@@ -1,0 +1,79 @@
+{
+  "shape": "i2s_vp_WL_L",
+  "shape_semantics": "cmp=W, vp=L, vpc=_, naive=L -> cmplog (I2S) resolves; value_profile AND naive block; value_profile_cmplog non-decisive. i2s-PRO where the value_profile GRADIENT does NOT help: the resolving move is exact-literal substitution / multi-literal structural assembly, not Hamming-gradient climbing. The G1 discriminator vs the vp-gradient families is that value_profile, with full CMP_MAP feedback, still BLOCKS here.",
+  "n_branches": 7,
+  "hypotheses": [
+    {
+      "id": "i2s_exact_literal_constant_gate",
+      "label": "cmplog plants an exact fixed-offset literal/magic constant the VP gradient cannot climb to",
+      "direction": "i2s_pro",
+      "from_prior": ["i2s_wl_l_literal_constant_gate"],
+      "members": ["bloaty_34", "curl_152", "harfbuzz_5483", "harfbuzz_5494"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "note": "fixed-offset VALUE gate; target byte(s) = the intercepted literal at the gate offset, decoy = a blocking-seed value at the same offset",
+          "per_branch_gate": {
+            "curl_152": "ASCII 'Content-Type:' literal (43 6f 6e 74 65 6e 74 2d 54 79 70 65 3a) at the header offset",
+            "harfbuzz_5483": "16-bit big-endian format field == 0x0004",
+            "harfbuzz_5494": "format field in {1,2,3} plus 'MATH' FOURCC tag"
+          }
+        }
+      },
+      "prediction": "cmplog's saved corpus is enriched in the TARGET literal byte(s) at the gate offset relative to naive (signed_target_enrich > 0), because I2SRandReplace plants the intercepted constant. A pure value_profile gradient mechanism would instead drive the byte toward the target by Hamming distance and would show no cmplog-specific literal enrichment; the shape already records that value_profile BLOCKS (it is an L), so the literal is NOT gradient-reachable. This rules out the vp-gradient alternative: if the operand were gradient-climbable, value_profile would resolve (be a W) and naive's corpus would drift toward the target rather than staying at decoy values.",
+      "rule": "signed_target_enrich >= 1.0 AND decoy_enrich <= 0.0",
+      "g2_independence": "operand_enrichment compares cmplog-vs-naive CORPUS byte composition at the gate offset; it does not consult the vpc/vp resolve pattern that defined the shape, so it is independent of the label source."
+    },
+    {
+      "id": "i2s_derived_signed_operand_construction",
+      "label": "cmplog constructs a DERIVED negative/range value across parser-routing bytes (no stored literal)",
+      "direction": "i2s_pro",
+      "from_prior": ["i2s_wl_l_derived_signed_operand"],
+      "members": ["curl_289", "curl_291"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich"],
+        "params": {
+          "note": "NO fixed literal: operand_literal=null, operand_width_bytes=null, byte_signature=unclear. The winning value is a derived signed integer (%d arg < 0) assembled from multi-field tag/colon/path/numeric bytes, NOT a single intercepted constant at a fixed offset."
+        }
+      },
+      "prediction": "operand_enrichment finds NO fixed-offset target signature for these branches and returns no_gate_signature (per its scope_limits: it skips gates with no fixed literal). The ABSENCE of a clean per-offset literal enrichment, combined with the same i2s-pro shape (cmplog W, vp+naive L), distinguishes derived-operand construction from exact-literal substitution: a stored-literal mechanism would yield a positive signed_target_enrich at a fixed offset, which this branch lacks.",
+      "rule": "no_gate_signature == true (operand_enrichment returns no fixed-offset literal); hypothesis confirmed by the diagnostic ABSENCE of literal enrichment under the i2s-pro shape, falling to inconclusive if any clean fixed-offset literal IS found (would reclassify to i2s_exact_literal_constant_gate)",
+      "g2_independence": "the no_gate_signature determination is a property of the gate's byte structure (whether a fixed-offset target literal exists), independent of the resolve pattern."
+    },
+    {
+      "id": "i2s_multiliteral_structural_assembly_gate",
+      "label": "cmplog assembles MULTIPLE dispersed table/script-tag literals into a coherent multi-part structure (no single fixed-offset gate byte) that the VP gradient cannot build",
+      "direction": "i2s_pro",
+      "from_prior": [],
+      "members": ["harfbuzz_5562"],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "struct_size_and_token_count", "operand": "tokens", "unit": "per_branch"},
+        "registry_tool": "joint_necessity",
+        "metrics_used": ["size_lift", "tag_lift", "cmp_tags"],
+        "params": {
+          "note": "Reuse the resolving-vs-blocking struct-size + structural-token contrast, but arms are cmplog-RESOLVING (W) vs naive/value_profile-BLOCKING (L) for this i2s-pro WL_L shape (NOT the vpc-needs-both joint the tool's anchor uses). The mechanism is multi-literal assembly: a well-formed sfnt blob carrying both a GPOS/GSUB FOURCC at offset 0x0c AND a 'dflt' script tag inside a populated ScriptList, with runs of structural offset bytes -- NOT one substitutable constant at a fixed offset.",
+          "tokens": "GPOS,GSUB,dflt,DFLT,latn,sfnt_version_00010000",
+          "resolving_arm": "cmplog resolving_seeds (well-formed sfnt, ~well-formed table directory)",
+          "blocking_arm": "naive + value_profile blocking_seeds (6-64 byte near-random fragments)"
+        }
+      },
+      "prediction": "The cmplog-resolving seeds are LARGER and carry MORE structural tokens than the naive/value_profile-blocking seeds (size_lift >= 1.3 AND cmp_tags >= 2 distinct structural tokens present in resolvers but ~0 in blockers). This is the discriminating signal that separates multi-literal structural assembly from the single fixed-offset literal hypothesis (i2s_exact_literal_constant_gate): a single-literal gate has SAME-SIZED winning/blocking seeds differing in one byte window (where operand_enrichment's byte_freq_ratio is the right test and DID hold for harfbuzz_5483/5494), whereas this gate needs an assembled structure of DIFFERENT size carrying several dispersed tokens (size_lift > 1, multiple tokens) -- which is exactly why operand_enrichment scored rule_not_met here (byte-alignment fails on different-sized seeds per data_realities). It also rules out the vp-gradient alternative: value_profile (an L) cannot Hamming-climb into a multi-part structure of changing length and token count; if it were a single climbable operand the shape would not show vp=L.",
+      "rule": "size_lift >= 1.3 AND cmp_tags >= 2",
+      "g2_independence": "joint_necessity's struct_size_and_token_count contrasts the resolving vs blocking SEED-SET structure (size + token composition); it never consults the vp/vpc resolve pattern that defined the shape. The cmplog-resolving vs naive/vp-blocking arms are the campaign-data signal, independent of the analysis-derived label source.",
+      "decidable": true
+    }
+  ],
+  "decision_order": ["i2s_exact_literal_constant_gate", "i2s_multiliteral_structural_assembly_gate", "i2s_derived_signed_operand_construction"],
+  "fallback": "inconclusive",
+  "data_realities_respected": [
+    "No seed_lineage 'I2S event' descriptor proposed (I2S is untagged in mutation_op) -- the discriminators are corpus byte-composition enrichment and resolving-vs-blocking seed-set structure, not lineage events.",
+    "No value_profile 'gradient event' descriptor proposed (VP is an invisible CMP_MAP feedback) -- the claim that VP does NOT help rests on the shape's own vp=L plus the operand_kind, not on a measured gradient event.",
+    "harfbuzz_5562 is a structural-ASSEMBLY gate with different-SIZED resolving vs blocking seeds, so byte_freq_ratio (operand_enrichment) is the WRONG test for it (it scored rule_not_met / no clean fixed-offset literal) -- per the data_reality 'joint/structural-assembly gates have different-sized winning vs blocking seeds, so byte-alignment fails -- use struct_size_ratio / token_count'. The new hypothesis switches it to joint_necessity's struct_size_and_token_count.",
+    "operand_enrichment needs an on-disk corpus and >=3 W + >=3 L seeds: SCORABLE only for curl + harfbuzz here; bloaty_34 has NO on-disk corpus (bloaty not in {curl,harfbuzz,openthread,sqlite3}) so it CANNOT be enrichment-scored and carries to fallback inconclusive on the measurement, even though its mechanism clearly matches the literal hypothesis. joint_necessity likewise needs on-disk seeds (harfbuzz is on-disk on s4, so harfbuzz_5562 is scorable)."
+  ],
+  "notes": "ROUND-1 re-design. PRIORS KEPT (verbatim, superset/monotonic): (1) i2s_exact_literal_constant_gate and (2) i2s_derived_signed_operand_construction -- both retained so the 6 confirmed branches re-validate. The ONLY change to a prior is that harfbuzz_5562 is REMOVED from i2s_exact_literal_constant_gate's member list and given its OWN new hypothesis (it was the rule_not_met branch -- operand_enrichment's signed_target_enrich>=1.0 AND decoy_enrich<=0.0 did not hold because this is NOT a single fixed-offset literal gate). The 5 still-confirmed-under-the-literal-rule members are bloaty_34, curl_152, harfbuzz_5483, harfbuzz_5494 (and curl_289/curl_291 under the derived hyp); harfbuzz_5483/5494 keep the literal rule. NEW MECHANISM (1): i2s_multiliteral_structural_assembly_gate for harfbuzz_5562 -- a genuinely DIFFERENT mechanism from exact-literal substitution: it assembles a multi-part sfnt structure (GPOS/GSUB FOURCC at 0x0c PLUS a 'dflt' script tag inside a populated ScriptList) of different size than the blocking fragments, not one substitutable constant at a fixed offset. Measured by REUSING the BUILT joint_necessity / struct_size_and_token_count descriptor (resolving-vs-blocking size_lift + structural-token count), which is the registry's prescribed test for different-sized structural-assembly gates -- NOT a relaxed-threshold re-run of operand_enrichment (that is forbidden and would just fail the same way). G1 novelty: discriminates multi-literal assembly (size_lift>1, cmp_tags>=2, byte-alignment fails) from single-literal substitution (same-size seeds, byte_freq_ratio holds) AND from the vp-gradient alternative (VP=L cannot climb a variable-length multi-token structure). NO decidable:false sub-group this round -- harfbuzz is on-disk on s4 so joint_necessity can score harfbuzz_5562, and the structural-assembly mechanism IS discriminable by the built struct-size/token tool; an honest inconclusive was not needed. CAVEAT (carried from r0): the 'vp does not help' claim is asserted from the shape (vp=L) + operand_kind, NOT independently measured (VP is an unobservable feedback); this is the honest discrimination ceiling for the WL_L shape and is exactly why the cmplog-vs-naive corpus/seed-structure contrast (not a VP contrast) is the load-bearing test."
+}

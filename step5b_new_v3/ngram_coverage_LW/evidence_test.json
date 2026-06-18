@@ -5,10 +5,34 @@
   "direction": "ngram_anti",
   "hypotheses": [
     {
+      "id": "ngram_wellformed_skeleton_token_gap",
+      "label": "naive's blocking-side corpus saves seeds that carry a well-formed XML document skeleton (the <?xml ...?> + <!DOCTYPE declaration + a real '&...;' reference token) that the parser can advance through to reach xmlParseReference->xmlAddChild, whereas naive_ngram4's saved seeds are malformed surface fragments (URL/attribute garbage, repeated-quote runs) that lack the structural skeleton tokens the deep reference path requires",
+      "direction": "anti",
+      "from_prior": [],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "token_count", "operand": "tokens", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": ["winner_token_count", "loser_token_count", "token_lift", "winner_token_richer"],
+        "params": {
+          "winner_fuzzer": "naive",
+          "loser_fuzzer": "naive_ngram4",
+          "winner_seed_set": "resolving_seeds(naive) for branch 6939",
+          "loser_seed_set": "blocking_seeds(naive_ngram4) for branch 6939",
+          "tokens": "<?xml,?>,<!DOCTYPE,SYSTEM,<!,&,;,<,>",
+          "count_mode": "per_seed_distinct_structural_token_presence_then_median_over_arm",
+          "note": "STRUCTURAL well-formedness tokens of an XML document head + reference, NOT byte-offset literals. winner_token_count = median over naive resolving seeds of how many distinct skeleton tokens each carries; loser_token_count = same over naive_ngram4 blocking seeds. token_lift = winner_token_count / max(loser_token_count, eps). Per-seed median, so unequal arm sizes do not confound (the confound that sank corpus_size_ratio). libxml2 owning server = sB (sB corpora = lcms,libxml2,libpng,bloaty); seeds live in db/blockers.sqlite resolving_seeds/blocking_seeds for this rep."
+        }
+      },
+      "prediction": "G1: the analysis directly observes the seed-composition asymmetry (winner seed offsets 0x1c-0x3f = 'ion=\"1.0\"?>.<!DO' = a clean <?xml...?>+<!DOCTYPE head; loser seed offsets 0x00-0x1f = 'ef=\"http://fdkeu' = attribute/URL garbage with NO document head). If well-formedness is the mechanism, naive's resolving seeds carry the XML skeleton tokens (<?xml/?>/<!DOCTYPE/&/;) at a far higher per-seed rate than naive_ngram4's blocking seeds => token_lift >= 2.0 AND winner_token_richer == true. The discriminated ALTERNATIVE this rules out: if the divergence were purely a runtime energy/reach effect with NO seed-composition difference (both arms' saved seeds equally carry the document skeleton, token_lift ~ 1), then the gap would be the already-tried depth_reach story (which did NOT hold for this branch) or pure stochastic noise -- NOT a well-formedness mechanism. This is a GENUINELY DIFFERENT measurement from the refuted depth_reach (runtime per-seed gate-line reach) and the superseded corpus_size_ratio (whole-campaign corpus SCALE): token_count is a per-seed STRUCTURAL-COMPOSITION property of each arm's saved corpus, attributable to this branch's two seed sets, and it can come out either way. G2-independent: it inspects what bytes/tokens each arm's seeds CONTAIN, never the resolve pattern that defined the shape.",
+      "rule": "winner_token_richer == true AND token_lift >= 2.0",
+      "decidable": true,
+      "non_decidable_reason": null
+    },
+    {
       "id": "ngram_deep_path_reach_gap",
       "label": "naive's blocking-side corpus actually drives the deep xmlParseReference->xmlAddChild call chain to the null-parent gate true-side per seed, while naive_ngram4's corpus stays mired in shallow tokenizer states and never reaches it",
       "direction": "anti",
-      "from_prior": [],
+      "from_prior": ["ngram_deep_path_reach_gap"],
       "measurement": {
         "descriptor": {"source": "seed_set", "compute": "depth_reach", "operand": "branch_line", "unit": "per_branch"},
         "registry_tool": "depth_reach",
@@ -41,17 +65,18 @@
       "prediction": "G1: naive_ngram4 corpus is inflated with shallow-gram entries (corpus_size_ratio >> 1) while naive reaches deeper. A non-saturation mechanism predicts comparable corpus sizes.",
       "rule": "corpus_size_ratio >= 1.5 AND depth_reach_inv == true",
       "decidable": false,
-      "non_decidable_reason": "REFUTED-as-non-discriminable in round 0 and NOT re-tested: corpus_size_ratio measures a whole-campaign corpus-SCALE / energy-allocation property that cannot be attributed to this single branch (it cannot separate ngram saturation-starvation from plain non-mutation of the '&...;' bytes for ONE branch, and n=1 gives no cross-branch threshold support). The per-branch deep-path-reach question this prior was really asking is captured instead by the new ngram_deep_path_reach_gap hypothesis (depth_reach), tried FIRST. Kept here only as the documented refuted/superseded record."
+      "non_decidable_reason": "REFUTED-as-non-discriminable in round 0 and NOT re-tested: corpus_size_ratio measures a whole-campaign corpus-SCALE / energy-allocation property that cannot be attributed to this single branch (it cannot separate ngram saturation-starvation from plain non-mutation of the '&...;' bytes for ONE branch, and n=1 gives no cross-branch threshold support). The per-branch deep-path-reach question this prior was really asking is captured instead by ngram_deep_path_reach_gap (depth_reach) and the new ngram_wellformed_skeleton_token_gap (token_count). Kept here only as the documented refuted/superseded record."
     }
   ],
-  "decision_order": ["ngram_deep_path_reach_gap", "ngram_shallow_corpus_saturation_starves_deep_path"],
+  "decision_order": ["ngram_wellformed_skeleton_token_gap", "ngram_deep_path_reach_gap", "ngram_shallow_corpus_saturation_starves_deep_path"],
   "fallback": "inconclusive",
   "data_realities_respected": [
-    "Cross-server (rule #4): libxml2 is owned by server B (sB corpora = lcms,libxml2,libpng,bloaty); it is NOT marked decidable:false merely because libxml2 is absent from the s4 on-disk set (curl/harfbuzz/openthread/sqlite3). The depth_reach test is designed to run on the OWNING server, which has libxml2 corpora + the cov image (docker/targets/Dockerfile.libxml2.cov).",
-    "depth_reach is a seed_set Docker tool (libafl-libxml2-cov image) — needs resolving_seeds(naive) + blocking_seeds(naive_ngram4) in db/blockers.sqlite for branch 6939; the rep set carries these. Per-seed normalization handles unequal arm sizes (the corpus-size confound that sank the prior corpus_size_ratio test).",
-    "no seed_lineage 'ngram event' proposed — ngram-4 is a coverage FEEDBACK, untagged in mutation_op (analogous to the value_profile feedback invisibility); its effect is measured only via what each arm's corpus REACHES, never via a lineage event.",
-    "no byte_freq_ratio proposed — the gate is presence/non-null structural (parent==NULL), not a fixed-offset value gate; byte-alignment is inapplicable.",
-    "corpus_size_ratio (the prior) is the genuinely non-attributable whole-campaign scale property; it stays decidable:false and is superseded, not relaxed."
+    "Cross-server (rule #4): libxml2 is owned by server B (sB corpora = lcms,libxml2,libpng,bloaty); NOT marked decidable:false merely because libxml2 is absent from the s4 on-disk set (curl/harfbuzz/openthread/sqlite3). Both the new token_count test and the kept depth_reach test are designed to run on the OWNING server, which has libxml2 corpora + the cov image (docker/targets/Dockerfile.libxml2.cov).",
+    "new token_count descriptor (seed_set:token_count:tokens:per_branch) needs resolving_seeds(naive) + blocking_seeds(naive_ngram4) in db/blockers.sqlite for branch 6939; the rep set carries these. It counts per-seed STRUCTURAL XML skeleton tokens (<?xml/<!DOCTYPE/&/;), then takes the per-seed median per arm, so unequal arm sizes do not confound (this is the per-seed fix for the corpus_size_ratio scale confound).",
+    "token_count tokens are STRUCTURAL well-formedness markers, NOT fixed-offset value literals -- the gate is presence/non-null structural (parent==NULL), so byte_freq_ratio (fixed-offset value gate) stays inapplicable and is NOT proposed.",
+    "no seed_lineage 'ngram event' proposed -- ngram-4 is a coverage FEEDBACK, untagged in mutation_op (analogous to the value_profile feedback invisibility); its effect is measured only via what each arm's corpus CONTAINS / REACHES, never via a lineage event.",
+    "joint_necessity (seed_set:struct_size_and_token_count:tokens:per_branch) NOT reused as-is: it is scoped to the joint vpc-needs-both ASSEMBLY-DEPTH subtype with size_lift/vp_tags/cmp_tags/vpc_tags metrics over a vpc/cmp/vp seed triad -- wrong shape (this is a naive-vs-naive_ngram4 anti pair, no vpc/vp arm). The token-presence idea is borrowed but re-expressed as a fresh seed_set:token_count descriptor over the naive/naive_ngram4 arms.",
+    "corpus_size_ratio (the prior) remains the genuinely non-attributable whole-campaign scale property; it stays decidable:false and is superseded, not relaxed."
   ],
-  "notes": "target=libxml2 (owning server = sB). PIVOT from round 0: the round-0 verdict marked this branch decidable:false on the strength of 'libxml2 has no on-disk corpus' — but that was the s4 corpus list; libxml2 IS available on its owning server, so cross-server rule #4 forbids pre-deciding it false. Re-examined the BUILT tools: depth_reach is the right discriminator. The branch's own analysis already states the path-reach divergence in depth_reach's exact terms — naive's seeds take the blocked true-side at tree.c:3421 (L3421 T=18, return NULL at 3426-3427) while naive_ngram4's seeds sit at true=0/false=194, an order of magnitude deeper into shallow scanners. depth_reach (seed_set:depth_reach:branch_line:per_branch, ITERATION/path-DEPTH subtype, anchor harfbuzz/6585, validated 7/20) replays both arms' corpora through the cov binary and reports per-seed blocked-side reach: side_lift >> 1 + winner_deeper confirms a genuine deep-path-reach mechanism and rules out stochastic-noise. KEPT the prior corpus_size_ratio hypothesis as decidable:false (superseded, NOT relaxed) because corpus-scale energy starvation is a whole-campaign property non-attributable to one branch. NEW mechanism = ngram_deep_path_reach_gap, tried first. If the owning server lacks the naive_ngram4 blocking seeds in the DB or the depth replay shows side_lift~1, the branch honestly routes to fallback inconclusive (G3)."
+  "notes": "target=libxml2 (owning server = sB). Round-2 PIVOT. Round 1 tried ngram_deep_path_reach_gap (depth_reach, runtime per-seed gate-line reach) and the rule did NOT hold for libxml2/6939 (rule_not_met); it is KEPT verbatim per the superset/monotonic invariant (and re-validates any future confirmed branch), but it left this branch UNLABELED. NEW mechanism = ngram_wellformed_skeleton_token_gap, tried FIRST: a genuinely DIFFERENT measurement from the refuted depth_reach. depth_reach asked 'does the corpus REACH the gate line deeper per seed at RUNTIME?'; token_count asks 'do the winner's saved seeds CONTAIN the XML document-skeleton tokens (<?xml/<!DOCTYPE/&/;) that the deep reference path requires, which the malformed loser seeds lack?' -- a per-seed STRUCTURAL-COMPOSITION property of each arm's corpus, attributable to this branch's two seed sets. This is exactly the seed-composition asymmetry the analysis evidence_trail records directly (winner seed 'ion=\"1.0\"?>.<!DO' clean head vs loser seed 'ef=\"http://fdkeu' garbage; what_input_feature: 'requires a well-formed-enough document skeleton'). G1: rules out the alternative that the gap is pure runtime energy/reach with no seed-content difference (which depth_reach already failed to confirm). G3 honesty: ngram is a non-local feedback family, often legitimately non-discriminable; token_count is a real, runnable, falsifiable per-seed measurement, so it is decidable:true, but if the owning server finds the two arms' seeds carry the skeleton tokens comparably (token_lift ~ 1) OR the naive_ngram4 blocking seeds are missing from the DB, the branch honestly routes to fallback inconclusive -- I do NOT force a label. The corpus_size_ratio prior stays decidable:false (whole-campaign scale, non-attributable to one branch), superseded by the two per-branch tests, not relaxed."
 }

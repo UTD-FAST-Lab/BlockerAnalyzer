@@ -175,6 +175,7 @@ JN_PAIR_ARMS = {"i2s_vp__WWL": ("value_profile", "naive")}
 CS_ARMS = {"ctx_coverage_LW": ("naive_ctx", "naive"),
            "ngram_coverage_LW": ("naive_ngram4", "naive"),
            "i2s_vp_LWLW": ("cmplog", "naive"),
+           "i2s_vp_LW_W": ("cmplog", "naive"),
            "i2s_vp_L__W": ("cmplog", "naive"),
            "i2s_vp_WWLW": ("value_profile_cmplog", "value_profile")}
 for m in ("vp_min_distance", "vpc_min_distance", "cmp_min_distance",
@@ -261,17 +262,33 @@ def noni2s_pair_arms(shape, bid, con):
 
 
 def depth_arms(shape, bid, con):
-    """ctx/ngram shapes -> (winner_fz resolving, loser_fz blocking) for depth_reach."""
+    """(winner_fz resolving, loser_fz blocking) for depth_reach. ctx/ngram use the
+    technique-vs-naive pair; i2s_vp shapes use the shape's decisive W/L arms (the
+    arm with the most seeds each side) so assembly/iteration-reach depth hypotheses
+    actually score (without this they were silently unscorable on i2s_vp shapes)."""
     m = re.match(r"(ctx_coverage|ngram_coverage)_(WL|LW)$", shape)
-    if not m:
+    if m:
+        tech, d = NONI2S_TECH[m.group(1)], m.group(2)
+        w, l = (tech, "naive") if d == "WL" else ("naive", tech)
+        wn = con.execute("select count(*) from resolving_seeds where branch_id=? and fuzzer=?",
+                         (bid, w)).fetchone()[0]
+        ln = con.execute("select count(*) from blocking_seeds where branch_id=? and fuzzer=?",
+                         (bid, l)).fetchone()[0]
+        return (w, l) if wn >= 2 and ln >= 2 else (None, None)
+    wa, la = shape_arms(shape)
+    if not wa or not la:
         return None, None
-    tech, d = NONI2S_TECH[m.group(1)], m.group(2)
-    w, l = (tech, "naive") if d == "WL" else ("naive", tech)
-    wn = con.execute("select count(*) from resolving_seeds where branch_id=? and fuzzer=?",
-                     (bid, w)).fetchone()[0]
-    ln = con.execute("select count(*) from blocking_seeds where branch_id=? and fuzzer=?",
-                     (bid, l)).fetchone()[0]
-    return (w, l) if wn >= 2 and ln >= 2 else (None, None)
+    def most(arms, table):
+        best_fz, best_n = None, 0
+        for fz in arms:
+            n = con.execute(f"select count(*) from {table} where branch_id=? and fuzzer=?",
+                            (bid, fz)).fetchone()[0]
+            if n > best_n:
+                best_fz, best_n = fz, n
+        return best_fz, best_n
+    w, wn = most(wa, "resolving_seeds")
+    l, ln = most(la, "blocking_seeds")
+    return (w, l) if (w and l and wn >= 2 and ln >= 2) else (None, None)
 
 
 def branch_seed_counts(bid, con):
