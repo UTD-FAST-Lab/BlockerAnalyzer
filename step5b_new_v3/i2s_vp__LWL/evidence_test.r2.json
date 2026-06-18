@@ -1,0 +1,108 @@
+{
+  "shape": "i2s_vp__LWL",
+  "shape_decode": "cmp,vp,vpc,naive = _,L,W,L. value_profile_cmplog RESOLVES; value_profile AND naive BLOCK; cmplog NON-decisive. The winner is the only decisive arm carrying I2SRandReplace (the resolve is attributed to the I2S inside vpc), so this is an i2s-pro shape whose winner is vpc rather than plain cmplog.",
+  "n_branches": 90,
+  "round": 2,
+  "hypotheses": [
+    {
+      "id": "i2s_exact_literal_gate",
+      "label": "vpc resolves an exact-literal equality gate because its I2SRandReplace splices the logged comparand literal into a fixed input offset, which value_profile's Hamming/CMP_MAP gradient cannot land",
+      "direction": "pro",
+      "decidable": true,
+      "frozen": true,
+      "from_prior": [
+        "i2s_binary_format_magic_gate",
+        "i2s_text_token_exact_match"
+      ],
+      "measurement": {
+        "descriptor": {
+          "source": "corpus_queue",
+          "compute": "byte_freq_ratio",
+          "operand": "target_vs_decoy",
+          "unit": "per_gate_offset"
+        },
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "winner_arm": "value_profile_cmplog",
+          "loser_arms": ["value_profile", "naive"],
+          "arm_repointing": "THIS SHAPE'S WINNER IS vpc, NOT cmplog. operand_enrichment as built computes cmplog-vs-naive log2 enrichment. Repoint it to measure the SAME byte_freq_ratio on the vpc-RESOLVING corpus (the I2S-bearing winner) vs the union of the value_profile- and naive-BLOCKING corpora (the non-I2S losers). signed_target_enrich = log2( freq(target literal byte @ gate offset in vpc corpus) / freq(same byte in vp+naive corpora) ). This is a PARAM change (which corpus dirs feed W vs L), not a new tool: the measurement, metrics, and gate-offset extraction are identical.",
+          "gate_offset_source": "per-branch W/L decisive seed bytes already in db/blockers.sqlite (resolving_seeds vs blocking_seeds); the gate offset + target literal come from the branch's operand_literal / byte diff, exactly as the validated harfbuzz/5391 anchor.",
+          "scope": "scored ONLY for targets with on-disk corpora and a FIXED-OFFSET contiguous literal: harfbuzz + curl here. lcms/libxml2/bloaty/libpng lack on-disk corpus (data_reality) and fall to fallback:inconclusive for the evidence-confirmation guardrail, though they still carry the shape's Layer-1 label."
+        }
+      },
+      "prediction": "signed_target_enrich > 0 (strictly): the exact target literal at the gate offset is MORE frequent in the vpc-resolving corpus than in the vp/naive-blocking corpora, because only the I2S-bearing winner can place the all-or-nothing constant. An ALTERNATIVE mechanism predicts differently: if vpc resolved via value_profile's gradient alone (not I2S substitution), the literal would accrete byte-by-byte in the value_profile corpus too and signed_target_enrich would be ~0 (no winner-over-loser enrichment, since vp is a loser arm). If vpc resolved by some structural/length route rather than landing THIS literal, the tool returns no_gate_signature. So a positive sign is a discriminating confirmation of I2S literal substitution, not merely of 'vpc wins'.",
+      "rule": "signed_target_enrich >= 1.0",
+      "rule_notes": "Threshold 1.0 (>=2x relative frequency, log2) is conservative vs the validated pro median of +3.12 at the operand_enrichment anchor; > 0 alone is the falsifiable boundary, 1.0 guards against corpus-frequency noise. FROZEN: 78 branches confirmed under this rule in the prior rounds; carried forward unchanged so they re-validate (superset/monotonic)."
+    },
+    {
+      "id": "i2s_multibyte_operand_gradient_stall",
+      "label": "vpc resolves a multi-byte exact-equality token gate by landing the EXACT logged comparand (vpc reaches Hamming distance ~0 to the operand), while value_profile -- despite carrying the SAME CMP_MAP Hamming feedback as vpc -- STALLS at a non-zero distance because the wide all-or-nothing equality offers no climbable gradient; only I2SRandReplace's one-shot operand substitution crosses the final gap",
+      "direction": "pro",
+      "decidable": true,
+      "from_prior": [],
+      "members": ["harfbuzz_5745", "harfbuzz_5362", "curl_427", "libxml2_6233", "libxml2_7249"],
+      "novelty_note": "Genuinely different mechanism AND measurement from BOTH refuted round-1 tests on these branches. (1) operand_enrichment (round-1 i2s_exact_literal_gate) measured byte FREQUENCY of one fixed-offset byte and did NOT hold here -- these operands are wide (4-6 byte FOURCC/token) and several are byte_signature=dispersed_multibyte, so a single-byte freq ratio washes out. (2) joint_necessity token_lift/vp_tags (round-1 i2s_structural_token_assembly) measured token COUNT over a vocabulary and also did NOT hold -- a single valid font/HTTP frame need not carry MORE distinct tokens than a blocking seed, so count does not lift. The NEW observable is the Hamming DISTANCE each arm's corpus reaches toward the specific multi-byte operand: vpc lands it exactly (distance ~0) while vp's gradient stalls short. This is the value_distance_reached tool, NOT yet tried on this shape. It is not a relaxed-threshold re-run of either refuted rule -- it is a different metric over a different tool.",
+      "measurement": {
+        "descriptor": {
+          "source": "seed_set",
+          "compute": "value_distance_reached",
+          "operand": "operand_literal",
+          "unit": "per_branch"
+        },
+        "registry_tool": "value_distance_reached",
+        "metrics_used": ["vpc_min_distance", "vp_min_distance", "distance_gap", "winner_closer"],
+        "params": {
+          "winner_arm": "value_profile_cmplog",
+          "loser_arms": ["value_profile", "naive"],
+          "arm_repointing": "value_distance_reached's anchor (sqlite3/14437) already has the vpc=winner pattern: it reads, per arm, the MIN over the arm's seeds of (min over sliding windows of Hamming(window, target_operand)/width). Repoint W = vpc-resolving seeds, L = union of value_profile- and naive-BLOCKING seeds. The discriminating contrast here is vpc_min_distance (winner, has I2S) vs vp_min_distance (loser, has the SAME CMP_MAP Hamming feedback but NO I2SRandReplace). distance_gap = vp_min_distance - vpc_min_distance; winner_closer = (vpc_min_distance < vp_min_distance). The Hamming-window computation is identical; only the arm-to-role mapping is set per this shape.",
+          "operand_per_branch": {
+            "harfbuzz_5745": "'cmap' (63 6d 61 70) at header offset ~0x0c and/or sfnt magic 00 01 00 00 at 0x00 (width 4)",
+            "harfbuzz_5362": "'GPOS' (47 50 4f 53) at table-tag offset ~0x0c and/or sfnt magic 00 01 00 00 (width 4)",
+            "curl_427": "'HTTP/' (48 54 54 50 2f) protocol token (width 5)",
+            "libxml2_6233": "'xml:id' (78 6d 6c 3a 69 64) attribute-fullname literal (width 6) -- supplied by the owning server sB",
+            "libxml2_7249": "'xml:id' / 'id=\"' attribute literal (width 4-6) -- supplied by the owning server sB"
+          },
+          "scope": "On s4 (on-disk corpora) value_distance_reached scores harfbuzz_5745, harfbuzz_5362, curl_427. libxml2_6233 + libxml2_7249 are sB targets: VALID test, arbitrated by the owning server with the same tool + the 'xml:id' operand (cross-server rule -- do NOT mark decidable:false for corpus-absence on the running server). All five operands are width>=4, clear of the registry's width<=2 chance-alignment caveat."
+        }
+      },
+      "prediction": "winner_closer == true AND vpc_min_distance ~ 0 AND vp_min_distance strictly > 0 (distance_gap large): the vpc-resolving corpus reaches the EXACT multi-byte operand (distance ~0) while the value_profile-blocking corpus -- which has identical CMP_MAP Hamming feedback minus I2SRandReplace -- stalls at a non-zero minimum distance, the all-or-nothing equality giving its gradient nowhere to climb. DISCRIMINATING vs the obvious alternatives: (1) if value_profile's Hamming gradient could itself reach the operand, vp_min_distance would also fall to ~0 and distance_gap ~ 0 -> the I2S-exact-substitution claim is REFUTED (vp would resolve too). (2) If vpc resolved by assembling a larger STRUCTURE rather than landing THIS operand (the round-1 token-assembly story), vpc_min_distance to the specific operand would NOT be ~0 and winner_closer would not hold -> picks against the assembly mechanism. So vpc-at-zero-while-vp-stalls is a confirmation of the exact multi-byte I2S substitution specifically, independent of the resolve pattern that defined the shape (G2): both arms carry the same CMP_MAP feedback, so the distance gap is attributable to I2SRandReplace, not to 'vpc is the winner'.",
+      "rule": "winner_closer == true AND vpc_min_distance <= 0.2 AND distance_gap >= 0.25",
+      "rule_notes": "vpc_min_distance <= 0.2 = winner lands at or essentially at the exact operand (<=20% of operand bytes off, i.e. an exact or near-exact splice). distance_gap >= 0.25 = the value_profile gradient stalls at least a quarter of the operand width short of vpc, the falsifiable separation. winner_closer must also be true so the gap is in the correct direction. Conservative vs the anchor (vpc dist 0 vs cmp/naive 0.5, gap 0.5); 0.25 guards short-operand noise. ALL three conjuncts (AND) so the confirmation is of I2S exact-operand placement, not a marginal closeness difference."
+    },
+    {
+      "id": "i2s_structural_chain_assembly_undecidable",
+      "label": "vpc resolves a presence/ID-registration gate that fires only after a CHAIN of DTD/declaration tokens is assembled (no single comparand operand) -- mechanism plausibly I2S multi-token assembly, but no built tool discriminates it after token-count and byte-frequency both failed",
+      "direction": "pro",
+      "decidable": false,
+      "from_prior": ["i2s_structural_token_assembly"],
+      "members": ["libxml2_6740", "libxml2_6929", "libxml2_6936"],
+      "decidable_false_reason": "These gates are presence_or_nonnull / dispersed_multibyte with operand_literal == null: they fire on an ASSEMBLED chain (ATTLIST + ID-type declaration + matching attribute instance for 6936/6929; DTD + xmlns-default ATTLIST for 6740), not on landing one comparand. The round-1 i2s_structural_token_assembly hypothesis ALREADY tested exactly this with joint_necessity (token_lift + vp_tags + size_lift) and was refuted (rule_not_met) -- re-testing it is forbidden. The remaining UNTRIED built tools cannot discriminate: (1) value_distance_reached needs a single concrete multi-byte operand to form a Hamming window; there is no single operand here, the chain spans variable-position DTD keywords. (2) depth_reach measures ctx/ngram iteration depth, which is not the mechanism (the gate is a one-shot presence check, not a deep loop). (3) corpus_size_ratio (whole-corpus size) is not seed-set-specific and does not isolate I2S assembly. operand_enrichment already washed out (dispersed, null literal). No built measurement separates 'I2S assembled the chain' from 'a valid-enough document happened to register an ID' -- honest inconclusive is the correct outcome (G3), not a fourth relabel of the same refuted assembly story.",
+      "measurement": null,
+      "prediction": null,
+      "rule": null
+    },
+    {
+      "id": "i2s_single_byte_cursor_or_derived_undecidable",
+      "label": "vpc resolves a single-byte equality at a content-dependent cursor, an escape-trigger byte, or a derived-integer header assembly -- I2S substitution is the plausible story but no built tool can separate it from baseline byte frequency / structural luck",
+      "direction": "pro",
+      "decidable": false,
+      "from_prior": ["i2s_cursor_relative_single_byte"],
+      "members": ["libxml2_6643", "libxml2_6809", "curl_263", "lcms_2334"],
+      "decidable_false_reason": "Four distinct reasons, all ending in non-discriminability: (1) libxml2_6643 ('?'=0x3f after a variable-length element Name) + libxml2_6809 (control byte 0x0A/0x0D/0x09 inside CDATA) + curl_263 (formtable escape byte 0x22/0x0D/0x0A at the *src position) are SINGLE-byte equalities at a CONTENT-DEPENDENT cursor -- no fixed gate offset for operand_enrichment, and width-1 operands are flagged chance-alignment-prone by the registry AND occur abundantly in any XML/text/form corpus regardless of fuzzer, so an enrichment or distance signal cannot separate I2S substitution from baseline byte presence. value_distance_reached needs width>=3 to form a meaningful Hamming gradient (a 1-byte equality has a degenerate distance of 0 or 1). (2) lcms_2334 is a derived_integer / dispersed_multibyte header-assembly gate (operand_literal == null): the resolve depends on a combination of profile-signature + tag-directory offset bytes producing a successful type-base read, not a single landable operand, and lcms has no on-disk corpus anyway. No built tool discriminates a single content-dependent byte or a derived multi-field header assembly from the same bytes arising by chance -- honest inconclusive (G3).",
+      "measurement": null,
+      "prediction": null,
+      "rule": null
+    }
+  ],
+  "decision_order": ["i2s_exact_literal_gate", "i2s_multibyte_operand_gradient_stall"],
+  "fallback": "inconclusive",
+  "data_realities_respected": [
+    "No seed_lineage 'I2S event' descriptor used (I2S is untagged in mutation_op) -- confirmation is via corpus byte-frequency (literal gate) or seed-set Hamming-distance-to-operand (multi-byte gradient-stall gate), the only observables of I2S substitution.",
+    "value_profile (CMP_MAP) is a FEEDBACK not a mutator: the i2s_multibyte_operand_gradient_stall test exploits exactly this -- vp carries the SAME Hamming feedback as vpc, so the vpc-vs-vp distance gap isolates the I2SRandReplace MUTATOR, never a lineage gradient event. The effect is read off what the corpus REACHES (min distance to the operand), per data_realities.",
+    "Structural-assembly / wide-operand gates have DIFFERENT-sized winning vs blocking seeds, so byte-alignment (byte_freq_ratio) is NOT used for the new hypothesis -- value_distance_reached uses sliding-window Hamming over seeds, which is alignment-robust, exactly as data_realities prescribe for non-fixed-offset gates.",
+    "on-disk corpora exist only for curl/harfbuzz/openthread/sqlite3 on s4 -> on s4 the new test scores harfbuzz_5745, harfbuzz_5362, curl_427; libxml2_6233 + libxml2_7249 are owning-server (sB) targets arbitrated by their server with the same tool + 'xml:id' operand, NOT marked decidable:false for corpus-absence (cross-server rule).",
+    "seed-dependent tools need resolving_seeds + blocking_seeds in db/blockers.sqlite (>=3 each). value_distance_reached needs >=1 usable window per arm; the round-1 seed-starved branches (curl_263, harfbuzz_5362, lcms_2334; W was 1) are now seed-present per the assignments (all 12 scored), so harfbuzz_5362 is admitted to the new test; curl_263/lcms_2334 fall to decidable:false on mechanism grounds (single-byte / derived), not seed-starvation."
+  ],
+  "notes": "ROUND-2 re-design of i2s_vp__LWL (78 confirmed FROZEN + 12 unlabeled, all 12 currently inconclusive). PRIORS KEPT: i2s_exact_literal_gate carried forward VERBATIM (frozen:true) so the 78 confirmed branches re-validate (superset/monotonic). FORBIDDEN re-tests honored: round-1's i2s_structural_token_assembly (joint_necessity token_lift+vp_tags) and i2s_cursor_relative_single_byte were both refuted/undecidable for these branches and are NOT re-proposed as-is or relaxed. NEW DECIDABLE MECHANISM: i2s_multibyte_operand_gradient_stall (5 branches: harfbuzz_5745, harfbuzz_5362, curl_427, libxml2_6233, libxml2_7249) -- uses the UNTRIED value_distance_reached tool. The novel observable is the Hamming DISTANCE each arm's corpus reaches toward the specific wide operand (FOURCC/sfnt-magic/HTTP-token/'xml:id', width>=4): vpc lands it exactly (distance ~0) while value_profile -- carrying the identical CMP_MAP feedback minus I2SRandReplace -- stalls short. This is genuinely different (G1) from both refuted round-1 measurements (byte-frequency at one offset; token COUNT over a vocabulary) and is discriminating: if vp's gradient could reach the operand, vp_min_distance would also hit 0 and the claim refutes; if vpc won by structural size rather than this operand, winner_closer fails. G2 independence: both arms share the Hamming feedback, so the distance gap is attributable to the I2S mutator, orthogonal to 'vpc is the winner'. Scorable on s4 for the 3 harfbuzz/curl members; libxml2_6233+7249 valid for sB to arbitrate. DECIDABLE:FALSE (G3) -- two honest-inconclusive sub-groups, 7 branches total: (A) i2s_structural_chain_assembly_undecidable = libxml2_6740/6929/6936 (ID/ATTLIST/xmlns-default CHAIN gates, operand_literal null) -- joint_necessity token-count ALREADY tested+refuted, and no remaining built tool (value_distance_reached needs a single operand; depth_reach is ctx/ngram-depth; corpus_size_ratio is whole-corpus) can separate I2S assembly from a merely valid document; (B) i2s_single_byte_cursor_or_derived_undecidable = libxml2_6643/6809 (single content-dependent byte), curl_263 (single escape byte), lcms_2334 (derived multi-field header, no operand, no corpus) -- width-1 operands are chance-alignment-prone and abundant in any corpus; no built tool separates I2S substitution from baseline byte presence. SUMMARY: 1 prior KEPT (78 frozen), 1 NEW decidable mechanism (5 branches), 2 NEW decidable:false sub-groups (3 + 4 = 7 branches). 12 unlabeled fully accounted for (5 newly testable + 7 honest inconclusive); 90 total with the frozen 78."
+}

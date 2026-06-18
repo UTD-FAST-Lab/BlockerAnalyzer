@@ -1,0 +1,124 @@
+{
+  "shape": "i2s_vp_LLW_",
+  "n_branches": 16,
+  "shape_semantics": "Joint-necessity. code over (cmp,vp,vpc,naive) = L,L,W,_ : ONLY value_profile_cmplog resolves; cmplog blocks AND value_profile blocks; naive is NON-decisive. The vpc-only resolution asserts BOTH I2S and the CMP_MAP gradient are jointly required. Every branch carries TWO Pass-A signatures of ONE joint mechanism (an h0 I2S half + an h1 gradient half), except harfbuzz/7170 which the classifier kept as a single joint signature. Layer 1 already asserts jointness; the evidence test does NOT re-confirm it (that would violate G2). The test discriminates WHICH joint SUBTYPE each branch is, on a measurement INDEPENDENT of the resolve pattern: it reads the structural/value/byte content of the cmplog-BLOCKING and value_profile-BLOCKING seed sets and asks what the gradient adds OVER I2S-only and what I2S adds OVER gradient-only.",
+  "round": 2,
+  "hypotheses": [
+    {
+      "id": "joint_assembly_depth",
+      "label": "vpc assembles a LARGER, multi-field structure than I2S-only (cmplog) ever reaches; the gradient is necessary to grow size/token-count past where exact substitution stalls, and I2S is necessary because the gradient alone (value_profile) places ~0 structural tokens",
+      "direction": "joint",
+      "decidable": true,
+      "from_prior": ["i2s_exact_literal_substitution_joint_necessity", "vp_gradient_structural_climb_joint_necessity", "i2s_vp_joint_fourcc_and_structural_header"],
+      "member_hint_branches": ["harfbuzz/6812", "harfbuzz/6813", "harfbuzz/6814", "harfbuzz/6815", "harfbuzz/7170", "harfbuzz/7239"],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "struct_size_and_token_count", "operand": "tokens", "unit": "per_branch"},
+        "registry_tool": "joint_necessity",
+        "metrics_used": ["vp_tags", "size_lift"],
+        "params": {
+          "tokens_by_target": {
+            "harfbuzz": "cmap,GSUB,GPOS,GDEF,name,post,OS/2,CFF2,CFF ,glyf,loca,head,hhea,hmtx,maxp,typ1,CPAL,COLR,_COLR",
+            "lcms": "acsp,spac,prtr,link,abst,mntr,scnr,nmcl,XYZ ,Lab ,RGB ,GRAY,CMYK,mft2,mAB ,mBA ",
+            "libxml2": "<?xml,<!DOCTYPE,<![CDATA[,xmlns,<!ENTITY,SYSTEM,PUBLIC,</,<!ELEMENT,<!ATTLIST"
+          }
+        }
+      },
+      "prediction": "On the value_profile-BLOCKING seed set the structural-token count is ~0 (vp_tags ~ 0): the gradient alone cannot place ANY exact multi-byte structural token (FOURCC table tag, ICC colorspace signature, XML markup literal), so I2S is necessary. AND the vpc-RESOLVING median seed is materially BIGGER than the cmplog-BLOCKING median seed (size_lift >= 1.3): the gradient grows the multi-field header/content-model structure past where exact-substitution-only (cmplog) plateaus, so the gradient is necessary. A pure-I2S-substitution mechanism (no assembly depth) predicts size_lift ~ 1.0; a pure-gradient mechanism predicts vp_tags > 0. Only the assembly-depth joint predicts BOTH vp_tags~0 AND size_lift>=1.3.",
+      "rule": "vp_tags < 0.3 AND size_lift >= 1.3"
+    },
+    {
+      "id": "joint_value_precision",
+      "label": "vpc and cmplog reach a SIMILARLY-sized input (size_lift ~ 1), but vpc lands a specific gradient-climbed VALUE (a single exact multi-byte keyword/token) that the cmplog-blocking seeds approach byte-by-byte yet never reach; I2S is still necessary to splice the keyword operand, and the gradient is necessary for the last-mile prefix precision that the structural size proxy is blind to",
+      "direction": "joint",
+      "decidable": true,
+      "from_prior": ["i2s_exact_literal_substitution_joint_necessity", "vp_gradient_structural_climb_joint_necessity"],
+      "member_hint_branches": ["sqlite3/16001", "sqlite3/16016", "sqlite3/16022", "sqlite3/16118"],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "target_value_at_cmp_site", "unit": "per_branch"},
+        "registry_tool": "value_distance_reached",
+        "metrics_used": ["vpc_min_distance", "cmp_min_distance", "distance_closure_ratio"],
+        "params": {
+          "comment": "Reuses the BUILT value_distance_reached tool. For the branch's decisive CMP site, take the target operand value from the signature (the exact SQL keyword/identifier token, e.g. 'PRAGMA' = 50 52 41 47 4d 41 for all four sqlite3 branches; operand_width_bytes=6). Compute the MIN byte-distance (Hamming over the operand-width window) between the target value and the value found at the cmp-site offset across (a) the vpc-RESOLVING seed set => vpc_min_distance and (b) the cmplog-BLOCKING seed set => cmp_min_distance. distance_closure_ratio = (cmp_min_distance - vpc_min_distance) / max(cmp_min_distance, 1).",
+          "operand_source": "signature.operand_literal / operand_width_bytes ('PRAGMA', 6); cmp-site offset is the input head (per the cards), confirmed via per-role coverage overlay / analysis byte-diff",
+          "feasibility": "All four value-precision members are sqlite3, which HAS an on-disk corpus AND is among the 286 reps with resolving_seeds+blocking_seeds in the DB, so they are scorable."
+        }
+      },
+      "prediction": "Inputs are the SAME size (size_lift ~ 1.0 -- a 'PRAGMA <name>;' statement is no bigger than the SELECT/junk blocking fragments) BUT the vpc-resolving seeds reach a keyword value strictly CLOSER to the exact target token than the cmplog-blocking seeds ever do: cmp_min_distance > 0 (cmplog seeds prefix-collide on a byte or two of 'PRAGMA' but never accrete the full keyword) while vpc_min_distance ~ 0, so distance_closure_ratio is large. A pure-I2S mechanism would predict cmp_min_distance ~ 0 (cmplog HAS I2S; if one substitution sufficed cmplog would resolve, contradicting L). This rules out 'I2S alone is enough' AND, because size_lift~1, rules out assembly-depth.",
+      "rule": "size_lift < 1.3 AND cmp_min_distance > 0 AND distance_closure_ratio >= 0.5"
+    },
+    {
+      "id": "joint_numeric_header_convergence",
+      "label": "ROUND-1 hypothesis (KEEP). The decisive divergence is on a DERIVED-INTEGER header/count field reached over a range/inequality gate: the literal table tag is PRESENT in BOTH arms (so assembly-depth's vp_tags<0.3 fails) and input size does NOT lift (so size_lift>=1.3 fails), yet vpc resolves because the CMP_MAP gradient hill-climbs the multi-byte NUMERIC offset/count/length fields toward a jointly-consistent in-range configuration that single-shot I2S substitution (cmplog) cannot reach. I2S is still necessary to plant the dispatching tag; the gradient is necessary for the numeric magnitude convergence that neither the size proxy NOR a fixed-literal value-distance can see (the target is a derived integer with no input literal). NOTE (round 2): on real data this rule did NOT fire for harfbuzz/6858 or harfbuzz/7245 (round-1 arbiter: scored, none held) -- the derived-integer numeric distance gap could not be anchored without an input literal, so those two branches are re-routed to joint_fixed_offset_literal_presence below. The hypothesis is carried forward VERBATIM (superset/freeze) so any branch it confirmed re-validates; no threshold was relaxed.",
+      "direction": "joint",
+      "decidable": true,
+      "from_prior": [],
+      "member_hint_branches": [],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "numeric_header_field_at_cmp_site", "unit": "per_branch"},
+        "registry_tool": "value_distance_reached",
+        "metrics_used": ["vpc_min_distance", "cmp_min_distance", "distance_closure_ratio", "winner_closer"],
+        "params": {
+          "comment": "Reuses value_distance_reached in its NUMERIC mode (the tool already supports 'magnitude gap for inequality gates'). The gate is an inequality/range on a DERIVED INTEGER. The target is NOT a fixed input literal (operand_literal=null, operand_kind=derived_integer), so this is a genuinely DIFFERENT measurement from joint_value_precision (which needs a fixed multi-byte literal operand): here the tool computes, per arm, the MIN magnitude gap of the wide LE integer header fields versus the in-range value the parser requires, over the cmplog-BLOCKING vs vpc-RESOLVING seed sets.",
+          "site_source": "decisive cmp site from the h1 (gradient) signature/card; offsets confirmed via per-role coverage overlay / analysis byte-diff.",
+          "feasibility": "harfbuzz HAS an on-disk corpus AND resolving_seeds+blocking_seeds in the DB. On real data this rule did not anchor for 6858/7245 (the in-range value is computed, not present in the input); see round-2 re-routing to literal-presence."
+        }
+      },
+      "prediction": "vp_tags > 0.3 (the table tag IS present in the value_profile-blocking seeds too, so assembly-depth's vp_tags<0.3 fails) AND size_lift < 1.3 (no structural growth), so BOTH prior joint rules miss. INDEPENDENTLY, on the derived-integer header field the vpc-resolving arm lands a magnitude STRICTLY closer to the in-range configuration than the cmplog-blocking arm: cmp_min_distance > 0 while vpc_min_distance is much smaller, so winner_closer=true and distance_closure_ratio is large. A pure-I2S story predicts cmp_min_distance ~ 0. An assembly-depth story predicts size_lift>=1.3. A fixed-literal value-precision story is inapplicable. Only the numeric-header-convergence joint predicts size_lift<1.3 AND vp_tags>=0.3 AND a numeric distance gap on the derived-integer field.",
+      "rule": "size_lift < 1.3 AND vp_tags >= 0.3 AND cmp_min_distance > 0 AND distance_closure_ratio >= 0.5 AND winner_closer == true"
+    },
+    {
+      "id": "joint_fixed_offset_literal_presence",
+      "label": "NEW (round 2). The decisive joint divergence is GATED BY A FIXED-OFFSET CONTIGUOUS MULTI-BYTE LITERAL (a FOURCC table tag / ICC colorspace signature at a constant low input offset): the value_profile-BLOCKING corpus is DEPLETED of the exact tag bytes at that offset (it carries decoy bytes -- language tags, 'fe ff ff ff', 'GOS' fragments), while the vpc-RESOLVING (I2S-bearing) corpus is ENRICHED for the exact literal there. The binding constraint that the gradient-only arm cannot clear is the EXACT-BYTE PLACEMENT at a fixed offset, not a numeric magnitude (numeric_header_convergence failed for these on real data) and not seed growth (assembly_depth's size_lift). I2S is necessary because only the I2S-bearing arms place the literal; the gradient is necessary downstream but the OFFSET-LITERAL presence is the measurable, discriminating axis here.",
+      "direction": "joint",
+      "decidable": true,
+      "from_prior": [],
+      "member_hint_branches": ["harfbuzz/6858", "harfbuzz/7245", "lcms/2674"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "comment": "Reuses the BUILT operand_enrichment / byte_freq_ratio tool. Per W/L gate offset it measures the fraction of the RESOLVING (W) vs BLOCKING (L) corpus whose bytes equal the target literal vs a decoy. The fixed-offset contiguous literal makes byte alignment valid even though these are joint gates -- the data_realities byte-alignment caveat is about DIFFERENT-SIZED structural-assembly gates where the literal floats; here the tag sits at a CONSTANT low offset regardless of seed size, so the gate-offset measurement is well-defined.",
+          "gate_offsets_by_branch": {
+            "harfbuzz/6858": {"literal": "typ1", "offset_bytes": 0, "width": 4, "literal2": "loca", "offset2_bytes": 12, "width2": 4},
+            "harfbuzz/7245": {"literal": "typ1", "offset_bytes": 0, "width": 4, "literal2": "loca", "offset2_bytes": 12, "width2": 4},
+            "lcms/2674": {"literal": "prtr", "offset_bytes": 12, "width": 4, "literal2": "Lab ", "offset2_bytes": 16, "width2": 4}
+          },
+          "operand_source": "signature.operand_literal / operand_width_bytes (h0 I2S half); fixed offset confirmed via the card byte-diff (W-vs-L concentrated byte set at the named offset: 6858 'typ1' at 0x00 + 'loca' at 0x0c; 7245 same; 2674 'prtr' at 0x0c-0x0f + 'Lab ' at 0x10-0x17).",
+          "feasibility": "harfbuzz/6858 + harfbuzz/7245 HAVE an on-disk corpus on s4 and are scorable here. lcms/2674's corpus is sB-owned; the test is designed valid for ALL branches (cross-server rule) and sB arbitrates lcms -- it is NOT marked decidable:false for off-server reasons. operand_enrichment needs >=3 W and >=3 L seeds in the DB (the reps have them)."
+        }
+      },
+      "prediction": "At the fixed tag offset the RESOLVING corpus carries the exact literal far more than the BLOCKING corpus does: signed_target_enrich > 0 (the value_profile-blocking corpus is depleted of the exact FOURCC/ICC signature -- it holds decoy bytes -- while the I2S-bearing resolving corpus concentrates the literal), and the decoy bytes dominate the blocking corpus (decoy_enrich at the offset). A pure-NUMERIC-convergence mechanism (the refuted joint_numeric_header_convergence story for these branches) predicts signed_target_enrich ~ 0: the literal would be present in BOTH arms and the divergence would be only in the wide integer fields. An assembly-depth mechanism predicts the divergence shows up as seed-size growth, not offset-literal enrichment. Only the fixed-offset-literal-presence mechanism predicts a positive signed_target_enrich AT the constant tag offset. This is FALSIFIABLE (it could come out ~0, as the numeric story would predict) AND DISCRIMINATING (rules out numeric-convergence and assembly-depth) AND G2-INDEPENDENT (it reads byte content at a fixed offset in the BLOCKING vs RESOLVING corpus, never the resolve label).",
+      "rule": "signed_target_enrich >= 1.0"
+    },
+    {
+      "id": "joint_grammar_state_path",
+      "label": "NON-DISCRIMINABLE (honest inconclusive). The libxml2 automaton/grammar-state branches (xmlFAGenerateEpsilonTransition to==NULL; xmlAutomataNewEpsilon to==NULL; xmlParseElementStart nsNr != ctxt->nsNr) resolve because vpc reaches a NON-NULL automaton target state via a GRAMMAR-PATH choice (the optional-quantifier OPT content model vs the MULT model; a namespaced empty-element close), not via a bigger seed, a closer fixed literal, an in-range derived integer, or a fixed-offset tag. The decisive feature is WHICH parse production the corpus reached -- a non-local grammar-state property no built tool measures independently of the resolve label.",
+      "direction": "joint",
+      "decidable": false,
+      "from_prior": [],
+      "member_hint_branches": ["libxml2/7296", "libxml2/7311", "libxml2/9361"],
+      "measurement": {
+        "descriptor": null,
+        "registry_tool": null,
+        "metrics_used": [],
+        "params": {
+          "why_undecidable": "No BUILT measurement discriminates the joint SUBTYPE here without re-measuring the resolve pattern (G2 violation). (1) The libxml2 gates (7296 xmlFAGenerateEpsilonTransition to==NULL; 7311 xmlAutomataNewEpsilon to==NULL; 9361 xmlParseElementStart nsNr!=ctxt->nsNr) hinge on reaching a NON-NULL automaton state via a grammar production choice (OPT vs MULT content model; a namespaced empty-element close). XML markup literals are present in BOTH W and L seeds and float at VARIABLE positions (byte_signature=dispersed_multibyte, operand_kind=presence_or_nonnull/derived_integer), so: assembly_depth misses (vp_tags not ~0, size barely lifts); value_precision and numeric_header miss (no fixed multi-byte literal / computed in-range target); and crucially operand_enrichment/byte_freq_ratio is INAPPLICABLE because the markup literal has NO fixed gate offset (the tool returns no_gate_signature for floating/structural literals -- the round-2 literal-presence test requires a CONSTANT offset, which these lack). depth_reach at the branch line would just re-detect that vpc reaches the false side, i.e. verify vpc-resolves with vpc-reaches -- a G2 violation, not an independent signal. There is no built tool that reads 'which grammar production the corpus exercised' as a signal independent of the resolve label. CROSS-SERVER NOTE: these are NOT marked undecidable because libxml2 is off the running server (it is sB-owned with DB seeds) -- they are undecidable because the MECHANISM is non-local/grammar-state with no independent built measurement. The owning server may revisit if a grammar-path / production-coverage descriptor is later built."
+        }
+      },
+      "prediction": "No falsifiable real-data prediction over named metrics is available that is independent of the resolve pattern; these branches are honestly left inconclusive (G3).",
+      "rule": "false"
+    }
+  ],
+  "decision_order": ["joint_assembly_depth", "joint_value_precision", "joint_numeric_header_convergence", "joint_fixed_offset_literal_presence"],
+  "fallback": "inconclusive",
+  "data_realities_respected": [
+    "No seed_lineage 'I2S event' descriptor is used (I2S is untagged across all 4 fuzzers).",
+    "value_profile treated as a FEEDBACK, not a mutator -- its effect is measured only via corpus admission / what the corpus reaches (size, tokens, value-distance, numeric magnitude, byte-presence-at-offset), never a lineage gradient event.",
+    "byte_freq_ratio (operand_enrichment) is used ONLY where the literal sits at a CONSTANT low offset (the harfbuzz typ1/loca FOURCC at 0x00/0x0c; the lcms prtr/Lab signature at 0x0c/0x10) so byte alignment is valid -- the data_realities caveat against byte_freq_ratio on joint gates is about DIFFERENT-SIZED structural-assembly gates where the literal FLOATS; the round-2 literal-presence hypothesis is restricted to fixed-offset contiguous literals, and the floating-literal libxml2 grammar gates are explicitly left decidable:false (no fixed gate offset => no_gate_signature).",
+    "struct_size/token_count (assembly), Hamming-window value_distance (value-precision), numeric magnitude gap (header-convergence), and fixed-offset byte_freq_ratio (literal-presence) are the four measurement families used -- each chosen to match the operand kind of its sub-group.",
+    "on-disk corpora exist only for curl/harfbuzz/openthread/sqlite3: harfbuzz (assembly + numeric-header + literal-presence) and sqlite3 (value-precision) are scorable on s4; libxml2 + lcms are sB-owned and seed_set/corpus-sourced from the DB reps -- lcms/2674 is decidable on MECHANISM grounds (fixed-offset literal) and sB arbitrates it; libxml2 members are decidable:false on MECHANISM grounds (grammar-state), NOT corpus-location grounds.",
+    "seed-dependent tools read resolving_seeds + blocking_seeds (or saved corpus) from db/blockers.sqlite (the 286 reps have them)."
+  ],
+  "notes": "ROUND 2 re-design (loop-until-dry). TARGET = the 6 still-unlabeled rule_not_met branches (lcms/2674, libxml2/7296, libxml2/7311, libxml2/9361, harfbuzz/6858, harfbuzz/7245).\n\nPRIORS KEPT (superset/freeze, VERBATIM, no threshold relaxed): joint_assembly_depth ('vp_tags<0.3 AND size_lift>=1.3'), joint_value_precision ('size_lift<1.3 AND cmp_min_distance>0 AND distance_closure_ratio>=0.5'), and joint_numeric_header_convergence ('size_lift<1.3 AND vp_tags>=0.3 AND cmp_min_distance>0 AND distance_closure_ratio>=0.5 AND winner_closer==true'). All three carried unchanged so every previously-confirmed branch re-validates. member_hint_branches on numeric_header emptied (its two round-1 intended members 6858/7245 did NOT hold under it on real data and are re-routed below); the rule itself is untouched.\n\nNEW MECHANISM (1, discriminable): joint_fixed_offset_literal_presence for harfbuzz/6858 (gid>=num_glyphs; typ1@0x00 + loca@0x0c), harfbuzz/7245 (glyf->get_path; same fixed tags) and lcms/2674 (prtr@0x0c + 'Lab '@0x10 ICC signature). These three failed the round-1 rules for a principled, card-readable reason: their decisive operand is a FIXED-OFFSET CONTIGUOUS LITERAL (FOURCC / ICC signature), NOT a numeric magnitude (so numeric_header's distance gap could not be anchored -- it failed on real data) and NOT a sliding-window keyword (so value_precision's Hamming window misses) and the seeds do not grow (so assembly_depth misses). The genuinely DIFFERENT, untried measurement is operand_enrichment/byte_freq_ratio (one of the 'NOT yet tried here' built tools): does the value_profile-BLOCKING corpus lack the exact tag at the fixed offset while the vpc-RESOLVING corpus carries it? G1: it is FALSIFIABLE (signed_target_enrich could come out ~0) and DISCRIMINATING -- a numeric-convergence mechanism predicts signed_target_enrich~0 (literal present in both arms), assembly-depth predicts size-growth not offset-enrichment; only literal-presence predicts a positive enrichment AT the constant offset. G2: it reads byte content at a fixed offset in the BLOCKING vs RESOLVING corpus, never the resolve label. NOVELTY: this is NOT a relaxed re-test of any refuted round-1 rule -- it uses a different built tool (byte_freq_ratio vs value_distance_reached) over a different metric (signed_target_enrich vs distance_closure_ratio) keyed on a different operand property (fixed-offset byte presence vs derived-integer magnitude). lcms/2674 is included on cross-server grounds: the mechanism is fixed-offset-literal (same as 6858/7245), its 4-byte FOURCC is at a CONSTANT offset (0x0c/0x10) so byte_freq_ratio is well-anchored even though the round-1 value_distance Hamming-window test was chance-prone on a 4-byte sliding window; sB arbitrates it.\n\nHONEST decidable:false SUB-GROUP (G3): joint_grammar_state_path now covers libxml2/7296, libxml2/7311, libxml2/9361 only (lcms/2674 moved OUT to the literal-presence hypothesis). These three are automaton non-NULL-state / namespace-count gates resolved via a GRAMMAR-PATH choice (OPT vs MULT content model; namespaced empty-element close) -- a non-local grammar-state property. Their markup literals FLOAT (dispersed_multibyte, no fixed gate offset), so even the new byte_freq_ratio literal-presence test is inapplicable (operand_enrichment returns no_gate_signature for floating literals); value_precision/numeric_header need a fixed literal / computed integer they don't have; depth_reach at the branch line would re-detect vpc-reaches-false-side (G2 violation). No built tool reads 'which grammar production the corpus exercised' independently of the resolve label, so an honest inconclusive is the correct outcome. NOT decidable:false for off-server reasons (sB owns libxml2 with DB seeds) -- decidable:false on MECHANISM grounds.\n\nDECISION ORDER: assembly_depth, value_precision, numeric_header_convergence (all unchanged), then joint_fixed_offset_literal_presence appended last. The new rule fires on signed_target_enrich, a metric DISJOINT from every prior rule's metrics, and the priors that score these branches (numeric_header) already miss them on real data, so order is robust and no prior label is perturbed. Anything matching none falls through to inconclusive; the grammar-state group never scores (rule:false) and lands in inconclusive by design."
+}

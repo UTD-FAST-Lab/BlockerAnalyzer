@@ -1,0 +1,104 @@
+{
+  "shape": "grimoire_structural_LW",
+  "n_branches": 3,
+  "decisive_pair": "grimoire(blocks) vs naive(resolves)",
+  "direction": "anti",
+  "family_claim": "grimoire's gap-abstraction / structural recombination is a NET NEGATIVE: it either erases the exact literal a byte-equality gate needs, or fragments structure so a depth/buffer threshold is never assembled; naive's literal-preserving, longer-content havoc wins. This is a NON-LOCAL grimoire (mutation-process) family; after the discriminable per-seed tests are exhausted, the residual signal is honestly decidable:false.",
+  "hypotheses": [
+    {
+      "id": "gap_erases_exact_literal",
+      "label": "Grimoire's GeneralizationStage replaces the concrete literal byte (I2S/havoc planted) with a <GAP> token; structural recombination never restores it, so a byte-equality gate that literal-preserving naive can satisfy stays blocked under grimoire.",
+      "direction": "anti",
+      "from_prior": ["grimoire_gap_abstraction_erases_literal"],
+      "members": ["libpng_3892_h1", "libxml2_6597_h2"],
+      "gate_kind": "byte-exact equality on a single-byte constant (libpng color_type==0x03 @offset 0x19; libxml2 comment-body tab ==0x09)",
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "token_count", "operand": "gate_literal", "unit": "per_gate_offset"},
+        "registry_tool": "token_count",
+        "registry_tool_note": "Prior KEEP test (carried forward verbatim per superset/freeze). operand_enrichment (corpus_queue:byte_freq_ratio) is the closest in spirit but needs an ON-DISK corpus and compares cmplog-vs-naive (not grimoire-vs-anything), so it cannot isolate the grimoire GAP-abstraction signal. This stays a SEED-SET literal-count over the DB-stored resolving/blocking seeds.",
+        "metrics_used": ["naive_literal_count", "grimoire_literal_count", "literal_presence_ratio"],
+        "params": {
+          "gate_literals": {"libpng_3892": "0x03", "libxml2_6597": "0x09"},
+          "gate_offset_hint": {"libpng_3892": "0x19", "libxml2_6597": "comment-body (not fixed-offset; count occurrences inside <!-- --> body, fall back to whole-seed count)"},
+          "compare": "naive RESOLVING seed set vs grimoire BLOCKING seed set; literal_presence_ratio = (grimoire_literal_count + eps) / (naive_literal_count + eps)"
+        }
+      },
+      "prediction": "The grimoire-blocking seeds contain the exact gate literal MARKEDLY LESS than the naive-resolving seeds: naive_literal_count > 0 (naive keeps the concrete byte) AND grimoire_literal_count near 0 / much lower (the <GAP> abstraction erased it). G1: a non-erasure explanation (e.g. grimoire just throughput-starved but still carries the literal) would predict literal_presence_ratio ~ 1; an erasure mechanism predicts ratio << 1.",
+      "rule": "naive_literal_count >= 1 AND literal_presence_ratio < 0.34",
+      "rules_out": "throughput-only / scheduling explanations that leave the literal intact in grimoire's seeds (those give ratio ~1)."
+    },
+    {
+      "id": "fragmentation_starves_depth",
+      "label": "Grimoire's re-run tax + structural-recombination produce short, fragmented inputs that never advance the parser far enough to pass a quantitative buffer/depth threshold; naive's longer coherent content satisfies the buffer-ahead condition.",
+      "direction": "anti",
+      "from_prior": ["grimoire_structural_fragmentation_starves_depth"],
+      "members": ["libxml2_6869"],
+      "gate_kind": "inequality/range buffer-depth threshold on a derived integer (xmlBufUse > indx+INPUT_CHUNK); NO fixed literal, different-SIZED W vs L seeds",
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "struct_size_ratio", "operand": "seed_bytes", "unit": "per_branch"},
+        "registry_tool": null,
+        "registry_tool_note": "joint_necessity (seed_set:struct_size_and_token_count) is close but is scoped to the vpc joint-necessity ASSEMBLY-DEPTH subtype (vpc vs cmplog/vp font tags) and its --tokens are font-tag specific; here the comparison is grimoire-blocking vs naive-resolving raw seed SIZE (depth proxy), not vpc tags. A plain struct_size_ratio descriptor; orchestrator may parameterize joint_necessity's size half or build a thin new tool.",
+        "metrics_used": ["naive_median_size", "grimoire_median_size", "size_lift"],
+        "params": {
+          "compare": "naive RESOLVING seed set vs grimoire BLOCKING seed set; size_lift = naive_median_size / grimoire_median_size",
+          "evidence_anchor": "naive/cmplog winner ~458 bytes (coherent, ends in long token run) vs grimoire blockers 13-52 bytes (fragmented)"
+        }
+      },
+      "prediction": "naive-resolving seeds are SUBSTANTIALLY longer than grimoire-blocking seeds (size_lift >= 3): the depth threshold is met only by the longer coherent input. G1: byte-alignment is FORBIDDEN here (data_realities: different-sized W/L seeds), and a value-precision explanation would predict comparable sizes with a value difference; the size gap discriminates fragmentation-starvation from a literal/value gate.",
+      "rule": "size_lift >= 3.0 AND grimoire_median_size < naive_median_size",
+      "rules_out": "literal/value-precision explanations (which predict comparable seed sizes); confirms it is a STRUCTURAL-DEPTH starvation, not a single-byte erasure."
+    },
+    {
+      "id": "fragmentation_starves_reach_depth",
+      "label": "NEW (round-1 pivot for libxml2_6869). The prior SIZE-RATIO surrogate failed; this tests the mechanism directly: grimoire's fragmented seeds do not DRIVE THE PARSER as deep as naive's, independent of raw byte size. Measured as per-seed execution reach of the buffer-grow branch line in the cov image - a short coherent seed can reach deep, a long fragmented one need not, so reach-depth is a genuinely different signal from seed size.",
+      "direction": "anti",
+      "from_prior": [],
+      "members": ["libxml2_6869"],
+      "gate_kind": "inequality/range buffer-depth threshold on a derived integer (xmlBufUse > indx+INPUT_CHUNK); the true (skip-grow) side fires only when the cursor has buffered enough coherent content ahead",
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "depth_reach", "operand": "branch_line", "unit": "per_branch"},
+        "registry_tool": "depth_reach",
+        "registry_tool_note": "BUILT tool depth_reach (seed_set:depth_reach:branch_line:per_branch). It runs naive-resolving (winner) vs grimoire-blocking (loser) seeds through the libafl-libxml2-cov image and reads line 309's per-seed-normalized execution count + the blocked/true-side count from llvm-cov. This directly measures whether the winner seeds drive the parser deeper to the line-309 true side, which IS the mechanism - NOT a seed-size proxy.",
+        "metrics_used": ["depth_lift", "side_lift", "winner_depth", "loser_depth", "winner_deeper"],
+        "params": {
+          "branch_line": "parserInternals.c:309",
+          "compare": "winner = naive (or cmplog, substitute) RESOLVING seeds; loser = grimoire BLOCKING seeds",
+          "evidence_anchor": "W path reaches xmlCurrentChar (W 351 vs L 0) and takes line-309 true side (L309 W: T=6 F=1); grimoire L seeds never reach xmlCurrentChar (L 0) and take only false side (L309 L: T=0 F=48)"
+        }
+      },
+      "prediction": "winner_deeper = true with depth_lift >= 2 AND side_lift >= 2: naive-resolving seeds execute the buffer-grow line and its true (skip-grow / buffered-ahead) side substantially more per seed than grimoire-blocking seeds, which stall before reaching it. G1: this is FALSIFIABLE the other way - if grimoire's blocking seeds reach the line just as deep but simply fail the integer threshold (a value/precision gate, not a reach gate), depth_lift ~ 1 and side_lift ~ 1, which would REFUTE structural-reach starvation. It is INDEPENDENT of the failed size-ratio surrogate (a small coherent seed can still reach deep).",
+      "rule": "winner_deeper AND depth_lift >= 2.0 AND side_lift >= 2.0",
+      "rules_out": "value/precision-gate explanations (grimoire reaches the line but fails the threshold -> depth_lift/side_lift ~ 1) and the raw-size-only explanation that already failed; confirms the divergence is REACH (parser progression), not seed length or operand value."
+    },
+    {
+      "id": "grimoire_nonlocal_process_inconclusive",
+      "label": "HONEST decidable:false (round-2 convergence) for ALL THREE branches. Every discriminable per-seed test that any BUILT tool affords has now been scored on real campaign data and NONE held: literal presence in seeds (gap_erases_exact_literal), raw seed-size proxy (fragmentation_starves_depth), and per-seed parser REACH-depth via the cov image (fragmentation_starves_reach_depth). What remains is the NON-LOCAL grimoire mutation-PROCESS signal - GeneralizationStage <GAP> re-execution/energy tax + structural recombination of generalized fragments - which is a property of the campaign's mutation budget, not of any individual saved seed, and is NOT tagged in mutation_op. No remaining built tool discriminates it.",
+      "direction": "anti",
+      "from_prior": ["gap_abstraction_nonlocal_inconclusive"],
+      "members": ["libpng_3892_h1", "libxml2_6597_h2", "libxml2_6869"],
+      "decidable": false,
+      "gate_kind": "byte-exact equality on a single-byte constant (libpng color_type==0x03; libxml2 tab==0x09) AND a derived-integer buffer-depth inequality (xmlBufUse > indx+INPUT_CHUNK) - united here because, post-refutation, the residual mechanism for both gate kinds is the same non-local grimoire stage, not a per-seed fingerprint.",
+      "measurement": {
+        "descriptor": null,
+        "registry_tool": null,
+        "registry_tool_note": "Why EVERY built tool (incl. the three not-yet-tried at round-0) is blind to the residual signal, branch by branch. (A) The two byte-equality literal branches (libpng_3892_h1, libxml2_6597_h2): (1) operand_enrichment (corpus_queue:byte_freq_ratio) compares cmplog-vs-naive corpora at a fixed offset - it has NO grimoire arm, so it cannot attribute anything to grimoire's GAP abstraction; the decisive pair here is grimoire-vs-naive. (2) value_distance_reached is a vp-gradient Hamming climb - a single-byte equality gate is a degenerate distance-0 target and grimoire is not a CMP_MAP fuzzer; inapplicable. (3) corpus_size_ratio is a campaign-level size statistic that cannot isolate whether the planted literal was erased; the literal-count test (closer in spirit) already failed to separate the arms. (4) depth_reach measures parser reach, but these gates the loser ALREADY reaches (it fails on the literal VALUE, not on depth), so reach would not separate the arms. (B) The depth branch (libxml2_6869): the two MOST-DIRECT tools both already FAILED on real data - depth_reach (the round-1 pivot, the canonical 'winner reaches deeper' tool) was scored and did not hold, and the seed-size proxy was scored and did not hold. Of the remaining tools, value_distance_reached needs an operand_literal per branch but this gate's operand is a DERIVED integer (signature.operand_literal=null) - inapplicable; byte_freq_ratio is FORBIDDEN by data_realities (different-sized W vs L seeds); corpus_size_ratio is an even coarser whole-campaign size statistic than the seed-size proxy that already failed. The decisive grimoire signal (did the GeneralizationStage abstract away the literal / fragment the structure, vs. did grimoire merely spend fewer effective execs) is a MUTATION-PROCESS distinction, and data_realities states grimoire generalization is a feedback/stage and havoc mutation events are NOT distinctly tagged in mutation_op. So no real-data measurement discriminates the grimoire stage from a plain throughput/scheduling penalty beyond the per-seed tests that already failed.",
+        "metrics_used": [],
+        "params": {}
+      },
+      "prediction": "No discriminating real-data prediction remains: the candidate per-seed signals (literal presence, seed size, parser reach-depth) have each been measured and did NOT separate the arms, and the residual mechanism leaves no per-seed, corpus-byte, or reach-depth fingerprint any built tool reads. Forcing a fourth relaxed-threshold re-test of those same signals is forbidden (no relaxed re-test) and would be dishonest.",
+      "rule": "decidable:false -> fallback inconclusive for all three branches",
+      "rules_out": "(none - honest inconclusive; we do NOT invent a label to force a verdict on a non-local grimoire mutation-process signal the data cannot see. Per the brief, an honest decidable:false IS the correct convergence for a non-local grimoire family once the discriminable tools are exhausted.)"
+    }
+  ],
+  "decision_order": ["gap_erases_exact_literal", "fragmentation_starves_depth", "fragmentation_starves_reach_depth", "grimoire_nonlocal_process_inconclusive"],
+  "fallback": "inconclusive",
+  "data_realities_respected": [
+    "No seed_lineage:event_cooccurrence on an 'I2S event' or a 'grimoire generalization event' is proposed - those mutation events are NOT tagged (havoc vocabulary byte-identical across fuzzers).",
+    "value_profile / grimoire GeneralizationStage treated as feedback/stage, not a tagged mutator - never measured via a lineage 'gradient/abstraction event'.",
+    "byte-alignment (byte_freq_ratio) NOT used on libxml2_6869 (different-sized W vs L seeds), and NOT used to fabricate a grimoire arm for the two literal branches (operand_enrichment has only cmplog/naive arms) - size_ratio / depth_reach were used instead, and both failed.",
+    "value_distance_reached NOT proposed: degenerate distance-0 target for the single-byte equality gates, and no operand_literal for the derived-integer depth gate (signature.operand_literal=null).",
+    "on-disk-corpus tools (operand_enrichment, corpus_size_ratio) NOT relied on for verdicts: libpng/libxml2 corpora live on server B, which arbitrates its own targets; the seed_set tests (token_count, struct_size_ratio, depth_reach) use DB-stored resolving_seeds/blocking_seeds.",
+    "Cross-server: NONE of the 3 branches is marked decidable:false because its corpus is absent on the running server; the decidable:false convergence is marked on MECHANISM grounds (non-local grimoire stage with every discriminable built tool exhausted), valid for the owning server (sB) too."
+  ],
+  "notes": "ROUND-2 (loop-until-dry) for grimoire_structural_LW. STARTING STATE: 0 confirmed, 3 unlabeled rule_not_met. The arbiter scored the round-1 design and NONE of the discriminable rules held: gap_erases_exact_literal (literal-presence) did not separate the two byte-equality branches; fragmentation_starves_depth (seed-size proxy) and the round-1 pivot fragmentation_starves_reach_depth (depth_reach, the canonical 'winner reaches deeper' tool) both did not hold for libxml2_6869 (n_scorable=1/3 there). PRIORS KEPT VERBATIM (superset/freeze, Rule 1): all three prior hypotheses (gap_erases_exact_literal, fragmentation_starves_depth, fragmentation_starves_reach_depth) are carried forward UNCHANGED and scored first in decision_order, with NO relaxed thresholds, so any branch that would re-validate still can. NEW THIS ROUND: NO new discriminable mechanism is proposed - this is the deliberate, honest convergence the brief calls for. I evaluated every built tool not yet tried (operand_enrichment/byte_freq_ratio, value_distance_reached, corpus_size_ratio) against the gate kinds and data_realities: operand_enrichment has no grimoire arm (decisive pair is grimoire-vs-naive); value_distance_reached is a vp Hamming climb that is degenerate on a single-byte equality gate and has no operand for the derived-integer depth gate; corpus_size_ratio is a coarser whole-campaign size statistic than the seed-size proxy that already failed; byte_freq_ratio is forbidden on the different-sized W/L seeds of the depth branch. NONE discriminates the residual signal. HONEST decidable:false (G3): the round-1 design split the depth branch (decidable via depth_reach) from a decidable:false literal sub-group; round-1 evidence now shows depth_reach ALSO did not hold, so the decidable:false group is WIDENED to cover ALL THREE branches (grimoire_nonlocal_process_inconclusive). The residual grimoire mechanism - GeneralizationStage <GAP> re-execution/energy tax + structural recombination - is a NON-LOCAL mutation-PROCESS property of the campaign, not a per-seed fingerprint, and not tagged in mutation_op; no built tool reads it. This is a CORRECT inconclusive for a non-local grimoire family, NOT a forced label. G2: every measurement proposed (and refuted) is INDEPENDENT of the resolve pattern that defined the shape (we measured WHAT the seeds carry / how deep they reach, never WHO resolved). LOOP-DRY: with all discriminable tools exhausted and refuted, this shape converges to inconclusive; no further productive round remains."
+}

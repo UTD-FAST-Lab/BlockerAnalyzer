@@ -1,0 +1,69 @@
+{
+  "shape": "i2s_vp_WWLW",
+  "n_branches": 4,
+  "decidable": false,
+  "shape_semantics": "code cmp,vp,vpc,naive = W,W,L,W: cmplog (I2S alone), value_profile (VP alone), and naive ALL resolve; ONLY value_profile_cmplog (vpc, both techniques) blocks. The canonical ANTI-SYNERGY / mutual-interference shape: the fuzzer holding the SUPERSET of techniques loses to each of its components AND to the baseline.",
+  "round": 2,
+  "hypotheses": [
+    {
+      "id": "vpc_corpus_inflation_interference",
+      "label": "vpc's combined I2S+VP corpus admission inflates and collapses composition, starving the single-technique-found path that both cmplog-alone and value_profile-alone sustain",
+      "direction": "anti",
+      "from_prior": ["i2s_vp_mutual_corpus_interference"],
+      "keep": true,
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "corpus_size_ratio", "operand": "vpc_vs_single_technique", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": ["vpc_corpus_size", "cmp_corpus_size", "vp_corpus_size", "vpc_target_value_fraction"],
+        "params": {"target_codepoints": "0x0E37 (branch 5624), 0x0EB9/CCC118-block 0x0E00 Lao codepoints (branch 5660)", "gate_offsets": "4-byte little-endian codepoint slot"},
+        "note": "Proposed-but-not-relied-on. Would need on-disk vpc, cmplog, value_profile corpora (all available for harfbuzz) plus a fraction-of-corpus-bytes-equal-target-value computation per gate offset."
+      },
+      "prediction": "G1 (the test we WOULD run if it were decidable): vpc_corpus_size >> max(cmp_corpus_size, vp_corpus_size) AND vpc_target_value_fraction < min(cmp_target_value_fraction, vp_target_value_fraction) -- i.e. vpc's corpus is strictly larger yet its share of seeds carrying the decisive codepoint value is strictly lower than either single-technique fuzzer, evidencing dilution/starvation rather than a simple too-few-execs failure.",
+      "rule": "vpc_corpus_size / max(cmp_corpus_size, vp_corpus_size) >= 1.3 AND vpc_target_value_fraction < 0.5 * min(cmp_target_value_fraction, vp_target_value_fraction)",
+      "decidable": false,
+      "why_not_decidable": "Even if the rule fires, a larger-but-off-target vpc corpus is equally consistent with the NULL alternative 'vpc simply explored a different region (different seed scheduling / RNG path), and never happened to converge here' as with the causal claim 'interference starved this path.' The two are NOT separable from per-branch corpus data: interference is a counterfactual (what vpc WOULD have reached without the second technique), and corpus composition shows only what vpc DID reach. There is no positive signature of an absence."
+    },
+    {
+      "id": "vpc_stalls_short_of_operand",
+      "label": "ROUND-1 re-examination via value_distance_reached: vpc's blocking corpus stalls at a non-zero Hamming distance from the gate codepoint operand while all three resolving arms (cmplog, value_profile, naive) land at distance ~0",
+      "direction": "anti",
+      "from_prior": [],
+      "keep": false,
+      "novel_vs_prior": "The prior hypothesis measured corpus SIZE + target-value FRACTION (corpus_size_ratio). This re-examination instead asks the sharper positive question -- did vpc's corpus get NEAR the operand and fail (a stalled gradient) or never approach it -- using the BUILT value_distance_reached tool. It is a genuinely different measurement (per-arm min Hamming distance, not corpus composition), which is why it is recorded here rather than as a relaxed-threshold re-test of the prior.",
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "operand_literal", "unit": "per_branch"},
+        "registry_tool": "value_distance_reached",
+        "metrics_used": ["vpc_min_distance", "cmp_min_distance", "vp_min_distance", "naive_min_distance", "distance_gap", "winner_closer"],
+        "params": {"operand_literal": "0x0E37 (branch 5624, width 4); 0x0EB9 / 0x0E00-block Lao CCC118 codepoint (branch 5660, width 4)", "note": "harfbuzz is an on-disk-corpus target so this tool is RUNNABLE for both branches."}
+      },
+      "prediction": "If vpc's loss were a clean 'failed to approach the operand' story, vpc_min_distance would be strictly > 0 while cmp_min_distance ~ vp_min_distance ~ naive_min_distance ~ 0 (all three winners resolve). A DIFFERENT mechanism -- vpc reached the operand region but a downstream/scheduling effect blocked the branch -- would instead predict vpc_min_distance ~ 0 (vpc DID place the codepoint) yet vpc still blocks. So the metric can falsify 'vpc never got near.'",
+      "rule": "vpc_min_distance > 0.15 AND cmp_min_distance < 0.05 AND vp_min_distance < 0.05 AND naive_min_distance < 0.05",
+      "decidable": false,
+      "why_not_decidable": "Two un-removable problems remain after running the tool. (G2 independence) value_distance_reached reads vpc's OWN corpus to derive vpc_min_distance -- the same fuzzer whose blocking DEFINED the shape -- so a stalled vpc distance is not a technique-independent witness of WHY vpc lost. (Counterfactual) a non-zero vpc_min_distance is exactly as consistent with the NULL 'vpc's seed schedule explored a different region of the input space and never happened to drive THIS codepoint' as with the causal 'the added second technique interfered with the gradient climb.' value_distance_reached can confirm the gate IS a Hamming-gradient value gate (which the WW arms already tell us) and can show WHETHER vpc approached, but it CANNOT attribute a non-approach to interference rather than divergent exploration -- the interference claim is a counterfactual the corpus cannot witness."
+    }
+  ],
+  "round2_reexamination": {
+    "premise": "Round 2 re-checked, with fresh eyes, every BUILT tool the registry lists -- including the ones the brief flags as 'not yet tried here' (operand_enrichment, joint_necessity, token_count, depth_reach) -- against the precise discriminating question for WWLW: can any built measurement separate a TRUE mutual-interference mechanism (B) from a COINCIDENTAL/divergent-exploration WWLW (A, no per-branch mechanism, vpc lost to 12h scheduling variance)? (A) and (B) are the only two genuinely different realities a WWLW gate can hold, and a label is only justified if a built measurement's OUTPUT differs between them.",
+    "operand_enrichment/byte_freq_ratio": "NOT discriminating. Measures cmplog-vs-naive byte enrichment at the gate offset. In WWLW naive RESOLVES, so by construction both cmplog and naive reach the value and the enrichment is ~0 -- and the tool never measures vpc at all. Its output is identical under (A) and (B); it cannot speak to vpc's loss mechanism.",
+    "value_distance_reached": "RUNNABLE (recorded as hypothesis vpc_stalls_short_of_operand) but NON-DISCRIMINATING -- a stalled vs near vpc distance is consistent with BOTH (A) divergent exploration and (B) interference, and the load-bearing metric is read from vpc itself (G2). decidable:false.",
+    "joint_necessity/struct_size_and_token_count": "NOT applicable. Built for the joint-necessity ASSEMBLY-DEPTH subtype where vpc is the both-needing WINNER that builds a LARGER structure than either single technique. WWLW is the inverse: vpc is the LOSER. size_lift/vp_tags/tag_lift are defined over a vpc-RESOLVING seed set, which is empty/degenerate here. Its output cannot distinguish (A) from (B).",
+    "token_count": "NOT applicable for the same reason -- vpc is the loser; a larger or smaller token count for vpc's corpus does not witness WHY the second technique caused the block, and is unchanged between (A) and (B).",
+    "depth_reach": "NOT applicable. Built for the ctx/ngram ITERATION-DEPTH subtype and needs per-call-context signal; these are fixed-offset 4-byte codepoint VALUE gates, vpc is the loser, and depth_lift/side_lift do not separate (A) from (B).",
+    "new_descriptor_considered": "The ONLY measurement that could discriminate (A) from (B) is a COUNTERFACTUAL ABLATION: re-run vpc with the second technique disabled on this gate and observe whether it then resolves. That is a campaign re-run, not a corpus/seed/lineage snapshot -- it is outside the descriptor vocabulary (no source in {corpus_queue, seed_set, seed_lineage, coverage_timeseries, exec_stats, source_cfg} captures a counterfactual), the data_realities expose only the existing campaign corpora, and no built tool implements it. Proposing it would violate the 'measurement over existing real-campaign data' contract. So no NEW discriminating descriptor exists either."
+  },
+  "decision_order": ["vpc_corpus_inflation_interference", "vpc_stalls_short_of_operand"],
+  "fallback": "inconclusive",
+  "fallback_carries": ["harfbuzz_5624", "harfbuzz_5660"],
+  "guardrail_status": {
+    "G1": "Both hypotheses carry falsifiable, discriminating-in-principle predictions, but neither's discriminating power against the divergent-exploration null can be realized from per-branch corpus/seed data -- so both fail G1 in practice. Round-2 confirmed: the discriminating alternative (A coincidental vs B interference) is unobservable from any built tool's output because both realities predict the same corpus snapshot.",
+    "G2": "FATAL and RE-CONFIRMED. The shape's label-source is exactly 'vpc blocks.' Every RUNNABLE measurement (corpus composition AND per-arm value distance) reads vpc's OWN corpus -- the same fuzzer whose blocking defined the shape -- to derive the load-bearing metric. The three resolving arms (cmplog/value_profile/naive) ARE technique-independent witnesses, but everything they witness ('the gate is reachable by each technique alone') is already encoded in the WWLW label pattern itself, so using them to 'verify' WWLW re-derives the shape. No technique-independent observable exists for an anti-synergy-of-the-superset shape.",
+    "G3": "Honest non-result is the correct output, RE-AFFIRMED in round 2. The 2 distinct harfbuzz gates (4 branch-halves) route to fallback:inconclusive. No mechanism was invented to force a label; every untried built tool (operand_enrichment, joint_necessity, token_count, depth_reach) was re-examined and none discriminates."
+  },
+  "data_realities_respected": {
+    "lineage_event_forbidden": "Did NOT propose any seed_lineage:event_cooccurrence 'I2S event' or 'gradient event' descriptor -- both I2S (mutator) and VP (CMP_MAP feedback) are untagged/invisible in mutation_op (data_realities #1, #2).",
+    "byte_alignment_ok_here": "These are fixed-offset 4-byte codepoint VALUE gates (contiguous_literal, equal-width seeds), so byte-fraction alignment and value_distance windows are technically valid -- the obstruction is the counterfactual/independence problem, not alignment.",
+    "corpus_targets": "harfbuzz has on-disk corpora on s4, so both proposed measurements are RUNNABLE; they are simply not DISCRIMINATING. The non-result is a logic/independence limit, not a data-availability limit -- NOT marked decidable:false for corpus-absence.",
+    "cross_server": "No branch is marked decidable:false for corpus absence -- harfbuzz is an s4-owned on-disk target. The verdict is a logical-independence limit valid for ALL servers/branches of this shape."
+  },
+  "notes": "ROUND 2 (loop-until-dry), shape i2s_vp_WWLW, 2 branches / 4 halves, all UNLABELED from round 1. RE-EXAMINED HONESTLY per the brief and RE-CONFIRMED decidable:false -- a built tool genuinely discriminating the WWLW mechanism does NOT exist. WWLW is the superset anti-synergy: vpc holds BOTH techniques yet blocks where each component (cmplog, value_profile) AND the naive baseline each resolve. The decisive round-2 argument: a WWLW gate can hold only two genuinely different realities -- (A) coincidental/divergent-exploration loss (no per-branch mechanism; vpc lost to 12h scheduling variance) vs (B) true mutual interference -- and a label is only earned if some built measurement's OUTPUT differs between (A) and (B). It does not: corpus composition, per-arm value distance, struct/token counts, byte enrichment, and depth all return the SAME signature under (A) and (B), because the distinguishing evidence is a COUNTERFACTUAL (what vpc would reach with the second technique disabled), which no corpus/seed/lineage snapshot witnesses and which no descriptor in the closed vocabulary can express. Three structural reasons, re-affirmed: (1) NON-SYNTHESIZABLE emergent corpus-scale/scheduling effect over a 12h budget -- no per-branch gate property localizes it; (2) NON-DISCRIMINABLE counterfactual -- the corpus shows what vpc DID reach, not what it WOULD have reached without the second technique; (3) G2-UNATTAINABLE -- the only load-bearing observable is vpc's own corpus, which is the label-source. The h0 (I2S-as-winner) vs h1 (VP-as-winner) signature split ascribes interference to the OTHER technique, but the testable residue is identical for both halves -- 'vpc's combined corpus failed to sustain the decisive codepoint' -- so all four member-halves collapse, and the collapsed hypothesis is undecidable from real-corpus data. PRIORS: vpc_corpus_inflation_interference KEPT verbatim (keep:true, decidable:false); vpc_stalls_short_of_operand KEPT as the round-1 value_distance_reached re-examination (keep:false, decidable:false). NEW round-2 contribution = the explicit (A)-vs-(B) discriminability argument plus the new-descriptor (counterfactual ablation) ruling, both confirming no built or proposable corpus-snapshot tool separates the mechanism. DECIDABLE:FALSE SUB-GROUP = the ENTIRE shape (harfbuzz 5624 case 0x0E37u; harfbuzz 5660 CCC118/U+0EB9 Lao sign u/uu). fallback:inconclusive carries both branches. No label forced (G3)."
+}

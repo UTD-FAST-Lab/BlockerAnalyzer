@@ -1,0 +1,99 @@
+{
+  "shape": "i2s_vp_WWWL",
+  "n_branches": 14,
+  "n_signatures": 28,
+  "round": 2,
+  "shape_semantics": "cmp,vp,vpc,naive = W,W,W,L. Every CMP-aware technique (cmplog/I2S, value_profile/Hamming, and the vpc combination) resolves the gate; only naive blocks. This is the CMP-SOLVABLE-GATE pattern, NOT a joint-necessity shape: vpc does not need both techniques, since either one alone already resolves (cmplog=W and value_profile=W independently). The label-source is therefore 'any CMP technique enriches/closes the gate target; naive does not'.",
+  "round2_target": "3 UNLABELED branches: libpng/3996 (rule_not_met), libxml2/6690 (rule_not_met), libxml2/6405 (seed_starved). The 11 confirmed branches (7x literal_value_gate_cmp_solvable, 4x cmp_gradient_closes_to_operand) are FROZEN and re-validate under the unchanged KEEP rules below.",
+  "hypotheses": [
+    {
+      "id": "literal_value_gate_cmp_solvable",
+      "label": "A fixed-offset literal value gate (FOURCC/tag/enum/single byte) is solved by any CMP-aware fuzzer (I2S substitution or VP Hamming gradient) while naive's blind havoc cannot place the literal",
+      "direction": "cmp_pro_naive_anti",
+      "decidable": true,
+      "from_prior": ["isolated_exact_field_gate"],
+      "status": "KEEP",
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "comment": "Per W/L gate offset, log2 enrichment of the corpus byte == target (W) value vs decoy (L) value, cmplog-and-value_profile vs naive. CMP-aware fuzzers should enrich the target literal at the gate offset; naive should not.",
+          "scored_targets": ["harfbuzz"],
+          "scored_branches": [5503, 5517],
+          "cross_server_branches": {
+            "libpng/3996": {
+              "comment": "ROUND-2: added as a cross-server member (sB arbitrates libpng). The card (prompts_a/libpng_3996.analysis.json) shows this is a FIXED-OFFSET single-byte enum gate identical in kind to the 7 CONFIRMED literal_value_gate members and to its confirmed sibling libpng/3966: IHDR color_type byte at offset 0x19 must equal 0x03 (PNG_COLOR_TYPE_PALETTE). Winners carry 03 at 0x19 in 34/34 samples; naive losers carry 06/04/00. This is exactly the value-PRESENCE enrichment operand_enrichment measures (corpus fraction with byte==target at a fixed offset), NOT a continuous gradient and NOT a structural-assembly gate. It belongs under this KEEP hypothesis, not under a new mechanism.",
+              "target_value": "0x03 at IHDR color_type offset 0x19",
+              "decoy_value": "06/04/00 at offset 0x19 in naive loser seeds",
+              "width_caveat": "single-byte enum (width 1): exact-value PRESENCE enrichment is robust here (set membership), unlike a continuous Hamming-distance gradient which is chance-alignment-prone at width<=2. operand_enrichment scores value-presence, so it is the correct tool for this enum."
+            }
+          },
+          "target_value": "GPOS table tag (47 50 4f 53) at table-directory offsets ~0x0c-0x0f",
+          "decoy_value": "diffuse non-tag bytes at the same offsets in naive loser seeds"
+        }
+      },
+      "prediction": "signed_target_enrich >= +1.0 (CMP-aware corpora over-represent the target literal bytes at the gate offset relative to naive) AND decoy_enrich <= 0 (CMP-aware does not over-represent the off-gate decoy bytes). DISCRIMINATING: a pure structural/length mechanism (not a literal-value gate) would predict signed_target_enrich ~ 0 at any fixed offset because no single byte value is privileged; an enrichment confirms the gate is a fixed-offset literal that CMP introspection targets, ruling out a structural-assembly alternative. G2: enrichment is measured over corpus byte content, independent of the resolve pattern that defined the shape.",
+      "rule": "signed_target_enrich >= 1.0 AND decoy_enrich <= 0.0"
+    },
+    {
+      "id": "cmp_gradient_closes_to_operand",
+      "label": "The CMP-aware corpus (value_profile Hamming gradient / I2S substitution) lands at or near the gate operand literal in a sliding-window distance sense, while naive's corpus stays far from it -- a CLOSENESS signal that survives dispersed/different-sized seeds where fixed-offset byte enrichment fails",
+      "direction": "cmp_pro_naive_anti",
+      "decidable": true,
+      "from_prior": [],
+      "status": "KEEP",
+      "novelty_vs_prior": "operand_enrichment (byte_freq_ratio) failed (rule_not_met / seed_starved) for several rule_not_met branches because it requires byte-ALIGNED fixed-offset frequency of the EXACT target byte. value_distance_reached is a genuinely different measurement: per-arm MIN over sliding windows of normalized Hamming distance to the operand literal. It (a) captures the VP Hamming-GRADIENT mechanism (h1 in every signature: 'progressively closer' / 'closer-prefix bucket retained') that fixed-offset exact-byte frequency cannot see, and (b) tolerates dispersed/variable-position operands (sliding window, no alignment), so it scores gates that defeated byte_freq_ratio. Not a relaxed-threshold re-run of the prior rule -- a different metric over a different descriptor.",
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "operand_literal", "unit": "per_branch"},
+        "registry_tool": "value_distance_reached",
+        "metrics_used": ["vp_min_distance", "cmp_min_distance", "naive_min_distance", "distance_gap", "winner_closer"],
+        "params": {
+          "comment": "Per arm, MIN over the arm's seeds of (MIN over sliding windows of Hamming(window, target_operand)/width). CMP-aware arms (vp/cmp) should land close (small distance); naive should stall far. operand_literal taken per branch from the signature. NOTE: libpng/3996 is now PRIMARILY scored by the KEEP enrichment hypothesis (value-presence on a single-byte enum); it stays here only as a width<=2-caveated BACKUP net.",
+          "operand_literals": {
+            "harfbuzz/5503": {"value": "GPOS", "hex": "47 50 4f 53", "width": 4},
+            "harfbuzz/5517": {"value": "GPOS", "hex": "47 50 4f 53", "width": 4},
+            "sqlite3/14451": {"value": "SELECT", "hex": "53 45 4c 45 43 54", "width": 6},
+            "libxml2/6967": {"value": "[", "hex": "5b", "width": 1, "caveat": "width<=2 chance-alignment prone; flagged by tool caveat -- arbiter should honor winner_closer only if distance_gap is non-trivial"},
+            "libpng/3996": {"value": "0x03", "hex": "03", "width": 1, "caveat": "single-byte color_type enum; width<=2 chance-alignment prone. BACKUP only -- the KEEP value-presence enrichment test is the primary, robust test for this enum. A Hamming gradient is weak here (06->04->03 are not monotone in bit-Hamming), so this branch should label via enrichment, not distance."}
+          },
+          "scored_targets_on_disk": ["harfbuzz", "sqlite3"],
+          "cross_server_targets": ["libxml2", "libpng"]
+        }
+      },
+      "prediction": "winner_closer == true AND distance_gap >= 0.25 -- the CMP-aware arm's corpus reaches a sliding window whose Hamming distance to the operand literal is materially smaller than naive's nearest window. DISCRIMINATING: a NON-CMP mechanism (scheduling / energy / pure structural-length, where naive blocks for a reason unrelated to a value gradient) predicts distance_gap ~ 0 -- naive's corpus would be just as close to (or as far from) the literal as the CMP arms, because nothing is selecting on operand-closeness. A positive gap rules out 'naive blocks for a non-value reason' and confirms a CMP-distance-climbable value gate. G2: distance is computed over raw seed bytes vs a static operand literal, independent of which fuzzer resolved (the resolve pattern is never an input to the distance computation).",
+      "rule": "winner_closer == true AND distance_gap >= 0.25"
+    },
+    {
+      "id": "structural_grammar_state_gate",
+      "label": "A non-local grammar/parse-state gate (DTD hash-triple insertion, XML prolog well-formedness chain) whose 'operand' is an abstract multi-token parser state, not a single fixed literal -- I2S repairs and VP gradient-completes dispersed structural tokens across the whole document",
+      "direction": "cmp_pro_naive_anti",
+      "decidable": false,
+      "from_prior": [],
+      "status": "NEW",
+      "decidable_false_reason": "No built measurement can discriminate this sub-group's mechanism, and round-2 inspection of the cards (libxml2_6405, libxml2_6690 analyses) confirms this is structural, not a fixed-offset literal in disguise. (1) operand_literal is null in the signatures: the gate is a parser-STATE predicate -- 6405 needs a genuinely-NEW (name,name2,name3) hash triple inserted via xmlHashAddEntry3 (line 580 false on the dict path); 6690 needs wellFormed==1 preserved through a chain of dispersed '<?xml'/'DOCTYPE'/'SYSTEM' tokens up to an undeclared entity-ref. Neither has a single target byte string -- value_distance_reached has no operand to measure against, and byte_freq_ratio fails on the different-SIZED dispersed_multibyte seeds (data_reality: structural-assembly gates have different-sized winning vs blocking seeds, byte-alignment fails). (2) The tokens that DO appear (DOCTYPE, SYSTEM, <?xml) are at VARIABLE document positions and are necessary-but-not-sufficient: a corpus can contain them and still block (parse-state, not byte-presence), so even a multi-window presence count cannot prove the STATE was reached -- it is confounded with parse-success which is the resolve pattern itself (would violate G2). (3) joint_necessity / depth_reach target other shapes (assembly-depth vpc-needs-both; ctx/ngram iteration-depth) -- this is a single-technique-suffices CMP gate (cmplog=W and value_profile=W independently), not joint, and not a per-seed depth story. (4) libxml2/6405 is additionally seed_starved (W=1, L=27; need >=3 each) and its corpus is on sB only; even a re-bisect (rank-10 candidate) would only restore W/L counts, not supply a measurable operand. The mechanism (I2S/VP repairing dispersed structural tokens) is real and likely correct, but it is honestly NON-DISCRIMINABLE with the current tool set -- an honest inconclusive, not a forced label (G3).",
+      "members": ["libxml2/6405", "libxml2/6690"],
+      "measurement": null,
+      "prediction": null,
+      "rule": null
+    }
+  ],
+  "decision_order": ["literal_value_gate_cmp_solvable", "cmp_gradient_closes_to_operand", "structural_grammar_state_gate"],
+  "fallback": "inconclusive",
+  "data_realities_respected": [
+    "operand_enrichment (KEEP hypothesis) requires an on-disk corpus AND >=3 W and >=3 L seeds; corpora exist only for curl, harfbuzz, openthread, sqlite3 on s4. It scores harfbuzz 5503/5517 (fixed-offset GPOS tag) on s4. libpng/3996 (fixed-offset 0x03 enum) is a valid enrichment design but its corpus lives on sB -- the OWNING SERVER arbitrates it; NOT marked inconclusive for being absent on s4 (cross-server rule).",
+    "value_distance_reached (KEEP hypothesis) reads on-disk seeds, so on-disk-corpus targets only. On s4 it scores harfbuzz 5503/5517 and sqlite3 14451 directly. libxml2/6967 and libpng/3996 are valid designs but their corpora live on sB (libxml2/libpng) -- the OWNING SERVER arbitrates them.",
+    "value_distance_reached flags width<=2 operands as chance-alignment-prone: libxml2/6967 ('[' w1) and libpng/3996 (0x03 w1) carry that caveat. For libpng/3996 the ROBUST test is the value-PRESENCE enrichment (set membership on a single byte), not the Hamming gradient (06/04/00 -> 03 is not monotone in bit-Hamming), so 3996 should label via the KEEP enrichment hypothesis first; distance is only a backup.",
+    "structural_grammar_state_gate (libxml2/6405, 6690) is dispersed_multibyte with operand_literal=null over different-sized seeds: byte_freq_ratio byte-alignment fails (data_reality) AND there is no single operand for value_distance_reached; any token-PRESENCE count would be confounded with parse-success (the resolve pattern, G2 violation) -- so it is honestly decidable:false, NOT force-labeled.",
+    "No seed_lineage 'I2S event' or 'VP gradient event' descriptor is proposed: I2S and value_profile are both untagged in mutation_op (I2S is a mutator with byte-identical havoc vocab; VP is a feedback, not a mutator). The only measurable signals are corpus byte content (enrichment) and corpus-to-operand distance (value_distance_reached)."
+  ],
+  "notes": {
+    "round2_resolution": "The 3 UNLABELED branches resolve as: (a) libpng/3996 -> reassigned to the KEEP literal_value_gate_cmp_solvable hypothesis as a CROSS-SERVER member (sB arbitrates). Round-1 returned it rule_not_met because it was only tried against a too-strict variant / insufficient seeds; the card proves it is a fixed-offset single-byte enum gate (color_type==0x03 at offset 0x19), identical in kind to its confirmed sibling libpng/3966 and the 7 confirmed members. value-PRESENCE enrichment (operand_enrichment) is the correct, robust tool for a single-byte enum -- NO new mechanism is warranted, and inventing one would violate G3. (b) libxml2/6690 and libxml2/6405 -> stay decidable:false (parser-state gate, null operand). The card re-inspection confirms the gate is an abstract parse-STATE, not a hidden literal.",
+    "priors_kept": "BOTH decidable priors kept VERBATIM in rule + descriptor: literal_value_gate_cmp_solvable (enrichment) and cmp_gradient_closes_to_operand (distance). Superset/monotonic invariant honored -- the 11 confirmed branches re-validate. The ONLY change is additive: libpng/3996 added to the KEEP enrichment hypothesis's cross_server_branches (does not alter the rule, only its membership/coverage).",
+    "new_mechanisms": "NONE genuinely new this round. After card re-inspection, libpng/3996 is NOT a new mechanism -- it is the existing fixed-offset literal_value_gate, mis-routed in round 1. Proposing a fresh mechanism for it would be a forced label (the obvious, correct mechanism already exists). structural_grammar_state_gate remains the only NEW (round-1) hypothesis, and it is honestly decidable:false.",
+    "g1_discrimination": "Each decidable hypothesis names the alternative it rules out: enrichment rules out a structural/length gate (~0 fixed-offset enrichment); distance rules out a non-value blocking reason (~0 distance_gap if naive blocks for scheduling/structure rather than an operand gradient). Both are falsifiable and could come out the other way. For libpng/3996, the enrichment test is discriminating: if color_type==3 were NOT the gate (e.g. a structural prerequisite), CMP-aware corpora would not over-represent 0x03 at offset 0x19, and the test fails -- but the card shows 34/34 winners carry 0x03, so it is predicted to pass.",
+    "g2_independence": "All measurements take raw corpus/seed bytes vs a static target/operand and never consume the W/L resolve pattern that defined the shape. The decidable:false reason for structural_grammar_state_gate explicitly cites the G2 risk that any token-presence proxy would be confounded with parse-success (= the resolve pattern), which is WHY it is left inconclusive rather than force-labeled.",
+    "scored_vs_inconclusive_on_s4": "S4-SCORED: harfbuzz 5503/5517 (enrichment + distance), sqlite3 14451 (distance). CROSS-SERVER (owning server arbitrates on its local corpus, same rules): libpng/3996 (enrichment primary + distance backup), libxml2/6967 (distance), plus lcms x5 / libpng 3901,3966 / other confirmed cross-server members. DECIDABLE:FALSE (fallback=inconclusive): libxml2/6405, libxml2/6690. The 11 confirmed-frozen branches are untouched and re-validate under the unchanged KEEP rules.",
+    "decidable_false_subgroup": "structural_grammar_state_gate = {libxml2/6405, libxml2/6690}. Honest inconclusive (G3): operand_literal=null parser-state gate, different-sized dispersed seeds, 6405 additionally seed_starved (rank-10 re-bisect would restore W/L counts but cannot supply a measurable operand). No built tool discriminates it without confounding the verification signal with the label source; carried to fallback=inconclusive."
+  }
+}

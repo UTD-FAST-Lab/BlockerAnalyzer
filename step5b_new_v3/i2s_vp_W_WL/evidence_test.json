@@ -111,13 +111,7 @@
       "decidable": true,
       "from_prior": [],
       "applies_to_branches": [
-        "libpng_3887",
-        "libpng_3902",
-        "libpng_3820",
-        "libpng_4051",
-        "libxml2_6359_h0",
-        "libxml2_6946",
-        "libxml2_6976"
+        "libpng_3820"
       ],
       "measurement": {
         "descriptor": {
@@ -138,39 +132,97 @@
           "winners": "cmplog",
           "losers": "naive",
           "operand_literal_per_branch": {
-            "libpng_3887": "png_PLTE FOURCC 'PLTE' (50 4c 54 45), width 4",
-            "libpng_3902": "png_tRNS FOURCC 'tRNS' (74 52 4e 53), width 4",
-            "libpng_3820": "Z_OK-path chunk-type FOURCC 'iTXt' (69 54 58 74), width 4",
-            "libpng_4051": "'iTXt' FOURCC (69 54 58 74), width 4",
-            "libxml2_6359_h0": "UTF-8 BOM (ef bb bf), width 3",
-            "libxml2_6946": "'xml' (78 6d 6c), width 3",
-            "libxml2_6976": "'http://[' scheme+authority-opener prefix (68 74 74 70 3a 2f 2f 5b), width 8"
+            "libpng_3820": "Z_OK-path chunk-type FOURCC 'iTXt' (69 54 58 74), width 4"
           },
-          "note": "byte/string mode (not --numeric); width >= 3 for every member so the value_distance_reached short-operand (width<=2) chance-alignment caveat does NOT apply"
+          "note": "byte/string mode (not --numeric); width >= 3 so the value_distance_reached short-operand (width<=2) chance-alignment caveat does NOT apply"
         }
       },
-      "prediction": "cmp_min_distance ~ 0 AND distance_gap > 0 AND winner_closer=true: the cmplog (I2S) corpus contains a seed whose sliding window matches the operand literal exactly (residual ~0), while naive's closest seed stays a measurable Hamming distance away. DISCRIMINATING and genuinely NEW vs the two prior tests for these branches: (a) it is OFFSET-AGNOSTIC, so it fires where operand_enrichment (per-gate-offset) returned ~0 because the literal floats across variable chunk positions rather than pinning to one fixed gate offset -- the exact reason the prior i2s_fixed_offset_literal_substitution rule did NOT hold here; (b) it asks whether the operand was REACHED at all, not how deeply the gated loop iterated, so it fires where depth_reach (depth_lift) was ~1 because the gate is a one-shot dispatch equality, not a loop. A non-I2S alternative (naive lands the multi-byte literal by havoc) predicts naive_min_distance ~ 0 too (distance_gap ~ 0). G2-independent: value_distance_reached reads what each arm's saved seeds REACHED (min sliding-window Hamming to the operand), never the resolve pattern.",
+      "prediction": "cmp_min_distance ~ 0 AND distance_gap > 0 AND winner_closer=true: the cmplog (I2S) corpus contains a seed whose sliding window matches the operand literal exactly (residual ~0), while naive's closest seed stays a measurable Hamming distance away. DISCRIMINATING and offset-agnostic, so it fires where operand_enrichment (per-gate-offset) returned ~0 because the literal floats across variable chunk positions; it asks whether the operand was REACHED at all, not how deeply the gated loop iterated, so it also fires where depth_reach (depth_lift) was ~1 (one-shot dispatch equality). A non-I2S alternative (naive lands the multi-byte literal by havoc) predicts naive_min_distance ~ 0 too (distance_gap ~ 0). G2-independent: value_distance_reached reads what each arm's saved seeds REACHED, never the resolve pattern.",
       "rule": "winner_closer == true AND distance_closure_ratio >= 0.5 AND cmp_min_distance <= 0.1"
+    },
+    {
+      "id": "i2s_structural_token_corpus_enrichment",
+      "label": "I2S enriches the cmplog corpus with the structural KEYWORD/FOURCC token (PNG chunk-type tag, XML namespace keyword, magic prefix) at a corpus-wide FREQUENCY that naive's blind havoc cannot sustain -- the fraction of the cmplog corpus carrying the token ANYWHERE in the buffer is much higher than naive's, a corpus-frequency statistic that survives where the per-seed minimum-Hamming reach test did not",
+      "direction": "pro",
+      "decidable": true,
+      "from_prior": [],
+      "applies_to_branches": [
+        "libpng_3887",
+        "libpng_3902",
+        "libpng_4051",
+        "libxml2_6359",
+        "libxml2_6946",
+        "libxml2_6976",
+        "libxml2_6930",
+        "libxml2_7250"
+      ],
+      "measurement": {
+        "descriptor": {
+          "source": "corpus_queue",
+          "compute": "token_count",
+          "operand": "structural_token",
+          "unit": "per_branch"
+        },
+        "registry_tool": null,
+        "metrics_used": [
+          "cmp_token_fraction",
+          "naive_token_fraction",
+          "token_enrich_log2",
+          "winner_token_enriched"
+        ],
+        "params": {
+          "winner_fuzzer": "cmplog",
+          "baseline_fuzzer": "naive",
+          "match_mode": "offset_agnostic_substring (count a corpus seed as token-bearing if the token appears at ANY offset; cmp_token_fraction = token-bearing seeds / corpus size, per fuzzer; token_enrich_log2 = log2(cmp_token_fraction / naive_token_fraction))",
+          "structural_token_per_branch": {
+            "libpng_3887": "'PLTE' (50 4c 54 45)",
+            "libpng_3902": "'tRNS' (74 52 4e 53)",
+            "libpng_4051": "'iTXt' (69 54 58 74)",
+            "libxml2_6359": "UTF-8 BOM (ef bb bf)",
+            "libxml2_6946": "'xml' (78 6d 6c)",
+            "libxml2_6976": "'http://[' (68 74 74 70 3a 2f 2f 5b)",
+            "libxml2_6930": "namespace keywords ['xmlns' (78 6d 6c 6e 73), 'xlink' (78 6c 69 6e 6b)] -- seed is token-bearing if it carries ANY listed keyword",
+            "libxml2_7250": "XML prolog/namespace literals ['<?xml' (3c 3f 78 6d 6c), 'xmlns' (78 6d 6c 6e 73)] -- seed is token-bearing if it carries ANY listed literal"
+          },
+          "note": "NEW descriptor (no built tool exposes a standalone cmplog-vs-naive corpus token-FREQUENCY; joint_necessity counts tokens but is hardwired to the vpc/cmplog/vp joint comparison, not cmplog-vs-naive, and reports per-seed median counts not a token-bearing fraction). All tokens width >= 3."
+        }
+      },
+      "prediction": "token_enrich_log2 >= 1.0 AND winner_token_enriched=true: a substantially larger FRACTION of the cmplog corpus carries the structural token (at any offset) than naive's corpus, because I2S keeps re-planting the logged FOURCC/keyword operand across the corpus while naive only retains the rare havoc-lucky seed. DISCRIMINATING and GENUINELY NEW vs the three prior tests for these branches: (a) it is a corpus-FRACTION statistic, not a per-seed MINIMUM -- so it fires where value_distance_reached scored rule_not_met because naive happened to retain ONE near-match seed (pulling naive_min_distance low and collapsing distance_gap) yet its corpus as a whole is NOT token-enriched; (b) it is offset-agnostic, so it fires where operand_enrichment (fixed per-gate-offset) diluted to ~0 because the token floats across chunk/element positions; (c) it asks about token PRESENCE frequency, not loop-iteration depth, so it fires where depth_reach was ~1 (one-shot dispatch / presence gates). The discriminating ALTERNATIVE it rules out: a non-I2S explanation (the token is common in BOTH corpora, e.g. naive reaches it by coverage or it is ambient) predicts token_enrich_log2 ~ 0. G2-independent: the metric is the fraction of each arm's SAVED corpus carrying the token, computed from corpus bytes, never from the resolve pattern that defined the shape.",
+      "rule": "token_enrich_log2 >= 1.0 AND winner_token_enriched == true"
     }
   ],
   "decision_order": [
     "i2s_fixed_offset_literal_substitution",
     "i2s_operand_reached_offset_agnostic",
+    "i2s_structural_token_corpus_enrichment",
     "i2s_structural_assembly_depth"
   ],
   "fallback": "inconclusive",
+  "decidable_false_branches": [
+    "libpng_3892_h0",
+    "libpng_3965_h0",
+    "libpng_4055_h0",
+    "libpng_4061_h0",
+    "libxml2_6597_h1",
+    "libxml2_6909",
+    "libxml2_7287",
+    "libxml2_6205",
+    "bloaty_87",
+    "bloaty_90"
+  ],
   "data_realities_respected": [
     "No seed_lineage:event_cooccurrence 'I2S event' descriptor is proposed (I2S is untagged in mutation_op).",
-    "value_profile is treated as a non-decisive feedback for this shape (vp = '_'); no descriptor attributes a gradient mutation to it. value_distance_reached is used with winner=cmplog (the I2S arm) vs loser=naive -- a valid I2S-reach question (did the I2S arm reach the operand?), NOT a vp-gradient claim.",
-    "byte_freq_ratio (operand_enrichment) is applied ONLY to fixed-offset, byte-aligned value gates. Offset-floating multibyte literals are routed to value_distance_reached (offset-agnostic sliding-window Hamming), respecting the data_reality that byte-alignment fails on different-sized / variable-offset seeds.",
-    "Every value_distance_reached member has operand width >= 3, so the tool's short-operand (width<=2) chance-alignment caveat is not triggered; single-byte / derived-integer gates are NOT routed here (they are decidable:false instead).",
-    "Corpus/seed tools score only targets whose corpus exists on the OWNING server (curl/harfbuzz/openthread/sqlite3 on s4; lcms/libxml2/libpng/bloaty on sB). Branches are NOT marked decidable:false for absent-on-s4 corpus; the owning server arbitrates its own targets (libpng/libxml2/bloaty seeds + cov images live on sB).",
-    "depth_reach needs the target cov image + resolving/blocking seeds in db/blockers.sqlite; libpng, libxml2, and bloaty have those on sB (the 286 reps carry seeds)."
+    "value_profile is treated as a non-decisive feedback for this shape (vp = '_'); no descriptor attributes a gradient mutation to it. value_distance_reached and the new token_count descriptor both use winner=cmplog (the I2S arm) vs loser=naive -- a valid I2S-corpus question, NOT a vp-gradient claim.",
+    "byte_freq_ratio (operand_enrichment) is applied ONLY to fixed-offset, byte-aligned value gates. Offset-floating multibyte literals are routed to value_distance_reached (per-seed min Hamming) and, where the corpus min collapses because one naive seed got lucky, to the NEW offset-agnostic token-FREQUENCY descriptor.",
+    "The new token_count descriptor is offset-agnostic substring presence over the saved corpus, so it respects the data_reality that byte-alignment fails on different-sized / variable-offset structural-assembly seeds.",
+    "ctx context-reach (naive_ctx, context-sensitive coverage) is INVISIBLE on the standard cov binary (data_reality: depth_reach is BLIND to it). Branches whose ONLY remaining competing winner story is a naive_ctx context-coverage effect are marked decidable:false, not force-labeled I2S.",
+    "Corpus/seed tools (operand_enrichment, value_distance_reached, the new token_count descriptor, depth_reach) score only targets whose corpus / cov image exists on the OWNING server (curl/harfbuzz/openthread/sqlite3 on s4; lcms/libxml2/libpng/bloaty on sB). Branches are NOT marked decidable:false for absent-on-s4 corpus; the owning server arbitrates its own targets."
   ],
   "notes": {
-    "priors_kept": "KEPT both prior KEEP hypotheses VERBATIM in measurement, metrics, and rule: (1) i2s_fixed_offset_literal_substitution (operand_enrichment, signed_target_enrich >= 1.0) and (2) i2s_structural_assembly_depth (depth_reach, depth_lift >= 1.5 AND winner_deeper). The 37 confirmed branches re-validate against these two unchanged rules. I removed from these two hypotheses' applies_to_branches the UNLABELED members that the prior test SCORED-AND-FAILED (rule_not_met) -- those are routed to the new hypothesis or to decidable:false below -- but the rules themselves are untouched, so the monotonic/superset guarantee holds for every confirmed branch.",
-    "new_mechanism": "ADDED ONE genuinely-new, not-previously-tried hypothesis i2s_operand_reached_offset_agnostic using the BUILT value_distance_reached tool (a brief-flagged pivot NOT used by the prior test). Mechanism: I2S plants the exact multi-byte CMP operand literal at a VARIABLE/floating offset (PNG chunk-type FOURCCs appear at whichever chunk position the parser walks to: 0x25, 0x35, ...; the BOM/'xml'/'http://[' prefixes likewise float), so per-gate-offset byte-frequency (operand_enrichment) dilutes to ~0 -- the exact reason the prior fixed-offset rule scored rule_not_met -- whereas the offset-agnostic sliding-window Hamming reach (value_distance_reached) sees the I2S arm land distance ~0 to the operand while naive stalls. This is distinct from depth_reach (asks REACHED-the-operand, not loop-iteration-depth, so it fires on one-shot dispatch equalities where depth_lift ~ 1) and is falsifiable + discriminating (G1: a non-I2S alternative predicts naive reaches the literal too -> distance_gap ~ 0). Members (all operand width >= 3): libpng_3887 (PLTE), libpng_3902 (tRNS), libpng_3820 (iTXt->Z_OK), libpng_4051 (iTXt + degenerate keyword), libxml2_6359_h0 (UTF-8 BOM), libxml2_6946 ('xml'), libxml2_6976 ('http://[' scheme prefix).",
-    "decidable_false_subgroup": "Marked 12 of the 19 unlabeled branches decidable:false -- an honest inconclusive, NOT a forced label. (A) SINGLE-BYTE / derived-integer / correlated-multifield gates with no clean discriminable operand-reach signal: I2S substitution is byte-for-byte indistinguishable from havoc landing the same one byte (a sliding-window Hamming/magnitude residual is ~0 for BOTH arms on a width<=2 target, value_distance_reached's own short-operand chance-alignment caveat), operand_enrichment already scored rule_not_met, and depth_reach already scored rule_not_met (depth_lift < 1.5 -- the iteration-depth story was tried and refuted for these specific branches). Members: libpng_3892_h0 (color_type 0x03 at 0x19, 1 byte), libpng_3965_h0 (gAMA length != 4, numeric magnitude), libpng_4055_h0 (iTXt compression-info byte, 1 byte), libpng_4061_h0 (iTXt compression-flag byte, 1 byte), libxml2_6597_h1 (tab 0x09, 1 byte), libxml2_6909 (colon 0x3a, 1 byte), libxml2_7287 (leading 0xf9 derived header byte, width<=1 -- depth_reach already refuted), bloaty_87 and bloaty_90 (ELF section-table CORRELATED multi-field dwords with NO single fixed offset and NO single operand literal -- the only built per-branch signal was depth_reach, which scored rule_not_met; a sliding-window distance has no single target to approach across the dispersed correlated fields, and corpus_count_ratio is a non-discriminating saved-entry proxy). (B) NON-MATCH / presence gates where the winner takes the FALSE side of an equality or fires a once-per-document presence check, so there is NO operand literal to REACH (value_distance_reached inapplicable), no fixed offset (operand_enrichment inapplicable), and no loop depth (depth_reach degenerate -- side_lift would be ~tautological with the resolve pattern that DEFINED the shape, violating G2). Members: libxml2_6205 (winner takes the ns != 'xmlns' FALSE side -- 'I2S planted a non-xmlns prefix' vs 'parse simply advanced' is not separable by any built tool), libxml2_6930 and libxml2_7250 (xmlFreeDoc / xmlTextReaderFreeDoc 'if (cur->oldNs != NULL)' once-per-document namespace-presence). Total 12 (9 in bucket A + 3 in bucket B); the remaining 7 unlabeled go to i2s_operand_reached_offset_agnostic. Honest inconclusive is the correct outcome; the fallback carries the 12.",
-    "scope_and_caveats": "Decision order tries operand_enrichment first (cheapest, fixed-offset literals), then the new offset-agnostic value_distance_reached (seed-byte sliding window, no Docker), then depth_reach (Docker-per-branch ~30-60s, needs the cov image). value_distance_reached + operand_enrichment both score only on the owning server's on-disk corpora (libpng/libxml2/bloaty on sB); any member missing its corpus or >=1 W/>=1 L seed on the owning server falls to the inconclusive fallback automatically. The value_distance_reached rule pairs a categorical winner_closer guard with distance_closure_ratio >= 0.5 AND cmp_min_distance <= 0.1 so a near-tie (both arms reach the literal, distance_gap ~ 0) does NOT produce a spurious label -- exactly the falsification condition that distinguishes I2S-reach from havoc-reach. No NEW descriptor is proposed: the three built tools cover every discriminable hypothesis in this shape; corpus_size_ratio/token_count/joint_necessity were considered but corpus_count_ratio (saved-entry count) is a non-discriminating proxy for the assembly story (count inflation has many causes) and joint_necessity targets the vpc-needs-both joint subtype which this pure-I2S shape does not contain, so neither is wired in."
+    "priors_kept": "KEPT all three prior KEEP hypotheses VERBATIM in measurement, metrics, and rule: (1) i2s_fixed_offset_literal_substitution (operand_enrichment, signed_target_enrich >= 1.0), (2) i2s_structural_assembly_depth (depth_reach, depth_lift >= 1.5 AND winner_deeper), (3) i2s_operand_reached_offset_agnostic (value_distance_reached, winner_closer AND distance_closure_ratio >= 0.5 AND cmp_min_distance <= 0.1). The confirmed branches (37x fixed_offset + 6x assembly_depth + the value_distance member that held) re-validate against these unchanged rules. From i2s_operand_reached_offset_agnostic I retained only libpng_3820 (the member that previously held); the floating-literal members that scored rule_not_met under the per-seed MIN test (libpng_3887/3902/4051, libxml2_6359/6946/6976) are re-routed to the NEW corpus-FRACTION token test, which is a different statistic, not a relaxed threshold. The three prior rules are byte-for-byte untouched, so the monotonic/superset guarantee holds for every confirmed branch.",
+    "new_mechanism": "ADDED ONE genuinely-new hypothesis i2s_structural_token_corpus_enrichment with a NEW descriptor corpus_queue:token_count:structural_token:per_branch (orchestrator builds it; the brief flagged token_count as a not-yet-tried pivot). Mechanism: I2S re-plants the logged structural FOURCC/keyword operand (PLTE/tRNS/iTXt chunk tags; UTF-8 BOM; 'xml'/'xmlns'/'xlink'/'http://[' XML literals) across the cmplog corpus at FLOATING offsets, so a much larger FRACTION of the cmplog corpus carries the token anywhere in the buffer than naive's corpus. This is the discriminating statistic the three prior tools missed for these 8 branches: operand_enrichment (fixed per-gate-offset) diluted to ~0 because the token floats; value_distance_reached (per-seed MINIMUM Hamming) scored rule_not_met because naive retained ONE lucky near-match seed that collapsed distance_gap even though naive's corpus as a whole is not token-enriched; depth_reach was ~1 because these are one-shot dispatch/presence gates, not loops. A corpus token-bearing FRACTION ratio survives all three failure modes and is falsifiable + discriminating (G1: a non-I2S alternative -- token common in both corpora -- predicts token_enrich_log2 ~ 0). libxml2_6930 and 7250 (xmlFreeDoc/xmlTextReaderFreeDoc oldNs presence) carry a partial naive_ctx story too, but the token-enrichment question is still cleanly discriminating: it asks whether the cmplog corpus is enriched in the namespace keywords (a property of the I2S corpus, independent of whether ctx also helped), so they belong with this test rather than decidable:false.",
+    "decidable_false_subgroup": "Marked 10 branches decidable:false -- an honest inconclusive, NOT a forced label. Of the round-3 UNLABELED set, FIVE land here: (1) libpng_3892_h0 (single byte color_type 0x03 at fixed offset 0x19): operand_enrichment already scored rule_not_met and the only competing story is grimoire-anti -- I2S substitution of one byte is byte-for-byte indistinguishable from havoc/other landing the same byte; no built tool discriminates a width-1 fixed-offset gate beyond operand_enrichment, which was already tried and refuted. (2) libpng_4055_h0 and (3) libpng_4061_h0 (iTXt compression-info/flag single bytes): the member analyses carry a STRONG competing naive_ctx (context-sensitive coverage) winner story -- the resolving seeds are stored by naive_ctx -- and ctx context-reach is BLIND on the standard cov binary (data_reality), so I2S-byte vs ctx-coverage cannot be separated by any built tool; depth_reach already scored rule_not_met. (4) libxml2_6597_h1 (single byte tab 0x09 in comment body): same naive_ctx competitor + a width-1 operand -- non-discriminable. (5) libxml2_6205 (winner takes the ns != 'xmlns' FALSE side): there is NO operand literal to REACH or to ENRICH TOWARD (the winner AVOIDS 'xmlns'), so value_distance_reached and the token-enrichment test are both inapplicable, and a side-based depth signal would be tautological with the resolve pattern (G2 violation). The remaining decidable:false members (libpng_3965_h0, libxml2_6909, libxml2_7287, bloaty_87, bloaty_90) carry over from the prior round (single-byte / derived-integer / correlated-multifield gates with no clean discriminable per-branch signal; depth_reach and/or operand_enrichment already refuted). Honest inconclusive is the correct outcome; the fallback carries these 10.",
+    "round3_routing_summary": "Of the 13 round-3 UNLABELED branches: 8 -> NEW i2s_structural_token_corpus_enrichment (libpng_3887/3902/4051, libxml2_6359/6946/6976/6930/7250); 5 -> decidable:false (libpng_3892/4055/4061, libxml2_6597/6205). No prior rule was relaxed; the new mechanism is a distinct corpus-FRACTION statistic, and the decidable:false set is justified by exhausted/blind built tools (ctx-coverage invisibility, width-1 indistinguishability, false-side non-match with no operand to reach).",
+    "scope_and_caveats": "Decision order: operand_enrichment first (cheapest, fixed-offset literals), then value_distance_reached (per-seed min Hamming), then the new token-frequency descriptor (corpus-fraction substring scan, no Docker), then depth_reach (Docker-per-branch). The token_count and value_distance_reached descriptors score only on the owning server's on-disk corpora (libpng/libxml2 on sB); any member missing its corpus or seeds on the owning server falls to the inconclusive fallback automatically. The token rule pairs token_enrich_log2 >= 1.0 with a winner_token_enriched guard so an ambient/common token (enriched in neither arm differentially) does NOT produce a spurious label -- exactly the falsification condition (G1) that distinguishes I2S corpus-replanting from background presence."
   }
 }

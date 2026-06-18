@@ -1,0 +1,133 @@
+{
+  "shape": "i2s_vp_WLWL",
+  "n_branches": 106,
+  "label_source": "Layer-1 resolve pattern cmp,vp,vpc,naive = W,L,W,L (cmplog AND value_profile_cmplog resolve; value_profile AND naive block) => i2s-PRO single-technique literal-substitution family. The evidence tests verify this independently (G2): they measure the cmplog corpus's literal content (byte-frequency enrichment at a fixed offset, offset-agnostic anchor-token presence vs depletion) OR what the resolving corpus dynamically REACHES (per-seed branch-line depth + decisive-side-taken), NEVER the resolve pattern that defined the shape.",
+  "hypotheses": [
+    {
+      "id": "i2s_fixed_offset_literal_value_gate",
+      "label": "cmplog (I2S) substitutes a logged CMP literal at a fixed gate offset, so its corpus is enriched in the target value at that offset relative to naive; value_profile/naive cannot synthesize the exact literal",
+      "direction": "i2s_pro",
+      "from_prior": ["i2s_wlwl_direct_literal_dispatch_gate"],
+      "kept_verbatim": true,
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "gate_kind": "fixed_offset_value_gate",
+          "applies_to_signatures": "operand_kind in {multibyte_literal, single_byte_constant, enum_or_code} AND byte_signature == contiguous_literal AND gate_structure in {equality, switch_case, presence_or_nonnull, length_or_count_check, inequality_or_range}",
+          "scorable_targets": ["curl", "harfbuzz", "openthread"],
+          "note": "lcms/libpng/libxml2/bloaty have no on-disk corpus on s4 (data_realities); their owning server (sB) arbitrates them. Tool returns no_corpus on a server lacking the corpus -> that server leaves the branch inconclusive for this hypothesis, it is NOT decidable:false."
+        }
+      },
+      "prediction": "For a fixed-offset literal value gate, the cmplog corpus is ENRICHED in the target literal at the gate offset relative to naive: signed_target_enrich > 0 (i2s-PRO direction). A pure-coverage / value-profile-only mechanism predicts NO cmplog-specific enrichment at the operand offset (signed_target_enrich ~ 0), because without I2S operand substitution cmplog's corpus byte distribution at that offset would match naive's. This is the alternative the test rules out.",
+      "rule": "signed_target_enrich >= 0.8",
+      "g1_falsifiable_by": "signed_target_enrich <= 0 (cmplog NOT enriched, or depleted, in the target literal at the gate offset) refutes i2s-PRO substitution at this gate.",
+      "g2_independence": "Measures corpus byte-frequency at the operand offset (a property of saved seeds), not whether vpc/cmplog resolved the branch. Independent of the Layer-1 resolve pattern."
+    },
+    {
+      "id": "i2s_planted_anchor_literal_presence_scaffold_gate",
+      "label": "I2S splices one or more logged CMP anchor literals (URL scheme '://', 'HTTP/'/'HTTP/2', header names, protocol tokens 'pop3', chunk-type FOURCCs 'IDAT'/'sRGB'/'eXIf'/'sCAL'/'tIME', OpenType table tags 'GPOS'/'GSUB', the Mach-O magic, the switch comparand byte) somewhere into the input; the literal is PRESENT in the cmplog-resolving corpus but ABSENT (depleted to filler-noise) in the naive/value_profile-blocking corpus, because only I2S operand substitution can plant the exact bytes. The branch is the value-compare itself OR sits one hop downstream of the planted token (dispatch into a handler / scaffold whose downstream state controls the branch).",
+      "direction": "i2s_pro",
+      "from_prior": [],
+      "kept_verbatim": true,
+      "novelty_vs_refuted": "GENUINELY DIFFERENT from the prior refuted 'i2s_multi_literal_scaffold_state_gate' (tool=value_enrichment, an OFFSET-ANCHORED byte-frequency enrichment that data_realities forbid on dispersed/different-sized W/L seeds -> it returned no_gate_signature and was decidable:false). This hypothesis instead uses OFFSET-AGNOSTIC, SIZE-TOLERANT per-seed occurrence COUNTING of named anchor literals with a winner-present / loser-depleted presence RATIO (built tool token_count.py). It does not require a fixed offset or equal-sized arms, so it survives the data_reality that broke value_enrichment.",
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "token_count", "operand": "anchor_literal_set", "unit": "per_branch"},
+        "registry_tool": "token_count",
+        "tool_path": "bench/tools/token_count.py",
+        "metrics_used": ["winner_literal_count", "loser_literal_count", "literal_presence_ratio"],
+        "params": {
+          "gate_kind": "anchor_literal_presence_scaffold",
+          "winner_fuzzer": "cmplog",
+          "loser_fuzzer": "naive",
+          "applies_to_signatures": "branch has at least one recoverable anchor literal (signature.operand_literal is a printable/hex literal, OR the card names a concrete scaffold token), regardless of byte_signature (contiguous OR dispersed) and regardless of operand_kind. Covers BOTH the dispersed-multibyte scaffold branches AND the contiguous-literal branches that did not clear hypothesis A's offset-anchored enrichment rule (a different measurement, not a relaxed re-test of A).",
+          "multi_anchor_rule": "when a branch lists >1 anchor literal, score each with token_count and take the MAX presence-depletion (best single recoverable anchor) — one planted I2S token present-in-winner/absent-in-loser is sufficient evidence of I2S scaffold assembly.",
+          "scorable_targets_s4": ["curl", "harfbuzz"],
+          "scorable_targets_sB": ["lcms", "libpng", "libxml2", "bloaty"],
+          "note": "Cross-server: curl/harfbuzz seeds on s4; lcms/libpng/libxml2/bloaty seeds on sB. Each server scores its own targets; a server lacking the corpus returns no_corpus -> inconclusive there (NOT decidable:false). data_realities: token_count reads on-disk seed bytes and needs >=1 resolving + >=1 blocking seed for the branch."
+        }
+      },
+      "prediction": "If the branch is reached via an I2S-planted anchor literal, that literal is PRESENT in the cmplog-resolving seeds and DEPLETED in the naive/value_profile-blocking seeds: winner_literal_count >= 1 AND literal_presence_ratio << 1. The alternative this rules out is that value_profile's Hamming gradient (not I2S substitution) assembles the scaffold or that the token is corpus-generic — either predicts comparable presence in both arms (literal_presence_ratio ~ 1), since the gradient is a feedback that cannot place an exact multi-byte token a naive seed also lacks. (Distinct from hypothesis A: A asks 'is the literal enriched at ONE fixed offset'; this asks 'is the literal PRESENT ANYWHERE in the winner yet absent in the loser' — survives dispersed placement + size mismatch.)",
+      "rule": "winner_literal_count >= 1.0 AND literal_presence_ratio <= 0.34",
+      "g1_falsifiable_by": "literal_presence_ratio ~ 1 (anchor literal equally present in the blocking seeds) OR winner_literal_count < 1 (the resolving corpus does not even carry the named anchor) refutes I2S-driven anchor-literal scaffold assembly for this branch.",
+      "g2_independence": "Reads per-seed occurrence counts of a named literal over the saved resolving vs blocking corpora; never inspects whether cmplog/vpc resolved. Independent of the Layer-1 resolve pattern."
+    },
+    {
+      "id": "i2s_structural_assembly_reach_depth_gate",
+      "label": "I2S does NOT just plant one token — it assembles a MULTI-FIELD structure (a full scheme://host:port URL + 'HTTP/' version line that seats a cached connection; a complete sfnt header + table-directory FOURCCs that validates the recursive sanitize walk; a well-formed PNG chunk stream that dispatches a handler then satisfies its length predicate; an XML scaffold that parses an entity name reaching the switch) whose downstream effect is that the cmplog-RESOLVING corpus, run dynamically, DRIVES execution to the blocker line AND TAKES the decisive side — while the naive/value_profile-BLOCKING corpus (short, filler-dominated, single-token-or-noise seeds) reaches the line only shallowly and never takes that side. The discriminator is the ASSEMBLED-STRUCTURE EXECUTION DEPTH at the gate, not the presence of any single byte/token (which is why hypotheses A and B, both byte-CONTENT tests, miss it).",
+      "direction": "i2s_pro",
+      "from_prior": [],
+      "novelty_vs_refuted": "GENUINELY DIFFERENT mechanism + DIFFERENT measurement-CLASS from both already-refuted byte-content tests for these branches. Hypothesis A (operand_enrichment) measures byte-FREQUENCY at a fixed offset; hypothesis B (token_count) measures named-literal PRESENCE-anywhere — both are STATIC reads of saved-seed bytes, and BOTH were scored on these 19 branches and did NOT hold (the winning structure is dispersed across many fields, the W/L seeds differ in SIZE so an offset scan misaligns, and the discriminating literal — e.g. '://' or 'sRGB' or 'GPOS' — also shows up as filler in some blocking seeds, defeating a pure presence ratio). This hypothesis instead RUNS the seeds and measures DYNAMIC REACH: does the resolving corpus actually arrive at the branch line and take the decisive side per seed (depth_lift, side_lift)? That is a categorically different signal — NOT a relaxed-threshold re-test of A or B (which are forbidden), but the orthogonal 'execution-depth' axis the byte tools are blind to. Mirrors the registry depth_reach tool's ctx/ngram iteration-depth subtype, re-aimed at the I2S structural-assembly subtype.",
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "depth_reach", "operand": "branch_line", "unit": "per_branch"},
+        "registry_tool": "depth_reach",
+        "tool_path": "bench/tools/depth_reach.py",
+        "metrics_used": ["depth_lift", "side_lift", "winner_depth", "loser_depth", "winner_side_depth", "loser_side_depth", "winner_deeper"],
+        "params": {
+          "gate_kind": "structural_assembly_reach",
+          "winner_fuzzer": "cmplog",
+          "loser_fuzzer": "naive",
+          "branch_id_form": "use the BARE numeric branch_id (depth_reach queries `branches where branch_id=?`); the signature '_h0' suffix is a hypothesis sub-id, NOT the DB branch key — e.g. libpng_3896_h0 -> branch_id 3896, libpng_3980_h0 -> 3980, libpng_4039_h0 -> 4039, curl_129_h0 -> 129.",
+          "members_decidable": ["curl_19", "curl_22", "curl_23", "curl_73", "curl_129_h0", "curl_298", "curl_322", "curl_422", "curl_470", "curl_567", "harfbuzz_5560", "harfbuzz_6236", "libpng_3877", "libpng_3896_h0", "libpng_3980_h0", "libpng_4006", "libpng_4031", "libpng_4039_h0", "libxml2_6381"],
+          "scorable_targets_s4": ["curl", "harfbuzz"],
+          "scorable_targets_sB": ["libpng", "libxml2"],
+          "note": "depth_reach is Docker per-branch and needs BOTH (a) the libafl-<target>-cov image AND (b) resolving_seeds + blocking_seeds on-disk for the branch. Cov images exist for curl/harfbuzz (s4) and libpng/libxml2 (sB) -> these 19 branches are decidable on their owning server. A server lacking the corpus/image returns skip -> inconclusive there (NOT decidable:false). lcms + bloaty have NO cov image on EITHER server -> their branches are NOT in this hypothesis (see hypothesis 4, decidable:false). ~30-60s per branch."
+        }
+      },
+      "prediction": "If I2S unlocks the branch by assembling a multi-field structure, the cmplog-resolving corpus run dynamically REACHES the blocker line far more per seed AND TAKES the decisive side, while the naive-blocking corpus stalls: depth_lift >= 2 (winner reaches the line >=2x per seed) AND side_lift >= 3 (the decisive blocker side is taken by the winner arm and barely/never by the loser arm — the cards show winner T>0 vs loser T=0 on the decisive side at every member: harfbuzz/6236 check_range ~110000 vs ~20; libpng handlers W:T>0 L:T=0; curl conncache W reaches locked-remove, L only false side). The ALTERNATIVE this rules out: 'the loser corpus reaches the branch line equally deep, it just carries the wrong gate VALUE' — that alternative predicts depth_lift ~ 1 and side_lift ~ 1 (equal dynamic reach, divergence purely in a byte the static tools would already have caught). A high side_lift with the loser stalling shallow of the line is the signature that I2S's ASSEMBLED STRUCTURE — not a single substituted byte — is what carries execution to the decisive side.",
+      "rule": "depth_lift >= 2.0 AND side_lift >= 3.0 AND winner_deeper == true",
+      "g1_falsifiable_by": "depth_lift ~ 1 AND side_lift ~ 1 (the blocking corpus reaches the branch line and takes the decisive side just as often as the resolving corpus) refutes the structural-assembly-reach mechanism — the divergence would then be a pure value/byte mismatch the static tools own, not an assembled-structure depth effect. winner_deeper == false (loser reaches deeper) also refutes.",
+      "g2_independence": "Runs each ARM's CORPUS through the instrumented binary and reads the branch-line execution + decisive-side-taken counts; it never reads the resolve label. The signal is what the saved seeds dynamically REACH, fully independent of the Layer-1 W,L,W,L pattern that defined the shape."
+    },
+    {
+      "id": "i2s_derived_state_no_recoverable_literal_no_cov_image",
+      "label": "The blocked branch is a DERIVED-state / structural-chain condition (lcms tone-curve float magnitude over 131072.0; lcms deep LUT-A2B NULL guard reached only by traversing a multi-FOURCC chain; lcms discrete parametric-curve Type==5 switch arm; bloaty Mach-O-magic format-dispatch into FindContaining) on a target with NO on-disk libafl-<target>-cov image, so neither the byte-content tools (no recoverable single anchor that discriminates, or the W/L seeds differ in size/offset) NOR the dynamic depth tool (no cov image to run the seeds through) can discriminate the I2S mechanism. I2S still unlocks these upstream, but no BUILT measurement reaches them.",
+      "direction": "i2s_pro",
+      "from_prior": ["i2s_derived_state_no_recoverable_literal"],
+      "decidable": false,
+      "members": ["bloaty_141", "lcms_2113", "lcms_2226", "lcms_2330"],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "depth_reach", "operand": "branch_line", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": [],
+        "params": {
+          "why_no_built_tool": "Two compounding blockers. (1) NO cov image: lcms and bloaty have NO Dockerfile.<target>.cov on either server, so depth_reach (the one tool that would otherwise discriminate these by dynamic reach, as it does for the 19 curl/harfbuzz/libpng/libxml2 branches) cannot run — it returns skip 'container'/'no coverage dump' for every lcms/bloaty branch. (2) NO clean byte signal: lcms_2226 is gated on a runtime tone-curve float magnitude (operand_literal null), lcms_2330 on a deep LUT-A2B NULL guard reached by a multi-FOURCC chain (the discriminator is path-depth, not one literal), lcms_2113 on a discrete Type==5 switch whose 1-byte operand also occurs as filler in losers, bloaty_141's Mach-O magic 'ce fa ed fe' did not clear A's offset-enrichment NOR B's presence ratio (losers carry the WASM magic at the same offset, and the discriminator is format-routing DEPTH, not magic presence). operand_enrichment needs a clean fixed offset; token_count needs a literal absent from losers; value_distance_reached needs a numeric target operand and on-disk seeds + (for a magnitude gate) a measurable operand value — none is available, and depth_reach is image-blocked.",
+          "what_would_make_it_decidable": "Building libafl-lcms-cov and libafl-bloaty-cov images would move bloaty_141 + lcms_2113/2226/2330 under hypothesis 3 (i2s_structural_assembly_reach_depth_gate), exactly as it covers the other format-routing/derived-state branches there. Until those images exist, these stay honestly inconclusive (G3) rather than force-labeled."
+        }
+      },
+      "prediction": "(undecidable with built tools on these targets) If a cov image existed, depth_reach would show the cmplog-resolving corpus driving these branches' decisive side (Type==5 arm; tone-curve over-magnitude false side; deep LUT NULL guard; Mach-O FindContaining empty-result side) with the naive-blocking corpus stalling on the shallow/other arm (the cards already report W:T>0 vs L:T=0 on each). An alternative where the derived/structural state is reached without I2S would show no winner/loser depth gap.",
+      "rule": "decidable:false",
+      "g1_falsifiable_by": "(no built measurement on these targets) — honest inconclusive per G3.",
+      "g2_independence": "n/a (no test built / runnable here)."
+    }
+  ],
+  "decision_order": [
+    "i2s_fixed_offset_literal_value_gate",
+    "i2s_planted_anchor_literal_presence_scaffold_gate",
+    "i2s_structural_assembly_reach_depth_gate",
+    "i2s_derived_state_no_recoverable_literal_no_cov_image"
+  ],
+  "fallback": "inconclusive",
+  "data_realities_respected": [
+    "I2S is NOT tagged in mutation_op -> no seed_lineage:event_cooccurrence 'I2S event' descriptor proposed anywhere.",
+    "value_profile (CMP_MAP) is a feedback not a mutator -> its effect is read only via corpus content (byte-freq, token presence) or what the corpus REACHES (depth_reach), never a lineage gradient event.",
+    "joint/structural-assembly gates have different-SIZED W vs L seeds -> hypothesis 3 uses depth_reach, which RUNS the seeds and per-seed-NORMALIZES the line count (winner_depth = line_count / n_W), so size mismatch is handled by normalization, not byte-alignment; it never does the byte-offset scan that data_realities forbid on different-sized seeds.",
+    "depth_reach needs the libafl-<target>-cov image: it exists for curl/harfbuzz/libpng/libxml2/openthread but NOT lcms/bloaty -> the 19 hypothesis-3 branches are all curl/harfbuzz/libpng/libxml2 (image present), and the 4 lcms/bloaty branches are held decidable:false (hypothesis 4) precisely because the image is missing.",
+    "on-disk corpora exist only for curl/harfbuzz/openthread/sqlite3 (s4) and lcms/libxml2/libpng/bloaty (sB); each server scores its own targets and a missing corpus/image yields inconclusive (NOT decidable:false) — cross-server rule honored.",
+    "seed-dependent tools (operand_enrichment, token_count, depth_reach) need resolving_seeds + blocking_seeds in db/blockers.sqlite for the branch (the reps have them)."
+  ],
+  "notes": {
+    "kept_priors": [
+      "i2s_fixed_offset_literal_value_gate (hypothesis A) — KEPT VERBATIM, FROZEN. It confirmed 73 branches via operand_enrichment (signed_target_enrich >= 0.8) and re-validates them unchanged. Rule + params byte-identical to the prior.",
+      "i2s_planted_anchor_literal_presence_scaffold_gate (hypothesis B) — KEPT VERBATIM, FROZEN. It confirmed 10 branches via token_count (winner_literal_count >= 1 AND literal_presence_ratio <= 0.34) and re-validates them unchanged. Rule + params byte-identical to the prior. (Its members that did NOT hold are the unlabeled-23 carried into hypothesis 3/4 below; this is NOT a relaxed re-test of B — hypothesis 3 uses a categorically different, dynamic measurement.)"
+    ],
+    "new_mechanism_for_unlabeled": [
+      "i2s_structural_assembly_reach_depth_gate (hypothesis 3) — the NEW discriminating mechanism for 19 of the 23 unlabeled branches, using the BUILT-but-previously-unused depth_reach.py (a registry pivot tool). Mechanism: I2S assembles a multi-FIELD structure (full URL+connection scaffold; complete sfnt header + table directory; well-formed PNG chunk stream + length predicate; XML entity scaffold) whose effect is that the resolving corpus DYNAMICALLY reaches the blocker line and takes the decisive side, while the blocking corpus (short, filler-dominated) stalls. This is why the two STATIC byte-content tests (A: byte-freq-at-offset; B: token-presence-anywhere) both failed on these 19 — the discriminator is assembled-structure EXECUTION DEPTH, not any single byte. depth_lift>=2 AND side_lift>=3 AND winner_deeper. Decidable members: curl (19,22,23,73,129_h0,298,322,422,470,567) + harfbuzz (5560,6236) on s4; libpng (3877,3896_h0,3980_h0,4006,4031,4039_h0) + libxml2 (6381) on sB. Note curl_422/470/73 and libpng_3877 — previously held decidable:false in the prior as 'derived-state' — become DECIDABLE here: their derived quantity (bytecount nonzero / a==0 fixed-point) maps cleanly onto a branch-LINE decisive-side count that depth_reach reads (cards report W:T>0 vs L:T=0), so the dynamic tool discriminates them. They are moved OUT of decidable:false into hypothesis 3."
+    ],
+    "decidable_false_subgroup": [
+      "i2s_derived_state_no_recoverable_literal_no_cov_image (hypothesis 4) — HONEST decidable:false, narrowed from the prior decidable:false set to exactly 4 branches on cov-image-less targets: bloaty_141, lcms_2113, lcms_2226, lcms_2330. They are inconclusive for a COMPOUND reason: (1) no libafl-lcms-cov / libafl-bloaty-cov image exists on either server, so the one tool that would discriminate them (depth_reach, which DOES discriminate the analogous format-routing/derived-state branches on curl/harfbuzz/libpng/libxml2) cannot run; (2) their byte signal is non-discriminating (tone-curve float magnitude / deep multi-FOURCC NULL chain / 1-byte switch-value also present as filler / Mach-O magic where losers carry WASM magic at the same offset). No BUILT tool reaches them, so per G3 they stay inconclusive rather than be force-labeled. Building the two cov images is the concrete path to making them decidable (they would then fall under hypothesis 3)."
+    ],
+    "discrimination_summary": "Four-tier decision: (1) fixed-offset byte-freq enrichment (frozen A) for clean contiguous-literal value gates [73 confirmed]; (2) offset-agnostic anchor-token presence-depletion (frozen B, token_count) for dispersed/scaffold gates where one named literal is winner-present/loser-absent [10 confirmed]; (3) NEW dynamic structural-assembly execution-depth (depth_reach) for the 19 unlabeled branches where neither static byte test holds because the discriminator is assembled-structure REACH, not a single byte [curl/harfbuzz/libpng/libxml2, cov image present]; (4) honest decidable:false for the 4 lcms/bloaty branches that BOTH lack a cov image AND lack a clean byte signal. Tiers 1/2 (static byte-content) vs tier 3 (dynamic execution-depth) are distinguished by MEASUREMENT CLASS — the data can separate them — and tier 4 is non-discriminable by any built tool on its targets."
+  }
+}

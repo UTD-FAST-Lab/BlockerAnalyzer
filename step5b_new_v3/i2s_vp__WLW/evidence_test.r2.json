@@ -1,0 +1,119 @@
+{
+  "shape": "i2s_vp__WLW",
+  "n_branches": 13,
+  "shape_semantics": "code cmp,vp,vpc,naive = _,W,L,W: value_profile AND naive resolve, value_profile_cmplog BLOCKS, cmplog non-decisive. ANTI-SYNERGY -- adding the I2S stage to value_profile (vpc = both techniques) HURTS: vpc loses to vp-alone and to naive. The verification question for every branch is WHY the extra I2S delta blocks what vp-alone resolves.",
+  "hypotheses": [
+    {
+      "id": "decoy_overcommit_wrong_literal",
+      "label": "vpc's I2S substitution pins the corpus to a WRONG decoy literal (sibling case / enumerated case / valid-range boundary), flooding the loser corpus with a value that blocks the target arm",
+      "direction": "anti_i2s",
+      "from_prior": [
+        "i2s_wrong_literal_overcommit_starves_target_arm",
+        "vp_gradient_literal_climb_i2s_budget_diversion"
+      ],
+      "applies_to_branches": [
+        "harfbuzz_5350",
+        "harfbuzz_5623",
+        "harfbuzz_5683",
+        "harfbuzz_5761",
+        "harfbuzz_6124_h0",
+        "harfbuzz_6162",
+        "harfbuzz_6210",
+        "harfbuzz_6263"
+      ],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["decoy_enrich", "signed_target_enrich"],
+        "params": {
+          "compare": "value_profile_cmplog_vs_value_profile",
+          "decoy_source": "the sibling / enumerated-case / boundary literal named in why_loser_doesnt (e.g. MONGOLIAN/NKO tag for 5761, 0x11481 sibling for 6124_h0, the 0x0020/0x00A0/0x2006 case literals for 6263, the GSUB/GPOS table tags for 6162/6210, 0x20 space-class for 5683)",
+          "target_value": "the W-resolving operand named in why_winner_satisfies"
+        }
+      },
+      "prediction": "vpc's corpus is ENRICHED for the decoy literal relative to vp (decoy_enrich > 0) while NOT enriched for the target value (signed_target_enrich <= 0). G1-discriminating: pure overhead/throughput drain (the rival hypothesis) predicts NO directional byte-frequency difference between vpc and vp corpora at the gate offset (decoy_enrich ~ 0) -- it slows the loser without steering it to any specific value. G2-independent: it scores corpus BYTE frequencies at the gate offset, not the vpc resolve/block outcome that defined the shape.",
+      "rule": "decoy_enrich > 0.8 AND signed_target_enrich < 0.3"
+    },
+    {
+      "id": "vp_gradient_reaches_exact_literal_i2s_stalls_short",
+      "label": "value_profile's CMP_MAP Hamming gradient lands ON the exact 4-byte switch-case codepoint while vpc's added I2S stage diverts mutation onto sibling operands and never closes the last bits to the exact literal -- a closeness gap, not a wrong-value-floods-corpus gap",
+      "direction": "anti_i2s",
+      "from_prior": [],
+      "applies_to_branches": [
+        "harfbuzz_5623",
+        "harfbuzz_6124_h0"
+      ],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "operand_literal", "unit": "per_branch"},
+        "registry_tool": "value_distance_reached",
+        "metrics_used": ["vp_min_distance", "vpc_min_distance", "distance_gap", "winner_closer"],
+        "params": {
+          "operand_literal": "0x0E36 for 5623 (width 4, LE bytes 36 0e 00 00); 0x1148D for 6124_h0 (width 4, LE bytes 8d 14 01 00 -- the primary winner-seed literal of the 0x1148B/0x1148D case pair)",
+          "winner_arm": "value_profile",
+          "loser_arm": "value_profile_cmplog"
+        }
+      },
+      "prediction": "value_profile's resolving corpus lands at or essentially at the exact operand (vp_min_distance ~ 0) while value_profile_cmplog's blocking corpus stalls measurably short of it (vpc_min_distance > vp_min_distance, so distance_gap > 0 with vp the closer arm). G1-discriminating: this separates the GRADIENT-CLOSENESS mechanism from the decoy-overcommit mechanism the prior test already tried and FAILED on these two branches -- decoy_overcommit predicts the vpc corpus is byte-enriched at the gate offset for a NAMED wrong literal (decoy_enrich high); the closeness mechanism instead predicts vpc simply ratchets LESS CLOSE to the target literal (no specific decoy needs to dominate, only that vpc's nearest-window Hamming distance to the exact operand stays larger than vp's). It also rules out pure overhead-drain, which predicts NO closeness gap (vpc would reach the literal just as near, only slower). G2-independent: it measures the minimum Hamming distance from corpus windows to the gate operand, computed from saved seed bytes -- never the vpc resolve/block label that defined the shape.",
+      "rule": "winner_closer == true AND distance_gap > 0.15 AND vp_min_distance < 0.1"
+    },
+    {
+      "id": "vpc_corpus_shallower_context_reach",
+      "label": "vpc's I2S substitution pulls the loser corpus toward shallow / degenerate inputs that never DRIVE THE CALL CHAIN to the deep shaping context where the gate is dispatched; vp's gradient-grown corpus reaches that context far more per seed, so the gate is reachable to vp and structurally out-of-reach to vpc -- a context-REACH shortfall, not a value-match or closeness shortfall",
+      "direction": "anti_i2s",
+      "from_prior": [],
+      "applies_to_branches": [
+        "harfbuzz_5623",
+        "harfbuzz_5865",
+        "harfbuzz_6124_h0"
+      ],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "depth_reach", "operand": "branch_line", "unit": "per_branch"},
+        "registry_tool": "depth_reach",
+        "metrics_used": ["depth_lift", "winner_depth", "loser_depth", "winner_deeper"],
+        "params": {
+          "branch_line": "the gate line per branch: hb-ot-shape-fallback.cc:51 (switch dispatch) for 5623; hb-ot-shaper-indic.cc:937 (do-while loop-exit) for 5865; hb-ot-shaper-vowel-constraints.cc:409 (switch dispatch) for 6124_h0",
+          "winner_arm": "value_profile",
+          "loser_arm": "value_profile_cmplog",
+          "note": "depth_lift / winner_depth / loser_depth measure per-seed-normalized executions of the gate LINE (reaching the dispatch / loop context AT ALL, independent of which case or which side is taken). side_lift is deliberately NOT used here -- the blocked-side count IS the resolve/block outcome (G2-coupled)."
+        }
+      },
+      "prediction": "vp's resolving seeds execute the gate-line context substantially more per seed than vpc's blocking seeds (winner_deeper == true AND depth_lift >= 1.5), i.e. vpc-blocking seeds rarely even reach the switch dispatch / loop context. G1-discriminating: the two PRIOR mechanisms already tried-and-failed on 5623/6124_h0 BOTH assume vpc REACHES the gate context and only mis-values it -- decoy_overcommit predicts vpc reaches the switch and lands on a SIBLING case (equal context reach, wrong case -> winner_deeper FALSE), and gradient-closeness predicts vpc reaches the switch and gets NEAR but not exact (also equal context reach -> winner_deeper FALSE). Pure overhead-drain likewise predicts vpc reaches the gate just as deeply, only slower in wall-clock (winner_deeper FALSE). Only the context-REACH mechanism predicts vpc's corpus is structurally shallower at the gate line (winner_deeper TRUE). For 5865 (formerly decidable:false: dispersed Indic-syllable assembly with no single operand) this is the FIRST decidable test -- it asks whether vp's assembled multi-glyph syllable drives the do-while loop-exit line per seed while vpc's disrupted shorter records do not, exactly depth_reach's ITERATION-DEPTH subtype. G2-independent: it scores per-seed executions of the gate LINE from a clean cov run, never the True/False side or the vpc resolve/block label that defined the shape.",
+      "rule": "winner_deeper == true AND depth_lift >= 1.5"
+    }
+  ],
+  "non_discriminable": [
+    {
+      "id": "nonliteral_relation_or_derived_gate_overhead_drain",
+      "label": "non-literal / derived-relation gate: I2S has no input-byte literal to substitute, so vpc pays pure CmpLog per-exec overhead and loses on throughput -- no value-level signature to measure, and the gate line collapses onto the resolve/block side so depth_reach cannot separate it either",
+      "from_prior": ["vp_gradient_nonliteral_gate_i2s_overhead_drain"],
+      "covers_branches": ["bloaty_301", "libpng_4072_h1"],
+      "decidable": false,
+      "candidate_descriptor": {"source": "corpus_queue", "compute": "corpus_size_ratio", "operand": "vpc_vs_vp", "unit": "per_branch"},
+      "why_non_discriminable": "bloaty_301 (start>=end pointer-arithmetic relation, none_structural) and libpng_4072_h1 (derived idat_size length field) have NO fixed-offset input literal for I2S to substitute toward, so operand_enrichment returns no_gate_signature and value_distance_reached has no operand by construction. The new depth_reach pivot ALSO fails to discriminate them: in both cases the gate line IS an inequality/relation that BOTH arms reach and evaluate every iteration (bloaty: W T=6 F=0, L T=0 F=12 -- both hit line 659; libpng: line 4245 is re-evaluated each IDAT-loop iteration), so the only difference is which SIDE is taken -- and the blocked-side count is exactly the resolve/block outcome that defined the shape (G2 violation). depth_lift on the gate line would be ~1 (equal context reach), so winner_deeper carries no mechanism information here. The only remaining candidate is global corpus-scale scheduling (corpus_size_ratio vpc vs vp), a per-trial quantity confounded by every other branch and by raw exec count -- it cannot attribute a per-branch block to the I2S delta, and an inflated corpus is equally consistent with benign exploration. data_realities: I2S is untagged in mutation_op and value_profile is a feedback, so NO seed_lineage 'I2S-overhead event' is measurable. G3 honest fallback: inconclusive."
+    }
+  ],
+  "corpus_coverage_gap": [
+    {
+      "id": "lcms_version_byte_decoy_depletion_offserver",
+      "label": "I2S substitution steers the vpc loser corpus toward valid ICC headers whose version major byte stays <= 0x09, depleting the >0x09 target arm -- a clean fixed-offset (offset 0x08) inequality decoy gate that operand_enrichment WOULD score, but the branch is seed-starved on this server and its corpus lives on sB",
+      "covers_branches": ["lcms_2137"],
+      "decidable": "deferred_to_owning_server",
+      "candidate_descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+      "note": "lcms_2137 is a single-byte (width 1) inequality gate at file offset 0x08 with operand 0x09; mechanism = I2S pins corpus to valid small version bytes (<=0x09 decoy) starving the >0x09 winner arm -- exactly the decoy_overcommit_wrong_literal signature with an anti/depletion polarity (decoy_enrich for the valid-small-version byte). It is NOT marked decidable:false: per the cross-server rule, lcms is an sB target and this branch is flagged seed_starved (W=2,L=24; rank-10 re-bisect candidate). The owning server arbitrates after re-bisecting >=3 W seeds. operand_enrichment is the correct descriptor; width-1 chance-alignment caveat applies but the >0x09-vs-<=0x09 split is a magnitude (inequality) distinction, not a single-byte equality coincidence."
+    }
+  ],
+  "decision_order": [
+    "decoy_overcommit_wrong_literal",
+    "vp_gradient_reaches_exact_literal_i2s_stalls_short",
+    "vpc_corpus_shallower_context_reach"
+  ],
+  "fallback": "inconclusive",
+  "data_realities_respected": [
+    "on-disk corpora exist ONLY for curl/harfbuzz/openthread/sqlite3 -> the decoy, closeness, and context-reach tests score ONLY the harfbuzz branches; bloaty_301, lcms_2137, libpng_4072_h1 have no corpus on s4 and route to their owning server (sB) or fallback.",
+    "operand_enrichment needs a fixed-offset VALUE gate (skips structural/length) and >=3 W and >=3 L seeds; value_distance_reached needs one operand_literal and on-disk seeds, and flags width<=2 chance-alignment (both closeness operands are width 4, safe).",
+    "depth_reach needs the target's cov image and >=3 W / >=3 L seeds; harfbuzz has its libafl-harfbuzz-cov image and the reps carry resolving_seeds + blocking_seeds, so the context-reach test runs for 5623/5865/6124_h0 on s4. It is applied ONLY to switch-dispatch / loop-exit gate lines where reaching the line is separable from the resolved side -- NOT to bloaty/libpng inequality/derived gates (gate line == resolve side -> G2-coupled).",
+    "I2S and value_profile are both invisible in mutation_op (no lineage event) -- no overhead-drain hypothesis is given a lineage descriptor; the non-literal gates fall to decidable:false honestly.",
+    "lcms_2137 is NOT marked decidable:false despite seed-starvation/corpus absence on s4 -- it is an sB target with a genuinely discriminable fixed-offset decoy gate; the owning server arbitrates after re-bisecting (cross-server rule)."
+  ],
+  "notes": "ROUND-2 RE-DESIGN (loop-until-dry). KEPT verbatim (frozen, superset): (1) decoy_overcommit_wrong_literal (operand_enrichment) and (2) vp_gradient_reaches_exact_literal_i2s_stalls_short (value_distance_reached) -- both carried forward UNCHANGED so the confirmed branch(es) re-validate; no relaxed-threshold re-test of either. NEW mechanism this round for the UNLABELED harfbuzz branches whose two PRIOR value-level tests were SCORED and did NOT hold (5623, 6124_h0) plus the formerly decidable:false assembly branch (5865): vpc_corpus_shallower_context_reach, measured by the previously-UNTRIED depth_reach tool. WHY GENUINELY DIFFERENT (G1): the two priors (operand_enrichment decoy-flood; value_distance_reached closeness) BOTH assume vpc REACHES the gate context and only mis-values it -- decoy predicts equal context reach + wrong sibling case, closeness predicts equal context reach + near-but-not-exact, and both were rule_not_met on 5623/6124_h0. The new hypothesis asserts the OPPOSITE: vpc's I2S-pulled corpus is structurally SHALLOWER at the gate line (rarely drives the deep font-shaping call chain to the switch dispatch / Indic do-while loop at all). depth_reach's per-seed-normalized gate-LINE execution count (depth_lift, winner_deeper) measures exactly that and is FALSIFIABLE: if vpc reaches the gate line as deeply as vp (depth_lift~1, winner_deeper false -- consistent with decoy/closeness/overhead-drain), the hypothesis fails and the branch falls through to fallback. side_lift is deliberately EXCLUDED (blocked-side count == resolve outcome, G2). For 5865 this is the FIRST decidable test -- depth_reach's iteration-depth subtype (does vp's assembled syllable drive the loop-exit line per seed?) replaces the prior honest decidable:false. STILL decidable:false (G3 honest inconclusive): bloaty_301 (start>=end pointer relation -- both arms reach line 659, only the side differs, so depth_lift~1 and side==outcome G2-coupled) and libpng_4072_h1 (derived idat_size length gate re-evaluated each loop iteration -- same gate-line==resolve-side collapse); neither has a fixed-offset literal nor a context-reach signal separable from the resolve outcome, leaving only a confounded global corpus-scale measure. CORPUS-COVERAGE-GAP (NOT decidable:false): lcms_2137 -- a clean single-byte >0x09 decoy gate operand_enrichment would score, but seed-starved and sB-owned; deferred to the owning server per the cross-server rule. G2 throughout: every test scores corpus byte frequencies / corpus-window Hamming distances / per-seed gate-line reach, independent of the vpc resolve pattern that defined the shape."
+}

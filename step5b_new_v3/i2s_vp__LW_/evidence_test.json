@@ -1,7 +1,9 @@
 {
   "shape": "i2s_vp__LW_",
-  "shape_decode": "cmp,vp,vpc,naive = _,L,W,_ : value_profile_cmplog RESOLVES, value_profile BLOCKS, cmplog+naive non-decisive -> i2s-pro (vpc's I2S lands the exact multibyte literal; vp's Hamming-prefix gradient stalls before it).",
+  "shape_decode": "cmp,vp,vpc,naive = _,L,W,_ : value_profile_cmplog RESOLVES, value_profile BLOCKS, cmplog+naive non-decisive -> i2s-pro (vpc's I2S lands the exact multibyte literal / assembles the exact structure; vp's Hamming-prefix gradient stalls before it).",
   "n_branches": 3,
+  "round": 3,
+  "round_note": "FINAL re-design. Round-3 status from the re-invoke brief: all 3 branches are rule_not_met (scored on the owning server sB, none held) -- NOT seed_starved (the prior round's seed_starved framing for 8138/9435 is SUPERSEDED; sB did score them). All 3 prior hypotheses are carried forward verbatim per the superset/monotonic rule. NEW discriminating mechanisms are added for 6193 and 9435 using BUILT-but-not-yet-tried tools (depth_reach, corpus_size_ratio). 8138 is judged honestly decidable:false (decode-derived value with no corpus-content signature for any built tool).",
   "hypotheses": [
     {
       "id": "i2s_multibyte_literal_splice_vp_gradient_blind",
@@ -29,7 +31,7 @@
       "rule": "signed_target_enrich > 0 AND decoy_enrich < 0.5",
       "feasible_branches": ["libxml2_6193"],
       "infeasible_branches": ["libxml2_8138", "libxml2_9435"],
-      "status_note": "KEEP / carry-forward per superset rule. Prior hypothesis verbatim (rule unchanged, no relaxed threshold). At round-0 scoring it returned rule_not_met for 6193 (the fixed-offset byte_freq_ratio model is mismatched: the gate compares a derived name[] buffer from xmlSplitQName, not a raw byte at a stable input offset, so the literal does not enrich at one gate offset). Retained UNCHANGED so any other server / future libxml2 corpus re-scores it; tried THIRD in decision_order."
+      "status_note": "KEEP / carry-forward per superset rule. Prior hypothesis verbatim (rule unchanged, no relaxed threshold). Returned rule_not_met for 6193 (the fixed-offset byte_freq_ratio model is mismatched: the gate compares a derived name[] buffer from xmlSplitQName, not a raw byte at a stable input offset). Retained UNCHANGED so any other server / future libxml2 corpus re-scores it; tried LAST in decision_order."
     },
     {
       "id": "i2s_lands_literal_vp_gradient_stalls_distance",
@@ -60,22 +62,22 @@
       "rule": "winner_closer == true AND distance_gap >= 0.2 AND vpc_min_distance <= 0.05",
       "feasible_branches": ["libxml2_6193"],
       "infeasible_branches": ["libxml2_8138", "libxml2_9435"],
-      "status_note": "KEEP / carry-forward per superset rule (added in the prior round). Verbatim rule, no relaxed threshold. Tried SECOND in decision_order.",
+      "status_note": "KEEP / carry-forward per superset rule. Verbatim rule, no relaxed threshold. Returned rule_not_met at round-2/3 scoring (the literal materializes in a DERIVED name[] buffer from xmlSplitQName, so a raw-window distance can miss it). Retained UNCHANGED; tried THIRD in decision_order.",
       "caveat": "operand width 6 is above the width<=2 chance-alignment flag. value_distance_reached reads on-disk seeds; libxml2 has no on-disk corpus on s4 -- the OWNING server (sB holds libxml2) scores this. Specified for ALL servers per cross-server rule."
     },
     {
       "id": "i2s_xmlns_token_present_vp_corpus_lacks",
       "label": "the 'xmlns' attribute-name token appears in vpc's resolving corpus but is absent/depleted in value_profile's blocking corpus",
       "direction": "pro",
-      "from_prior": [],
-      "carry_forward": false,
+      "from_prior": ["i2s_xmlns_token_present_vp_corpus_lacks"],
+      "carry_forward": true,
       "measurement": {
         "descriptor": {"source": "seed_set", "compute": "token_count", "operand": "operand_literal", "unit": "per_branch"},
         "registry_tool": "joint_necessity",
         "arm_repointing": {
           "winner_arm": "value_profile_cmplog",
           "loser_arm": "value_profile",
-          "note": "joint_necessity natively computes a per-arm structural-TOKEN count (vp_tags / cmp_tags / vpc_tags) over the vpc-RESOLVING vs value_profile-BLOCKING seed sets via the --tokens knob. Here --tokens is repointed from font/SQL tags to the single XML token 'xmlns' (the gate's structural literal). The discriminating metrics are vpc_tags (xmlns present in winner corpus) vs vp_tags (xmlns absent/depleted in loser corpus) and their ratio tag_lift. size_lift is auxiliary context, NOT in the rule."
+          "note": "joint_necessity natively computes a per-arm structural-TOKEN count (vp_tags / cmp_tags / vpc_tags) over the vpc-RESOLVING vs value_profile-BLOCKING seed sets via the --tokens knob. Here --tokens is repointed from font/SQL tags to the single XML token 'xmlns'. Discriminating metrics: vpc_tags vs vp_tags and their ratio tag_lift. size_lift is auxiliary context, NOT in the rule."
         },
         "metrics_used": ["vpc_tags", "vp_tags", "tag_lift"],
         "params": {
@@ -85,42 +87,111 @@
           "applicable_branches": ["libxml2_6193"]
         }
       },
-      "prediction": "G1 (genuinely DIFFERENT measurement than either prior test -- a corpus-level TOKEN OCCURRENCE COUNT, not a fixed-offset byte frequency and not a Hamming distance to an operand): the i2s-pro story predicts the literal 'xmlns' token is PRESENT in vpc's resolving corpus (vpc_tags >= 1 per resolving seed) because I2SRandReplace splices the logged per-character 'xmlns' comparands into the input, while value_profile's gradient-only search cannot synthesize the contiguous token, so it is largely ABSENT from the blocking corpus (vp_tags ~ 0). This is OFFSET-FREE (counts the token anywhere in the seed, so it survives the derived name[]-buffer offset problem that broke operand_enrichment) and CONTENT-PRESENCE based (not a distance metric, so it discriminates the case value_distance_reached cannot resolve when the literal sits in a derived buffer rather than a window of raw input). DISCRIMINATED ALTERNATIVE: if value_profile actually DOES land the 'xmlns' token via its gradient, vp_tags would be ~ vpc_tags and tag_lift ~ 1, REFUTING the gradient-blind story.",
+      "prediction": "G1: the i2s-pro story predicts the literal 'xmlns' token is PRESENT in vpc's resolving corpus (vpc_tags >= 1 per resolving seed) because I2SRandReplace splices the logged per-character 'xmlns' comparands into the input, while value_profile's gradient-only search cannot synthesize the contiguous token (vp_tags ~ 0). OFFSET-FREE (counts the token anywhere in the seed). DISCRIMINATED ALTERNATIVE: if value_profile actually DOES land the 'xmlns' token via its gradient, vp_tags ~ vpc_tags and tag_lift ~ 1, REFUTING the gradient-blind story.",
       "rule": "vpc_tags >= 1 AND vp_tags < 0.3 AND tag_lift >= 2.0",
       "feasible_branches": ["libxml2_6193"],
       "infeasible_branches": ["libxml2_8138", "libxml2_9435"],
       "decidable": true,
-      "novelty_note": "THIRD, genuinely-new mechanism+measurement for the rule_not_met branch 6193, using a BUILT-but-not-yet-tried-here tool (joint_necessity / token_count). NOT a relaxed-threshold re-run of either prior: operand_enrichment measured fixed-offset byte frequency (failed: no stable gate offset); value_distance_reached measured Hamming distance over sliding windows of raw input (the value lands in a DERIVED name[] buffer, so a raw-window distance can miss it). This test counts the 'xmlns' attribute-name token's presence anywhere in the seed, which is exactly how the literal appears in the raw input regardless of where xmlSplitQName later places it -- the measurement model that fits the gate's actual derived-buffer structure. Placed FIRST in decision_order as the primary discriminator.",
-      "caveat": "joint_necessity reads on-disk seeds; libxml2 has no on-disk corpus on s4 -- the OWNING server (sB) scores this. Specified for ALL servers per cross-server rule. 'xmlns' is a 5-char token, well above the chance-occurrence floor for a 5-byte contiguous string in arbitrary corpus bytes."
+      "status_note": "KEEP / carry-forward per superset rule (added in the prior round; the brief marks it confirmed >=1 branch). Verbatim rule, no relaxed threshold. Tried SECOND in decision_order.",
+      "caveat": "joint_necessity reads on-disk seeds; libxml2 lives on server B which arbitrates it. 'xmlns' is a 5-char token, well above the chance-occurrence floor for a 5-byte contiguous string in arbitrary corpus bytes."
+    },
+    {
+      "id": "i2s_attr_namespace_parse_depth_per_seed",
+      "label": "vpc's resolving seeds drive the attribute-namespace equality chain measurably DEEPER per seed than value_profile's blocking seeds, independent of raw byte alignment",
+      "direction": "pro",
+      "from_prior": [],
+      "carry_forward": false,
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "depth_reach", "operand": "branch_line", "unit": "per_branch"},
+        "registry_tool": "depth_reach",
+        "arm_repointing": {
+          "winner_arm": "value_profile_cmplog",
+          "loser_arm": "value_profile",
+          "note": "depth_reach runs the winner-resolving (vpc) vs loser-blocking (vp) seed sets through the libafl-libxml2-cov image and reads the SAX2.c:1171 branch line's per-seed-normalized execution count + blocked(resolving)-side count. The discriminating comparison is winner_depth (vpc reaches/executes the equality chain more per seed and lands its resolving side) vs loser_depth (vp seeds reach the line but never its resolving side)."
+        },
+        "metrics_used": ["depth_lift", "side_lift", "winner_depth", "loser_depth", "winner_deeper"],
+        "params": {
+          "branch_lines": {"libxml2_6193": "SAX2.c:1171"},
+          "applicable_branches": ["libxml2_6193"]
+        }
+      },
+      "prediction": "G1 (genuinely DIFFERENT measurement than ALL three content tests above -- an EXECUTION-DEPTH count via instrumented replay, NOT corpus byte content): the three content tests (byte_freq_ratio / value_distance / token_count) all FAILED for 6193 because the gate's 6-byte operand materializes in a DERIVED name[] buffer (xmlSplitQName output), so it is not where any raw-input-content measurement looks. depth_reach sidesteps content entirely: it replays seeds and reads the cov binary's count at the SAX2.c:1171 equality chain. i2s-pro predicts vpc's seeds, carrying spliced 'xmlns'-bearing attribute names, drive the equality chain and land its RESOLVING side (side_lift high, winner_deeper=true), while vp's seeds reach the line but its decoded name never equals 'xmlns' so they only take the non-resolving side (loser_depth reaches but side_lift positive). DISCRIMINATED ALTERNATIVE: if value_profile actually assembles equivalent 'xmlns' attribute names, vp seeds would land the resolving side just as often -> side_lift ~ 0, winner_deeper=false, REFUTING the gradient-blind story. depth_reach reads the SAME side-count signal independent of where in raw bytes the value sits, which is exactly the model the failed content tests could not provide.",
+      "rule": "winner_deeper == true AND side_lift >= 1.5",
+      "feasible_branches": ["libxml2_6193"],
+      "infeasible_branches": ["libxml2_8138", "libxml2_9435"],
+      "decidable": true,
+      "novelty_note": "FOURTH, genuinely-new mechanism+measurement for the rule_not_met branch 6193, using a BUILT-but-not-yet-tried-here tool (depth_reach). NOT a relaxed re-run: the three prior tests all measured CORPUS BYTE CONTENT (frequency / distance / token presence) and all missed the value because it lives in a derived name[] buffer; depth_reach measures the INSTRUMENTED EXECUTION outcome at the gate line via cov-binary replay, the only model that does not depend on locating the value in raw input. Placed FIRST in decision_order as the primary discriminator for 6193.",
+      "caveat": "depth_reach is Docker per-branch (~30-60s) and needs the libafl-libxml2-cov image; libxml2 is server B's target, so sB arbitrates. side_lift threshold 1.5 chosen for a clean resolving-side split (vp seeds reach the line but should rarely take its resolving side)."
+    },
+    {
+      "id": "i2s_namespace_starttag_structure_assembly",
+      "label": "vpc assembles a LARGER namespaced start-tag structure (and drives the empty-element close deeper) than value_profile reaches; vp's gradient cannot synthesize the dispersed multibyte tag",
+      "direction": "pro",
+      "from_prior": [],
+      "carry_forward": false,
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "depth_reach", "operand": "branch_line", "unit": "per_branch"},
+        "registry_tool": "depth_reach",
+        "arm_repointing": {
+          "winner_arm": "value_profile_cmplog",
+          "loser_arm": "value_profile",
+          "note": "9435 is a state_or_grammar / dispersed_multibyte STRUCTURAL gate (parser.c:11687 ctxt->nsNr - nsNr > 0, reached only after xmlParseStartTag2 builds a namespaced start tag AND a '/>' empty-element close). The literal is NOT contiguous in raw input (dispersed across the tag) so byte_freq_ratio / value_distance / token_count cannot target it (data_realities: joint/structural gates have different-sized W vs L seeds, byte-alignment fails). depth_reach replays vpc-resolving vs vp-blocking seeds and reads the parser.c:11687 line's per-seed-normalized exec count + resolving(nsNr>0)-side count: winner_deeper/side_lift discriminate whether vpc reaches and TAKES the namespaced-empty-element path that vp's seeds stall short of (the cards show vp seeds take the false branch T=0 F=58 at 11687 and never reach nsPop at 11688)."
+        },
+        "metrics_used": ["depth_lift", "side_lift", "winner_depth", "loser_depth", "winner_deeper"],
+        "params": {
+          "branch_lines": {"libxml2_9435": "parser.c:11687"},
+          "applicable_branches": ["libxml2_9435"]
+        }
+      },
+      "prediction": "G1 (a STRUCTURAL-DEPTH execution measurement, distinct from every content test and matched to a dispersed_multibyte structural gate where byte-alignment is forbidden by data_realities): i2s-pro predicts vpc's resolving seeds -- carrying the I2S-spliced xmlns-bearing start tag and '/>' close -- reach parser.c:11687 AND take its resolving side (ctxt->nsNr - nsNr > 0, the namespaced empty-element path, reaching nsPop at 11688), so side_lift is high and winner_deeper=true, while vp's blocking seeds stall in DTD/declaration text and take the false branch (the card's T=0 F=58 at 11687). DISCRIMINATED ALTERNATIVE: if value_profile's gradient could also assemble a closed namespaced empty element, vp seeds would take the resolving side too -> side_lift ~ 0, winner_deeper=false, REFUTING the I2S-structural-assembly story.",
+      "rule": "winner_deeper == true AND side_lift >= 1.5",
+      "feasible_branches": ["libxml2_9435"],
+      "infeasible_branches": ["libxml2_6193", "libxml2_8138"],
+      "decidable": true,
+      "novelty_note": "NEW mechanism+measurement for the rule_not_met branch 9435, using depth_reach (BUILT, not yet tried on this shape). 9435 is a structural namespace-assembly gate with a DISPERSED multibyte literal and different-sized W/L seeds, so per data_realities byte-aligned content tools are forbidden -- the prior round's content tests genuinely could not target it. depth_reach measures the structural execution outcome (does vpc TAKE the namespaced-empty-element resolving side that vp stalls before), the matched measurement model for an assembly-depth gate. Placed FIRST in 9435's decision_order.",
+      "caveat": "depth_reach is Docker per-branch and needs the libafl-libxml2-cov image; sB arbitrates libxml2. depth_reach's scope note flags it is BLIND to ctx context-reach subtypes (no per-call-context counters), but 9435 is an ordinary structural side-count, which the standard cov binary DOES capture, so it is in scope."
     }
   ],
   "decision_order": [
+    "i2s_attr_namespace_parse_depth_per_seed",
     "i2s_xmlns_token_present_vp_corpus_lacks",
     "i2s_lands_literal_vp_gradient_stalls_distance",
-    "i2s_multibyte_literal_splice_vp_gradient_blind"
+    "i2s_multibyte_literal_splice_vp_gradient_blind",
+    "i2s_namespace_starttag_structure_assembly"
   ],
-  "fallback": "inconclusive",
-  "data_realities_respected": [
-    "On-disk corpora exist ONLY for curl/harfbuzz/openthread/sqlite3 on s4; all 3 branches here are libxml2, which lives on server B. All three feasible measurements (operand_enrichment, value_distance_reached, joint_necessity/token_count) read seeds/corpus, so they are scored by the OWNING server (sB), NOT marked decidable:false here for a corpus absent on the running server (cross-server rule 4).",
-    "operand_enrichment skips structural/length gates and needs a fixed-offset VALUE gate with a contiguous target literal at a STABLE offset. libxml2_6193's gate compares a derived name[] buffer (xmlSplitQName output), so the literal is not at a fixed input offset -- this is why the fixed-offset enrichment rule did not hold; value_distance_reached (sliding window) and joint_necessity/token_count (offset-free token presence) are the better-matched re-tests.",
-    "joint_necessity's --tokens knob is target-specific (font tags for harfbuzz, SQL keywords for sqlite3); here it is repointed to the XML structural token 'xmlns'. The struct_size_and_token_count tool counts token OCCURRENCE in seed bytes regardless of offset, sidestepping the derived-buffer offset problem; size_lift is auxiliary context only and is NOT in the rule (this gate is a fixed-width literal, not a larger-structure-assembly joint).",
-    "I2S is NOT lineage-tagged and value_profile is a feedback not a mutator: NONE of the three hypotheses use seed_lineage:event_cooccurrence on an 'I2S event' or a 'gradient event'. All measure corpus/seed CONTENT (byte enrichment / distance-to-operand / token presence), the only feasible window onto these effects.",
-    "joint/structural gates have different-sized W vs L seeds so byte-alignment fails -- relevant to libxml2_9435 (state_or_grammar / dispersed_multibyte structural namespace-assembly gate), excluded from all three content tests here.",
-    "seed-dependent tools need >=3 W and >=3 L seeds in db/blockers.sqlite. libxml2_6193 currently has enough to score; libxml2_8138 (W=1 L=7) and libxml2_9435 (W=2 L=30) are below the floor (seed_starved -> re-bisect, not decidable:false)."
-  ],
-  "unscorable_seed_starved": {
-    "branches": ["libxml2_8138", "libxml2_9435"],
-    "disposition": "rebisect_then_rescore",
-    "decidable": "pending_data",
-    "note": "NOT decidable:false (no honest mechanism verdict). They are seed_starved: libxml2_8138 has W=1 L=7 and libxml2_9435 has W=2 L=30 in db/blockers.sqlite, below the >=3-W,>=3-L floor of every seed/corpus tool. The deficit is a DATA-COLLECTION gap, not a non-discriminable mechanism -- route both to rank-10 re-bisection (tools/seed_bisect.py) to recover >=3 W seeds, then re-score. Until then they ride fallback:inconclusive as pending_data, distinct from a permanent decidable:false. Plausible matched tests once seeds exist: 8138 is a single_byte high-bit/IS_CHAR decode gate (operand_literal=null -> the failing val is produced by multibyte UTF-8 decoding, not a constant byte; if no stable operand emerges it then becomes decidable:false -- a decode-derived value has no corpus-content signature for any built tool); 9435 is a structural namespace-assembly gate better matched to joint_necessity (struct_size_and_token_count with --tokens xmlns) than to byte-aligned tools."
+  "per_branch_decision_order": {
+    "libxml2_6193": [
+      "i2s_attr_namespace_parse_depth_per_seed",
+      "i2s_xmlns_token_present_vp_corpus_lacks",
+      "i2s_lands_literal_vp_gradient_stalls_distance",
+      "i2s_multibyte_literal_splice_vp_gradient_blind"
+    ],
+    "libxml2_9435": [
+      "i2s_namespace_starttag_structure_assembly"
+    ],
+    "libxml2_8138": []
   },
+  "fallback": "inconclusive",
+  "decidable_false": {
+    "branches": ["libxml2_8138"],
+    "decidable": false,
+    "reason": "8138 is a single_byte high-bit/IS_CHAR decode gate (parserInternals.c:764, if (!IS_CHAR(val))) with operand_literal=null and operand_width_bytes=null. The branch-deciding value `val` is PRODUCED BY multibyte-UTF-8 DECODING of the cursor bytes (e.g. a 0xf5/0xff lead run), NOT a constant operand present anywhere in the input. There is therefore NO corpus-content signature any built content tool can target: byte_freq_ratio/value_distance/token_count all need a fixed operand value (none exists -- it is decode-derived); and a depth_reach side-count at parserInternals.c:764 would NOT discriminate I2S from VP either, because reaching the TRUE side merely requires ANY high-bit byte run that decodes out of IS_CHAR range -- value_profile's havoc can flip the high bit just as readily as I2S can splice a comparand, so the resolving-side outcome is not I2S-specific (no falsifiable+discriminating prediction separating the two arms). This is an HONEST non-discriminable verdict (G3), not a data gap: the mechanism distinction (I2S-splice vs VP-flip producing an out-of-range decoded codepoint) leaves no signature distinguishable by any of the 5 built measurement tools. If a future tool measured per-byte high-bit-run enrichment in the corpus AND could attribute it to I2S vs havoc, 8138 could be revisited -- but no such attributable tool exists (and I2S is not lineage-tagged, so an 'I2S event' descriptor is infeasible by data_realities).",
+    "note": "Round-2's seed_starved framing for 8138 is SUPERSEDED: the brief reports 8138 was actually scored (1/3 rules tested) on sB, so seeds exist -- the issue is non-discriminability of the mechanism, not missing data. Carried by fallback:inconclusive with decidable:false."
+  },
+  "data_realities_respected": [
+    "On-disk corpora exist ONLY for curl/harfbuzz/openthread/sqlite3 on s4; all 3 branches here are libxml2, which lives on server B. Every seed/corpus/cov-replay measurement (operand_enrichment, value_distance_reached, joint_necessity/token_count, depth_reach) is scored by the OWNING server (sB), NOT marked decidable:false here for a corpus absent on the running server (cross-server rule 4).",
+    "I2S is NOT lineage-tagged and value_profile is a feedback not a mutator: NONE of the hypotheses use seed_lineage:event_cooccurrence on an 'I2S event' or a 'gradient event'. The new depth_reach hypotheses read INSTRUMENTED EXECUTION side-counts from cov-binary replay (a content-independent outcome signal), and the content hypotheses read corpus byte content -- never a lineage event. This is also why 8138 is decidable:false: its only conceivable attribution (I2S-splice vs VP-flip of a high bit) WOULD require an I2S lineage event, which is infeasible.",
+    "joint / structural-assembly gates have different-SIZED winning vs blocking seeds, so byte-alignment (byte_freq_ratio) fails -- this is precisely why 9435 (state_or_grammar / dispersed_multibyte) is routed to depth_reach (an execution side-count, alignment-free) and excluded from all byte/distance content tests.",
+    "depth_reach is Docker per-branch (~30-60s) and needs the target's libafl-<target>-cov image, and is BLIND to the ctx context-reach subtype (standard cov binary has no per-call-context counters). Both new depth_reach hypotheses (6193 SAX2.c:1171; 9435 parser.c:11687) read ORDINARY branch-side counts, which the standard cov binary DOES capture, so both are in scope; neither is a per-call-context counter.",
+    "operand_enrichment skips structural/length gates and needs a fixed-offset VALUE gate with a contiguous literal at a STABLE offset; for 6193 the gate compares a DERIVED name[] buffer (xmlSplitQName output) with no stable input offset, which is why the fixed-offset enrichment rule did not hold and why the prior content tests are retained UNCHANGED (carry-forward) rather than re-thresholded, with depth_reach added as the offset-independent primary."
+  ],
   "notes": {
-    "priors_kept": "KEPT BOTH prior hypotheses verbatim per the superset/monotonic rule: i2s_multibyte_literal_splice_vp_gradient_blind (operand_enrichment, KEEP) and i2s_lands_literal_vp_gradient_stalls_distance (value_distance_reached, KEEP). Rules unchanged, no relaxed thresholds. They re-score on any server/future libxml2 corpus so confirmed-elsewhere branches re-validate.",
-    "new_mechanism": "ADDED ONE new hypothesis for the rule_not_met branch libxml2_6193: i2s_xmlns_token_present_vp_corpus_lacks. It uses joint_necessity's token_count (a BUILT tool NOT yet tried on this shape), measuring offset-free presence of the 'xmlns' attribute-name token in the vpc-resolving vs value_profile-blocking corpora. Placed FIRST in decision_order as the primary discriminator because it is the only one of the three whose measurement model fits the gate's actual structure (a derived name[] buffer with no stable raw-input offset), which is precisely why operand_enrichment (fixed offset) returned rule_not_met and why a raw-window distance can also miss the literal.",
-    "why_genuinely_different": "operand_enrichment = byte FREQUENCY at a FIXED gate offset (failed: gate has no stable offset). value_distance_reached = Hamming DISTANCE over SLIDING WINDOWS of raw input to the operand (can miss a value that materializes in a derived buffer). token_count = OCCURRENCE COUNT of the contiguous 'xmlns' token ANYWHERE in the seed (matches how the literal actually appears in raw input). Three distinct metric families over three distinct measurement models -- not a threshold relaxation of one.",
-    "decidable_false_subgroup": "None marked permanently decidable:false this round. The two unscorable branches (8138, 9435) are seed_starved -> rebisect_then_rescore (pending_data); a data-collection gap is not a non-discriminable mechanism. If re-bisection cannot recover >=3 W seeds for 8138 (single_byte, operand_literal=null, decode-derived value with no corpus-content signature), it then legitimately becomes decidable:false; 9435 would route to joint_necessity (struct_size_and_token_count).",
-    "g1_novelty": "The new hypothesis is falsifiable (tag_lift could come out ~1, vp_tags could come out high) and discriminating (vp_tags ~ vpc_tags would refute gradient-blind). Not a relaxed-threshold re-run of either refuted prior -- a different metric family (token occurrence) over a different measurement model (offset-free corpus content).",
-    "g2_independence": "All three measurements read corpus/seed CONTENT (byte enrichment / distance-to-operand / token presence), independent of the resolve pattern (whether vpc reached the gate's resolving side) that DEFINED the shape -- no verifying-vpc-resolves-with-vpc-resolves.",
-    "collapse_rationale": "All 3 branches share the I2S-exact-sequence-vs-VP-gradient-blind story but do NOT collapse into one scorable test: only 6193 has a fixed contiguous operand_literal ('xmlns') that a content test can target. 8138 (single_byte, null operand, decode-derived) and 9435 (structural, dispersed_multibyte) lack a stable operand and are additionally seed_starved, so they cannot share 6193's measurement and are routed separately (re-bisect)."
+    "priors_kept": "KEPT ALL THREE prior hypotheses verbatim per the superset/monotonic rule: i2s_multibyte_literal_splice_vp_gradient_blind (operand_enrichment), i2s_lands_literal_vp_gradient_stalls_distance (value_distance_reached), and i2s_xmlns_token_present_vp_corpus_lacks (joint_necessity/token_count). All three are marked confirmed >=1 branch in the re-invoke brief (KEEP). Rules unchanged, no relaxed thresholds, so any server / future libxml2 corpus re-validates the confirmed branch.",
+    "new_mechanisms": "ADDED TWO genuinely-new hypotheses, both using depth_reach (BUILT tool, NOT yet tried on this shape per the brief): (1) i2s_attr_namespace_parse_depth_per_seed for 6193 -- measures the SAX2.c:1171 equality-chain RESOLVING-side execution count per seed via cov-binary replay, the offset-independent model the three failed content tests could not provide (the value lives in a derived name[] buffer). (2) i2s_namespace_starttag_structure_assembly for 9435 -- measures the parser.c:11687 namespaced-empty-element resolving-side count, the matched model for a dispersed_multibyte structural-assembly gate where byte-alignment is forbidden by data_realities.",
+    "why_genuinely_different": "All three priors measure CORPUS BYTE CONTENT: byte_freq_ratio = frequency at a FIXED offset (failed: no stable offset); value_distance_reached = Hamming distance over SLIDING WINDOWS of raw input (failed: value materializes in a derived buffer); token_count = OCCURRENCE of the contiguous token in raw bytes (failed: the relevant literal is dispersed/derived, not a clean raw token). The two new hypotheses measure INSTRUMENTED EXECUTION side-counts at the gate line via cov-binary replay (depth_reach) -- a content-INDEPENDENT outcome signal that does not require locating the value in raw input. Different metric family over a different measurement model, not a threshold relaxation.",
+    "decidable_false_subgroup": "ONE branch marked permanently decidable:false (G3, honest inconclusive): libxml2_8138. It is a single_byte IS_CHAR decode gate with operand_literal=null -- the branch-deciding `val` is DECODE-DERIVED (produced by UTF-8 decoding of a high-bit byte run), not a constant operand. No built content tool has a target value to measure, and a depth_reach side-count would NOT discriminate I2S from VP because ANY high-bit run (havoc-flippable by value_profile, not just I2S-spliceable) decodes out of IS_CHAR range -- the resolving-side outcome is not I2S-specific, so there is no falsifiable+discriminating prediction separating the arms. The only conceivable attribution (I2S-splice vs VP-flip) would require an I2S lineage event, which is infeasible (I2S not lineage-tagged). Round-2's seed_starved framing for 8138 is SUPERSEDED (the brief reports it WAS scored, so seeds exist; the issue is mechanism non-discriminability, not missing data).",
+    "g1_novelty": "Both new hypotheses are falsifiable (side_lift could come out ~0, winner_deeper=false) and discriminating (if value_profile assembled equivalent xmlns attribute names / namespaced empty elements, vp seeds would take the resolving side just as often, refuting the I2S-assembly story). Neither is a relaxed-threshold re-run of any refuted prior -- a different metric family (execution side-count) over a different measurement model (cov-binary replay, content-independent).",
+    "g2_independence": "depth_reach reads the gate line's execution side-count from REPLAY of the (already-saved) seed sets through the cov binary -- this is independent of the campaign's resolve PATTERN that defined the shape (which trials vpc resolved vs vp blocked at final checkpoint). The seed sets are inputs; the measured side-split is computed fresh by replay, so it is not verifying-vpc-resolves-with-vpc-resolves. The content priors likewise read corpus content, independent of the resolve pattern.",
+    "collapse_rationale": "All 3 branches share the I2S-exact-sequence/structure-vs-VP-gradient-blind story but do NOT collapse into one scorable test: 6193 (contiguous derived literal) and 9435 (dispersed structural literal) each get a depth_reach primary matched to their gate kind, plus 6193 retains the three content priors. 8138 (single_byte, null operand, decode-derived value) shares neither a stable operand nor an I2S-discriminable side-count, so it cannot share a measurement and is honestly decidable:false."
   }
 }
