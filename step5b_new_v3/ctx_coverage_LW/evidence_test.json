@@ -33,7 +33,7 @@
       },
       "prediction": "corpus_count_ratio >= 1.5 (naive_ctx hoards >=1.5x the corpus naive keeps, because the same edges count as new under each call-context). A NON-ctx penalty (e.g. naive simply got luckier on byte mutation) would predict corpus_count_ratio ~ 1.0 -- no systematic corpus bloat on the blocking arm.",
       "rule": "corpus_count_ratio >= 1.5",
-      "scope": "corpus_queue exists ONLY for curl/harfbuzz/openthread/sqlite3 (data_realities). Of the 6 members, ONLY harfbuzz_5802 and harfbuzz_6124_h1 are scorable; lcms/libpng/libxml2 fall through to the fallback.",
+      "scope": "corpus_queue exists ONLY for curl/harfbuzz/openthread/sqlite3 (data_realities). Of the 6 members, ONLY harfbuzz_5802 and harfbuzz_6124_h1 are scorable on s4; lcms/libpng/libxml2 are corpus targets on sB (the owning server arbitrates them).",
       "g1_falsifiable": "could come out corpus_count_ratio ~ 1.0; rules out 'naive just won by chance' alternative",
       "g2_independent": "measures corpus SIZE (the inflation mechanism), independent of the resolve pattern (which gate side each fuzzer takes) that defined the shape"
     },
@@ -54,7 +54,7 @@
       ],
       "measurement": {
         "descriptor": {"source": "coverage_timeseries", "compute": "depth_reach", "operand": "blocker_call_count_naive_ctx_vs_naive", "unit": "per_branch"},
-        "registry_tool": null,
+        "registry_tool": "depth_reach",
         "metrics_used": ["call_count_lift"],
         "params": {
           "call_count_lift": "median(blocker_function_call_count[naive_ctx]) / median(blocker_function_call_count[naive])",
@@ -66,11 +66,44 @@
       "scope": "needs per-role / coverage call-count data at the blocker function for both arms; the cards expose this for libpng (2750 vs 136) and harfbuzz, partial elsewhere.",
       "g1_falsifiable": "could come out uniform; separates flooding from dilution",
       "g2_independent": "call-count at the gate function is a structural property of the path, not the resolve pattern"
+    },
+    {
+      "id": "ctx_literal_corpus_depletion",
+      "label": "at a SHALLOW exact-literal equality gate (not a loop, not a hoard), naive's corpus is enriched in the gate's target byte while naive_ctx's corpus is DEPLETED of it -- the per-edge reward that should pull mutation onto the winning literal is split across call-context slots so naive_ctx never assembles it",
+      "direction": "anti",
+      "from_prior": [],
+      "members": [
+        "libxml2_6605",
+        "harfbuzz_5802"
+      ],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy_ctx", "unit": "per_gate_offset"},
+        "registry_tool": null,
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "arms": "naive_ctx (blocking) vs naive (resolving) -- NOT the registry tool's cmplog-vs-naive; a new arm pairing on the SAME byte_freq_ratio compute",
+          "signed_target_enrich": "log2(target_frac[naive_ctx] / target_frac[naive])  -- fraction of each fuzzer's saved corpus whose byte at the gate offset == the resolving (target) value",
+          "decoy_enrich": "log2(decoy_frac[naive_ctx] / decoy_frac[naive])  -- fraction whose byte == the blocking (decoy) value",
+          "gate_offsets": "libxml2_6605: name[1] offset, target byte 0x6d ('m'/'M'), decoy 0x5f ('_'); harfbuzz_5802: the 0x05E9 SHIN low byte 0xe9 (paired with 0x05C2 SIN-DOT 0xc2 05), decoy = SIN-DOT-only fills (0x00/0xb9/0xc2)",
+          "note": "operand offsets + target/decoy values come from the signature.operand_literal + card byte_diff, exactly as the registry operand_enrichment tool sources them"
+        }
+      },
+      "prediction": "DILUTION signature: signed_target_enrich <= -0.5 (naive_ctx corpus DEPLETED of the gate target byte relative to naive -- ctx never assembled the winning literal) AND decoy_enrich >= 0 (naive_ctx pinned on the non-target byte). The obvious alternative -- 'no systematic ctx penalty, naive simply won by luck on these two gates' -- predicts signed_target_enrich ~ 0 (both corpora equally likely to carry the target byte). A pure flooding/hoarding alternative is ALSO ruled out here: these are shallow 1-hop equality gates (depth_reach call_count_lift ~ 1, corpus_size_ratio < 1.5 already observed), so the only ctx-anti signature available is corpus byte-CONTENT depletion at the gate offset, not corpus SIZE or call-depth.",
+      "rule": "signed_target_enrich <= -0.5",
+      "scope": "fixed-offset exact-literal value gates only (byte_freq_ratio domain). harfbuzz_5802 has an on-disk corpus on s4 (scorable). libxml2_6605 has NO corpus on s4 but libxml2 is an sB corpus target (cross-server rule: design the test valid for the branch; the owning server arbitrates -- do NOT mark decidable:false for s4 corpus absence). Needs >=3 W and >=3 L seeds in db/blockers.sqlite (the reps have them).",
+      "g1_falsifiable": "could come out signed_target_enrich ~ 0 (no depletion) -> refutes dilution; the prediction is directional and could fall the other way",
+      "g2_independent": "measures corpus byte CONTENT at the gate offset (the dilution mechanism's footprint) -- a DIFFERENT signal than corpus SIZE (corpus_size_ratio, already tried) or call-DEPTH (depth_reach, blind to context-reach here). It does NOT re-use the naive_ctx-blocks resolve pattern that defined the shape; it asks an independent question (does naive_ctx's corpus carry the literal byte at all)."
     }
   ],
-  "decision_order": ["ctx_corpus_inflation", "ctx_depth_inflation_at_gate"],
+  "decision_order": ["ctx_corpus_inflation", "ctx_depth_inflation_at_gate", "ctx_literal_corpus_depletion"],
   "fallback": "inconclusive",
   "decidable": true,
-  "decidable_caveat": "PARTIALLY decidable. The corpus_inflation test (the primary ctx-anti verification) is scorable on only 2 of 6 members (harfbuzz_5802, harfbuzz_6124_h1) because on-disk corpora exist only for curl/harfbuzz/openthread/sqlite3 (data_realities). lcms/libpng/libxml2 have NO corpus and fall to fallback:inconclusive. The depth_inflation test that would SEPARATE flooding (libpng) from dilution (libxml2/harfbuzz) leans on per-role call-count data that is fully present only for the cards' cited examples. Per G3, members the data cannot discriminate are carried by fallback:inconclusive rather than asserted.",
-  "notes": "MERGES: the three prior clusters (ctx_valid_path_corpus_anchoring, ctx_loop_call_context_flooding, ctx_exact_literal_signal_dilution) are ONE technique-effect at the verification level -- ctx map inflation that dilutes/starves the focused signal naive keeps. They differ in the gate they sit on (length-underflow anchoring @ lcms; deep-loop flooding @ libpng; exact-literal dilution @ libxml2/harfbuzz) but all predict the SAME primary signature: naive_ctx hoards a context-redundant corpus and loses the focused byte-mutation race. I collapsed them into ctx_corpus_inflation (the discriminable, verifiable hypothesis) and kept ctx_depth_inflation_at_gate ONLY as the one axis a measurement could still separate (flooding's deep loop vs dilution's shallow gate, via call_count_lift). TARGETS: corpus-scorable members are harfbuzz_5802, harfbuzz_6124_h1 only. data_realities respected: (a) NO seed_lineage/event measurement -- ctx, like VP, is a FEEDBACK invisible in mutation_op, so the only handle is what the corpus REACHES/HOARDS (size, call-depth), never a lineage 'ctx event'; (b) corpus_size_ratio scored only on the 4 corpus targets; (c) no byte-alignment claim (gates here are mixed length/literal/structural). CAVEAT: ctx_valid_path_corpus_anchoring (lcms_2149) is the weakest merge -- its mechanism is direction-INVERTED (ctx keeps inputs LARGE, naive SHRINKS), so corpus_count_ratio>=1.5 may hold but for a size reason; lcms has no corpus and is INCONCLUSIVE regardless. If corpus_inflation is judged purely a corpus-scale artifact non-discriminable from generic ctx overhead on the non-corpus targets, the whole shape collapses to G3 inconclusive for lcms/libpng/libxml2; only the two harfbuzz members can carry an evidence-confirmed ctx-anti label."
+  "decidable_caveat": "PARTIALLY decidable. The 4 CONFIRMED branches re-validate under the two KEPT priors (corpus_inflation + depth_inflation). The 2 UNLABELED branches (libxml2_6605, harfbuzz_5802) failed BOTH priors because they are the SHALLOW exact-literal DILUTION sub-mechanism -- not loop-flooding (depth_reach call_count_lift ~ 1) and not corpus-hoarding (corpus_size_ratio < 1.5). The NEW hypothesis ctx_literal_corpus_depletion tests the only ctx-anti footprint left for a shallow literal gate: naive_ctx's corpus is DEPLETED of the gate target byte while naive's is enriched. This is scorable on harfbuzz_5802 (s4 corpus) and on libxml2_6605 by the sB server (libxml2 corpus lives on sB). Neither unlabeled branch is decidable:false -- a genuinely new, discriminating measurement exists for both; only the s4 server cannot score libxml2 locally, which the cross-server rule explicitly forbids treating as decidable:false.",
+  "data_realities_respected": [
+    "NO seed_lineage 'ctx event' measurement -- ctx, like value_profile, is a FEEDBACK invisible in mutation_op; the only handles are what the corpus REACHES/HOARDS (size, call-depth) or CARRIES (byte content at the gate offset), never a lineage event.",
+    "corpus_queue / byte_freq_ratio scored only on corpus targets (curl/harfbuzz/openthread/sqlite3 on s4; lcms/libxml2/libpng/bloaty on sB).",
+    "byte_freq_ratio (ctx_literal_corpus_depletion) applies ONLY to the two fixed-offset EXACT-LITERAL gates (libxml2_6605, harfbuzz_5802); it is NOT applied to the length/structural/loop members (lcms length-underflow, libpng deep-loop) -- those keep the size/depth tests, honoring the rule that byte-alignment fails on structural/length gates.",
+    "cross-server: libxml2_6605 designed test is valid for the branch; s4 cannot score it locally but sB owns and arbitrates libxml2."
+  ],
+  "notes": "ROUND-1 re-design (loop-until-dry). KEPT both priors VERBATIM (ctx_corpus_inflation, ctx_depth_inflation_at_gate) so the 4 confirmed branches re-validate (superset/monotonic). ADDED one NEW hypothesis (ctx_literal_corpus_depletion) for the 2 UNLABELED branches. NEW MECHANISM: the unlabeled pair are the SHALLOW exact-literal DILUTION sub-mechanism -- ctx splits the per-edge reward for the winning literal byte across call-context slots, so naive_ctx's corpus never accumulates the target byte at the gate offset, whereas naive's flat map enriches it. This is genuinely DIFFERENT from the two refuted priors: corpus_inflation measures corpus SIZE (these gates do not hoard, ratio<1.5) and depth_inflation measures loop call-DEPTH (these gates are shallow, call_count_lift~1); the new test measures corpus byte CONTENT at the gate offset (signed_target_enrich), a signal neither prior touched. G1: the prediction is directional (depletion <= -0.5) and could come out ~0 (refuting dilution, i.e. naive won by luck). It reuses the registry's byte_freq_ratio COMPUTE but with a NEW arm pairing (naive_ctx_vs_naive instead of cmplog_vs_naive), so registry_tool=null and the orchestrator builds/parameterizes the operand variant at build time. DECIDABLE:FALSE SUB-GROUP: NONE -- both unlabeled branches have a valid discriminating test; libxml2_6605 is merely non-LOCAL to s4 (sB arbitrates), which is not a decidability failure. If at build time the byte_freq_ratio operand variant proves infeasible for the codepoint-pair gate (harfbuzz_5802 has a TWO-byte paired codepoint, not a single fixed offset), harfbuzz_5802 falls to fallback:inconclusive honestly rather than asserting a label the measurement cannot support."
 }

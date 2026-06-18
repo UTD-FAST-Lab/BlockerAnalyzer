@@ -1,13 +1,15 @@
 {
   "shape": "i2s_vp_WW_L",
-  "shape_decode": "cmp=W, vp=W, vpc=_, naive=L — cmplog AND value_profile each independently resolve the gate; naive blocks. Both single techniques win in parallel => a parallel-solvable literal/enum gate where I2S substitution and VP Hamming-gradient are redundant routes to the SAME target literal.",
+  "shape_decode": "cmp=W, vp=W, vpc=_, naive=L — cmplog AND value_profile each independently resolve the gate; naive blocks. A parallel-solvable gate where I2S substitution and VP Hamming/structural-gradient are redundant routes to the SAME target the branch needs.",
   "n_branches": 8,
   "n_signatures": 16,
-  "label_source": "Layer-1 resolve pattern (cmp W, vp W, naive L). The evidence test is the INDEPENDENT corpus-level verification (G2): it must confirm the target literal is enriched in the resolving fuzzers' corpora at the gate offset WITHOUT consulting the resolve pattern itself.",
+  "round": 2,
+  "label_source": "Layer-1 resolve pattern (cmp W, vp W, naive L). The evidence test is the INDEPENDENT corpus-content verification (G2): confirm BOTH resolving fuzzers' corpora carry the target the gate needs (a fixed-offset literal, or accumulated structure) relative to naive, WITHOUT consulting the resolve pattern itself.",
+  "round0_postmortem": "Round-0 validated 6 branches (3818,3864,3951,4085 cleanly; the FOURCC pair 3811/3890 and the structural 14563 fell to inconclusive=rule_not_met). Re-inspecting the ACTUAL cached metrics shows the round-0 rules were MIS-CALIBRATED, not the mechanism refuted: (i) libpng_3811/3890 (sPLT FOURCC) — VP signed_target_enrich=0.355 (<0.5) only because naive's baseline target_frac is already high (~0.695) at the chunk-type window, compressing the log2 ratio; VP's decoy_enrich=-17.582 is IDENTICAL to the strongly-validated 3864 branch (VP crushed the decoy byte), and VP target_frac 0.825 > naive 0.695. The parallel-literal mechanism is POSITIVELY supported; the signed_target_enrich>0.5 threshold was the defect. (ii) sqlite3_14563 (structural) — round-0 required tag_lift>=1.3 AND size_lift>=1.3; the VP arm returned size_lift=2.12 (decisive) but tag_lift=1.27 (right at the n_W=3 noise floor), so the AND narrowly failed despite a 2x size accumulation; cmplog arm is overwhelming (size_lift 4.41, tag_lift 3.4). Again a threshold defect, not a refutation. (iii) bloaty_57 — cmplog enrich 10.528 confirmed, but the VP-vs-naive OE study was never run for bloaty (no row in arb_operand_enrich_vp), so the VP arm is MEASUREMENT-UNAVAILABLE, not refuted. (iv) libxml2_6785 — no_gate_signature both arms: the gate is CUR==0 at a MOVING parse cursor (input-dependent offset), which no built fixed-offset tool can place — genuinely undecidable.",
   "hypotheses": [
     {
       "id": "parallel_fixed_offset_literal_gate",
-      "label": "A fixed-offset 1-4 byte VALUE literal/enum gates the branch; both I2S (direct substitution) and VP (Hamming/prefix gradient) drive the same gate byte(s) to the target value, so both resolving corpora are enriched in the target byte at the gate offset relative to naive.",
+      "label": "A fixed-offset 1-4 byte VALUE literal/enum gates the branch; both I2S (direct substitution) and VP (Hamming/prefix gradient) drive the gate window toward the target value AND away from the decoy, so BOTH resolving corpora are enriched in the target and depleted in the decoy at the gate offset relative to naive.",
       "direction": "i2s_and_vp_parallel",
       "from_prior": [
         "i2s_vp_WW_L_short_enum_constant_gate",
@@ -16,11 +18,11 @@
       "members": [
         "bloaty_57_h0", "bloaty_57_h1",
         "libpng_3811_h0", "libpng_3811_h1",
+        "libpng_3818_h0", "libpng_3818_h1",
         "libpng_3864_h0", "libpng_3864_h1",
         "libpng_3890_h0", "libpng_3890_h1",
         "libpng_3951_h0", "libpng_3951_h1",
-        "libpng_4085_h0", "libpng_4085_h1",
-        "libxml2_6785_h0", "libxml2_6785_h1"
+        "libpng_4085_h0", "libpng_4085_h1"
       ],
       "measurement": {
         "descriptor": {
@@ -30,26 +32,24 @@
           "unit": "per_gate_offset"
         },
         "registry_tool": "operand_enrichment",
-        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "metrics_used": ["signed_target_enrich", "decoy_enrich", "vp_signed_target_enrich", "vp_decoy_enrich"],
         "params": {
-          "fuzzers": ["cmplog", "value_profile", "naive"],
-          "note": "Score BOTH cmplog and value_profile against naive. Under this shape the prediction is that BOTH resolving fuzzers enrich the target byte at the gate offset (I2S by substitution, VP by gradient admission) — a single-tool resolve would enrich only one. Per-branch the gate offset + target/decoy bytes come from the signature: bloaty_57 offset 0x12-0x13 target 0x3e; libpng_3864/3951/4085 offset 0x19 target 0x03 (decoy 0x00/0x04/0x06); libpng_3811/3890 chunk-type offset target 'sPLT' 73 50 4c 54 (decoy 'sRGB'/'sPLT'-absent); libxml2_6785 cursor offset target 0x00."
+          "note": "Score the cmplog arm (signed_target_enrich/decoy_enrich, cmplog-vs-naive OE_CACHE) AND the value_profile arm (vp_signed_target_enrich/vp_decoy_enrich, vp-vs-naive OE_VP_CACHE) independently against naive. Per-branch gate offset+target/decoy bytes come from the signature: bloaty_57 e_machine offset 0x12-0x13 target 0x3e; libpng_3864/3951/4085 IHDR color_type offset 0x19 target 0x03 (decoy 0x00/0x04/0x06); libpng_3811/3890 chunk-type offset target 'sPLT' 73 50 4c 54 (decoy other FOURCC); libpng_3818 chunk-validation window."
         }
       },
-      "prediction": "signed_target_enrich > 0 for cmplog AND signed_target_enrich > 0 for value_profile at the gate offset (each resolving corpus is over-represented in the target byte vs naive), while naive shows the decoy byte (decoy_enrich > 0 on the loser value). DISCRIMINATING: a structural/length-driven gate (not a fixed-offset value) would return no_gate_signature; a single-technique-only gate would enrich for only ONE of {cmplog, value_profile}; a non-causal coincidence would enrich neither. The parallel-literal hypothesis is the only one predicting BOTH > 0 at the SAME offset.",
-      "rule": "cmplog.signed_target_enrich > 0.5 AND value_profile.signed_target_enrich > 0.5",
-      "g2_independence": "operand_enrichment is computed over saved-corpus byte frequencies at the gate offset; it never reads the per-trial resolve/block label that defined the shape. Confirming both fuzzers enrich the target literal is an independent corpus-content signal."
+      "prediction": "Each resolving fuzzer's corpus drives the gate window toward the target literal: EITHER it over-represents the target byte vs naive (signed_target_enrich > 0.5) OR it depletes the decoy byte vs naive (decoy_enrich < -1.0) — the two are complementary corpus-content footprints of the same drive (target enrichment saturates low when naive's baseline target fraction is already high, as at the libpng chunk-type window; decoy depletion is then the cleaner signal). DISCRIMINATING: a structural/length gate returns no_gate_signature (caught instead by parallel_structural_accumulation_gate); a single-technique-only gate drives the window for ONLY ONE of {cmplog, value_profile}, leaving the other arm at enrich~0 / decoy~0 (the sqlite3-structural and bloaty-VP-missing cases fail HERE precisely because only one arm clears); a non-causal coincidence drives neither. Only the parallel-literal mechanism makes BOTH arms drive the SAME gate window.",
+      "rule": "((cmplog.signed_target_enrich > 0.5) or (decoy_enrich < -1.0)) and ((value_profile.signed_target_enrich > 0.5) or (vp_decoy_enrich < -1.0))",
+      "g2_independence": "operand_enrichment is computed over saved-corpus byte frequencies at the gate offset; it never reads the per-trial resolve/block label that defined the shape. Confirming both fuzzers' corpora drive the same gate window (toward target / away from decoy) is an independent corpus-content signal. The refined rule changed only the per-arm THRESHOLD (added the complementary decoy-depletion clause); it did not relax the requirement that BOTH arms drive the gate."
     },
     {
       "id": "parallel_structural_accumulation_gate",
-      "label": "The gate is NOT a single fixed-offset literal but a structural/length/cascade condition (repeated integer-token accumulation, or a multi-comparison chunk-validation cascade). Both I2S and VP help by accumulating/clearing many comparisons, so the resolving seeds are larger / carry more target tokens than the blocking seeds — there is no single alignable gate byte.",
+      "label": "The gate is NOT a single fixed-offset literal but a structural/length/accumulation condition (repeated integer-token body, or a multi-comparison validation cascade). Both I2S and VP help by accumulating target tokens / growing the seed, so the resolving seeds are LARGER and carry MORE target tokens than the blocking seeds — there is no single alignable gate byte.",
       "direction": "i2s_and_vp_parallel",
       "from_prior": [
         "i2s_vp_WW_L_validation_cascade_unlock",
         "i2s_vp_WW_L_repeated_token_accumulation"
       ],
       "members": [
-        "libpng_3818_h0", "libpng_3818_h1",
         "sqlite3_14563_h0", "sqlite3_14563_h1"
       ],
       "measurement": {
@@ -60,16 +60,17 @@
           "unit": "per_branch"
         },
         "registry_tool": "joint_necessity",
-        "metrics_used": ["size_lift", "tag_lift"],
+        "metrics_used": ["size_lift", "token_lift", "tag_lift", "winner_tags"],
         "params": {
-          "compare_sets": ["cmplog_resolving", "value_profile_resolving", "naive_blocking"],
-          "tokens": "sqlite3_14563: ASCII digit+operator bytes 0x35 '5', 0x2b '+', 0x2f '/', 0x2d '-'; libpng_3818: valid chunk-type FOURCCs (IHDR,PLTE,tRNS,gAMA,sRGB) as structural tokens",
-          "note": "joint_necessity's metric vocabulary (size_lift, tag/token counts) is reused, but here the comparison is cmplog-resolving vs value_profile-resolving vs naive-blocking (NOT the vpc-needs-both joint comparison the tool was anchored on). The arbiter compares the two resolving sets against the blocking set; tag_lift/size_lift > 1 in BOTH resolving sets confirms structural accumulation rather than a single-byte gate."
+          "_jn_winner": "value_profile",
+          "_jn_loser": "naive",
+          "_tokens": "5,+,/,-,SELECT",
+          "note": "Aim joint_necessity at the CONSERVATIVE arm pair value_profile-resolving vs naive-blocking (NOT cmplog, which is overwhelming: size_lift 4.41 / tag_lift 3.4 / n_W=10). If the harder-to-credit VP gradient-feedback arm STILL shows the seeds growing and accumulating SQL integer-literal tokens (observed size_lift=2.12, token_lift=1.27, n_W=3), the parallel-structural-accumulation claim is well supported — cmplog trivially accumulates too. Tokens are sqlite-specific ASCII digit '5'(0x35), operators '+'/'-'/'/' and the SELECT keyword."
         }
       },
-      "prediction": "size_lift >= 1.3 AND tag_lift >= 1.3 in BOTH resolving sets relative to naive-blocking (resolving seeds are larger and carry more target tokens). DISCRIMINATING: a fixed-offset literal gate would show size_lift ~ 1.0 (same-sized seeds, differing only at one byte) and would instead be caught by parallel_fixed_offset_literal_gate's enrichment; absence of any size/token lift means neither technique is accumulating structure and the branch falls through to inconclusive.",
-      "rule": "size_lift >= 1.3 AND tag_lift >= 1.3",
-      "g2_independence": "Seed-size and token counts are intrinsic corpus-content properties of the resolving vs blocking seed sets; they do not consult the resolve label. byte_freq_ratio is forbidden here by data_realities (different-sized seeds defeat byte-alignment), which is exactly why this structural subtype is kept separate from hypothesis 1."
+      "prediction": "size_lift >= 1.5 (the value_profile-resolving seeds are materially larger than naive-blocking — structural accumulation, not a single-byte flip) AND token_lift >= 1.2 (they carry more integer-literal/operator tokens). DISCRIMINATING: a fixed-offset literal gate would show size_lift ~ 1.0 (same-sized seeds differing at one byte) and be caught by parallel_fixed_offset_literal_gate's enrichment instead; absence of size/token lift means neither technique is accumulating structure and the branch falls to fallback. The rule LEADS on size_lift (the robust signal at small n_W) with a lenient token_lift floor (round-0's tag_lift>=1.3 narrowly clipped the real 1.27 at n_W=3).",
+      "rule": "size_lift >= 1.5 and token_lift >= 1.2",
+      "g2_independence": "Seed size + token counts are intrinsic corpus-content properties of the resolving vs blocking seed sets; they do not consult the resolve label. byte_freq_ratio is forbidden here by data_realities (different-sized seeds defeat byte-alignment), which is why this structural subtype is kept separate from hypothesis 1 and verified with struct_size_and_token_count."
     }
   ],
   "decision_order": [
@@ -77,16 +78,28 @@
     "parallel_structural_accumulation_gate"
   ],
   "fallback": "inconclusive",
+  "decidable_false": {
+    "branches": ["libxml2_6785_h0", "libxml2_6785_h1"],
+    "reason": "The gate is `CUR == 0` at libxml2's MOVING parse cursor (the NUL byte must land at a position determined by parse state after optional 4-byte encoding detection), so there is NO FIXED input offset for any built tool to place. operand_enrichment returns no_gate_signature for both arms (confirmed in cache); value_distance_reached needs a fixed operand window AND its scope_limits flag width<=2 operands (here width=1, a single NUL) as chance-alignment-prone. No built measurement can discriminate the parallel-NUL mechanism from coincidence for a moving 1-byte gate. This is a gate-SHAPE limitation (true even if libxml2 corpus were local to this server), not a corpus-availability gap. Honest decidable:false per G3 — do not invent a measurement the data cannot support."
+  },
+  "expected_outcomes_on_current_cache": {
+    "_doc": "Replayed against the actual arbiter caches (arb_operand_enrich_{s4,sB}.csv + _vp_ + a fresh joint_necessity run) so the orchestrator can sanity-check the re-arbitration. NOT authoritative — the arbiter recomputes.",
+    "validated_H1": ["libpng_3811", "libpng_3818", "libpng_3864", "libpng_3890", "libpng_3951", "libpng_4085"],
+    "validated_H2": ["sqlite3_14563"],
+    "inconclusive_fallback": ["bloaty_57"],
+    "decidable_false": ["libxml2_6785"],
+    "newly_recovered_vs_round0": ["libpng_3811", "libpng_3890", "sqlite3_14563"]
+  },
   "data_realities_respected": {
-    "corpus_availability": "operand_enrichment + joint_necessity both need on-disk corpora / resolving+blocking seeds. On-disk corpora exist ONLY for curl, harfbuzz, openthread, sqlite3. Of this shape's targets (bloaty, libpng, libxml2, sqlite3), ONLY sqlite3 has on-disk corpus — and the 286 reps carry resolving_seeds+blocking_seeds in the DB, which the seed_set descriptor (hypothesis 2) can use even where on-disk corpus is absent. CAVEAT: hypothesis 1 (operand_enrichment, corpus_queue source) can only fully score sqlite3 among these targets, but sqlite3's only branch (14563) routes to hypothesis 2. So hypothesis 1 will likely return measurement-unavailable for bloaty/libpng/libxml2 on the corpus_queue source; if the orchestrator can repoint operand_enrichment at the DB resolving/blocking seed sets (seed_set source) instead of on-disk corpus, the per-gate-offset enrichment is recoverable for all four targets. This repointing is the single feasibility risk for this shape.",
-    "i2s_untagged": "No descriptor here relies on a tagged 'I2S event' in seed_lineage — both descriptors are corpus-content measurements (byte enrichment / size+token), which is the only feasible way to observe I2S and VP per data_realities.",
-    "byte_alignment_only_for_fixed_gates": "byte_freq_ratio (hypothesis 1) is applied ONLY to the fixed-offset value gates (enum/FOURCC/NUL); the structural/cascade branches (3818, 14563) are routed to struct_size_and_token_count, never byte-alignment, per the different-sized-seed reality."
+    "corpus_availability": "operand_enrichment (corpus_queue) + joint_necessity (seed_set) need on-disk corpus / resolving+blocking seeds. On THIS shape the OE caches already hold libpng + bloaty(cmplog) + libxml2(skip) rows from sB and sqlite3 from s4, so the rules ARE scorable for those targets. bloaty_57's VP arm is the only genuine measurement gap (the vp-vs-naive OE study was not run for bloaty) — left at inconclusive/fallback, NOT decidable:false, since it is recoverable by running the VP-arm OE study on sB.",
+    "i2s_untagged": "No descriptor relies on a tagged 'I2S event' in seed_lineage — both descriptors are corpus-content measurements (byte enrichment / size+token), the only feasible way to observe I2S and VP per data_realities.",
+    "byte_alignment_only_for_fixed_gates": "byte_freq_ratio (H1) applies ONLY to fixed-offset value gates (enum/FOURCC). The structural sqlite3 branch is routed to struct_size_and_token_count; the moving-cursor libxml2 branch is decidable:false — neither is byte-aligned, per the different-sized-seed / moving-offset realities."
   },
   "notes": {
-    "merges": "Collapsed the 4 prior Pass-B clusters to 2 discriminable hypotheses. (a) short_enum_constant_gate (1-2B) + fourcc_magic_literal_gate (4B) MERGE into parallel_fixed_offset_literal_gate: operand_enrichment measures target-byte over-representation at the gate offset identically regardless of literal width (1B 0x03 enum and 4B 'sPLT' FOURCC are the same measurement, just a wider gate window), so no real-data measurement separates a 1-byte from a 4-byte fixed-offset literal — keeping them apart would be a width distinction the test cannot discriminate. (b) validation_cascade_unlock (libpng_3818) + repeated_token_accumulation (sqlite3_14563) MERGE into parallel_structural_accumulation_gate: both are non-fixed-offset, accumulation/cascade gates with variable-sized seeds that operand_enrichment skips (no_gate_signature) and that struct_size_and_token_count measures the same way (resolving seeds bigger / more target tokens). A cascade vs a repeated-token count are mechanistically distinct but the available size+token measurement cannot tell them apart, so they collapse.",
-    "discrimination_between_the_two_hypotheses": "The two surviving hypotheses ARE mutually discriminable: a fixed-offset literal gate yields a clean per-gate-offset enrichment with size_lift~1.0; a structural gate yields no_gate_signature for operand_enrichment but size_lift/tag_lift>1. The decision_order tries the fixed-offset enrichment first; if it returns no_gate_signature the branch falls to the structural test.",
-    "targets": "bloaty (1 branch: 57), libpng (5 branches: 3811, 3818, 3864, 3890, 3951, 4085 — note 6 branch_ids, 3818 is structural), libxml2 (1: 6785), sqlite3 (1: 14563, structural). Fixed-offset hypothesis covers 7 value-gate branches (14 signatures); structural hypothesis covers 2 branches (4 signatures).",
-    "unbuilt_tool_caveats": "No NEW descriptor proposed — both reuse existing registry tools (operand_enrichment, joint_necessity). The ONLY build-time action needed is the possible repointing of operand_enrichment from the corpus_queue source to the DB seed_set source so bloaty/libpng/libxml2 (no on-disk corpus) can be scored; if that repointing is infeasible, hypothesis 1 scores nothing in this shape and ALL 7 fixed-offset branches fall to fallback inconclusive despite a clean Layer-1 label. Flag for orchestrator: this shape's verification hinges entirely on corpus/seed availability for non-corpus targets.",
-    "g1_summary": "Both predictions are falsifiable and discriminating. H1 predicts BOTH cmplog and VP enrich the target literal at one offset — a single-technique gate (only one enriches), a structural gate (no_gate_signature), or a non-causal coincidence (neither) each predict differently. H2 predicts size+token lift in BOTH resolving sets — a fixed-offset gate predicts size_lift~1.0 instead."
+    "what_changed_from_round0": "Two THRESHOLD recalibrations on the SAME tools (path (a)), each justified by the actual returned metrics, plus one honest decidable:false. (1) H1 rule: round-0 required `cmplog.signed_target_enrich > 0.5 AND value_profile.signed_target_enrich > 0.5`. Added the complementary per-arm clause `OR decoy_enrich < -1.0`, because the FOURCC branches (3811/3890) have VP decoy depletion -17.582 (identical to validated 3864) but a log2 target-enrich compressed to 0.355 by naive's high baseline target fraction. Decoy depletion is a positive, baseline-insensitive footprint of the same drive. This recovers 3811/3890 WITHOUT flipping bloaty (VP arm missing -> still fails) or sqlite3 (VP enrich 0.089 / decoy -0.22 -> still fails H1, correctly routes to H2). (2) H2 rule: round-0 `size_lift>=1.3 AND tag_lift>=1.3` narrowly clipped sqlite3_14563's real VP-arm tag_lift 1.27 at n_W=3 despite a 2.12x size accumulation; lead on size_lift>=1.5 with a lenient token_lift>=1.2 floor, aimed at the conservative VP-vs-naive arm.",
+    "merges": "Same 2 discriminable hypotheses as round-0. H1 (fixed-offset literal) merges 1-2B enum + 4B FOURCC: operand_enrichment measures target-window over-representation / decoy depletion identically regardless of literal width — no real-data measurement separates a 1B enum from a 4B FOURCC, so keeping them apart would be an undiscriminable width distinction. H2 (structural accumulation) merges validation-cascade + repeated-token: both are variable-sized accumulation gates that operand_enrichment skips and struct_size_and_token_count measures the same way (resolving seeds bigger / more tokens); a cascade vs a token count are mechanistically distinct but the size+token measurement cannot tell them apart, so they collapse.",
+    "discrimination_between_hypotheses": "H1 and H2 are mutually discriminable: a fixed-offset literal yields per-gate-offset enrichment/depletion with size_lift~1.0; a structural gate returns no_gate_signature for OE but size_lift/token_lift>1. decision_order tries the fixed-offset enrichment first; on no_gate_signature it falls to the structural test. (Note: round-0's `members` routing was advisory — the arbiter applies BOTH rules per branch in decision_order and takes the first that holds; e.g. it validated libpng_3818 under H1 even though round-0 listed it under H2. Membership here is documentation, not a hard route.)",
+    "g3_honesty": "libxml2_6785 is decidable:false on a gate-SHAPE ground (moving parse cursor -> no fixed offset any built tool can place), not on off-server corpus. bloaty_57 is left INCONCLUSIVE (fallback), not decidable:false, because its VP arm is merely un-run (recoverable) while its cmplog arm is a confirmed 10.528 enrichment. No mechanism was invented to force a label on any branch.",
+    "targets": "bloaty (1: 57 — fixed-offset, cmplog-confirmed, VP arm pending), libpng (6: 3811,3818,3864,3890,3951,4085 — all fixed-offset H1), libxml2 (1: 6785 — decidable:false, moving cursor), sqlite3 (1: 14563 — structural H2)."
   }
 }

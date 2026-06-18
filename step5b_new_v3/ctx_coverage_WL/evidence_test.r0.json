@@ -1,0 +1,69 @@
+{
+  "shape": "ctx_coverage_WL",
+  "decisive_pair": "naive_ctx>naive (ctx_coverage, pro)",
+  "n_branches": 53,
+  "resolving_arm": "naive_ctx",
+  "blocking_arm": "naive",
+  "hypotheses": [
+    {
+      "id": "context_reach_advantage",
+      "label": "naive_ctx's resolving corpus reaches the blocker through call-contexts / path-depths that naive's blocking corpus never reaches",
+      "direction": "pro",
+      "from_prior": [
+        "ctx_deep_chain_stepping_stone_retention",
+        "ctx_multi_caller_shared_function_coverage",
+        "ctx_allocation_failure_path"
+      ],
+      "mechanism": "CtxHook folds the caller chain into the edge-map index, so the (call-context, edge) pair at the blocker is a fresh bucket per distinct caller chain. The corpus-level fingerprint is identical across the three prior clusters: naive_ctx retains intermediate seeds that arrive at the blocker function from MORE DISTINCT call contexts (deeper chains, multiple call sites, or a rare allocation sub-state caller), where naive collapses them all onto one saturated bare edge and prunes them.",
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "depth_reach", "operand": "call_context", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": ["ctx_reach_lift", "naive_ctx_distinct_contexts", "naive_distinct_contexts"],
+        "params": {
+          "blocker_function_from": "cards.json:function",
+          "context_def": "set of distinct caller-chain hashes (1-hop caller frame, from callers_index) at the blocker function across the arm's on-disk corpus, replayed under FUZZ_BIN",
+          "corpus_arms": {"reach": "out/<target>/naive_ctx", "baseline": "out/<target>/naive"},
+          "ctx_reach_lift": "naive_ctx_distinct_contexts / max(1, naive_distinct_contexts)"
+        }
+      },
+      "prediction": "naive_ctx's corpus reaches the blocker function from STRICTLY MORE distinct call contexts than naive's (ctx_reach_lift >= 1.5, and naive_ctx_distinct_contexts > naive_distinct_contexts). A pure byte/value-solving alternative (I2S or value-profile) would predict NO context-multiplicity difference — the two arms would reach the blocker from the same caller set and differ only in the operand bytes — so a lift ~ 1.0 refutes context-sensitive coverage and points at a value mechanism mis-bucketed into this shape.",
+      "rule": "ctx_reach_lift >= 1.5 AND naive_ctx_distinct_contexts > naive_distinct_contexts",
+      "scored_targets": ["harfbuzz", "sqlite3"]
+    },
+    {
+      "id": "iteration_depth_threshold",
+      "label": "naive_ctx accumulates higher loop/recursion iteration depth at the blocker than naive, clearing a count/nesting threshold",
+      "direction": "pro",
+      "from_prior": [
+        "ctx_loop_iteration_threshold",
+        "ctx_indic_reordering_syllable_iteration"
+      ],
+      "mechanism": "Here the blocker fires only after a loop re-entry or recursion/syllable-iteration COUNT exceeds a threshold (e.g. xmlParseCharRef count++>20, sqlite3 expression-tree nesting, harfbuzz per-syllable reordering re-entry). CtxHook turns each loop re-entry / recursion depth level / per-syllable invocation into a fresh coverage bucket, manufacturing a depth GRADIENT that drives the iteration count up. The corpus fingerprint that separates this from generic context-reach is a higher per-seed MAX iteration count at the blocker, not just more distinct callers.",
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "depth_reach", "operand": "loop_iteration_count", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": ["iter_depth_lift", "naive_ctx_max_iter", "naive_max_iter"],
+        "params": {
+          "blocker_function_from": "cards.json:function",
+          "iter_def": "max hit-count of the blocker basic-block edge in a single replayed input (loop-body / recursion / foreach_syllable re-entry count), taken as the per-arm corpus maximum",
+          "corpus_arms": {"reach": "out/<target>/naive_ctx", "baseline": "out/<target>/naive"},
+          "iter_depth_lift": "naive_ctx_max_iter / max(1, naive_max_iter)"
+        }
+      },
+      "prediction": "naive_ctx's corpus contains at least one input that drives the blocker loop/recursion to a HIGHER iteration count than any naive input (iter_depth_lift >= 1.5 AND naive_ctx_max_iter > naive_max_iter). A context-reach-only mechanism (hypothesis 1) would show comparable max iteration counts and differ only in caller multiplicity; a value-solving alternative would show no iteration-count gradient at all. So iter_depth_lift ~ 1.0 routes the branch to hypothesis 1 instead.",
+      "rule": "iter_depth_lift >= 1.5 AND naive_ctx_max_iter > naive_max_iter",
+      "scored_targets": ["harfbuzz", "sqlite3", "libxml2"]
+    }
+  ],
+  "decision_order": ["iteration_depth_threshold", "context_reach_advantage"],
+  "fallback": "inconclusive",
+  "notes": {
+    "merges": "5 prior clusters collapsed to 2 discriminable hypotheses. (a) ctx_deep_chain_stepping_stone_retention(31) + ctx_multi_caller_shared_function_coverage(7) + ctx_allocation_failure_path(2) -> context_reach_advantage: their narratives (deep single chain / N call sites / rare OOM caller) differ only in WHY the context bucket is novel; the real-data measurement is identical — distinct call-context reach of the naive_ctx corpus at the blocker exceeds naive's. No corpus measurement can tell 'deep chain' apart from 'multi caller' apart from 'OOM substate' (all three are just 'more distinct caller chains reach the blocker'), so keeping them separate would be a distinction the data cannot support. (b) ctx_loop_iteration_threshold(7) + ctx_indic_reordering_syllable_iteration(6) -> iteration_depth_threshold: both fire only after a loop/recursion/syllable-iteration COUNT crosses a threshold; the Indic per-syllable reordering re-entry IS a loop-iteration count, so the same max-iteration-count metric covers both.",
+    "discriminability_between_the_two": "context_reach_advantage and iteration_depth_threshold ARE separable: hyp1 measures distinct call-context multiplicity (set cardinality of caller-chain hashes), hyp2 measures max loop/recursion re-entry count within a single input. decision_order tries iteration first (the sharper, more specific signal); a branch that clears the iteration threshold is the loop subtype, otherwise context-reach catches the generic case. A branch could in principle satisfy both — iteration is the more specific claim so it wins on order.",
+    "G1_falsifiability": "Both predictions can come out the other way and rule out a concrete alternative. A value/byte-solving mechanism (I2S or value_profile) mis-bucketed into this naive_ctx>naive shape would predict ctx_reach_lift ~ 1.0 AND iter_depth_lift ~ 1.0 (same caller set, same iteration depth, differing only in operand bytes) — both rules fail -> fallback inconclusive, correctly refusing to confirm a context mechanism on a value branch.",
+    "G2_independence": "The measurement is INDEPENDENT of the resolve pattern that defined the shape. The shape was defined by naive_ctx-resolves / naive-blocks (a coverage OUTCOME). The test measures HOW the corpora reach the blocker (distinct call-context count / iteration depth) — a structural corpus property, not the resolve outcome. We do not 'verify naive_ctx resolves by observing naive_ctx resolves'; we ask whether naive_ctx's saved seeds carry the context-diversity / depth signature the mechanism predicts.",
+    "unbuilt_descriptors": "BOTH descriptors are NEW (registry_tool null). Neither registry tool fits: operand_enrichment is for fixed-offset VALUE gates (returns no_gate_signature on these structural/no-operand ctx gates), and joint_necessity measures vpc-vs-cmplog/vp seed size+tokens (wrong arms entirely — this shape's arms are naive_ctx vs naive). The orchestrator must build a depth_reach tool: source=seed_set, replay each arm's on-disk corpus under FUZZ_BIN with the callers_index, and emit (i) distinct caller-chain-hash count at the blocker function [context_reach_advantage] and (ii) max single-input blocker-edge hit-count [iteration_depth_threshold]. Both metrics come from ONE replay pass, so one tool covers both hypotheses. compute=depth_reach is already in the descriptor vocabulary; the operand differs (call_context vs loop_iteration_count).",
+    "data_realities_respected": "No lineage events used (mechanism is a corpus/feedback effect, invisible in mutation_op). On-disk corpora exist ONLY for harfbuzz and sqlite3 among this shape's targets (curl/openthread have no members; libpng/libxml2/lcms have NO on-disk corpora). So scored members: harfbuzz (16 branches across both hyps) + sqlite3 (4 branches). The 33 libpng/libxml2/lcms branches (incl. the libxml2 iteration members 6467/6483) CANNOT be corpus-measured and fall to fallback=inconclusive on the on-disk-corpus reality — except note that iteration_depth_threshold lists libxml2 as a scored_target ASPIRATIONALLY: if a libxml2 naive_ctx/naive on-disk corpus is later materialized, the same metric applies; with current data it scores 0 libxml2 branches.",
+    "target_member_counts": "harfbuzz: context_reach_advantage = {5237,5302,5503,5517,5708,5878,5839,5887,5990,6616}; iteration_depth_threshold = {6061,6093,6130,6539,6585,6613} (Indic per-syllable iteration). sqlite3: context_reach_advantage = {14745,14762,15434}; iteration_depth_threshold = {14535} (expression-tree nesting depth). All other branches (libpng x14, libxml2 x18, lcms x1) -> inconclusive (no on-disk corpus)."
+  }
+}

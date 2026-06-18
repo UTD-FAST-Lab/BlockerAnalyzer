@@ -168,15 +168,24 @@ def analyze_pair(target, branch_id, winner_fz, loser_fz, tokens, tau_tag, tau_si
     tag_lift = round(w["tags"] - lo["tags"], 2)
     size_lift = round(w["size"] / lo["size"], 2) if lo["size"] else None
     wt, lt = _armtag(winner_fz), _armtag(loser_fz)
+    # token DENSITY = structural tokens per byte (a token-RICH small seed vs a
+    # token-sparse large one). Distinct from size_lift (raw extent) and tag_lift
+    # (raw count): VP can admit small syntactically-dense seeds while naive bloats
+    # the corpus with large token-sparse garbage.
+    wd = round(w["tags"] / w["size"], 5) if w["size"] else 0.0
+    ld = round(lo["tags"] / lo["size"], 5) if lo["size"] else 0.0
     out = {"target": target, "branch_id": branch_id,
            "winner_tags": w["tags"], "loser_tags": lo["tags"],
            "winner_size": w["size"], "loser_size": lo["size"],
            "tag_lift": tag_lift, "token_lift": tag_lift,
-           "size_lift": size_lift, "n_W": w["n"], "n_L": lo["n"]}
-    for tag, st in ((wt, w), (lt, lo)):
+           "size_lift": size_lift, "n_W": w["n"], "n_L": lo["n"],
+           "winner_token_density": wd, "loser_token_density": ld,
+           "token_density_lift": round(wd / ld, 2) if ld else None}
+    for tag, st, dens in ((wt, w, wd), (lt, lo, ld)):
         out[f"{tag}_tags"] = st["tags"]
         out[f"{tag}_tokens"] = st["tags"]
         out[f"{tag}_size"] = st["size"]
+        out[f"{tag}_token_density"] = dens
     return out
 
 

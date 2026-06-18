@@ -42,6 +42,21 @@ blockers. Synthetic harnesses are kept ONLY as an optional causal sidecar for
   real-data prediction; G2 label-SOURCE (analysis) independent from
   verification-SIGNAL (campaign data); G3 keep refuted/inconclusive labeled —
   honest `inconclusive`/`decidable:false` are correct outcomes, don't chase 100%.
+- **Labeling loop (loop-until-dry, ≤3 rounds; spec §8.4):** round 0 = original
+  design; rounds 1–3 re-invoke `evidence-test-author` on **every shape with ≥1
+  unlabeled decisive branch** (selection by presence-of-unlabeled, NOT a "high %"
+  threshold; `seed_starved`-only branches route to re-bisection instead). Prompt is
+  assembled deterministically by `tools/build_reinvoke_prompt.py --shape <S>`.
+  Invariants: re-design TARGETS the unlabeled branches only (confirmed ones FROZEN);
+  **monotonic superset** (keep every prior hypothesis that confirmed ≥1 branch, so
+  re-arbitration never loses a label — enforce by diffing for label→inconclusive
+  regressions and restoring the dropped hypothesis from `evidence_test.r0.json`);
+  **novelty** (a refuted mechanism may not be re-tested with a relaxed threshold —
+  only a genuinely different one). **Both servers re-arbitrate each round before the
+  next** (the shared `evidence_test.json` covers both; arbiter scores only its
+  `BENCH_ONDISK` targets). Stop at convergence (a round adds no new labels); the
+  per-round label-gain curve is the reported rigor artifact; identical categories
+  are merged in the manual Pass-C review.
 - The end-goal beyond the benchmark: distil each validated feature into a
   **static/cheap-dynamic recognizer** (gate shape + operand provenance + CFG
   context) so an adaptive fuzzer can recognize a blocker type online and enable

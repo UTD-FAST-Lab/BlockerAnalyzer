@@ -85,7 +85,15 @@ TOOL_CMD = {
     "depth_reach": ["python3", "bench/tools/depth_reach.py", "branch"],
     "corpus_size_ratio": ["python3", "bench/tools/corpus_size_ratio.py", "branch"],
     "token_count": ["python3", "bench/tools/token_count.py", "branch"],
+    # live operand_enrichment for coverage shapes whose hypothesis compares a
+    # NON-cmplog arm (naive_ctx vs naive) — the pre-run OE cache is cmplog-vs-naive
+    # (the WRONG arm for a "ctx corpus depletes the operand" claim), so we invoke
+    # the tool live with the correct arms instead of reading the cache.
+    "operand_enrichment": ["python3", "bench/tools/i2s_operand_availability.py", "branch"],
 }
+# coverage shapes: the byte_freq depletion hypothesis compares the technique arm
+# (naive_ctx) vs naive, NOT cmplog vs naive. Live-run OE with these arms.
+CTX_OE_ARMS = {"ctx_coverage_LW": ("naive_ctx", "naive")}
 CS_MEMO = {}   # (target, arm-pair) -> corpus_size_ratio result; branch-independent, scan once
 BUILT = {"operand_enrichment", *TOOL_CMD}
 
@@ -133,7 +141,8 @@ for m in ("signed_target_enrich", "decoy_enrich", "cmplog_target_frac",
           "vp_signed_target_enrich", "vp_decoy_enrich"):
     METRIC_TOOL[m] = "operand_enrichment"
 for m in ("size_lift", "tag_lift", "token_lift", "vp_tags", "cmp_tags", "vpc_tags",
-          "winner_tags", "loser_tags", "i2s_necessary", "assembly_necessary"):
+          "winner_tags", "loser_tags", "i2s_necessary", "assembly_necessary",
+          "token_density_lift", "winner_token_density", "loser_token_density"):
     METRIC_TOOL[m] = "joint_necessity"
 
 # non-i2s/vp families: the decisive technique fuzzer vs the baseline. Used to aim
@@ -153,7 +162,14 @@ for m in ("naive_literal_count", "grimoire_literal_count", "literal_presence_rat
     METRIC_TOOL[m] = "token_count"
 # exact-literal-presence arm pairs (grimoire <GAP> erasure): winner=literal-preserving
 # (naive, resolving), loser=grimoire (blocking). Literal comes from the signature.
-TC_ARMS = {"grimoire_structural_LW": ("naive", "grimoire")}
+# i2s_vp_WLWL: I2S (cmplog) plants the anchor literal at the gate; naive can't —
+# winner=cmplog (resolving), loser=naive (blocking), literal = signature.operand_literal.
+TC_ARMS = {"grimoire_structural_LW": ("naive", "grimoire"),
+           "i2s_vp_WLWL": ("cmplog", "naive")}
+# joint_necessity 2-arm PAIR-mode override for i2s_vp shapes whose hypothesis
+# compares value_profile-resolving vs naive-blocking corpora (token-density /
+# larger-structure) instead of the default 3-arm vpc/cmp/vp analysis.
+JN_PAIR_ARMS = {"i2s_vp__WWL": ("value_profile", "naive")}
 # corpus-scale arm pairs per shape: (winner=hypothesized inflating/homogenizing arm,
 # loser=flat baseline). Whole-corpus comparison, branch-independent.
 CS_ARMS = {"ctx_coverage_LW": ("naive_ctx", "naive"),
@@ -331,6 +347,18 @@ def metrics_for_rule(rule, target, bid, shape, sig, cache, force_vd=False, force
         if tool not in BUILT:
             return None  # unscorable: needs an unbuilt tool
         if tool == "operand_enrichment":
+            if shape in CTX_OE_ARMS:    # coverage shapes: live naive_ctx-vs-naive (cmplog cache is the WRONG arm)
+                cw, cl = CTX_OE_ARMS[shape]
+                ck = ("oe_live", target, bid, cw, cl)
+                if ck not in CS_MEMO:
+                    CS_MEMO[ck] = run_tool("operand_enrichment", target, bid,
+                                           ["--winner-fuzzer", cw, "--loser-fuzzer", cl])
+                r = CS_MEMO[ck]
+                if r.get("_error") or r.get("skip"):
+                    return None
+                cache[tool] = r
+                merged.update(r)
+                continue
             if bid not in OE_CACHE:
                 return None  # not in the pre-run cache (no seeds / non-local)
             cache[tool] = OE_CACHE[bid]
@@ -485,6 +513,8 @@ def arbitrate_shape(shape):
         sig["_operand"] = parse_operand(sig)
         sig["_tokens"] = shape_tokens(shape, target)
         jw, jl = noni2s_pair_arms(shape, bid, con)  # non-i2s token families
+        if shape in JN_PAIR_ARMS:                    # explicit i2s_vp pair override (e.g. __WWL vp vs naive)
+            jw, jl = JN_PAIR_ARMS[shape]
         sig["_jn_winner"], sig["_jn_loser"] = jw, jl
         dw, dl = depth_arms(shape, bid, con)         # ctx/ngram depth families
         sig["_depth_winner"], sig["_depth_loser"] = dw, dl
@@ -508,7 +538,8 @@ def arbitrate_shape(shape):
             compute = (meas.get("descriptor") or {}).get("compute") if isinstance(meas, dict) else None
             is_vd = (meas.get("registry_tool") == "value_distance_reached"
                      or compute == "value_distance_reached")
-            is_jn_pair = (meas.get("registry_tool") == "joint_necessity") and jw and jl
+            is_jn_pair = ((meas.get("registry_tool") == "joint_necessity"
+                           or compute == "struct_size_and_token_count") and jw and jl)
             is_depth = (compute == "depth_reach") and dw and dl
             met = metrics_for_rule(rule, target, bid, shape, sig, cache,
                                    force_vd=is_vd, force_jn=is_jn_pair, force_depth=is_depth)

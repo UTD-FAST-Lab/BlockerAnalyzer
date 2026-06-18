@@ -1,0 +1,57 @@
+{
+  "shape": "i2s_vp_W_WL",
+  "shape_decode": "cmp,vp,vpc,naive = W,_,W,L  -> cmplog and value_profile_cmplog RESOLVE, naive BLOCKS, value_profile NON-DECISIVE. Pure i2s-pro family: I2S (input-to-state literal substitution) is the resolving technique; value-profile gradient adds nothing decisive.",
+  "n_branches": 35,
+  "hypotheses": [
+    {
+      "id": "i2s_fixed_offset_literal_substitution",
+      "label": "I2S enriches the cmplog corpus with the exact CMP-target byte(s) at the gate offset (literal substitution), which naive's blind havoc cannot place",
+      "direction": "pro",
+      "from_prior": [
+        "i2s_exact_literal_substitution"
+      ],
+      "applies_to_branches": [
+        "curl_405",
+        "openthread_13320",
+        "openthread_13321",
+        "openthread_13326",
+        "openthread_13333",
+        "openthread_13337",
+        "openthread_13389",
+        "openthread_13390"
+      ],
+      "measurement": {
+        "descriptor": {
+          "source": "corpus_queue",
+          "compute": "byte_freq_ratio",
+          "operand": "target_vs_decoy",
+          "unit": "per_gate_offset"
+        },
+        "registry_tool": "operand_enrichment",
+        "metrics_used": [
+          "signed_target_enrich",
+          "decoy_enrich"
+        ],
+        "params": {
+          "winner_fuzzer": "cmplog",
+          "baseline_fuzzer": "naive",
+          "gate_target_value": "per-branch W (CMP-target) byte(s) at the fixed gate offset",
+          "gate_decoy_value": "per-branch L (loser-occupying) byte(s) at the same offset"
+        }
+      },
+      "prediction": "signed_target_enrich > 0: the cmplog corpus is log2-enriched (vs naive) for the exact target byte value at the fixed gate offset. This is DISCRIMINATING because an i2s-pro literal-substitution mechanism deterministically plants the CMP operand at that offset, so its corpus concentrates on the target value; a NON-i2s explanation (e.g. naive happens to reach it by coverage gradient, or the gate is not actually an I2S value gate) would predict signed_target_enrich ~ 0 (no cmplog-over-naive concentration). G2-independent: enrichment is measured on the saved CORPUS bytes at the gate offset, not on which fuzzer resolved -- the resolve pattern (vpc/cmplog vs naive) does not enter the metric.",
+      "rule": "signed_target_enrich >= 1.0"
+    }
+  ],
+  "decision_order": [
+    "i2s_fixed_offset_literal_substitution"
+  ],
+  "fallback": "inconclusive",
+  "notes": {
+    "merges": "The prior v2 Pass-B split this shape into THREE clusters: (1) i2s_exact_literal_substitution [single-operand fixed-offset value gate], (2) i2s_correlated_multifield_header [bloaty section_count / vm-range, multiple interdependent header dwords], (3) i2s_structural_grammar_assembly [PNG chunk-stream / XML namespace oldNs / IPv6 fragment reassembly / font table layout]. The unifying mechanism across all 35 is IDENTICAL at the technique level: I2SRandReplace reads a logged CMP operand and substitutes it at the matching input offset; the v2 clusters differ only in HOW MANY offsets and whether the gated scalar is a single field vs a derived/structural value. Real campaign data can DISCRIMINATE only the single-offset value-gate subtype (operand_enrichment scores one fixed offset with byte-aligned W/L seeds). Clusters (2) and (3) are NOT separately discriminable from (1) by any built tool -- they would require struct_size_ratio / value_distance_reached / multi-offset enrichment that no current tool provides for these targets -- so I do NOT keep them as distinct testable hypotheses. They collapse into 'I2S literal substitution' conceptually but are carried by the inconclusive fallback for measurement, per the honest 'no clean test' rule.",
+    "targets_present": "All 10 targets appear (bloaty, lcms, libpng, libxml2, openthread, curl, harfbuzz, sqlite3). data_realities: on-disk corpora exist ONLY for curl, harfbuzz, openthread, sqlite3. Therefore operand_enrichment can score AT MOST those four targets; bloaty/lcms/libpng/libxml2 branches (28 of 35) have no on-disk corpus and are unscorable by ANY corpus/seed tool -> inconclusive.",
+    "data_reality_byte_alignment": "data_realities forbid byte_freq_ratio on different-SIZED winning vs blocking seeds (structural-assembly gates). On corpus targets this rules OUT: harfbuzz_5334 (sfnt header + table-tag assembly, dispersed_multibyte, W/L different size), sqlite3_14549 (expression-tree structural sub-case, byte_signature 'unclear', operator-token structure not a fixed offset), openthread_13311/13335 (fragment-reassembly structural assembly, dispersed magic runs across many offsets, W/L different size: cmplog winners ~57B vs naive losers ~296B per the cards), and openthread_13313 (relational CHECKSUM equality -- the target value is computed from other header bytes, not a fixed literal at a fixed offset, so target_vs_decoy at one offset is ill-defined). These 5 corpus-target branches go to inconclusive.",
+    "scorable_set": "Only 8 branches survive to the testable hypothesis: curl_405 (file:// contiguous literal at 0x06) and openthread_13320/13321/13326/13333 (single-byte protocol switch constants 0x2c/0x3a), 13390 (single-byte context-ID), 13389 (2-byte Server16 -- still a fixed-offset contiguous literal the CMP logs), 13337 (16-byte unicast destination address, contiguous_literal at a fixed header offset). openthread_13337's W/L seeds ARE similar-sized coherent IPv6 headers per the card so byte-alignment holds; if operand_enrichment returns no_gate_signature for it (length/structural skip), the arbiter lets it fall to inconclusive. The remaining 27 branches (all non-corpus targets + the 5 structural/relational corpus branches above) carry no discriminable measurement and are labelled by the deterministic shape-decode label-source only at the orchestrator level; this evidence test does not independently confirm them.",
+    "tool_caveats": "operand_enrichment (validated, pro median +3.12 / anti -0.55, 88% separation) is the ONLY built tool that fits; threshold 1.0 is conservative relative to its validated pro median to keep the rule robust to the smaller openthread per-byte operands. scope_limits: it returns no_gate_signature on structural/length gates and needs >=3 W and >=3 L seeds in db/blockers.sqlite -- the 286 reps have seeds, but any scorable branch lacking >=3/>=3 falls to inconclusive automatically. No NEW descriptor is proposed: every discriminable hypothesis in this shape is a fixed-offset i2s value gate that operand_enrichment already covers; proposing a struct_size/value_distance descriptor for the structural subtypes would be untestable on these non-corpus targets and so is deliberately omitted."
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "shape": "i2s_vp_LWWW",
+  "n_branches": 11,
+  "n_signatures": 22,
+  "shape_decode": "cmp=L, vp=W, vpc=W, naive=W -> cmplog BLOCKS; value_profile + value_profile_cmplog + naive RESOLVE. Mixed shape: each branch carries an i2s-ANTI claim (_h0: naive>cmplog, I2S hurts) AND a vp-PRO claim (_h1: vpc>cmplog, CMP_MAP gradient rescues). Per contract, each hypothesis is assigned by its named mechanism+direction, not by the shape label.",
+  "hypotheses": [
+    {
+      "id": "i2s_anti_structural_byte_corruption",
+      "label": "I2S RandReplace overwrites the exact structural/category/literal bytes naive havoc assembles, depleting (not enriching) the target byte in cmplog's corpus relative to naive",
+      "direction": "anti",
+      "axis": "i2s",
+      "from_prior": ["i2s_cmp_target_corrupts_structural_bytes"],
+      "members": ["harfbuzz_5844_h0", "harfbuzz_5947_h0", "harfbuzz_5977_h0", "harfbuzz_5992_h0"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich"],
+        "params": {"note": "harfbuzz on-disk corpus available; these branches expose a fixed-ish offset structural/category byte (Halant H bytes, VPre record bytes, intact tag substrings, the 64/a8 repeated-record stride) that I2S substitution displaces"}
+      },
+      "prediction": "If I2S is ACTIVELY CORRUPTING the structural byte, cmplog's corpus is byte-DEPLETED at the target offset vs naive => signed_target_enrich < 0 (anti). An I2S-IRRELEVANT gate (the no-preimage class below) would instead return no_gate_signature; a pro-I2S gate would return signed_target_enrich > 0. So a clearly NEGATIVE enrichment discriminates active corruption from mere irrelevance.",
+      "rule": "signed_target_enrich < -0.3",
+      "g1_alternative_ruled_out": "Rules out the 'I2S simply has no traction here' (no_gate_signature) and 'I2S helps' (positive enrich) alternatives: only ACTIVE depletion of the structural byte in the cmplog corpus produces signed_target_enrich < -0.3.",
+      "g2_independence": "operand_enrichment compares cmplog-vs-naive corpus byte frequency, never the vp/vpc resolve signal that defined the shape; independent of the label-source."
+    },
+    {
+      "id": "i2s_anti_no_input_preimage_misdirection",
+      "label": "Gate has no input-side CMP preimage (category-table / state-machine classification, length threshold, or internally-derived overflow sentinel); I2S substitution finds no fixed-offset value to copy, so it misallocates budget while naive havoc explores freely",
+      "direction": "anti",
+      "axis": "i2s",
+      "from_prior": ["i2s_category_dispatch_misdirection", "i2s_length_dimension_pinning", "i2s_no_preimage_derived_sentinel"],
+      "members": ["harfbuzz_5866_h0", "harfbuzz_5938_h0", "harfbuzz_5983_h0", "harfbuzz_5998_h0", "harfbuzz_6086_h0", "harfbuzz_5831_h0", "libpng_3974_h0"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich"],
+        "params": {"note": "operand_enrichment returns no_gate_signature on structural/length gates and on gates with no fixed-offset value operand; libpng_3974 has NO on-disk corpus (data_realities) so it is unscored and falls to fallback by absence-of-signal, not by a positive measurement"}
+      },
+      "prediction": "These gates have NO fixed-offset input-byte value to substitute (category-table dispatch, syllable-length threshold start+3<=end, derived overflow sentinel 0x7fffffff with no input preimage). operand_enrichment therefore returns no_gate_signature. A genuine fixed-offset value gate (the corruption class above) would instead return a definite signed_target_enrich; so 'no_gate_signature' positively discriminates the no-preimage class from byte-corruption.",
+      "rule": "signed_target_enrich == no_gate_signature",
+      "g1_alternative_ruled_out": "Distinguishes the no-input-preimage class (no fixed-offset operand => no_gate_signature) from the active-corruption class (a real target byte => a numeric signed enrich). If the tool DID find a target offset and return a number here, this hypothesis would be REFUTED for that branch.",
+      "g2_independence": "Same corpus-byte-frequency measurement, independent of the vp/vpc resolve pattern.",
+      "collapse_note": "MERGED three prior clusters (category_dispatch_misdirection, length_dimension_pinning, no_preimage_derived_sentinel). operand_enrichment cannot tell them apart -- all three present NO fixed-offset value operand and yield the identical no_gate_signature outcome. Per the collapse rule, candidates no real-data measurement can discriminate are merged. Their source-level distinction (table vs length vs sentinel) is real but UNMEASURABLE with built tools."
+    },
+    {
+      "id": "vp_pro_cmpmap_gradient_rescue",
+      "label": "VP CMP_MAP Hamming/prefix-distance gradient gives graded partial-progress feedback toward the gate comparand, letting value_profile/vpc retain near-miss inputs that approach the target while cmplog's edge-only binary feedback stalls",
+      "direction": "pro",
+      "axis": "value_profile",
+      "from_prior": ["vp_cmpmap_gradient_rescues_cmplog_binary_stall"],
+      "members": ["libpng_3974_h1", "harfbuzz_5831_h1", "harfbuzz_5844_h1", "harfbuzz_5866_h1", "harfbuzz_5938_h1", "harfbuzz_5947_h1", "harfbuzz_5977_h1", "harfbuzz_5983_h1", "harfbuzz_5992_h1", "harfbuzz_5998_h1", "harfbuzz_6086_h1"],
+      "measurement": {
+        "descriptor": {"source": "coverage_timeseries", "compute": "value_distance_reached", "operand": "gate_comparand", "unit": "per_branch"},
+        "registry_tool": null,
+        "proposed_tool": {
+          "name": "vp_gradient_climb",
+          "status": "NOT_YET_BUILT",
+          "measures": "For the gate comparand, the minimum value-distance (Hamming / |operand - target|) reached by value_profile's corpus vs cmplog's corpus over the trial; alternatively depth_reach = how far into the comparison/category-state chain each fuzzer's best seed advances. Source: coverage_timeseries (snapshot corpora per checkpoint) or seed_set (final resolving/blocking seeds).",
+          "metrics": ["vp_min_value_distance", "cmp_min_value_distance", "vp_depth_reach", "cmp_depth_reach", "distance_lift"],
+          "alt_descriptor": {"source": "seed_set", "compute": "depth_reach", "operand": "comparison_state", "unit": "per_branch"},
+          "build_note": "Must measure value_profile's APPROACH (gradient effect), NOT a mutator event -- per data_realities, value_profile is a FEEDBACK invisible in mutation_op; its effect is only visible via what the corpus reaches (value-distance / depth), never via a lineage gradient event. Score harfbuzz from on-disk corpus; libpng has no corpus so vp_pro is unscorable for 3974 (falls to fallback)."
+        },
+        "metrics_used": ["vp_min_value_distance", "cmp_min_value_distance", "distance_lift"],
+        "params": {"note": "comparand examples: 0x7fffffff (libpng redy sentinel), category/codepoint equality states (harfbuzz indic/myanmar/USE category gates, 0x0D12 MALAYALAM codepoint)"}
+      },
+      "prediction": "If VP's gradient is the rescue mechanism, value_profile's corpus REACHES strictly closer to the gate comparand than cmplog's (vp_min_value_distance < cmp_min_value_distance => distance_lift > 1) while cmplog plateaus far from the target. If instead both reached equal distance, the rescue would NOT be gradient-driven (refuted). This discriminates a true graded-approach rescue from a coincidental throughput/structural win.",
+      "rule": "distance_lift >= 1.3 AND vp_min_value_distance < cmp_min_value_distance",
+      "g1_alternative_ruled_out": "Rules out 'value_profile resolves for a non-gradient reason' (e.g. raw throughput like naive): under that alternative vp and cmplog would reach equal value-distance and distance_lift ~ 1. A gradient rescue REQUIRES vp to approach measurably closer than cmplog.",
+      "g2_independence": "Measures corpus value-distance/depth to the comparand, NOT the vpc-resolves flag that defined the shape. The shape says vpc RESOLVES; this test asks WHETHER it got there by graded approach -- an independent question (G2 satisfied)."
+    }
+  ],
+  "decision_order": [
+    "i2s_anti_structural_byte_corruption",
+    "i2s_anti_no_input_preimage_misdirection",
+    "vp_pro_cmpmap_gradient_rescue"
+  ],
+  "decision_order_rationale": "Per branch, _h0 (i2s-anti) and _h1 (vp-pro) are INDEPENDENT claims about the same branch and BOTH may confirm (this shape mixes an i2s-anti and a vp-pro mechanism on every branch). The arbiter evaluates the i2s-anti axis first: try byte-corruption (definite negative enrich), else no-preimage (no_gate_signature). Then independently evaluate the vp-pro axis for _h1. A branch can be evidence-confirmed on one axis, both, or neither.",
+  "fallback": "inconclusive",
+  "data_realities_respected": [
+    "I2S is untagged in mutation_op: NO seed_lineage 'I2S event' descriptor proposed; operand_enrichment uses corpus BYTE FREQUENCY (depletion), not a lineage event.",
+    "value_profile is a FEEDBACK not a mutator: vp_pro descriptor proposed over coverage_timeseries/seed_set value-distance/depth_reach (what the corpus REACHES), NOT a lineage gradient event.",
+    "On-disk corpora exist only for curl/harfbuzz/openthread/sqlite3: 10/11 branches are harfbuzz (scorable); libpng_3974 has NO corpus -> both its _h0 (operand_enrichment) and _h1 (vp_gradient_climb) are UNSCORABLE and fall to fallback=inconclusive by absence of signal.",
+    "Structural-assembly gates have different-sized W/L seeds so byte-alignment can fail: the no-preimage class explicitly EXPECTS no_gate_signature rather than forcing a byte_freq comparison; only the corruption class (fixed-ish offset category/tag/record bytes) uses byte_freq."
+  ],
+  "notes": {
+    "merges": "Collapsed 5 prior clusters into 3 hypotheses across 2 axes. i2s-anti axis: (a) i2s_cmp_target_corrupts_structural_bytes -> i2s_anti_structural_byte_corruption (kept separate: measurable byte depletion); (b) i2s_category_dispatch_misdirection + i2s_length_dimension_pinning + i2s_no_preimage_derived_sentinel -> i2s_anti_no_input_preimage_misdirection (MERGED: all yield no_gate_signature, indiscriminable). vp-pro axis: vp_cmpmap_gradient_rescues_cmplog_binary_stall -> vp_pro_cmpmap_gradient_rescue (kept; 11 members, all same gradient mechanism).",
+    "targets": "10/11 branches harfbuzz (indic/myanmar/USE shapers + vowel-constraints), 1 libpng (cHRM redy sentinel). Only harfbuzz is corpus-scorable.",
+    "tools_not_built": "vp_pro_cmpmap_gradient_rescue requires a NEW tool 'vp_gradient_climb' (registry_tool: null) measuring value_distance_reached / depth_reach to the comparand. NOT YET BUILT -- orchestrator must build+register from the proposed descriptor before this hypothesis can be arbitrated. The two i2s-anti hypotheses REUSE the existing operand_enrichment tool.",
+    "discriminability_caveat": "The i2s-anti axis leans on the corruption-vs-no_preimage split being CLEAN in operand_enrichment output. If a no-preimage branch happens to expose a spurious fixed-offset byte and returns a numeric enrich near 0 (not < -0.3), it correctly fails the corruption rule and is NOT mislabeled; it then matches neither i2s rule cleanly and falls to fallback for the i2s axis. Honest 'no clean i2s test' is preferred over forcing a label."
+  }
+}

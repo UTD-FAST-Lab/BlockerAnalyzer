@@ -1,0 +1,109 @@
+{
+  "shape": "i2s_vp__W_L",
+  "shape_decode": "cmp,vp,vpc,naive = _,W,_,L : value_profile RESOLVES, naive BLOCKS, cmplog & value_profile_cmplog non-decisive. Pure VP-PRO (CMP_MAP gradient) family — VP's distance-bucket feedback is necessary and sufficient; I2S substitution is neither (cmplog non-decisive).",
+  "n_branches": 12,
+  "label_source": "Layer-1 resolve pattern (value_profile resolves / naive blocks). The tests below are the INDEPENDENT verification (G2): they measure what the VP-resolving vs naive-blocking CORPUS REACHES (value-distance / structure), never the resolve pattern itself.",
+  "hypotheses": [
+    {
+      "id": "vp_direct_value_gradient",
+      "label": "VP CMP_MAP climbs a monotone distance gradient toward a FIXED target value (single literal / switch constant / masked-equality / terminal byte of a chain); VP-resolving seeds reach a smaller residual distance to that target than naive-blocking seeds, which stall at a fixed distance.",
+      "direction": "vp_pro",
+      "from_prior": ["vp_cmpmap_literal_gradient", "vp_cmpmap_chained_byte_gradient"],
+      "members": [
+        "bloaty_147", "bloaty_150", "lcms_2147", "lcms_2417",
+        "libxml2_6325_h1", "libxml2_6655", "harfbuzz_6006",
+        "harfbuzz_6061_h1", "sqlite3_14793"
+      ],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "gate_target_literal", "unit": "per_branch"},
+        "registry_tool": null,
+        "new_descriptor": true,
+        "metrics_used": ["vp_residual_distance", "naive_residual_distance", "distance_close_lift"],
+        "metric_definitions": {
+          "vp_residual_distance": "median over value_profile-RESOLVING seeds of the minimum operand-distance (Hamming over the operand_width_bytes window, or |masked_value - target| for masked-equality gates) between the seed's gate-offset bytes and the gate's target literal/switch constant.",
+          "naive_residual_distance": "same statistic over naive-BLOCKING seeds.",
+          "distance_close_lift": "naive_residual_distance - vp_residual_distance (positive => VP seeds sit closer to the target than naive seeds)."
+        },
+        "params": {
+          "gate_target_literal_per_branch": {
+            "bloaty_147": {"target": "0x6d736100", "width": 4, "sense": "mismatch (true side wants NOT-equal — distance-from-magic)"},
+            "bloaty_150": {"target": "00 61 73 6d", "width": 4, "sense": "mismatch (false side wants NOT-equal)"},
+            "lcms_2147": {"target": "nmcl", "width": 4, "offset": "0x0c", "sense": "match"},
+            "lcms_2417": {"target": "nmcl", "width": 4, "offset": "0x0c", "sense": "match"},
+            "libxml2_6325_h1": {"target": "0xD800", "width": 2, "mask": "0xFC00", "sense": "masked_match"},
+            "libxml2_6655": {"target": "0x3f", "width": 1, "sense": "match (terminal byte of DTD prefix chain)"},
+            "harfbuzz_6006": {"target": "0x093A/0x093B/0x093E/0x0945", "width": 2, "sense": "match (nearest of the case-constant set)"},
+            "harfbuzz_6061_h1": {"target": "0x0B05", "width": 2, "sense": "match"},
+            "sqlite3_14793": {"target": "token-class char set", "width": 1, "sense": "match (nearest valid token-class byte)"}
+          },
+          "note_mismatch_sense": "For the two bloaty mismatch gates the target literal IS the magic the seeds must AVOID; the gradient is the same direction (VP keeps seeds whose distance-from-magic is LARGE while naive stays trapped at distance 0). Arbiter inverts the sign for sense=='mismatch': distance_close_lift = vp_residual_distance - naive_residual_distance (VP FARTHER from magic)."
+        }
+      },
+      "prediction": "G1: VP-resolving seeds sit measurably closer to the gate target (or, for mismatch gates, measurably farther from the avoided magic) than naive-blocking seeds — i.e. the corpus carries a value-distance gradient VP exploited. An alternative (naive simply never reached the gate region at all, no gradient) predicts NO distance separation: both seed sets would be uniformly far / random with respect to the operand. A pure structural-assembly mechanism (vp_structural_assembly_gradient) predicts vp~naive on fixed-operand distance but a size/token gap instead. This rules out 'no-gradient navigation gap' and 'structural-only' alternatives.",
+      "rule": "distance_close_lift > 0 AND vp_residual_distance < naive_residual_distance (after sense-inversion for mismatch gates) AND abs(distance_close_lift) >= 0.25 * naive_residual_distance"
+    },
+    {
+      "id": "vp_structural_assembly_gradient",
+      "label": "VP CMP_MAP closes DERIVED integer comparisons (table offsets/lengths computed from structural fields), not a fixed input literal; VP-resolving seeds carry a larger/more-valid parsed structure built from padding, with no fixed-operand distance signal.",
+      "direction": "vp_pro",
+      "from_prior": ["vp_cmpmap_derived_structural_gradient"],
+      "members": ["harfbuzz_5708_h0"],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "struct_size_ratio", "operand": "parsed_structure", "unit": "per_branch"},
+        "registry_tool": null,
+        "new_descriptor": true,
+        "reuse_note": "Reuses the SIZE metric of bench/tools/joint_necessity.py (struct_size_and_token_count) but on the vp-RESOLVING vs naive-BLOCKING seed sets (not vpc vs cmplog); orchestrator may parameterize joint_necessity rather than build new code.",
+        "metrics_used": ["vp_struct_size", "naive_struct_size", "struct_size_lift", "vp_residual_distance", "naive_residual_distance"],
+        "metric_definitions": {
+          "vp_struct_size": "median non-padding (non-0x20) structured byte span / valid sub-table field count in value_profile-RESOLVING seeds at the kern-table region.",
+          "naive_struct_size": "same over naive-BLOCKING seeds.",
+          "struct_size_lift": "vp_struct_size / max(naive_struct_size, 1).",
+          "vp_residual_distance/naive_residual_distance": "fixed-operand distance from H1's metric, computed here ONLY to confirm it does NOT separate (the discriminator vs H1)."
+        },
+        "params": {"target": "harfbuzz", "padding_byte": "0x20", "region": "kern sub-table offset/length fields ~0x10-0x2f"}
+      },
+      "prediction": "G1: VP-resolving seeds show a structural-size/validity lift over naive-blocking seeds (struct_size_lift > 1) WHILE showing NO fixed-operand distance separation (it is a derived field, not an input literal — data_realities forbid byte-alignment here). The direct-literal alternative (H1) predicts the opposite: a fixed-operand distance gap and NO structural-size gap. This separates derived-structural assembly from direct-literal climbing.",
+      "rule": "struct_size_lift >= 1.3 AND distance_close_lift < 0.25 * naive_residual_distance"
+    },
+    {
+      "id": "vp_basin_escape",
+      "label": "VP CMP_MAP steers AWAY from a dominant magic-value basin: there is no single target literal — the true side wants ANY value but the corpus-dominant magic. VP-resolving seeds DEPART the basin (multi-modal: spread over several non-magic format magics), while naive-blocking seeds are pinned at the basin value.",
+      "direction": "vp_pro",
+      "from_prior": ["vp_cmpmap_basin_escape"],
+      "members": ["bloaty_11"],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "corpus_dominant_basin", "unit": "per_branch"},
+        "registry_tool": null,
+        "new_descriptor": true,
+        "metrics_used": ["naive_basin_lock_fraction", "vp_basin_lock_fraction", "vp_value_modality", "basin_departure_lift"],
+        "metric_definitions": {
+          "naive_basin_lock_fraction": "fraction of naive-BLOCKING seeds whose 4-byte prefix == the corpus-dominant magic (00 61 73 6d).",
+          "vp_basin_lock_fraction": "same fraction over value_profile-RESOLVING seeds.",
+          "vp_value_modality": "count of DISTINCT non-magic 4-byte prefix values across the vp-resolving seed set (multi-modality test — a single-target gradient would be ~uni-modal at one constant; basin escape is multi-modal).",
+          "basin_departure_lift": "naive_basin_lock_fraction - vp_basin_lock_fraction (positive => VP escaped the basin that pinned naive)."
+        },
+        "params": {"target": "bloaty", "dominant_basin_value": "00 61 73 6d (WASM magic, offset 0x00, width 4)"}
+      },
+      "prediction": "G1: naive-blocking seeds are basin-locked (high naive_basin_lock_fraction) while VP-resolving seeds have left the basin (low vp_basin_lock_fraction) AND spread over MULTIPLE distinct non-magic prefixes (vp_value_modality >= 3). The direct-literal alternative (H1) predicts the opposite signature: VP seeds CONVERGING on ONE target value (low modality, ~uni-modal). This is the decisive separator from a fixed-target gradient: basin escape is divergence-AWAY-from-one-value (multi-modal), literal gradient is convergence-TOWARD-one-value (uni-modal).",
+      "rule": "basin_departure_lift > 0 AND naive_basin_lock_fraction >= 0.7 AND vp_value_modality >= 3"
+    }
+  ],
+  "decision_order": ["vp_basin_escape", "vp_structural_assembly_gradient", "vp_direct_value_gradient"],
+  "decision_order_rationale": "Try the two SPECIFIC mechanisms first (basin_escape needs a multi-modal departure signature; structural_assembly needs a struct-size lift WITHOUT operand-distance), then fall to the GENERAL direct_value_gradient. This ordering prevents the broad direct-literal rule from absorbing a branch that is really a basin-escape (VP seeds look 'far from magic' under a naive distance metric) or a structural assembly (no fixed literal at all). The arbiter assigns each branch to the FIRST hypothesis whose rule fires.",
+  "fallback": "inconclusive",
+  "data_realities_respected": [
+    "On-disk corpora exist ONLY for curl, harfbuzz, openthread, sqlite3. Of the 12 branches, only harfbuzz_5708_h0, harfbuzz_6006, harfbuzz_6061_h1 (harfbuzz) and sqlite3_14793 (sqlite3) have corpus seeds for value_distance_reached. The bloaty (3), lcms (2), libxml2 (2) branches have NO on-disk corpus and can be scored ONLY if resolving_seeds + blocking_seeds are present in db/blockers.sqlite (the 286 reps have them). Branches with neither => fallback: inconclusive.",
+    "VP (CMP_MAP) is a FEEDBACK, not a mutator — no seed_lineage 'gradient event' is measurable. All three tests read the RESOLVING vs BLOCKING seed SETS (what the corpus reached), never a lineage event. Compliant.",
+    "I2S is untagged in mutation_op — irrelevant here (cmplog is non-decisive in this shape), so no I2S-event descriptor is proposed.",
+    "Structural-assembly gate (harfbuzz_5708_h0) has different-SIZED winning vs blocking seeds, so byte-alignment (byte_freq_ratio / fixed-operand distance) is FORBIDDEN there — H2 uses struct_size_ratio, NOT operand distance, as its positive signal (operand distance is computed only as a negative control)."
+  ],
+  "notes": {
+    "discovery": "12 branches, all pure VP-PRO CMP_MAP gradient. mechanism_summary describes one underlying technique (distance-bucket feedback VP has and naive lacks) in 4 surface forms: (a) fixed-literal/switch-constant climbing (8: both bloaty mismatch gates, both lcms FOURCC, libxml2 masked surrogate, both harfbuzz codepoint switches, sqlite3 token class), (b) chained byte ratchet (1: libxml2_6655), (c) derived structural assembly (1: harfbuzz_5708_h0), (d) basin escape (1: bloaty_11).",
+    "collapse": "Collapsed the 4 prior subtypes to 3 discriminable hypotheses. MERGED chained_byte_gradient (libxml2_6655) INTO vp_direct_value_gradient: a multi-step prefix chain that culminates in ONE terminal-byte equality produces the SAME measurable signal as a one-step literal gate — VP-resolving seeds close the residual distance to the terminal operand while naive stalls. Real seed-set data cannot tell 'reached the terminal byte via a 1-step gate' from 'via an N-step chain'; only the terminal residual distance is observable. Keeping them apart would be a distinction the data cannot support. KEPT basin_escape and structural_assembly separate because each has a DISTINCT, oppositely-signed signature: basin_escape is multi-modal DIVERGENCE away from one value (uni-modal convergence would refute it), structural_assembly is a struct-size lift WITH NO fixed-operand distance (the exact inverse of H1's signature). The decision_order + the negative-control terms in each rule make the three mutually exclusive at arbitration.",
+    "new_descriptors": "Introduces value_distance_reached (registry_tool null) as the family's primary measurement — VP-resolving seeds close operand-distance to the gate target, naive stalls. Two flavors: gate_target_literal (H1, fixed target) and corpus_dominant_basin (H3, distance FROM a dominant value, multi-modal). H2 reuses the size metric of joint_necessity (struct_size_and_token_count) but applied to vp-resolving vs naive-blocking sets — orchestrator may parameterize the existing tool rather than build new code.",
+    "g2_independence": "All measurements read what the RESOLVING vs BLOCKING corpus REACHED (operand distance, structure size, basin modality) — never the resolve/block pattern that defined the shape. We do not 'verify VP-resolves with VP-resolves': the discriminating signal is a property of the seed BYTES relative to the gate, available independent of which fuzzer ran.",
+    "feasibility_caveat": "Corpus availability is the binding constraint: 4 of 12 branches (3 harfbuzz + 1 sqlite3) have on-disk corpora outright; the rest depend on resolving/blocking seeds being in db/blockers.sqlite. Branches lacking seed sets fall to inconclusive rather than being labeled from the resolve pattern alone — an honest no-evidence beats an unverified label.",
+    "targets": ["bloaty", "lcms", "libxml2", "harfbuzz", "sqlite3"],
+    "unbuilt_tool": "value_distance_reached (descriptor compute key already reserved in tool_registry.json descriptor_vocabulary, but no tool implements it yet) — orchestrator must build/register it before the arbiter can score H1 and H3."
+  }
+}

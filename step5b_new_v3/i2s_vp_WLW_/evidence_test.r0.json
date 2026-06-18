@@ -1,0 +1,53 @@
+{
+  "shape": "i2s_vp_WLW_",
+  "shape_decode": "cmp=W, vp=L, vpc=W, naive=_ : cmplog and value_profile_cmplog resolve, value_profile blocks, naive non-decisive => i2s-pro literal family (the only technique delta between the winners {cmplog,vpc} and the loser {value_profile} is I2SRandReplace)",
+  "n_branches": 7,
+  "hypotheses": [
+    {
+      "id": "i2s_literal_operand_substitution",
+      "label": "I2SRandReplace splices the exact logged comparand literal into the fixed gate offset; VP's CMP_MAP Hamming gradient cannot reach the exact value within budget",
+      "direction": "i2s_pro",
+      "from_prior": [
+        "i2s_fourcc_chunk_dispatch",
+        "i2s_exact_scalar_operand_substitution",
+        "i2s_url_structure_assembly"
+      ],
+      "members": [
+        {"id": "libpng_3949", "target": "libpng", "branch_id": 3949, "gate_offset_hint": "second chunk-type field == 'IHDR' (49 48 44 52)", "scorable": false, "scorable_reason": "no on-disk corpus for libpng"},
+        {"id": "libpng_3970", "target": "libpng", "branch_id": 3970, "gate_offset_hint": "cHRM 4-byte length field != 32", "scorable": false, "scorable_reason": "no on-disk corpus for libpng"},
+        {"id": "libpng_4020", "target": "libpng", "branch_id": 4020, "gate_offset_hint": "chunk-type field 0x25-0x28 == 'pHYs' (70 48 59 73)", "scorable": false, "scorable_reason": "no on-disk corpus for libpng"},
+        {"id": "libxml2_6910", "target": "libxml2", "branch_id": 6910, "gate_offset_hint": "QName name[0] == ':' (0x3a)", "scorable": false, "scorable_reason": "no on-disk corpus for libxml2"},
+        {"id": "curl_297", "target": "curl", "branch_id": 297, "gate_offset_hint": "scheme/port/HTTP literals at 0x06-0x2b (e.g. '9001' 0x17-0x1a, 'HTTP/' 0x24-0x28)", "scorable": true},
+        {"id": "curl_468", "target": "curl", "branch_id": 468, "gate_offset_hint": "scheme + '://127.0.0.1:9001/' authority literals at 0x06-0x1b", "scorable": true},
+        {"id": "curl_505", "target": "curl", "branch_id": 505, "gate_offset_hint": "scheme 'pop3' at 0x06-0x09 + host:port path 0x0a-0x1a", "scorable": true}
+      ],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "scope": "score only targets with on-disk corpora (curl here); per W/L gate offset the tool reads the target byte (W-resolving value) vs decoy byte (L-blocking value) frequency in the cmplog corpus as a cmplog-vs-naive log2 enrichment",
+          "aggregation": "per branch, take median signed_target_enrich across that branch's gate offsets (multi-offset dispersed literals decompose into per-offset enrichments)"
+        }
+      },
+      "prediction": "i2s-pro => signed_target_enrich > 0 : the cmplog corpus is enriched (log2 > 0) in the exact target literal byte at the gate offset relative to naive, because I2SRandReplace plants the logged comparand there. A competing 'VP-gradient-was-sufficient' or 'structural-assembly-not-literal' explanation predicts no per-offset cmplog-vs-naive enrichment (signed_target_enrich ~ 0), so the sign+magnitude discriminates. G2: the metric is a cmplog-vs-naive CORPUS byte-frequency comparison, fully independent of the vpc/value_profile resolve pattern that defined the shape.",
+      "rule": "signed_target_enrich >= 1.0"
+    }
+  ],
+  "decision_order": ["i2s_literal_operand_substitution"],
+  "fallback": "inconclusive",
+  "data_realities_applied": [
+    "operand_enrichment needs an on-disk corpus + >=3 W and >=3 L seeds in db/blockers.sqlite; on-disk corpora exist ONLY for curl, harfbuzz, openthread, sqlite3 => only the 3 curl branches (297, 468, 505) are scorable. The 3 libpng + 1 libxml2 branches have NO on-disk corpus and carry to fallback:inconclusive (label-source resolve pattern stands, but G2 independent verification cannot run).",
+    "I2S is untagged in mutation_op, so a seed_lineage 'I2S event' descriptor is INFEASIBLE; operand_enrichment instead reads the standing CORPUS byte frequency, which is the feasible footprint of I2S literal placement.",
+    "value_profile (CMP_MAP) is a feedback not a mutator and is invisible in mutation_op; the test does not attempt to observe a VP 'gradient event' — it relies on the cmplog-vs-naive corpus enrichment delta, which captures I2S's literal-placement footprint without needing to see VP directly."
+  ],
+  "notes": {
+    "merge": "Collapsed all 3 prior Pass-B clusters (i2s_fourcc_chunk_dispatch, i2s_exact_scalar_operand_substitution, i2s_url_structure_assembly) into ONE hypothesis. The prior clusters split on byte_signature (contiguous_literal FOURCC vs single_byte/derived scalar vs dispersed_multibyte URL scaffold), but NO real-data measurement discriminates those subtypes: all 7 are the identical mechanism (I2SRandReplace splices a logged comparand into a fixed gate offset that VP's Hamming gradient cannot reach), and operand_enrichment measures exactly that per-offset literal-placement footprint regardless of literal width or contiguity. Splitting them would yield 3 rules the data cannot tell apart.",
+    "discriminability": "operand_enrichment's per_gate_offset metric handles all three byte_signatures: a contiguous 4-byte FOURCC, a single byte (':'), and a dispersed multi-offset URL scaffold all decompose into one-or-more fixed gate offsets, each scored independently and aggregated per branch.",
+    "caveats": [
+      "4 of 7 branches (libpng_3949, libpng_3970, libpng_4020, libxml2_6910) are NOT scorable: no on-disk corpus for libpng/libxml2. They carry to inconclusive by data-reality, not by mechanism doubt. If libpng/libxml2 corpora are later materialized (or a value_enrichment variant over saved seeds is built), the same descriptor scores them unchanged.",
+      "libpng_3970 is an inequality gate (length != 32): the WINNING value is 'any value != 32' rather than a single literal, so its decoy/target framing is value!=constant. operand_enrichment's signed_target_enrich (target=W byte, decoy=L=32 byte) still applies, but if it returns no_gate_signature on this inequality form the branch falls to inconclusive rather than being forced.",
+      "Threshold rule >= 1.0 follows the registry's validated pro median (+3.12) with 88% threshold separation against the anti depletion (-0.55); 1.0 is a conservative pro cutoff well inside the validated separation band."
+    ]
+  }
+}

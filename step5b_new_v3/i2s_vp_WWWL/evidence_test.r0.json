@@ -1,0 +1,42 @@
+{
+  "shape": "i2s_vp_WWWL",
+  "n_branches": 14,
+  "n_signatures": 28,
+  "shape_semantics": "cmp,vp,vpc,naive = W,W,W,L. Every CMP-aware technique (cmplog/I2S, value_profile/Hamming, and the vpc combination) resolves the gate; only naive blocks. This is the CMP-SOLVABLE-GATE pattern, NOT a joint-necessity shape: vpc does not need both techniques, since either one alone already resolves (cmplog=W and value_profile=W independently). The label-source is therefore 'any CMP technique enriches the gate target; naive does not'.",
+  "hypotheses": [
+    {
+      "id": "literal_value_gate_cmp_solvable",
+      "label": "A fixed-offset literal value gate (FOURCC/tag/enum/single byte) is solved by any CMP-aware fuzzer (I2S substitution or VP Hamming gradient) while naive's blind havoc cannot place the literal",
+      "direction": "cmp_pro_naive_anti",
+      "from_prior": ["isolated_exact_field_gate"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "comment": "Per W/L gate offset, log2 enrichment of the corpus byte == target (W) value vs decoy (L) value, cmplog-and-value_profile vs naive. CMP-aware fuzzers should enrich the target literal at the gate offset; naive should not.",
+          "scored_targets": ["harfbuzz"],
+          "scored_branches": [5503, 5517],
+          "target_value": "GPOS table tag (47 50 4f 53) at table-directory offsets ~0x0c-0x0f",
+          "decoy_value": "diffuse non-tag bytes at the same offsets in naive loser seeds"
+        }
+      },
+      "prediction": "signed_target_enrich >= +1.0 (CMP-aware corpora over-represent the GPOS-tag bytes at the gate offset relative to naive) AND decoy_enrich <= 0 (CMP-aware does not over-represent the off-gate decoy bytes). DISCRIMINATING: a pure structural/length mechanism (not a literal-value gate) would predict signed_target_enrich ~ 0 at any fixed offset because no single byte value is privileged; an enrichment confirms the gate is a fixed-offset literal that CMP introspection targets, ruling out a structural-assembly alternative. G2: enrichment is measured over corpus byte content, independent of the resolve pattern that defined the shape.",
+      "rule": "signed_target_enrich >= 1.0 AND decoy_enrich <= 0.0"
+    }
+  ],
+  "decision_order": ["literal_value_gate_cmp_solvable"],
+  "fallback": "inconclusive",
+  "data_realities_respected": [
+    "operand_enrichment requires an on-disk corpus AND >=3 W and >=3 L seeds; corpora exist only for curl, harfbuzz, openthread, sqlite3. Of this shape's 14 branches, only harfbuzz 5503/5517 are both (a) fixed-offset literal-value gates and (b) corpus-backed, so only they are scored.",
+    "The structural-grammar branches (libxml2_6405, libxml2_6690, sqlite3_14451) are dispersed_multibyte gates over different-SIZED winning vs blocking seeds; byte_freq_ratio byte-alignment fails per data_realities, so operand_enrichment returns no_gate_signature. They are NOT scored and fall to fallback=inconclusive.",
+    "lcms and libpng literal gates (lcms 2259/2282/2297/2323/2342, libpng 3901/3966/3996, libxml2_6967) are fixed-offset literal gates but have NO on-disk corpus (lcms/libpng/libxml2 are not in the corpus-backed target set), so operand_enrichment cannot score them -> fallback=inconclusive.",
+    "No seed_lineage 'I2S event' or 'VP gradient event' descriptor is proposed: I2S and value_profile are both untagged in mutation_op (I2S is a mutator with byte-identical havoc vocab; VP is a feedback, not a mutator). The only measurable signal is corpus byte content."
+  ],
+  "notes": {
+    "merges": "Collapsed to ONE measurable hypothesis. The prior v2 split into isolated_exact_field_gate (22 members) and structural_grammar_token_gate (6 members) is mechanistically real, but no available measurement can DISCRIMINATE the two on this shape's data: the only corpus-backed fixed-offset gates are harfbuzz 5503/5517 (literal-gate group), while the structural group's gates are either corpus-less (libxml2) or different-sized/dispersed (sqlite3) and defeat byte alignment. Keeping a second 'structural_token_assembly' hypothesis would attach a measurement the data forbids, so it is folded into fallback=inconclusive rather than emitted as a testable hypothesis. Both groups share the identical G1 prediction shape (any-CMP enriches the gate target, naive does not), so the single tested hypothesis is the representative-and-measurable instance of the shape's mechanism.",
+    "scored_vs_inconclusive": "SCORED (rule applied): harfbuzz 5503, harfbuzz 5517 via operand_enrichment on the GPOS tag offsets. INCONCLUSIVE (fallback): all 12 other branches (lcms x5, libpng x3, libxml2 x3, sqlite3 x1) for lack of a corpus-backed, byte-alignable measurement.",
+    "targets": "harfbuzz (scored); lcms/libpng/libxml2/sqlite3 (inconclusive by data-reality, not by mechanism). Of the 28 signatures, both h0 (I2S substitution) and h1 (VP Hamming gradient) per branch describe the SAME gate target, so the corpus-content enrichment test does not need to separate I2S from VP -- the shape's claim is the union 'any CMP technique', and enrichment of the target literal in the combined CMP-aware corpora vs naive confirms exactly that union claim.",
+    "caveats": "operand_enrichment scopes cmplog-vs-naive in its validated anchor (harfbuzz/5391); the prediction here treats value_profile as part of the CMP-aware side too (shape says vp=W). If the tool's metric is strictly cmplog-vs-naive, the harfbuzz enrichment still confirms the I2S arm of the union claim; the VP arm (h1) for these two branches is then carried as corroborated-by-shape but not independently enrichment-verified -- a one-arm confirmation is sufficient to label the shape's mechanism as CMP-solvable literal gate. The G1 discrimination (structural alternative predicts ~0 enrichment) holds regardless of which CMP arm produced the enrichment."
+  }
+}

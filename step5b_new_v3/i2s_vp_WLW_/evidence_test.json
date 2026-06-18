@@ -1,11 +1,17 @@
 {
   "shape": "i2s_vp_WLW_",
-  "shape_decode": "cmp=W, vp=L, vpc=W, naive=_ : cmplog and value_profile_cmplog resolve, value_profile blocks, naive non-decisive => i2s-pro literal family (the only technique delta between the winners {cmplog,vpc} and the loser {value_profile} is I2SRandReplace)",
+  "shape_decode": "cmp=W, vp=L, vpc=W, naive=_ : cmplog and value_profile_cmplog resolve, value_profile blocks, naive non-decisive => i2s-pro literal family (the only technique delta between the winners {cmplog,vpc} and the loser {value_profile} is I2SRandReplace). Label-source = resolve pattern; G2 verification = cmplog-vs-naive corpus byte footprint, independent of the vpc/vp pattern.",
   "n_branches": 7,
+  "round": 2,
+  "round0_outcome_reviewed": {
+    "validated": ["curl_297 (signed_target_enrich=2.587)", "curl_468 (3.284)", "libpng_4020 (14.664)"],
+    "inconclusive_rule_not_met": ["curl_505", "libpng_3949", "libpng_3970", "libxml2_6910"],
+    "note": "Round-0 was NOT all-inconclusive: operand_enrichment DID discriminate 3 of 7 (all three are FIXED-HEAD-OFFSET distinctive multibyte literals: 'scheme/HTTP' at 0x06-0x2b, 'scheme://authority' at 0x06-0x1b, 'pHYs' FOURCC at 0x25-0x28). The remaining 4 each have a gate the tool's target/decoy-byte model genuinely cannot represent (variable/deep operand position, inequality with no target byte, or a corpus-ambient literal). The libpng/libxml2 branches were scored ON SERVER B (their corpora are on-disk there), so this is NOT an off-server gap."
+  },
   "hypotheses": [
     {
       "id": "i2s_literal_operand_substitution",
-      "label": "I2SRandReplace splices the exact logged comparand literal into the fixed gate offset; VP's CMP_MAP Hamming gradient cannot reach the exact value within budget",
+      "label": "I2SRandReplace splices the exact logged comparand literal into a fixed head gate offset; VP's CMP_MAP Hamming gradient cannot reach the exact value within budget => cmplog corpus enriched in the target byte vs naive",
       "direction": "i2s_pro",
       "from_prior": [
         "i2s_fourcc_chunk_dispatch",
@@ -13,41 +19,57 @@
         "i2s_url_structure_assembly"
       ],
       "members": [
-        {"id": "libpng_3949", "target": "libpng", "branch_id": 3949, "gate_offset_hint": "second chunk-type field == 'IHDR' (49 48 44 52)", "scorable": false, "scorable_reason": "no on-disk corpus for libpng"},
-        {"id": "libpng_3970", "target": "libpng", "branch_id": 3970, "gate_offset_hint": "cHRM 4-byte length field != 32", "scorable": false, "scorable_reason": "no on-disk corpus for libpng"},
-        {"id": "libpng_4020", "target": "libpng", "branch_id": 4020, "gate_offset_hint": "chunk-type field 0x25-0x28 == 'pHYs' (70 48 59 73)", "scorable": false, "scorable_reason": "no on-disk corpus for libpng"},
-        {"id": "libxml2_6910", "target": "libxml2", "branch_id": 6910, "gate_offset_hint": "QName name[0] == ':' (0x3a)", "scorable": false, "scorable_reason": "no on-disk corpus for libxml2"},
-        {"id": "curl_297", "target": "curl", "branch_id": 297, "gate_offset_hint": "scheme/port/HTTP literals at 0x06-0x2b (e.g. '9001' 0x17-0x1a, 'HTTP/' 0x24-0x28)", "scorable": true},
-        {"id": "curl_468", "target": "curl", "branch_id": 468, "gate_offset_hint": "scheme + '://127.0.0.1:9001/' authority literals at 0x06-0x1b", "scorable": true},
-        {"id": "curl_505", "target": "curl", "branch_id": 505, "gate_offset_hint": "scheme 'pop3' at 0x06-0x09 + host:port path 0x0a-0x1a", "scorable": true}
+        {"id": "curl_297", "target": "curl", "branch_id": 297, "gate": "fixed-head dispersed multibyte 'scheme/port/HTTP' literals 0x06-0x2b", "scorable": true, "round0_status": "validated"},
+        {"id": "curl_468", "target": "curl", "branch_id": 468, "gate": "fixed-head 'scheme://127.0.0.1:9001/' authority literals 0x06-0x1b", "scorable": true, "round0_status": "validated"},
+        {"id": "libpng_4020", "target": "libpng", "branch_id": 4020, "gate": "'pHYs' FOURCC contiguous at fixed offset 0x25-0x28", "scorable": true, "round0_status": "validated"}
       ],
       "measurement": {
         "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
         "registry_tool": "operand_enrichment",
         "metrics_used": ["signed_target_enrich", "decoy_enrich"],
         "params": {
-          "scope": "score only targets with on-disk corpora (curl here); per W/L gate offset the tool reads the target byte (W-resolving value) vs decoy byte (L-blocking value) frequency in the cmplog corpus as a cmplog-vs-naive log2 enrichment",
-          "aggregation": "per branch, take median signed_target_enrich across that branch's gate offsets (multi-offset dispersed literals decompose into per-offset enrichments)"
+          "winner": "cmplog",
+          "loser": "naive",
+          "agg": "max",
+          "scope": "per W/L gate offset, log2(target_frac_cmplog / target_frac_naive) over the cmplog-vs-naive corpus; sign-preserving max-magnitude aggregation isolates the single most-differentiating (I2S operand) offset.",
+          "note": "Rule and threshold UNCHANGED from round-0 — they correctly discriminated 3 of 7 and sit inside the registry's validated separation band (pro median +3.12 / anti -0.55, 88% separation). Lowering the cutoff to capture the 4 failures would break that band and chase labels (G3); we do NOT touch it."
         }
       },
-      "prediction": "i2s-pro => signed_target_enrich > 0 : the cmplog corpus is enriched (log2 > 0) in the exact target literal byte at the gate offset relative to naive, because I2SRandReplace plants the logged comparand there. A competing 'VP-gradient-was-sufficient' or 'structural-assembly-not-literal' explanation predicts no per-offset cmplog-vs-naive enrichment (signed_target_enrich ~ 0), so the sign+magnitude discriminates. G2: the metric is a cmplog-vs-naive CORPUS byte-frequency comparison, fully independent of the vpc/value_profile resolve pattern that defined the shape.",
+      "prediction": "i2s-pro => signed_target_enrich >= 1.0 : the cmplog corpus carries the exact target literal byte at the fixed gate offset at a higher rate than naive, because I2SRandReplace plants the logged comparand there and VP/havoc cannot. A 'VP-gradient-was-sufficient' or 'literal-is-corpus-ambient' alternative predicts signed_target_enrich ~ 0 (no cmplog-vs-naive delta). The sign+magnitude discriminates. G2: this is a cmplog-vs-naive corpus byte-frequency comparison, fully independent of the vpc/value_profile resolve pattern that defined the shape.",
       "rule": "signed_target_enrich >= 1.0"
     }
   ],
   "decision_order": ["i2s_literal_operand_substitution"],
   "fallback": "inconclusive",
-  "data_realities_applied": [
-    "operand_enrichment needs an on-disk corpus + >=3 W and >=3 L seeds in db/blockers.sqlite; on-disk corpora exist ONLY for curl, harfbuzz, openthread, sqlite3 => only the 3 curl branches (297, 468, 505) are scorable. The 3 libpng + 1 libxml2 branches have NO on-disk corpus and carry to fallback:inconclusive (label-source resolve pattern stands, but G2 independent verification cannot run).",
-    "I2S is untagged in mutation_op, so a seed_lineage 'I2S event' descriptor is INFEASIBLE; operand_enrichment instead reads the standing CORPUS byte frequency, which is the feasible footprint of I2S literal placement.",
-    "value_profile (CMP_MAP) is a feedback not a mutator and is invisible in mutation_op; the test does not attempt to observe a VP 'gradient event' — it relies on the cmplog-vs-naive corpus enrichment delta, which captures I2S's literal-placement footprint without needing to see VP directly."
+  "non_scorable": [
+    {
+      "id": "libpng_3949",
+      "decidable": false,
+      "reason": "The I2S operand is a DUPLICATE 'IHDR' chunk-type appearing a SECOND time at a layout-dependent (variable) downstream offset, not a fixed head offset. operand_enrichment auto-derives its gate signature from W/L head-byte consensus (head=48); for a variable-position second-IHDR the consensus locks onto the incidental shared PNG-header prefix (the FIRST IHDR / signature bytes, identical in W and L) rather than the gate operand, so the scored offsets carry no I2S delta (target==decoy across arms => enrichment ~0). The mechanism is real but its footprint is a VARIABLE-OFFSET structural repeat, which no available descriptor (byte_freq_ratio is fixed-offset; value_distance_reached needs a single fixed operand window) can represent. decidable:false by tool reach, NOT by mechanism doubt or off-server corpus."
+    },
+    {
+      "id": "libpng_3970",
+      "decidable": false,
+      "reason": "Inequality gate `length != 32`: the WINNING value is 'any 4-byte value != 32', so there is NO single target literal byte for operand_enrichment's target/decoy model. The tool found a fixed-offset signature on the shared cHRM FOURCC (present in both W and L => target==decoy, enrichment ~0) and scored it as rule_not_met, but that is the wrong gate. The actual length field is a variable big-endian integer with no consensus byte; value_distance_reached's numeric (magnitude-gap) mode is framed for a vp/vpc gradient WINNER, whereas here vp is the BLOCKER and the win is an I2S step-substitution, so its winner_closer framing does not fit. decidable:false by tool reach."
+    },
+    {
+      "id": "libxml2_6910",
+      "decidable": false,
+      "reason": "Single-byte equality `name[0] == ':'` (0x3a), but name[0] sits at a VARIABLE, DTD-scaffold-dependent position deep in the input (after <?xml ...><!DOCTYPE ...>), not at a fixed head offset. The W and L seeds share the identical DTD scaffold prefix, so the head-byte consensus locks onto scaffold bytes (target==decoy) and misses the deep, variable colon position. The operand is width-1, which is chance-alignment prone even if a window tool were applied. No available descriptor can pin a single-byte operand at a variable deep offset. decidable:false by tool reach."
+    },
+    {
+      "id": "curl_505",
+      "decidable": true,
+      "round0_status": "inconclusive (rule_not_met)",
+      "reason": "GENUINE low-enrichment, not a tool defect. The gate is a fixed-head contiguous 4-byte 'pop3' scheme literal at 0x06-0x09 — exactly operand_enrichment's sweet spot — yet signed_target_enrich fell below 1.0. The honest read: a scheme prefix is CORPUS-AMBIENT in curl (virtually every reaching seed in naive's corpus already carries some scheme at the head, including 'pop3'-family bytes), so naive_target_frac is high and the cmplog-vs-naive log2 ratio washes out. This is the alternative the prediction is built to catch ('literal-is-corpus-ambient => enrich ~0'), so the negative is a valid discriminating outcome, NOT evidence to lower the threshold. curl_505 stays inconclusive/rule_not_met under the unchanged rule (G3: an honest negative is the correct outcome). Sibling curl_297/468 enriched strongly precisely because their distinctive port/HTTP/authority literals are NOT corpus-ambient — the contrast confirms the rule is doing real work."
+    }
   ],
   "notes": {
-    "merge": "Collapsed all 3 prior Pass-B clusters (i2s_fourcc_chunk_dispatch, i2s_exact_scalar_operand_substitution, i2s_url_structure_assembly) into ONE hypothesis. The prior clusters split on byte_signature (contiguous_literal FOURCC vs single_byte/derived scalar vs dispersed_multibyte URL scaffold), but NO real-data measurement discriminates those subtypes: all 7 are the identical mechanism (I2SRandReplace splices a logged comparand into a fixed gate offset that VP's Hamming gradient cannot reach), and operand_enrichment measures exactly that per-offset literal-placement footprint regardless of literal width or contiguity. Splitting them would yield 3 rules the data cannot tell apart.",
-    "discriminability": "operand_enrichment's per_gate_offset metric handles all three byte_signatures: a contiguous 4-byte FOURCC, a single byte (':'), and a dispersed multi-offset URL scaffold all decompose into one-or-more fixed gate offsets, each scored independently and aggregated per branch.",
-    "caveats": [
-      "4 of 7 branches (libpng_3949, libpng_3970, libpng_4020, libxml2_6910) are NOT scorable: no on-disk corpus for libpng/libxml2. They carry to inconclusive by data-reality, not by mechanism doubt. If libpng/libxml2 corpora are later materialized (or a value_enrichment variant over saved seeds is built), the same descriptor scores them unchanged.",
-      "libpng_3970 is an inequality gate (length != 32): the WINNING value is 'any value != 32' rather than a single literal, so its decoy/target framing is value!=constant. operand_enrichment's signed_target_enrich (target=W byte, decoy=L=32 byte) still applies, but if it returns no_gate_signature on this inequality form the branch falls to inconclusive rather than being forced.",
-      "Threshold rule >= 1.0 follows the registry's validated pro median (+3.12) with 88% threshold separation against the anti depletion (-0.55); 1.0 is a conservative pro cutoff well inside the validated separation band."
-    ]
+    "merge": "Single hypothesis (collapsed the 3 prior Pass-B clusters: i2s_fourcc_chunk_dispatch, i2s_exact_scalar_operand_substitution, i2s_url_structure_assembly). They split on byte_signature (contiguous FOURCC vs single-byte/derived scalar vs dispersed URL scaffold), but operand_enrichment's per_gate_offset metric scores all three identically when the operand is a FIXED-HEAD-OFFSET distinctive literal — and that is exactly the dividing line between the 3 it validated and the 4 it could not. No real-data measurement discriminates the byte_signature subtypes among the validated members, so they remain one hypothesis.",
+    "round2_rationale": "Task framing implied all 4 inconclusive came from an operand-enrichment failure on an i2s-pro shape where it 'should have shown'. Re-reading the actual assignments_s4/sB shows 3 of 7 DID validate strongly (2.587 / 3.284 / 14.664). The 4 failures are NOT a mis-derived offset or wrong threshold on the validated mechanism; they are 4 genuinely different gate forms the tool's fixed-offset target-byte model cannot represent: (1) variable-offset structural repeat (libpng_3949 duplicate IHDR), (2) inequality with no target byte (libpng_3970 length!=32), (3) variable deep single-byte operand (libxml2_6910 deep DTD colon), (4) a fixed-offset but corpus-ambient literal (curl_505 'pop3'). Three are decidable:false by tool reach; one (curl_505) is an honest discriminating negative.",
+    "fix_a_considered": "Re-deriving the gate offset from signature.operand_literal instead of head-consensus was considered (fix-a). It does not help: 3949/6910 operands are at VARIABLE positions (no fixed offset to pin), 3970 has no target byte at all, and 505 already pins the correct offset and genuinely under-enriches. So an offset-pinned variant cannot rescue any of the 4.",
+    "fix_b_considered": "value_distance_reached (Hamming/magnitude closure) was considered for curl_505 and libpng_3970. It is framed for a vp/vpc GRADIENT winner (winner_closer expects vp closest); here vp is the BLOCKER and the win is an I2S step-substitution, so the closure framing inverts and does not cleanly discriminate I2S-pro from VP-sufficiency. struct_size_and_token_count (joint_necessity) is for vpc-needs-both assembly depth, which this shape is not (cmplog alone resolves => not joint). Neither yields a discriminable rule for these 4, so no second hypothesis is added.",
+    "threshold_integrity": "The rule >= 1.0 is held FIXED. It validated 3 members inside the registry's validated pro band and correctly rejected 4 ill-fitting gates. Per G3 the 4 non-validated branches stay inconclusive (3 decidable:false + 1 honest rule_not_met) rather than being relabeled by widening the rule.",
+    "off_server_clarification": "libpng (3949,3970,4020) and libxml2 (6910) corpora ARE on-disk on server B and WERE scored there (libpng_4020 validated at 14.664, the other three rule_not_met). So the decidable:false verdicts above are by TOOL REACH on the gate form, explicitly NOT by missing off-server corpus."
   }
 }

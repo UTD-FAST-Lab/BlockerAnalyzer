@@ -1,0 +1,52 @@
+{
+  "shape": "i2s_vp_LWLL",
+  "n_branches": 5,
+  "shape_meaning": "code cmp,vp,vpc,naive = L,W,L,L : ONLY value_profile resolves; cmplog, value_profile_cmplog, and naive all block. => vp-PRO (CMP_MAP gradient is necessary AND sufficient where I2S alone is not) AND vpc-anti (adding the I2S CmpLog stage to VP regresses it).",
+  "label_source": "Layer-1 resolve pattern (vp resolves, all others block). The measurements below are the INDEPENDENT verification (G2): none of them reads the vp-resolves / others-block pattern that defined the shape.",
+  "hypotheses": [
+    {
+      "id": "vp_gradient_distance_climb",
+      "label": "value_profile's CMP_MAP gradient climbs a comparison-operand distance ramp toward a structural/syntactic gate state that cmplog- and naive-blocking seeds never approach",
+      "direction": "vp_pro",
+      "decidable": true,
+      "from_prior": [
+        "vp_cmpmap_gradient_structural_semantic_state",
+        "vp_cmpmap_gradient_sql_syntax_assembly"
+      ],
+      "collapse_rationale": "The two prior subtypes (harfbuzz GPOS structural-semantic-state climb; sqlite3 SQL-syntax/relational-expression assembly) are ONE mechanism observed in two domains: VP preserves inputs whose intercepted CMP operands move incrementally closer to the values guarding a deep gate (a GPOS-attachment scratch flag behind many tag/integer CMPs; a bracketed-identifier or relational-operator token behind parser/VDBE CMPs). In BOTH, the discriminating quantity is the same: how close a seed set's CMP operands get to satisfying the gate. No real-data measurement can tell 'structural state' apart from 'syntax assembly' — both are a CMP-operand-distance climb — so they collapse to one hypothesis. The token vocabulary differs per target (handled by params), the measurement does not.",
+      "measurement": {
+        "descriptor": {
+          "source": "seed_set",
+          "compute": "value_distance_reached",
+          "operand": "gate_cmp_operands",
+          "unit": "per_branch"
+        },
+        "registry_tool": null,
+        "registry_tool_rationale": "No existing tool fits. operand_enrichment (corpus_queue:byte_freq_ratio) is for FIXED-OFFSET single-value literal gates and returns no_gate_signature on these dispersed_multibyte / structural gates (data_realities: byte-alignment fails on different-sized assembly seeds). joint_necessity (seed_set:struct_size_and_token_count) is for the vpc-NEEDS-BOTH joint-assembly subtype where vpc RESOLVES; here vpc BLOCKS, so this is not a joint gate. A NEW descriptor is required.",
+        "proposed_descriptor_spec": "For the branch's gate (file:line in the card), instrument the gate-guarding CMPs and replay each seed set through FUZZ_BIN: for every intercepted CMP on the path to the blocker, record the operand-pair distance (min over the two normalizations the CMP_MAP buckets: Hamming over equal-width operands, and absolute integer difference) to a match, then take the per-seed-set minimum reached distance (closest approach) and the fraction of gate CMPs at distance 0 (satisfied). Emit per fuzzer's RESOLVING/BLOCKING seed set. Corpora exist for harfbuzz + sqlite3 (data_realities) — both targets in this shape are covered.",
+        "metrics_used": ["vp_min_distance", "naive_min_distance", "cmplog_min_distance", "vp_gate_cmp_satisfied_frac", "naive_gate_cmp_satisfied_frac"],
+        "params": {
+          "harfbuzz": {"gate_cmps": "tag/integer comparisons guarding GPOS table parse -> HB_BUFFER_SCRATCH_FLAG_HAS_GPOS_ATTACHMENT at GPOS.hh:151"},
+          "sqlite3": {"gate_cmps": "byte/keyword/operator comparisons assembling bracketed-identifier or relational-operator tokens at sqlite3.c dequote/parser/VDBE lines 31402,87188,98662,103533"}
+        }
+      },
+      "prediction": "G1: value_profile's resolving seed set reaches a STRICTLY CLOSER minimum CMP-operand distance to the gate than BOTH cmplog's and naive's blocking seed sets (vp_min_distance < cmplog_min_distance AND vp_min_distance < naive_min_distance), and satisfies a larger fraction of gate CMPs (vp_gate_cmp_satisfied_frac > naive_gate_cmp_satisfied_frac). This is discriminating: if the win were NOT a gradient climb (e.g. a single I2S literal substitution, or pure luck/edge-coverage), the blocking seeds would be just as close on average and the closest-approach distances would NOT separate by fuzzer — an I2S/naive mechanism predicts no monotone VP-toward-gate distance advantage. It can come out the other way (blocking seeds equally close => refutes vp-gradient).",
+      "rule": "vp_min_distance < cmplog_min_distance AND vp_min_distance < naive_min_distance AND vp_gate_cmp_satisfied_frac >= naive_gate_cmp_satisfied_frac + 0.2",
+      "refuted_if": "vp_min_distance >= min(cmplog_min_distance, naive_min_distance) (VP's corpus is no closer to the gate than the blockers' => no gradient climb), OR the satisfied-fraction gap < 0.2."
+    },
+    {
+      "id": "vpc_i2s_overhead_regression",
+      "label": "adding the I2S CmpLog stage to value_profile (=vpc) diverts mutation energy / dilutes the corpus and so REGRESSES the same gradient climb",
+      "direction": "vpc_anti",
+      "decidable": false,
+      "from_prior": [],
+      "undecidable_rationale": "The vpc-anti half (vpc loses despite carrying the SAME VP CMP_MAP feedback) is attributed in every member analysis to corpus-scale / per-exec-budget effects: 'the added I2S CmpLog stage and per-execution CMP buffering dilutes its corpus and per-exec budget' / 'diverts mutation effort away from the gradient'. This is NOT discriminable with real campaign data: (a) I2S is UNTAGGED in mutation_op (data_realities) so there is no per-fuzzer 'I2S diverted energy' event to count; (b) VP is a feedback, invisible in mutation_op; (c) distinguishing 'I2S overhead regressed VP' from ordinary corpus-scale run-to-run variance would need an energy/budget attribution the data does not carry. We record the hypothesis honestly but mark it decidable:false; it does not gate the shape's verdict.",
+      "measurement": null,
+      "prediction": "non-discriminable (see undecidable_rationale)",
+      "rule": null
+    }
+  ],
+  "decision_order": ["vp_gradient_distance_climb"],
+  "fallback": "inconclusive",
+  "notes": "COLLAPSED the 2 prior subtypes (vp_cmpmap_gradient_structural_semantic_state + vp_cmpmap_gradient_sql_syntax_assembly) into ONE hypothesis vp_gradient_distance_climb: both are a CMP-operand-distance climb toward a deep gate (GPOS structural state vs SQL syntax assembly), and no real-data measurement can separate 'structural state' from 'syntax assembly' — only the per-target token/gate vocabulary differs (carried in params), the measurement is identical. The load-bearing, DISCRIMINABLE claim is the vp-PRO gradient: value_distance_reached over the gate CMPs separates VP's resolving corpus (closer to the gate) from cmplog/naive blocking corpora (stalled) — independent of the resolve pattern (G2). NEW descriptor seed_set:value_distance_reached:gate_cmp_operands:per_branch (registry_tool null) — the existing operand_enrichment is fixed-offset-literal-only (these gates are dispersed_multibyte/structural; byte-align forbidden per data_realities) and joint_necessity is for the vpc-RESOLVES joint subtype (here vpc BLOCKS). The vpc-anti half (vpc loses carrying VP) is corpus-scale only and marked decidable:false: I2S is untagged so no per-fuzzer energy/overhead measurement exists (data_realities). TARGETS: harfbuzz (1 branch, GPOS.hh:151) + sqlite3 (4 branches, dequote/parser/VDBE) — both have on-disk corpora + resolving/blocking seeds, so the descriptor can score every branch. CAVEAT: the proposed value_distance_reached tool is UNBUILT — it needs gate-CMP instrumentation + seed-set replay; the orchestrator must build/register it before the arbiter can run this shape."
+}

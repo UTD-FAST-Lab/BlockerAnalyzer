@@ -7,9 +7,10 @@
       "label": "n-gram path-tuple retention lets naive_ngram4 reach deeper sequential-decode path states that plain edge coverage collapses and discards",
       "direction": "ngram_pro",
       "from_prior": ["ngram_sequential_decode_cascade_retention"],
+      "decidable": true,
       "measurement": {
         "descriptor": {"source": "seed_set", "compute": "depth_reach", "operand": "sequential_path_depth", "unit": "per_branch"},
-        "registry_tool": null,
+        "registry_tool": "depth_reach",
         "metrics_used": ["winner_depth", "loser_depth", "depth_lift"],
         "params": {
           "depth_proxy": "max sequential-decode iteration / cascade-stage index reached at the blocker function (e.g. UTF16/UTF8 decode-loop iteration count, encoding-detection if-cascade stage, content-dispatch fan depth) measured by instrumented replay of the W (naive_ngram4-resolving) vs L (naive-blocking) seed sets through FUZZ_BIN",
@@ -21,9 +22,55 @@
       },
       "prediction": "The naive_ngram4-resolving (winner) seed set reaches a strictly deeper sequential-decode path state at the blocker than the naive-blocking (loser) seed set: winner_depth > loser_depth (depth_lift >= 1.5). This is discriminating because an alternative where naive simply lacks the right LITERAL bytes (an I2S/value-substitution story, not a coverage-retention story) would predict the loser seeds reaching the SAME cascade depth but failing the terminal byte comparison (depth_lift ~ 1.0) — i.e. the gate fails at the literal, not for lack of path depth. n-gram retention predicts the loser is stalled SHALLOW (its near-miss intermediate seeds were discarded), so the loser never even arrives at the deep decode stage.",
       "rule": "depth_lift >= 1.5 AND winner_depth > loser_depth"
+    },
+    {
+      "id": "ngram_value_approach_retention",
+      "label": "n-gram path-tuple retention keeps naive_ngram4 seeds that progressively approach the gate operand VALUE (threshold magnitude), so the winner corpus lands measurably closer to the operand than the naive corpus even when both reach the same decode-comparison depth",
+      "direction": "ngram_pro",
+      "from_prior": [],
+      "decidable": true,
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "operand_literal", "unit": "per_branch"},
+        "registry_tool": "value_distance_reached",
+        "metrics_used": ["winner_closer", "distance_gap", "naive_min_distance", "winner_min_distance"],
+        "params": {
+          "winner_arm": "naive_ngram4 (resolving_seeds)",
+          "loser_arm": "naive (blocking_seeds)",
+          "operand_per_branch": {"libxml2/6887": "0x800 (numeric/inequality mode, val < 0x800 overlong-3-byte UTF-8 threshold, width 2)"},
+          "mode_note": "6887 is an inequality gate (val < 0x800) -> use the tool's numeric magnitude-gap mode, not Hamming-window mode. winner_min_distance / naive_min_distance map onto the tool's vp_*/naive_* arm slots applied to the naive_ngram4 (winner) vs naive (loser) seed sets for this single-fuzzer-pair ngram shape.",
+          "targets": ["libxml2"]
+        }
+      },
+      "prediction": "On libxml2/6887 the naive_ngram4 (winner) seed set lands measurably closer to the val<0x800 overlong threshold than the naive (loser) seed set: winner_closer=true with a non-trivial distance_gap. This is the RIGHT test (and a genuinely different mechanism than depth_reach) precisely because depth_reach came out rule_not_met here: the loser DOES reach the 3-byte-decode comparison repeatedly (L T=0 F=1730 at line 622) at the SAME depth as the winner, so path-depth does NOT separate the arms — the discriminator must be whether the retained corpus approaches the operand VALUE. ngram value-approach retention predicts the winner corpus is systematically nearer the threshold (its near-miss seeds were kept) while the loser stalls far (near-miss seeds discarded by single-edge feedback). The competing alternative — both arms sit equally near the value and the winner merely crosses by a single lucky seed — predicts winner_closer=false / distance_gap ~ 0, which would refute this hypothesis.",
+      "rule": "winner_closer == true AND distance_gap > 0"
+    },
+    {
+      "id": "ngram_flat_cascade_bom_retention",
+      "label": "n-gram path-diversity retention of near-miss UTF-8-BOM-adjacent inputs in a FLAT detection cascade (no iteration depth, no magnitude gradient) — honestly non-discriminable by any built measurement",
+      "direction": "ngram_pro",
+      "from_prior": [],
+      "decidable": false,
+      "measurement": {
+        "descriptor": null,
+        "registry_tool": null,
+        "metrics_used": [],
+        "params": {
+          "branch": "libxml2/6359",
+          "operand": "0xEFBBBF (3-byte contiguous UTF-8 BOM equality literal)",
+          "why_no_built_tool": "depth_reach returned [unmeasurable] for 6359 because xmlDetectCharEncoding is a FLAT if-cascade of magic-byte equality checks (in[0]==0xEF && in[1]==0xBB && in[2]==0xBF) — there is no decode-loop iteration or stage index to climb, so 'sequential path depth' is undefined here. value_distance_reached (Hamming mode to the 3-byte literal) could be RUN, but it cannot DISCRIMINATE the n-gram path-tuple-retention mechanism from the obvious alternative: a winner corpus that is Hamming-closer to the BOM triple is equally consistent with plain literal-presence/lucky-seeding as with path-retention — both predict winner_closer, so the test is not discriminating (fails G1). operand_enrichment (byte_freq_ratio) is an I2S cmplog-vs-naive substitution tool with no cmplog arm in this shape and the same non-discrimination problem. joint_necessity / token_count / corpus_size_ratio measure structural assembly, absent for a flat 3-byte equality gate."
+        }
+      },
+      "prediction": "DECIDABLE:FALSE — no built measurement separates n-gram path-tuple retention from literal-presence for a flat 3-byte equality cascade with neither iteration depth nor magnitude gradient. ngram_coverage is a non-local edge-tuple feedback whose retention effect is not isolable from corpus byte-composition by any tool in the registry; an honest inconclusive (G3) is the correct outcome rather than forcing a label with a non-discriminating Hamming test.",
+      "rule": null
     }
   ],
-  "decision_order": ["ngram_sequential_depth_reach"],
+  "decision_order": ["ngram_sequential_depth_reach", "ngram_value_approach_retention", "ngram_flat_cascade_bom_retention"],
   "fallback": "inconclusive",
-  "notes": "MERGE: all 4 branches (libxml2 6325 UTF16LE surrogate decode, 6359 UTF-8 BOM detection cascade, 6835 content-dispatch CDATA fan, 6887 overlong-3-byte UTF-8 decode) collapse to ONE hypothesis — their mechanism_summaries describe the identical effect (4-edge n-gram tuples turn sequential cascade/decode states into fresh map buckets, retaining near-miss seeds plain single-edge coverage drops). No real-campaign measurement could separate 'surrogate decode' from 'BOM cascade' from 'CDATA fan' as DISTINCT mechanisms — they differ only in WHICH sequential structure is being retained, not in the retention effect — so keeping them apart would be fuzzy, not discriminable. G1: the depth_lift test discriminates ngram-retention (loser stalls shallow) from a literal-substitution alternative (loser reaches same depth, fails at the byte). G2 (independence): the measurement is a depth-of-reach over the seed sets, NOT a re-statement of the naive_ngram4-resolves-naive-blocks pattern that defined the shape — it asks WHY (path depth) rather than re-confirming the resolve outcome. DATA-REALITY CAVEAT (feasibility): registry data_realities state on-disk corpora exist ONLY for curl/harfbuzz/openthread/sqlite3 — libxml2 is NOT among them, and ALL 4 branches here are libxml2. The depth_reach measurement therefore depends on the per-branch resolving_seeds + blocking_seeds being present in db/blockers.sqlite (the 286 reps carry them) and on instrumented replay through FUZZ_BIN rather than on a saved corpus_queue; if those seed sets are absent for a branch, that branch falls to fallback:inconclusive. UNBUILT TOOL: no registry tool measures sequential-decode depth_reach (joint_necessity measures struct size/token count, operand_enrichment measures byte-frequency at fixed offsets — neither captures path depth), so registry_tool=null and depth_reach (source=seed_set, compute=depth_reach, operand=sequential_path_depth, unit=per_branch) is a NEW descriptor for the orchestrator to build."
+  "data_realities_respected": [
+    "No seed_lineage:event_cooccurrence proposed — there is no cmplog/I2S arm in this shape (naive_ngram4 vs naive) and I2S/ngram are not lineage-tagged.",
+    "value_profile is not invoked; value_distance_reached here is applied to the naive_ngram4 (winner) vs naive (loser) seed sets, measuring corpus value-approach (a feedback/admission effect), not a mutator event.",
+    "All 4 branches are libxml2 (an sB-owned target, NOT on-disk on s4). Per cross-server rule 4 the tests are designed valid for ALL branches and sB arbitrates its own corpora; depth_reach already scored 2/4 via DB-resident resolving_seeds+blocking_seeds replay through the libafl-libxml2-cov image, and value_distance_reached reads the same DB-resident seed sets (W=10 confirmed present for 6359). Branches are NOT marked decidable:false merely for s4 corpus absence.",
+    "byte_freq_ratio / operand_enrichment intentionally NOT used: it is the I2S cmplog-vs-naive substitution descriptor and there is no cmplog arm here; it also fails G1 discrimination for these ngram branches."
+  ],
+  "notes": "PRIORS KEPT: ngram_sequential_depth_reach (depth_reach) carried forward VERBATIM as the first hypothesis — it confirmed >=2 branches (6325 surrogate-decode loop + 6835 content-dispatch fan), so the FROZEN confirmed branches re-validate against it. registry_tool corrected to 'depth_reach' (the tool was BUILT and used; the r0 left it null pre-build) — measurement otherwise unchanged. NEW MECHANISM (1): ngram_value_approach_retention for the UNLABELED libxml2/6887 [rule_not_met]. This is a genuinely DIFFERENT mechanism than the already-refuted depth_reach for that branch: depth_reach came out rule_not_met precisely because the loser reaches the val<0x800 comparison at the SAME depth (L F=1730), so path-depth does not separate the arms; the live discriminator is whether the RETAINED corpus approaches the operand VALUE. value_distance_reached (BUILT, numeric/inequality mode, NOT previously tried on this shape) tests exactly that and rules out the 'both arms equally near, winner crosses by luck' alternative (G1). G2 independence: it asks corpus value-approach, not the naive_ngram4-resolves/naive-blocks resolve pattern. DECIDABLE:FALSE SUB-GROUP (1): ngram_flat_cascade_bom_retention for the UNLABELED libxml2/6359 [unmeasurable]. xmlDetectCharEncoding is a FLAT 3-byte equality cascade — no iteration depth (why depth_reach was unmeasurable) and no magnitude gradient (it is an equality literal, not an inequality). The only runnable built tool (value_distance_reached Hamming mode) cannot DISCRIMINATE n-gram path-tuple retention from plain literal-presence (both predict winner-closer), so per G3 and the brief's explicit guidance for non-local ngram families this branch is honestly decidable:false rather than force-labeled. WHY 6359 != 6887: 6887 is an inequality (val<0x800) with a real magnitude gradient that value_distance can climb and that the depth test left open; 6359 is a flat equality with neither depth nor gradient, so no built test discriminates. The two confirmed branches stay on depth_reach; the two unlabeled split into one value-distance label-candidate (6887) and one honest decidable:false (6359)."
 }

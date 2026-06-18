@@ -14,7 +14,7 @@
         "registry_tool": "operand_enrichment",
         "metrics_used": ["signed_target_enrich", "decoy_enrich"],
         "params": {
-          "note": "decoy = the structural literal I2S copies in (sfnt header 00 01 00 00 + GSUB/GPOS/MATH FOURCCs at offset 0x0c for 5323/5353; Hebrew mark codepoints e.g. 0x05B7/0x05BC for 5784). target = the winner's free leading-byte / fall-through bytes."
+          "note": "decoy = the structural literal I2S copies in (sfnt header 00 01 00 00 + GSUB/GPOS/MATH FOURCCs at offset 0x0c for 5323/5353; Hebrew mark codepoints e.g. 0x05B7/0x05BC for 5784). target = the winner's free leading-byte / fall-through bytes. KEEP VERBATIM (prior-confirmed >=1 branch). NOTE for arbiter: branches 5664/5968/6253 (formerly parked in i2s_no_operand_budget_drain) ALSO score under this rule and were confirmed by it — they are decoy-substitution members in fact, not budget-drain; the prior author's pessimism about their fixed-offset operand was wrong."
         }
       },
       "prediction": "On the I2S-bearing (cmplog/vpc) corpus vs naive corpus, the decoy structural literal is ENRICHED (decoy_enrich > 0) while the winner-target byte is DEPLETED (signed_target_enrich < 0). A pro-I2S 'magic-gate' alternative would predict the opposite (signed_target_enrich > 0, the I2S arm enriches the gate-satisfying byte). A no-effect/random alternative predicts signed_target_enrich ~ 0. So a clearly NEGATIVE signed enrichment falsifiably picks anti-decoy-substitution over both.",
@@ -32,7 +32,7 @@
         "registry_tool": null,
         "metrics_used": ["corpus_size_ratio", "composition_entropy_ratio"],
         "params": {
-          "note": "NEW descriptor. corpus_size_ratio = median saved-corpus size of the I2S arm (cmplog/vpc) / non-I2S arm (naive/value_profile) per trial. composition_entropy_ratio = byte-value Shannon entropy of the I2S arm corpus / non-I2S arm corpus (homogenization => I2S arm collapses onto few values => ratio < 1). openthread HAS an on-disk corpus (data_realities). The repetitive '5c 78 30 30' run cited for 13302 is the homogenization signature.",
+          "note": "NEW descriptor. corpus_size_ratio = median saved-corpus size of the I2S arm (cmplog/vpc) / non-I2S arm (naive/value_profile) per trial. composition_entropy_ratio = byte-value Shannon entropy of the I2S arm corpus / non-I2S arm corpus (homogenization => I2S arm collapses onto few values => ratio < 1). openthread HAS an on-disk corpus (data_realities). The repetitive '5c 78 30 30' run cited for 13302 is the homogenization signature. KEEP VERBATIM (prior-confirmed). NOTE: openthread/13300 and 13302 are flagged manual_demote (stateful LinkedList op, decoy_enrich~0.08) — this hypothesis is retained as the standing mechanism for the homogenization subtype; the arbiter honors the manual demotion for those two branches.",
           "source": "corpus_queue",
           "compute": "corpus_size_ratio",
           "unit": "per_trial"
@@ -43,20 +43,61 @@
       "decidable": true
     },
     {
+      "id": "i2s_diverts_from_exact_codepoint_literal",
+      "label": "Gate is an EXACT-equality test against a short codepoint literal that the WINNER (non-I2S) corpus lands by free havoc byte mutation, while the I2S stage diverts mutation energy away from the literal so the I2S-arm corpus stalls FARTHER from it in Hamming distance",
+      "direction": "anti",
+      "from_prior": [],
+      "members": ["harfbuzz_5958_h0"],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "operand_literal", "unit": "per_branch"},
+        "registry_tool": "value_distance_reached",
+        "metrics_used": ["vp_min_distance", "vpc_min_distance", "cmp_min_distance", "naive_min_distance", "distance_gap", "winner_closer"],
+        "params": {
+          "operand_literal": "0x0E0E",
+          "operand_literal_alt": "0x0E0F",
+          "width_bytes": 2,
+          "winner_arms": ["value_profile", "naive"],
+          "loser_arms": ["cmplog", "value_profile_cmplog"],
+          "note": "GENUINELY NEW mechanism (untried here). The gate `u == 0x0E0Eu || u == 0x0E0Fu` is a fixed exact value — not a fixed-OFFSET byte literal (the codepoint can appear at any read offset, so operand_enrichment is blind), so value_distance_reached is the right tool: it slides a 2-byte window across each arm's seeds and takes the MIN Hamming distance to the operand. Discriminator here is which ARM lands closer (winner_closer over winner=naive/vp vs loser=cmplog/vpc), NOT vp-vs-cmplog. CAVEAT: width=2 triggers the short-operand chance-alignment flag; we therefore require BOTH a winner-reaches-zero AND a clear gap (not just winner_closer) so chance alignment of the loser doesn't mask the effect. harfbuzz has an on-disk corpus + DB seeds for this rep (data_realities OK)."
+        }
+      },
+      "prediction": "The WINNER arm (naive/value_profile) corpus contains a 2-byte window at Hamming distance ~0 to 0x0E0E/0x0E0F (it actually lands the literal), while the LOSER arm (cmplog/vpc) stalls at a strictly larger min distance (distance_gap > 0 with winner_closer=true). This rules out the NULL alternative 'I2S has no effect, both arms equally close' (which predicts distance_gap ~ 0) and the PRO-I2S alternative 'I2S substitutes the codepoint and gets the loser closer' (which predicts winner_closer=false / loser nearer). A genuinely NEGATIVE gap (loser farther) falsifiably isolates I2S-anti energy-diversion away from a free-byte literal. G2-clean: corpus Hamming distance to a literal is independent of the resolve outcome (a corpus can be close yet block, or far yet resolve).",
+      "rule": "winner_closer == true AND distance_gap >= 0.25 AND naive_min_distance <= 0.0",
+      "decidable": true
+    },
+    {
       "id": "i2s_no_operand_budget_drain",
-      "label": "Gate is a table-/state-machine-derived or range value with NO fixed-offset input-byte CMP operand; I2S substitution finds nothing to copy and its overhead dilutes the havoc budget that would otherwise land the codepoint by random exploration",
+      "label": "Gate is a table-/state-machine-derived, mask/range, or shaper-category value with NO fixed-offset input-byte CMP operand and NO exact value literal; I2S substitution finds nothing to copy and its overhead dilutes the havoc budget that would otherwise land the codepoint/category by random exploration",
       "direction": "anti",
       "from_prior": ["i2s_no_operand_budget_drain", "i2s_overhead_off_path_diversion"],
-      "members": ["harfbuzz_5619", "harfbuzz_5664", "harfbuzz_5968", "harfbuzz_5989", "harfbuzz_6253", "harfbuzz_5958_h0", "harfbuzz_5576"],
+      "members": ["harfbuzz_5619", "harfbuzz_5989"],
       "measurement": {
         "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
         "registry_tool": "operand_enrichment",
         "metrics_used": ["signed_target_enrich"],
         "params": {
-          "note": "These gates are derived_integer / enum_or_code / range / structural with no contiguous fixed-offset literal (operand_literal null; byte_signature unclear/single_byte/dispersed). operand_enrichment returns no_gate_signature on them (scope_limit: skips structural/non-fixed-offset gates). The 'budget drain' and 'off-path diversion' subtypes are MERGED here: no per-branch signature measurement separates 'wasted budget' from 'wasted budget routed into a deep subtree' — both predict the SAME corpus observation (no decoy enrichment, no target byte signal), so collapsing them is honest. 5958_h0 has a literal (0x0E0E/0x0E0F) but it is the WINNER's target, not an I2S decoy substituted at a fixed gate offset; I2S diverts energy rather than enriching a competing decoy, so no byte_freq_ratio test discriminates it from generic drain — placed here, not in decoy-substitution."
+          "note": "5619 = mask/range test (u & ~0xFF)==0x0E00 on a derived Unicode codepoint (byte_signature single_byte, dispersed — the target 0x0e byte has no fixed gate offset). 5989 = USE shaper halant category (use_category()==USE(H)/HVM/IS) assigned by harfbuzz machine-class TABLES from glyph properties — no input-byte literal at all. Neither has a fixed-offset literal (operand_enrichment returns no_gate_signature) NOR an exact value literal value_distance_reached could target. There is no POSITIVE corpus signature of 'budget drain' measurable from a per-branch signature — only the absence of an operand signal — and any depth/reach test would trivially read the resolve pattern (every anti branch has winner-reaches/loser-doesn't), violating G2. Per G3 we do NOT assert a mechanism on absence-of-evidence."
         }
       },
-      "prediction": "operand_enrichment returns no_gate_signature OR signed_target_enrich ~ 0 (no decoy enriched, no target depleted) — confirming there is no fixed-offset operand for I2S to act on. This is NON-DISCRIMINATING from the null/underpowered case by design: there is no positive corpus signature of 'budget drain' measurable from a per-branch signature, only the absence of an operand signal. Marked decidable:false so it falls to inconclusive rather than being asserted on absence-of-evidence.",
+      "prediction": "operand_enrichment returns no_gate_signature OR signed_target_enrich ~ 0; no built measurement yields a POSITIVE, G2-independent signature that distinguishes 'budget drain on a non-operand gate' from the null/underpowered case. Honest inconclusive.",
+      "rule": "false",
+      "decidable": false
+    },
+    {
+      "id": "i2s_off_path_subtree_diversion",
+      "label": "Branch carries no comparison operand (presence/non-null gate reached by generic table/loop traversal); the I2S stage's operand substitution diverts the loser into an EXPENSIVE SIBLING subtree (deep GPOS sanitize/coverage paths) the winner never enters, so the loser never reaches the gate",
+      "direction": "anti",
+      "from_prior": ["i2s_overhead_off_path_diversion"],
+      "members": ["harfbuzz_5576"],
+      "measurement": {
+        "descriptor": {"source": "exec_stats", "compute": "event_cooccurrence", "operand": "sibling_subtree_invocation", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": [],
+        "params": {
+          "note": "The distinguishing evidence (card 5576: loser-ONLY invocation of GPOSProxy::GPOSProxy 0-vs-189, PairPosFormat1_3::sanitize 0-vs-49, Mark*PosFormat1_2 sanitize, all W=0/L>0) is the execution count of SIBLING diversion functions, not of the branch line itself. depth_reach is BRANCH-LINE scoped: at line 1989 it would only show winner-reaches / loser-doesn't, which is the resolve pattern restated (G2 violation), NOT the diversion signature. No BUILT tool measures per-function sibling-subtree execution divergence between W and L seed sets. Building such a descriptor is feasible in principle but speculative for a single branch; per G3 we keep this honestly inconclusive rather than invent the measurement. decidable:false."
+        }
+      },
+      "prediction": "Would predict loser-blocking seeds invoke the deep GPOS sanitize functions (PairPosFormat1_3::sanitize etc.) at high count while winner-resolving seeds invoke them ~0 — but NO built tool measures sibling-subtree invocation, and the only built reach tool (depth_reach) reads the branch line itself (= resolve pattern, G2-fail). UNMEASURABLE with current tools. Falls to inconclusive.",
       "rule": "false",
       "decidable": false
     },
@@ -71,20 +112,22 @@
         "registry_tool": null,
         "metrics_used": ["median_seed_length_ratio"],
         "params": {
-          "note": "The mechanism (I2S arm holds LONGER seeds, winner needs < 128-byte truncation) is in principle seed-length measurable, BUT lcms has NO on-disk corpus (data_realities: corpora exist ONLY for curl, harfbuzz, openthread, sqlite3). No real-data measurement is available for this single lcms branch, so it cannot be tested."
+          "note": "The mechanism (I2S arm holds LONGER seeds, winner needs < 128-byte truncation) is in principle seed-length measurable, BUT lcms has NO on-disk corpus on the s4 server (data_realities: corpora exist ONLY for curl, harfbuzz, openthread, sqlite3 on s4 / lcms,libxml2,libpng,bloaty on sB). CROSS-SERVER NOTE: lcms is a server-B target — server B DOES have the lcms corpus and CAN arbitrate this branch with median_seed_length_ratio. The test is left valid (not deleted) so the owning server can score it; it is only undecidable on the server that lacks the corpus, which is a data-availability matter, not a mechanism gap."
         }
       },
-      "prediction": "Would predict median_seed_length(I2S arm) >> median_seed_length(naive arm) and naive winners below the 128-byte header minimum — but UNMEASURABLE: lcms has no corpus. Falls to inconclusive.",
+      "prediction": "Would predict median_seed_length(I2S arm) >> median_seed_length(naive arm) and naive winners below the 128-byte header minimum. Decidable on the corpus-owning server (B). On s4 (no lcms corpus) it falls to inconclusive by data availability, NOT by mechanism non-discriminability.",
       "rule": "false",
       "decidable": false
     }
   ],
   "decision_order": [
     "i2s_decoy_substitution_overfit",
+    "i2s_diverts_from_exact_codepoint_literal",
     "i2s_homogenizes_corpus_starves_state_diversity",
     "i2s_no_operand_budget_drain",
+    "i2s_off_path_subtree_diversion",
     "i2s_anchors_large_valid_blocks_truncation"
   ],
   "fallback": "inconclusive",
-  "notes": "COLLAPSE: started from 5 prior clusters, kept 2 decidable + 1 explicitly-undecidable merged hypothesis + 1 undecidable singleton. (1) DECIDABLE via operand_enrichment (anti, signed < -0.3): the 3 structural-overfit branches (5323/5353/5784) have a fixed-offset decoy literal I2S copies in (FOURCC tags / Hebrew mark codepoints), so byte_freq_ratio CAN show decoy-enrich-with-target-deplete. (2) DECIDABLE via a NEW corpus_size_ratio descriptor: the 2 openthread homogenization branches (13300/13302) have an on-disk corpus and a homogenization signature (repetitive byte runs), so corpus inflation + composition-entropy collapse is measurable. NON-DISCRIMINABLE / decidable:false: (3) the 7 no-operand branches (5619/5664/5968/5989/6253/5958_h0 + the 5576 off-path-diversion singleton MERGED in) — their gates are table/state-machine-derived, range, or enum with no fixed-offset CMP operand, so operand_enrichment returns no_gate_signature and there is no positive corpus signature of 'budget drain'; per G3 we do not assert a mechanism on absence-of-evidence, so they go inconclusive. 'budget drain' vs 'off-path diversion' are merged because no per-branch SIGNATURE measurement separates them (both = no operand signal); separating them would need exec-path/coverage-subtree profiling, not a per-branch signature. (4) lcms_2149 (truncation/anchor) is in principle seed-LENGTH measurable but lcms has NO on-disk corpus (data_realities), so it is unmeasurable and goes inconclusive. data_realities respected: no seed_lineage 'I2S event' (untagged); no byte-alignment on different-sized structural seeds (decoy test scoped to fixed-offset literal gates only); corpus-based tests scoped to harfbuzz/openthread (corpus-bearing); lcms excluded for lack of corpus. Targets covered: harfbuzz (decidable for 3 of 10), openthread (decidable for 2 of 2); lcms (0 of 1)."
+  "notes": "ROUND-1 RE-DESIGN (loop-until-dry). SUPERSET/MONOTONIC: both prior-confirmed (KEEP) hypotheses are carried VERBATIM — i2s_decoy_substitution_overfit (rule signed_target_enrich<-0.3) and i2s_homogenizes_corpus_starves_state_diversity (rule corpus_size_ratio>=1.3 AND composition_entropy_ratio<0.85) — so the 6 confirmed decoy branches and the homogenization subtype re-validate unchanged. The arbiter's reality: of the 13 decisive branches the decoy rule actually confirmed 6 (the explicit 5323/5353/5784 PLUS 5664/5968/6253, which the r0 author had wrongly parked in budget-drain:decidable=false; they carry a fixed-offset FOURCC decoy after all and score under operand_enrichment). My 5 rule_not_met targets are lcms/2149, harfbuzz/5576, 5619, 5958, 5989; openthread/13300+13302 are manual_demote and left for the arbiter.\n\nNEW DECIDABLE LABEL (1): i2s_diverts_from_exact_codepoint_literal for harfbuzz/5958_h0. This is a GENUINELY DIFFERENT mechanism than decoy-substitution (which needs a fixed-OFFSET structural literal) and than budget-drain (no literal at all): 5958's gate is an EXACT-value equality `u==0x0E0E||0x0E0F`, a free-position codepoint the WINNER lands by havoc but the I2S stage diverts AWAY from. value_distance_reached (untried here) measures min Hamming distance of each arm's corpus to that literal — G2-independent of the resolve pattern. Rule requires winner reaches distance 0 AND a clear loser gap, guarding the width=2 chance-alignment caveat. G1: rules out both the null (gap~0) and pro-I2S (loser closer) alternatives.\n\nHONEST decidable:false (G3): (a) i2s_no_operand_budget_drain now holds ONLY 5619 (mask/range on derived codepoint, dispersed single byte, no fixed offset) and 5989 (USE shaper TABLE-derived halant category, no input literal at all) — neither has a fixed-offset literal (operand_enrichment blind) nor an exact value literal (value_distance_reached blind), and the only other reach signal would re-read the resolve pattern (G2 violation). No positive, independent signature exists, so per G3 they stay inconclusive. (b) i2s_off_path_subtree_diversion (harfbuzz/5576): the real discriminating evidence is loser-only invocation of deep GPOS sanitize SIBLING functions (W=0/L>0) — that is sibling-subtree execution divergence, which NO built tool measures; depth_reach is branch-line scoped (would just restate resolve = G2-fail). Kept as a NAMED honest-inconclusive (distinct from generic drain) rather than inventing a speculative single-branch descriptor. (c) i2s_anchors_large_valid_blocks_truncation (lcms/2149): seed-length measurable in principle but lcms has no corpus on s4 — CROSS-SERVER: server B owns lcms and can score median_seed_length_ratio; left valid so the owning server arbitrates, undecidable only by data availability, not mechanism.\n\nMERGE/COLLAPSE rationale: r0 lumped 5664/5968/6253 + 5958_h0 + 5576 + 5619 + 5989 all into one budget-drain:false bucket. The arbiter showed 5664/5968/6253 are really decoy members; I further SPLIT OUT 5958_h0 (now decidable via value_distance) and NAMED 5576's off-path-diversion separately (distinct mechanism, honestly unmeasurable) — leaving budget-drain as the genuinely-non-discriminable {5619,5989}. Fewer, sharper hypotheses; every split is backed by a different measurement or an explicit no-tool admission.\n\ndata_realities respected: no seed_lineage 'I2S event' (I2S untagged); no byte-alignment on different-sized structural seeds; value_distance_reached scoped to harfbuzz (on-disk corpus + DB seeds); corpus/seed tests scoped to corpus-bearing targets; lcms deferred to its owning server; value_profile treated as a feedback (its effect read via corpus value-distance, never a lineage gradient event)."
 }

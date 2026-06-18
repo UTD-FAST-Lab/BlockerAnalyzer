@@ -195,14 +195,35 @@ python3 bench/build_dataset.py        # merges assignments_*.json across servers
 `inconclusive`, so the output `bench/dataset.jsonl` is the combined benchmark.
 Push your `assignments_sB.json` back so s4 can also rebuild the merged set.
 
-## 7. (Optional, LAST) re-design only RESISTANT shapes
+## 7. Per-round re-arbitration — the loop-until-dry labeling loop (REQUIRED each round)
 
-Only after seeds + tools are complete: if a shape comes back with a *wall* of
-inconclusive (menu likely missed a mechanism), re-invoke the
-`evidence-test-author` agent on that shape with the inconclusive branches'
-evidence (spec §8.4, bounded ≤2 rounds). **Do NOT chase 100% assignment** —
-honest `inconclusive` (the test ran, mechanism didn't hold) and `decidable:false`
-(corpus-scale / non-discriminable) are correct outcomes (guardrail G3).
+The design re-invocation is **driven by s4** (it re-authors the shared
+`evidence_test.json` files); your job each round is to **re-arbitrate YOUR targets
+against the new tests and push back**, so the merged residual is consistent before
+the next round. The loop runs ≤3 re-design rounds (round 0 = original design,
+rounds 1–3 = re-design), stopping when a round adds no new labels. See spec §8.4.
+
+**Each round, when s4 has pushed redesigned `evidence_test.json` files:**
+1. `git pull` (gets the new/changed `evidence_test.json` + the `evidence_test.r0.json`
+   round-0 backups). s4 will tell you exactly which shapes changed.
+2. `export BENCH_SERVER=sB BENCH_ONDISK=lcms,libxml2,libpng,bloaty`
+3. Make sure your operand-enrichment cache is current (§4) — several re-invoke
+   hypotheses use `operand_enrichment`.
+4. Re-arbitrate the changed shapes: `python3 bench/arbitrate.py --shape <S>` for each
+   (or `--all`).
+5. **REGRESSION CHECK (critical — the monotonic-superset invariant).** Diff the new
+   `assignments_sB.json` against the previous one. If ANY branch went **labeled →
+   inconclusive**, the re-design dropped a hypothesis that had validated it on YOUR
+   target. Restore that hypothesis from the shape's `evidence_test.r0.json` into
+   `evidence_test.json` and re-arbitrate. Never silently lose a label.
+6. Commit + push `assignments_sB.json` (and any refreshed `csvs/*` caches you want
+   shared). s4 then `git pull` → `build_dataset.py` → computes the true residual →
+   next round.
+
+**Do NOT chase 100% assignment** — honest `inconclusive` (the test ran, mechanism
+didn't hold) and `decidable:false` (corpus-scale / non-discriminable) are correct
+outcomes (guardrail G3). The per-round label-gain curve + the honest residual ARE
+the result, not a 100% label rate.
 
 ## Gotchas
 - The shared `step5a_new_v3/*/signatures.json` lists BOTH servers' branches; the

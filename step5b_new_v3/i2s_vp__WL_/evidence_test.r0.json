@@ -1,0 +1,43 @@
+{
+  "shape": "i2s_vp__WL_",
+  "n_branches": 1,
+  "hypotheses": [
+    {
+      "id": "vp_gradient_value_distance",
+      "label": "value_profile's CMP_MAP gradient closes the value-distance to the case constants that vpc does not reach",
+      "direction": "vp_pro",
+      "from_prior": ["i2s_vp__WL__single"],
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "case_constants", "unit": "per_branch"},
+        "registry_tool": null,
+        "metrics_used": ["vp_min_distance", "vpc_min_distance", "distance_gap"],
+        "params": {
+          "case_constants": ["0x0905", "0x0946", "0x0949", "0x094A", "0x094B"],
+          "operand_width_bytes": 2,
+          "gate_offset_hint": "16-bit Devanagari codepoint at buffer->cur(1).codepoint feeding switch at hb-ot-shaper-vowel-constraints.cc:68",
+          "w_seed_role": "value_profile-resolving",
+          "l_seed_role": "value_profile_cmplog-blocking"
+        }
+      },
+      "prediction": "The value_profile-resolving (W) seed set reaches a smaller minimum Hamming/numeric distance to the 0x0905/0x094X case constants than the value_profile_cmplog-blocking (L) seed set, i.e. distance_gap = vpc_min_distance - vp_min_distance > 0. G1: this is discriminating because a NON-gradient mechanism (e.g. structural-assembly joint or I2S literal substitution) predicts NO systematic VP-vs-VPC distance gap at this 16-bit value gate (vpc, which also runs CMP_MAP plus I2S, would reach the constants at least as closely) — so the alternative predicts distance_gap <= 0. G2: the metric is the value-distance the corpus reaches at the codepoint operand, independent of the resolve/block pattern that defined the shape.",
+      "rule": "vp_min_distance < vpc_min_distance AND distance_gap >= 2"
+    }
+  ],
+  "undecidable": [
+    {
+      "id": "vpc_anti_i2s_overhead_churn",
+      "label": "vpc blocks because the added I2SRandReplace overhead and corpus churn dilute the shared CMP_MAP gradient",
+      "direction": "vpc_anti",
+      "decidable": false,
+      "reason": "Corpus-scale / mutator-efficiency claim. The anti half attributes vpc's failure to I2S per-execution overhead and corpus churn degrading gradient progress. data_realities forbid this: I2S is NOT tagged in mutation_op (the havoc vocabulary is byte-identical across all 4 fuzzers) and value_profile is a FEEDBACK invisible in lineage, so there is no seed_lineage:event_cooccurrence 'I2S overhead/churn event' to measure. Overhead/churn vs gradient progress cannot be separated with the available seed_set/lineage data — only the corpus's reached value-distance is observable, which is what the vp_pro hypothesis already tests. Left to fallback:inconclusive."
+    }
+  ],
+  "decision_order": ["vp_gradient_value_distance"],
+  "fallback": "inconclusive",
+  "data_realities_respected": [
+    "Uses source=seed_set value_distance_reached on the codepoint operand, NOT byte_freq_ratio (byte-alignment is unreliable across seeds, and value_distance is the gradient-appropriate metric per data_reality 2/3).",
+    "Does NOT propose any seed_lineage:event_cooccurrence 'I2S event' or 'gradient event' (forbidden by data_realities 1-2) — the vpc-anti overhead/churn claim is therefore marked decidable:false rather than given a measurement.",
+    "harfbuzz HAS on-disk corpus + resolving/blocking seeds in db/blockers.sqlite (data_realities 4-5), so the seed_set descriptor can score this branch."
+  ],
+  "notes": "SINGLETON shape (1 branch: harfbuzz/6010, hb-ot-shaper-vowel-constraints.cc:68, switch on cur(1).codepoint over the Devanagari case constants). Load-bearing discriminable claim is the vp-PRO gradient: value_profile's CMP_MAP gradient reaches a closer value-distance to the 16-bit case constants than value_profile_cmplog. No registry tool fits: operand_enrichment is fixed-offset byte_freq (data_reality forbids byte-alignment for the gradient-distance question) and joint_necessity is structural token-count (this is a single nested value gate, not multi-token assembly). Hence registry_tool:null + a NEW seed_set:value_distance_reached:case_constants:per_branch descriptor for the orchestrator to build. TARGET-SPECIFIC knob: case_constants = the 0x0905/0x094X Devanagari codepoints (analogous to joint_necessity's --tokens being font-tags/SQL-keywords). UNBUILT TOOL: value_distance_reached does not yet exist in bench/tools/ — must be built to compute the minimum numeric/Hamming distance from a seed set's reached operand values to the case-constant set. The vpc-anti corpus-scale half is decidable:false (see undecidable[]); the single vp_pro hypothesis carries the verdict, fallback inconclusive if distance_gap is not positive."
+}

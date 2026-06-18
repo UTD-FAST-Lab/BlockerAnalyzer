@@ -247,11 +247,48 @@ Per shape (worked example `LW_W`, 7 candidates):
 3. **Arbiter** runs per branch → `assignments.json`: each branch → one of the ~3 /
    `refuted` / `inconclusive`. Refutation reassigns *within the menu* first
    (try the next candidate's rule); only if no candidate fits → `inconclusive`.
-4. **Inconclusive re-round (bounded, per-shape, ≤2).** If a shape returns a wall of
-   `inconclusive`, re-invoke the design agent on *that shape only*, feeding the
-   inconclusive branches' evidence ("here's what didn't fit — propose a new/revised
-   candidate + sharper rule"). Output → `round2/`. Whatever stays inconclusive after
-   the budget is flagged for manual review (G3). Re-round is never per-branch.
+4. **Inconclusive re-rounds — the loop-until-dry labeling loop (bounded, ≤3 rounds).**
+   The deliverable is grown by *re-invoking the design agent on shapes that still
+   carry unlabeled decisive branches*, until a round produces no new confirmed
+   labels (or 3 rounds elapse). Numbering: **round 0** = the original design pass;
+   **rounds 1–3** = re-design passes. Each round:
+
+   - **Selection (no threshold).** Re-design **every shape with ≥1 unlabeled
+     decisive branch** — NOT a "high unlabeled %" heuristic. Rationale: you cannot
+     tell *a priori* whether an unlabeled branch hides an undiscovered mechanism or
+     is genuinely non-discriminable — you find out by trying, and convergence (not a
+     selection filter) is what bounds it. *Exception:* a branch unlabeled **only**
+     because of `seed_starved` routes to seed re-bisection, not re-design (the design
+     agent has no seeds to measure).
+   - **Standardized prompt.** `tools/build_reinvoke_prompt.py --shape <S>` assembles
+     the re-invoke prompt deterministically from the shape's prior `evidence_test.json`
+     + the per-branch confirmed/unlabeled split. A re-invoke prompt differs from a
+     first-invoke: it hands the agent the prior (refuted) hypotheses, the
+     confirmed-vs-unlabeled split, and the loop invariants. (The agent *definition*
+     is unchanged — it already accepts a prior hint.)
+   - **Invariants.** (i) **Target = unlabeled branches only**; already-confirmed
+     branches are FROZEN. (ii) **Monotonic superset** — the new `evidence_test.json`
+     MUST retain every prior hypothesis that confirmed ≥1 branch, so the stateless
+     arbiter re-validates them (never lose a label; no silent relabel — renames are
+     deferred to the Pass-C manual merge). (iii) **Novelty (G1)** — new hypotheses
+     must be *genuinely different* mechanisms, not a refuted one re-tested with a
+     relaxed threshold (that is chasing-100%, forbidden). (iv) **Honest
+     non-discriminable (G3)** — `decidable:false`/`inconclusive` for a sub-group no
+     built tool can discriminate is a CORRECT outcome; do not force labels.
+   - **Enforce the freeze at merge.** After re-arbitrating, diff against the prior
+     dataset: if any branch regressed labeled→inconclusive (the agent dropped a
+     still-working hypothesis), restore that round-0 hypothesis into the test and
+     re-arbitrate.
+   - **Cross-server (per round).** `evidence_test.json` is shared; the arbiter scores
+     only `BENCH_ONDISK` targets, so **both servers must re-arbitrate each round's
+     redesigned shapes before the next round** — else the merged residual mixes
+     round-N (one server) with round-0 (the other) and the next round's selection is
+     wrong. See `docs/OTHER_SERVER_TODO.md` §7.
+   - **Stop / report.** Stop when a round adds no new labels (convergence) or at
+     round 3. The per-round label-gain curve (round 1 ≫ round 2 ≫ round 3 → plateau)
+     is the reported rigor artifact; the residual at convergence is the honest
+     non-discriminable tail. Identical mechanism categories produced across shapes or
+     rounds are merged in the manual Pass-C review (G3), not deduped during re-invoke.
 
 ---
 

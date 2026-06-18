@@ -1,0 +1,57 @@
+{
+  "shape": "i2s_vp_WL_L",
+  "shape_semantics": "cmp=W, vp=L, vpc=_, naive=L -> cmplog (I2S) resolves; value_profile AND naive block; value_profile_cmplog non-decisive. i2s-PRO where the value_profile GRADIENT does NOT help: the resolving move is exact-literal substitution, not Hamming-gradient climbing. The G1 discriminator vs the vp-gradient families is that value_profile, with full CMP_MAP feedback, still BLOCKS here.",
+  "n_branches": 7,
+  "hypotheses": [
+    {
+      "id": "i2s_exact_literal_constant_gate",
+      "label": "cmplog plants an exact fixed-offset literal/magic constant the VP gradient cannot climb to",
+      "direction": "i2s_pro",
+      "from_prior": ["i2s_wl_l_literal_constant_gate"],
+      "members": ["bloaty_34", "curl_152", "harfbuzz_5483", "harfbuzz_5494", "harfbuzz_5562"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "note": "fixed-offset VALUE gate; target byte(s) = the intercepted literal at the gate offset, decoy = a blocking-seed value at the same offset",
+          "per_branch_gate": {
+            "curl_152": "ASCII 'Content-Type:' literal (43 6f 6e 74 65 6e 74 2d 54 79 70 65 3a) at the header offset",
+            "harfbuzz_5483": "16-bit big-endian format field == 0x0004",
+            "harfbuzz_5494": "format field in {1,2,3} plus 'MATH' FOURCC tag",
+            "harfbuzz_5562": "'GPOS'/'GSUB' FOURCC + 'dflt' script tag"
+          }
+        }
+      },
+      "prediction": "cmplog's saved corpus is enriched in the TARGET literal byte(s) at the gate offset relative to naive (signed_target_enrich > 0), because I2SRandReplace plants the intercepted constant. A pure value_profile gradient mechanism would instead drive the byte toward the target by Hamming distance and would show no cmplog-specific literal enrichment; the shape already records that value_profile BLOCKS (it is an L), so the literal is NOT gradient-reachable. This rules out the vp-gradient alternative: if the operand were gradient-climbable, value_profile would resolve (be a W) and naive's corpus would drift toward the target rather than staying at decoy values.",
+      "rule": "signed_target_enrich >= 1.0 AND decoy_enrich <= 0.0",
+      "g2_independence": "operand_enrichment compares cmplog-vs-naive CORPUS byte composition at the gate offset; it does not consult the vpc/vp resolve pattern that defined the shape, so it is independent of the label source."
+    },
+    {
+      "id": "i2s_derived_signed_operand_construction",
+      "label": "cmplog constructs a DERIVED negative/range value across parser-routing bytes (no stored literal)",
+      "direction": "i2s_pro",
+      "from_prior": ["i2s_wl_l_derived_signed_operand"],
+      "members": ["curl_289", "curl_291"],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "metrics_used": ["signed_target_enrich"],
+        "params": {
+          "note": "NO fixed literal: operand_literal=null, operand_width_bytes=null, byte_signature=unclear. The winning value is a derived signed integer (%d arg < 0) assembled from multi-field tag/colon/path/numeric bytes, NOT a single intercepted constant at a fixed offset."
+        }
+      },
+      "prediction": "operand_enrichment finds NO fixed-offset target signature for these branches and returns no_gate_signature (per its scope_limits: it skips gates with no fixed literal). The ABSENCE of a clean per-offset literal enrichment, combined with the same i2s-pro shape (cmplog W, vp+naive L), distinguishes derived-operand construction from exact-literal substitution: a stored-literal mechanism would yield a positive signed_target_enrich at a fixed offset, which this branch lacks.",
+      "rule": "no_gate_signature == true (operand_enrichment returns no fixed-offset literal); hypothesis confirmed by the diagnostic ABSENCE of literal enrichment under the i2s-pro shape, falling to inconclusive if any clean fixed-offset literal IS found (would reclassify to i2s_exact_literal_constant_gate)",
+      "g2_independence": "the no_gate_signature determination is a property of the gate's byte structure (whether a fixed-offset target literal exists), independent of the resolve pattern."
+    }
+  ],
+  "decision_order": ["i2s_exact_literal_constant_gate", "i2s_derived_signed_operand_construction"],
+  "fallback": "inconclusive",
+  "data_realities_respected": [
+    "No seed_lineage 'I2S event' descriptor proposed (I2S is untagged in mutation_op) -- the discriminator is corpus byte-composition enrichment, not a lineage event.",
+    "No value_profile 'gradient event' descriptor proposed (VP is an invisible CMP_MAP feedback) -- the claim that VP does NOT help rests on the shape's own vp=L plus the exact-literal operand_kind, not on a measured gradient event.",
+    "operand_enrichment needs an on-disk corpus and >=3 W + >=3 L seeds: SCORABLE only for curl + harfbuzz here; bloaty_34 has NO on-disk corpus (bloaty is not in {curl,harfbuzz,openthread,sqlite3}) so it CANNOT be enrichment-scored and carries to fallback inconclusive on the measurement, even though its mechanism_summary clearly matches the literal hypothesis."
+  ],
+  "notes": "MERGES: kept the two prior clusters as the two surviving hypotheses -- they ARE discriminable by real data: the literal branches present a fixed-offset target byte that operand_enrichment can score (signed_target_enrich > 0), while the derived-operand branches (curl_289, curl_291) have operand_literal=null / byte_signature=unclear and return no_gate_signature. The measurement tool itself separates them, so no further collapse. TARGETS scorable by operand_enrichment: curl_152, harfbuzz_5483, harfbuzz_5494, harfbuzz_5562 (literal hyp); curl_289, curl_291 (derived hyp, scored by ABSENCE). CAVEATS: (1) bloaty_34 has no on-disk corpus -> not enrichment-scorable, parks at inconclusive despite a textbook ELF-magic literal mechanism; (2) bloaty_34 is also a partial DIRECTIONAL twist -- it keeps the ELF magic (pro) at offsets 0x00-0x03 but ESCAPES the EI_DATA switch (the winning byte at 0x05 must NOT equal case labels), so a single signed_target_enrich at the switch offset would read ANTI there; the literal-pro signal lives at the magic offset, not the switch offset; (3) the 'vp does not help' claim is asserted from the shape (vp=L) + exact-literal operand_kind, NOT independently measured -- real data here cannot positively distinguish 'VP could not climb' from 'VP did not get the chance', because VP is an unobservable feedback; this is the honest discrimination ceiling for the WL_L shape and is exactly why the operand-enrichment cmplog-vs-naive contrast (not a VP contrast) is the load-bearing test."
+}

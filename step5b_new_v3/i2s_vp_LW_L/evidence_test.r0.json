@@ -1,0 +1,67 @@
+{
+  "shape": "i2s_vp_LW_L",
+  "shape_decode": "cmp=L, vp=W, vpc=_, naive=L : value_profile resolves; cmplog AND naive block; value_profile_cmplog non-decisive => a BARE VP CMP_MAP operand-distance gradient that I2S substitution (cmplog) AND blind havoc (naive) both fail to climb. The gradient steers the corpus across a comparison the I2S mutator cannot spell in one splice and edge-feedback cannot ratchet.",
+  "n_branches": 7,
+  "hypotheses": [
+    {
+      "id": "vp_gradient_assembles_multibyte_literal",
+      "label": "value_profile-resolving seeds reach a multi-byte operator/keyword/structural LITERAL strictly closer than cmplog-blocking AND naive-blocking seeds; the operand is not a single spliceable constant, so I2S stalls and naive gets no gradient while the CMP_MAP distance bucket ratchets a prefix/Hamming approach to the literal",
+      "direction": "vp_pro",
+      "from_prior": ["vp_cmpmap_literal_assembly_gradient"],
+      "measurement": {
+        "descriptor": {
+          "source": "seed_set",
+          "compute": "value_distance_reached",
+          "operand": "multibyte_literal",
+          "unit": "per_branch"
+        },
+        "registry_tool": null,
+        "registry_tool_note": "No existing tool fits. operand_enrichment (corpus_queue:byte_freq_ratio:target_vs_decoy:per_gate_offset) measures fixed-offset single-byte target/decoy presence and would mislabel a graded partial-match prefix climb as a binary miss; it also assumes a shared fixed offset, which fails here because W and L seeds differ in size (data_realities #3). joint_necessity measures struct size/token count, not operand value distance. Propose / reuse the NEW descriptor seed_set:value_distance_reached:multibyte_literal:per_branch (shared with other vp-gradient shapes, e.g. i2s_vp_L_W_): for each branch locate the gate operand window in each seed (scan plausible offsets), compute per-seed MINIMUM byte-distance to the target literal (sum of per-byte |seed_byte - target_byte| over the operand_width window, min over offsets; for conjunctive/dispersed cascades = count of cascade bytes unmatched at the best-aligned occurrence), then take the median over the value_profile-RESOLVING seed set (vp_dist), the cmplog-BLOCKING seed set (cmp_dist), and the naive-BLOCKING seed set (naive_dist). Report lit_dist_gap = min(cmp_dist, naive_dist) - vp_dist (positive => vp strictly closer than BOTH losers) and vp_dist_frac = vp_dist / operand_width (0 = exact literal reached, 1 = max distance).",
+        "metrics_used": ["vp_dist", "cmp_dist", "naive_dist", "lit_dist_gap", "vp_dist_frac"],
+        "params": {
+          "operands_per_branch": {
+            "lcms_2141": "scnr (73 63 6e 72, 4-byte DeviceClass FOURCC at offset 0x0c-0x0f; decoy is mntr=6d 6e 74 72, so a fixed-offset 4-byte literal target)",
+            "libxml2_6756": "<![CDATA[ (9-byte contiguous opener literal; distance over the CMP6 'CDATA[' + CMP9 window, min over offsets)",
+            "sqlite3_14438": ">> (3e 3e, two adjacent shift-operator bytes embedded in a SELECT expression; distance = unmatched-bytes of the best '>>' adjacency occurrence)",
+            "sqlite3_14777": "comparison-operator token class (>=, <=, =, -, /); distance = min over the operator literal set of unmatched bytes at best occurrence (token-class membership, dispersed)",
+            "sqlite3_15242": ">= (3e 3d, two adjacent bytes forming TK_GE; distance = unmatched bytes of best '>=' adjacency)",
+            "sqlite3_15515": "= (3d) immediately after '>'/'<'; distance = (1 if no '>'/'<' present) + |second_byte - 0x3d| at the best operator-adjacent position"
+          },
+          "distance_metric": "per_byte_abs_sum_min_over_offsets (contiguous literals: lcms_2141, libxml2_6756); adjacency literals (sqlite3 >>, >=, =-after-operator): unmatched-bytes of best adjacency occurrence; token-class (sqlite3_14777): min unmatched-bytes over the operator literal set"
+        }
+      },
+      "prediction": "value_profile-resolving seeds sit CLOSE to the multi-byte literal (vp_dist_frac low) while BOTH cmplog-blocking and naive-blocking seeds sit FAR (cmp_dist, naive_dist high), so lit_dist_gap > 0 by a clear margin. DISCRIMINATING vs I2S substitution: if this were ordinary single-literal I2S, cmplog's I2S mutator would splice the constant and its blocking seeds would NOT be uniformly far -- cmp_dist would be near 0 on some seeds (substitution landed) or bimodal, collapsing lit_dist_gap toward 0. DISCRIMINATING vs naive luck: naive_dist far confirms blind havoc never assembled the literal. The signature of a gradient-needed multi-byte gate is BOTH losers clustered at intermediate/far distance (climbed partway but never exact) while only vp reaches near-zero -- ruling out both the I2S-substitution and the naive-found-it-anyway alternatives.",
+      "rule": "lit_dist_gap >= 1.0 AND vp_dist_frac <= 0.34 AND cmp_dist > vp_dist AND naive_dist > vp_dist",
+      "rule_note": "lit_dist_gap >= 1.0 = vp at least one full byte-equivalent closer than the NEARER of the two losers; vp_dist_frac <= 0.34 = vp reaches within ~1 byte of a multi-byte target on median; the two strict-ordering clauses enforce vp closer than cmplog AND naive separately. All over the NEW named metrics only."
+    },
+    {
+      "id": "vp_gradient_climbs_numeric_threshold",
+      "label": "value_profile-resolving seeds drive a derived NUMERIC field past an inequality/range threshold; there is no exact literal to splice, so distance is the MAGNITUDE GAP to crossing the threshold -- vp closes it monotonically while cmplog (no single constant to substitute) and naive (no gradient) stall below the bound",
+      "direction": "vp_pro",
+      "from_prior": ["vp_cmpmap_numeric_threshold_gradient"],
+      "measurement": {
+        "descriptor": {
+          "source": "seed_set",
+          "compute": "value_distance_reached",
+          "operand": "numeric_threshold",
+          "unit": "per_branch"
+        },
+        "registry_tool": null,
+        "registry_tool_note": "No existing tool fits and this is a DISTINCT operand kind from the literal-assembly hypothesis: an inequality/range gate has no exact target operand, so per-byte literal distance is meaningless. Propose / reuse the NEW descriptor seed_set:value_distance_reached:numeric_threshold:per_branch: for each branch parse the derived numeric field from each seed (same parser as the gate: e.g. _cmsReadUInt32Number big-endian u32 for the TagCount field) and compute the signed MAGNITUDE GAP to the threshold (threshold - field_value, clamped at 0 once crossed). Take the median over the value_profile-RESOLVING set (vp_gap), cmplog-BLOCKING set (cmp_gap), naive-BLOCKING set (naive_gap). Report mag_gap_lift = min(cmp_gap, naive_gap) - vp_gap (positive => vp closer to / past the threshold than both losers) and vp_crossed_frac = fraction of vp-resolving seeds with field_value > threshold.",
+        "metrics_used": ["vp_gap", "cmp_gap", "naive_gap", "mag_gap_lift", "vp_crossed_frac"],
+        "params": {
+          "operands_per_branch": {
+            "lcms_2446": "TagCount vs MAX_TABLE_TAG (4-byte big-endian u32 parsed by _cmsReadUInt32Number at cmsio0.c:826, compared > MAX_TABLE_TAG at line 827; gap = MAX_TABLE_TAG + 1 - TagCount, clamped at 0 once crossed; MAX_TABLE_TAG resolved from the lcms build header)"
+          },
+          "threshold_source": "source_cfg / build header (MAX_TABLE_TAG constant); field parsed with the same big-endian width as the gate"
+        }
+      },
+      "prediction": "value_profile-resolving seeds carry TagCount AT or ABOVE the threshold (vp_crossed_frac high, vp_gap ~ 0) while cmplog-blocking and naive-blocking seeds stay below (cmp_gap, naive_gap > 0), so mag_gap_lift > 0. DISCRIMINATING vs literal substitution: a threshold gate has no single constant for I2S to splice -- ANY value above the bound resolves -- so cmplog cannot win by substitution and its seeds remain bounded below, exactly distinguishing this from the literal-assembly hypothesis (where the discriminator is per-byte literal distance, not magnitude). A null result (cmp_gap ~ vp_gap, or vp_crossed_frac low) would refute the gradient-climb story.",
+      "rule": "vp_crossed_frac >= 0.5 AND mag_gap_lift > 0 AND cmp_gap > vp_gap AND naive_gap > vp_gap",
+      "rule_note": "vp_crossed_frac >= 0.5 = a median vp-resolving seed actually crosses the threshold; mag_gap_lift > 0 with both strict-ordering clauses = vp magnitude-closer than cmplog AND naive. Magnitude-gap metric only, no per-byte literal distance."
+    }
+  ],
+  "decision_order": ["vp_gradient_climbs_numeric_threshold", "vp_gradient_assembles_multibyte_literal"],
+  "fallback": "inconclusive",
+  "notes": "DISCOVER + COLLAPSE: the 7 branches describe ONE shared technique-effect (a bare VP CMP_MAP operand-distance gradient that cmplog's I2S substitution AND naive's edge feedback both fail to climb) but split into TWO discriminable gate SHAPES that need different distance metrics, so they are kept as two hypotheses with a single shared descriptor compute (value_distance_reached) parameterized by operand kind. (1) LITERAL-ASSEMBLY (6 branches: lcms_2141 'scnr' FOURCC, libxml2_6756 '<![CDATA[' opener, sqlite3_14438 '>>', sqlite3_15242 '>=', sqlite3_15515 '=' adjacency, sqlite3_14777 operator token-class) -- distance is per-byte literal/prefix distance to an exact multi-byte target. (2) NUMERIC-THRESHOLD (1 branch: lcms_2446 TagCount > MAX_TABLE_TAG, inequality_or_range, operand_kind=derived_integer) -- there is NO exact operand to splice, so distance is the MAGNITUDE GAP to crossing the bound; per-byte literal distance is undefined here. This is exactly the prior subtype split (vp_cmpmap_literal_assembly_gradient vs vp_cmpmap_numeric_threshold_gradient) and the two ARE discriminable: the literal-assembly rule fails on a threshold gate (no fixed target byte pattern) and the threshold rule fails on a literal gate (a literal has no monotone magnitude to cross). WITHIN the literal group, NO real-campaign measurement separates 'contiguous FOURCC' from 'adjacency operator' from 'dispersed token-class' -- they all reduce to 'how close did the seed set get to the multi-byte target?', so splitting them would be fuzzier, not sharper; collapsed to one. DECISION_ORDER tries the numeric-threshold rule FIRST (it is the narrower, operand-specific test that fires only on lcms_2446); the literal rule catches the rest; anything matching neither falls to fallback=inconclusive. DATA_REALITIES honored: value_profile is a FEEDBACK invisible in mutation_op (data_realities #1,#2), so BOTH tests measure what the corpus REACHES (operand value distance / magnitude), never a lineage 'gradient event'; W vs L seeds differ in size (data_realities #3), so NO byte_freq_ratio fixed-offset alignment -- value_distance_reached scans for the best-aligned window per seed. UNBUILT-TOOL CAVEAT: registry_tool=null for both -- seed_set:value_distance_reached:multibyte_literal:per_branch and seed_set:value_distance_reached:numeric_threshold:per_branch are NOT yet built; the orchestrator must implement the min-over-offsets per-byte literal distance (incl. adjacency + token-class variants) and the threshold-field parser (same width/endianness as the gate) before the arbiter can score. CORPUS/SEED COVERAGE: on-disk corpora exist only for curl/harfbuzz/openthread/sqlite3 (data_realities #4), so of these 7 only the 4 sqlite3 branches have on-disk corpora; lcms_2141, lcms_2446, libxml2_6756 must be scored from db/blockers.sqlite resolving_seeds + blocking_seeds (the 286 reps carry them, data_realities #5). NOTE the bare-vp shape needs THREE seed sets (vp-resolving W, cmplog-blocking L, naive-blocking L) -- both losers are scored separately so the gradient must beat I2S AND blind havoc, a stronger G1 test than the vpc shapes (which compare vpc against a single I2S baseline). WEAK FITS: sqlite3_14777 (token-class operand, no single literal) is the loosest literal fit -- its 'distance' is min unmatched-bytes over an operator SET and is the most likely to land in fallback=inconclusive. TARGETS in this shape: lcms, libxml2, sqlite3. G2 INDEPENDENCE: every metric is operand value distance / magnitude gap in the seed sets, computed independently of the value_profile-resolves pattern that defined the shape."
+}

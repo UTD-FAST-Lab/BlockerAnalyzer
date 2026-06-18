@@ -1,43 +1,73 @@
 {
   "shape": "i2s_vp__WL_",
   "n_branches": 1,
+  "label_source": "Layer-1 resolve pattern cmp,vp,vpc,naive = _,W,L,_ : value_profile RESOLVES (W), value_profile_cmplog BLOCKS (L), cmplog + naive non-decisive. The two involved fuzzers (vp winner, vpc loser) share the SAME CMP_MAP gradient feedback; the only technique delta is that vpc ALSO runs the I2S input-to-state substitution mutator. The shape's Layer-1 attribution is therefore 'adding I2S to a VP gradient HURTS here' (vp-pro / vpc-anti). This test is the INDEPENDENT real-data verification (G2) of HOW value_profile's unburdened gradient out-resolves the I2S-burdened vpc on the nested 16-bit Devanagari codepoint switch.",
+  "round": 2,
+  "round0_refuted": "Round-0 bet the whole shape on ONE story: VP's gradient closes scalar value-DISTANCE to the case constants (measured via a NEW value_distance_reached descriptor: vp_min_distance << vpc_min_distance, rule distance_gap>=2). The deterministic arbiter returned UNMEASURABLE for harfbuzz/6010: it could not extract a fixed-offset scalar gate operand on this branch despite seeds being present. Re-reading the signature confirms WHY -- the gate is NOT a scalar literal-distance compare: it is a switch on buffer->cur(1).codepoint requiring the 0x0905-THEN-0x094X codepoint PAIR to be assembled at adjacent glyph indices (byte_signature=dispersed_multibyte), with the operand sitting at a VARIABLE glyph index, not a fixed byte offset. A residual-Hamming-to-one-operand metric mis-models an assembly/co-location gate. The scalar-distance-closure mechanism and its value_distance_reached descriptor are NOT re-proposed here.",
   "hypotheses": [
     {
-      "id": "vp_gradient_value_distance",
-      "label": "value_profile's CMP_MAP gradient closes the value-distance to the case constants that vpc does not reach",
+      "id": "vp_admits_token_richer_codepoint_assembly",
+      "label": "value_profile's UNBURDENED CMP_MAP gradient admits a corpus that physically CONTAINS more of the gate's required Devanagari codepoint tokens (the 0x0905 + 0x094X words) and/or is larger than the value_profile_cmplog-blocking corpus. The I2S substitution that vpc adds does not help place the adjacent-codepoint pair and its per-exec overhead/churn yields a token-POORER saved corpus. STRUCTURAL-ASSEMBLY / token-availability advantage, NOT scalar value-distance.",
       "direction": "vp_pro",
+      "decidable": true,
       "from_prior": ["i2s_vp__WL__single"],
+      "replaces": ["vp_gradient_value_distance"],
       "measurement": {
-        "descriptor": {"source": "seed_set", "compute": "value_distance_reached", "operand": "case_constants", "unit": "per_branch"},
-        "registry_tool": null,
-        "metrics_used": ["vp_min_distance", "vpc_min_distance", "distance_gap"],
+        "descriptor": {"source": "seed_set", "compute": "struct_size_and_token_count", "operand": "tokens", "unit": "per_branch"},
+        "registry_tool": "joint_necessity",
+        "tool_mode": "analyze_pair(winner_fz=value_profile, loser_fz=value_profile_cmplog) -- __WL_ has NO plain cmplog/naive decisive arm; the discriminating contrast is W=value_profile-resolving vs L=value_profile_cmplog-blocking, which the tool's analyze_pair mode emits as winner_tags/loser_tags/tag_lift/size_lift. NOT the 3-arm i2s_necessary mode (no cmplog blocking arm here).",
+        "metrics_used": ["tag_lift", "size_lift", "winner_tags", "loser_tags"],
         "params": {
-          "case_constants": ["0x0905", "0x0946", "0x0949", "0x094A", "0x094B"],
-          "operand_width_bytes": 2,
-          "gate_offset_hint": "16-bit Devanagari codepoint at buffer->cur(1).codepoint feeding switch at hb-ot-shaper-vowel-constraints.cc:68",
-          "w_seed_role": "value_profile-resolving",
-          "l_seed_role": "value_profile_cmplog-blocking"
+          "winner_fz": "value_profile",
+          "loser_fz": "value_profile_cmplog",
+          "tokens_by_target": {
+            "harfbuzz_6010": "the required little-endian Devanagari codepoint words for the nested switch at hb-ot-shaper-vowel-constraints.cc:68 -- the leading vowel 0x0905 (05 09 00 00) plus the cur(1) case constants {0x0946 (46 09 00 00), 0x0949 (49 09 00 00), 0x094A (4a 09 00 00), 0x094B (4b 09 00 00)}. Pass --tokens as these codepoint words; the token signal is the count of these adjacent-codepoint tokens present in a seed (the gate fires only when a 0x0905 word is immediately followed by one of the 0x094X words)."
+          },
+          "scope": "ON-DISK CORPUS + SEEDS REQUIRED. DB-confirmed for harfbuzz_6010: resolving_seeds = value_profile x3, blocking_seeds = value_profile_cmplog x23 (verified in db/blockers.sqlite). harfbuzz IS in the on-disk corpus target set {curl,harfbuzz,openthread,sqlite3}. W=3 sits at the tool's >=3 minimum -- a thin winner arm; flagged in notes.",
+          "tau_tag": 0.3,
+          "tau_size": 0.3
         }
       },
-      "prediction": "The value_profile-resolving (W) seed set reaches a smaller minimum Hamming/numeric distance to the 0x0905/0x094X case constants than the value_profile_cmplog-blocking (L) seed set, i.e. distance_gap = vpc_min_distance - vp_min_distance > 0. G1: this is discriminating because a NON-gradient mechanism (e.g. structural-assembly joint or I2S literal substitution) predicts NO systematic VP-vs-VPC distance gap at this 16-bit value gate (vpc, which also runs CMP_MAP plus I2S, would reach the constants at least as closely) — so the alternative predicts distance_gap <= 0. G2: the metric is the value-distance the corpus reaches at the codepoint operand, independent of the resolve/block pattern that defined the shape.",
-      "rule": "vp_min_distance < vpc_min_distance AND distance_gap >= 2"
+      "prediction": "tag_lift = winner_tags - loser_tags >= 1.0 OR size_lift = winner_size/loser_size >= 1.3 : the value_profile-resolving seed set carries at least one MORE of the required adjacent codepoint tokens than the value_profile_cmplog-blocking set, and/or is >=30% larger. DISCRIMINATING (G1): both involved fuzzers run the IDENTICAL CMP_MAP gradient; the ONLY delta is vpc's added I2S substitution. (1) If the divergence were a scalar residual-distance effect, it would not show as whole-token PRESENCE/extent (round-0's distance metric already failed and was deemed unmeasurable here -- token-count is orthogonal). (2) If adding I2S were NEUTRAL for assembling this codepoint pair, the two gradient-equal corpora would place the codepoint tokens EQUALLY (tag_lift ~ 0 AND size_lift ~ 1.0) -- the NULL that the signature's 'I2S overhead/churn degrades the gradient' claim must beat. A positive tag_lift / size_lift in the vp-resolving direction is the signature uniquely attributable to the unburdened gradient admitting more-assembled corpus members. ALTERNATIVE RULED OUT: 'vpc assembles the same codepoints, just fewer trials reached the branch by chance' -> would show tag_lift ~ 0 AND size_lift ~ 1.0 (no systematic corpus-content difference).",
+      "rule": "tag_lift >= 1.0 OR size_lift >= 1.3"
+    },
+    {
+      "id": "vp_enriches_codepoint_operand_bytes",
+      "label": "secondary / corroborant: the value_profile-resolving corpus is enriched for the target Devanagari codepoint bytes (vs decoy bytes) relative to the value_profile_cmplog-blocking corpus at the gate site, because near-miss codepoints register as new CMP_MAP coverage and steer the unburdened gradient's corpus toward the exact 0x0905/0x094X words.",
+      "direction": "vp_pro",
+      "decidable": true,
+      "from_prior": [],
+      "measurement": {
+        "descriptor": {"source": "corpus_queue", "compute": "byte_freq_ratio", "operand": "target_vs_decoy", "unit": "per_gate_offset"},
+        "registry_tool": "operand_enrichment",
+        "tool_mode": "winner_fz=value_profile (target=resolving corpus) vs loser_fz=value_profile_cmplog (decoy=blocking corpus). NOTE the tool's anchor is cmplog-vs-naive; here the W/L fuzzers differ, so it scores the vp-vs-vpc corpus byte-frequency contrast on the codepoint bytes.",
+        "metrics_used": ["signed_target_enrich", "decoy_enrich"],
+        "params": {
+          "scope": "harfbuzz_6010 only. operand bytes = the low bytes of the codepoint words 0x0905 (05 09) and the case constants 0x0946/0x0949/0x094A/0x094B (46 09 / 49 09 / 4a 09 / 4b 09).",
+          "caveat": "operand_enrichment is anchored at a FIXED gate offset; here the codepoints sit at VARIABLE glyph indices (byte_signature=dispersed_multibyte) and are SHORT (2-byte words -> width<=2 chance-alignment risk flagged by the tool). Treat as CORROBORANT ONLY; it does NOT stand alone as the verdict and is ranked below H1."
+        }
+      },
+      "prediction": "signed_target_enrich > 0 AND signed_target_enrich > decoy_enrich : the value_profile-resolving corpus is enriched for the target codepoint bytes relative to decoy bytes vs the vpc-blocking corpus. DISCRIMINATING (G1): if adding I2S were neutral the two gradient-equal corpora would show signed_target_enrich ~ 0 (no systematic codepoint-byte difference). RULED OUT: chance co-occurrence of short 2-byte words -> would NOT exceed decoy_enrich (the >decoy_enrich clause guards the short-operand risk).",
+      "rule": "signed_target_enrich > 0 AND signed_target_enrich > decoy_enrich"
     }
   ],
   "undecidable": [
     {
       "id": "vpc_anti_i2s_overhead_churn",
-      "label": "vpc blocks because the added I2SRandReplace overhead and corpus churn dilute the shared CMP_MAP gradient",
+      "label": "vpc blocks because the added I2SRandReplace per-execution overhead and corpus churn DILUTE the shared CMP_MAP gradient's progress (a rate/efficiency claim, not a corpus-content claim).",
       "direction": "vpc_anti",
       "decidable": false,
-      "reason": "Corpus-scale / mutator-efficiency claim. The anti half attributes vpc's failure to I2S per-execution overhead and corpus churn degrading gradient progress. data_realities forbid this: I2S is NOT tagged in mutation_op (the havoc vocabulary is byte-identical across all 4 fuzzers) and value_profile is a FEEDBACK invisible in lineage, so there is no seed_lineage:event_cooccurrence 'I2S overhead/churn event' to measure. Overhead/churn vs gradient progress cannot be separated with the available seed_set/lineage data — only the corpus's reached value-distance is observable, which is what the vp_pro hypothesis already tests. Left to fallback:inconclusive."
+      "reason": "Corpus-scale / mutator-efficiency claim. Attributes vpc's failure to I2S per-exec overhead + churn degrading gradient progress over time. data_realities FORBID measuring this: I2S is NOT tagged in mutation_op (the havoc vocabulary is byte-identical across all 4 fuzzers -> no seed_lineage:event_cooccurrence 'I2S overhead/churn event' exists) and value_profile is a FEEDBACK invisible in lineage (no 'gradient event'). Overhead/churn-as-RATE cannot be separated from gradient progress with the available seed_set/lineage data -- only the corpus's reached CONTENT (token count, byte enrichment) is observable, which is exactly what H1/H2 already test from the vp-pro side. The DEGRADATION half of the story is therefore covered observationally by the H1 NULL (if vpc's corpus is token-poorer, that IS the degradation manifest in corpus content); the per-exec-RATE attribution itself is left to fallback:inconclusive."
     }
   ],
-  "decision_order": ["vp_gradient_value_distance"],
+  "decision_order": ["vp_admits_token_richer_codepoint_assembly", "vp_enriches_codepoint_operand_bytes"],
   "fallback": "inconclusive",
   "data_realities_respected": [
-    "Uses source=seed_set value_distance_reached on the codepoint operand, NOT byte_freq_ratio (byte-alignment is unreliable across seeds, and value_distance is the gradient-appropriate metric per data_reality 2/3).",
-    "Does NOT propose any seed_lineage:event_cooccurrence 'I2S event' or 'gradient event' (forbidden by data_realities 1-2) — the vpc-anti overhead/churn claim is therefore marked decidable:false rather than given a measurement.",
-    "harfbuzz HAS on-disk corpus + resolving/blocking seeds in db/blockers.sqlite (data_realities 4-5), so the seed_set descriptor can score this branch."
+    "value_profile (CMP_MAP) is a FEEDBACK not a mutator -> NOT measured via any seed_lineage 'gradient event'. Its effect is read off the corpus the gradient ADMITTED -- structural size + codepoint-token count (joint_necessity) and codepoint-byte enrichment (operand_enrichment) -- both corpus-state computes, no lineage event.",
+    "I2S is NOT tagged in mutation_op -> NO seed_lineage:event_cooccurrence on an I2S overhead/churn event proposed; the vpc-anti rate claim is marked decidable:false rather than given a measurement.",
+    "on-disk corpora exist ONLY for curl,harfbuzz,openthread,sqlite3 -> harfbuzz_6010 IS seed-measurable (verified: value_profile x3 resolving, value_profile_cmplog x23 blocking in db/blockers.sqlite).",
+    "__WL_ has NO plain cmplog/naive decisive arm (cmp,naive = '_'); the involved W/L are value_profile vs value_profile_cmplog. joint_necessity is therefore used in analyze_pair(W=value_profile, L=value_profile_cmplog) mode, NOT its 3-arm i2s_necessary mode -- no code change, the analyze_pair entry point already exists. operand_enrichment likewise scores the vp-vs-vpc corpus pair, not its cmplog-vs-naive anchor pair.",
+    "the codepoint operands are NOT fixed-offset scalar literals (dispersed_multibyte, variable glyph index) -> the refuted value_distance_reached scalar-distance descriptor is dropped; token PRESENCE/extent (joint_necessity) is the gate-appropriate metric, with byte_freq_ratio applied ONLY as a short-operand-caveated corroborant."
   ],
-  "notes": "SINGLETON shape (1 branch: harfbuzz/6010, hb-ot-shaper-vowel-constraints.cc:68, switch on cur(1).codepoint over the Devanagari case constants). Load-bearing discriminable claim is the vp-PRO gradient: value_profile's CMP_MAP gradient reaches a closer value-distance to the 16-bit case constants than value_profile_cmplog. No registry tool fits: operand_enrichment is fixed-offset byte_freq (data_reality forbids byte-alignment for the gradient-distance question) and joint_necessity is structural token-count (this is a single nested value gate, not multi-token assembly). Hence registry_tool:null + a NEW seed_set:value_distance_reached:case_constants:per_branch descriptor for the orchestrator to build. TARGET-SPECIFIC knob: case_constants = the 0x0905/0x094X Devanagari codepoints (analogous to joint_necessity's --tokens being font-tags/SQL-keywords). UNBUILT TOOL: value_distance_reached does not yet exist in bench/tools/ — must be built to compute the minimum numeric/Hamming distance from a seed set's reached operand values to the case-constant set. The vpc-anti corpus-scale half is decidable:false (see undecidable[]); the single vp_pro hypothesis carries the verdict, fallback inconclusive if distance_gap is not positive."
+  "notes": "SINGLETON shape (1 branch: harfbuzz/6010, hb-ot-shaper-vowel-constraints.cc:68, nested switch on buffer->cur(1).codepoint over the Devanagari case constants 0x0946/0x0949/0x094A/0x094B, gated under a preceding 0x0905). Round-0 returned UNMEASURABLE (not refuted-by-rule): its value_distance_reached descriptor could not extract a fixed-offset scalar operand on this branch, because the gate is a CODEPOINT-PAIR ASSEMBLY/co-location gate, not a scalar literal-distance compare.\n\nPIVOT (mirrors the sibling i2s_vp_LWW_ harfbuzz fix, which succeeded by dropping value_distance_reached for joint_necessity + operand_enrichment): this round proposes a GENUINELY DIFFERENT mechanism, not a reword. VP's advantage here is STRUCTURAL-ASSEMBLY / TOKEN-AVAILABILITY -- the unburdened gradient admits corpus members that physically CONTAIN the adjacent 0x0905-then-0x094X codepoint words (and/or are larger), which the round-0 distance metric never measured and which a content-level tool CAN extract from the seeds present. The signature's own words support it: 'does not help ASSEMBLE the 0x0905-then-0x094X PAIR' and 'the resolving seed carries 09 09 05 09 byte runs consistent with the codepoints' -- assembly/co-location of discrete codepoint tokens, not minimizing a scalar residual.\n\nDIRECTION NOTE (differs from sibling LWW_): here value_profile WINS and value_profile_cmplog LOSES (adding I2S HURTS). So the analyze_pair contrast is W=value_profile vs L=value_profile_cmplog -- the discriminating null is 'adding I2S is neutral -> the two gradient-equal corpora carry codepoint tokens equally (tag_lift~0, size_lift~1.0)'. A positive vp-direction tag_lift/size_lift beats that null and confirms the unburdened-gradient advantage.\n\nNO NEW DESCRIPTOR NEEDED: both decidable hypotheses reuse a BUILT registry tool by descriptor_key, neither of which round-0 used (joint_necessity = seed_set:struct_size_and_token_count:tokens:per_branch; operand_enrichment = corpus_queue:byte_freq_ratio:target_vs_decoy:per_gate_offset). The only adaptation is the analyze_pair fuzzer pair (W=value_profile, L=value_profile_cmplog), an existing entry point.\n\nDISCRIMINABILITY / G3 HONESTY: H1 is primary and decidable (BUILT joint_necessity analyze_pair; W=3 sits at the tool's >=3 minimum -> a THIN winner arm, so a null result is weakly powered and should fall to inconclusive rather than be read as a confident refutation). H2 is a decidable-but-marginal corroborant (BUILT operand_enrichment; short 2-byte dispersed codepoints -> chance-alignment caveat, guarded by the >decoy_enrich clause, ranked second). The vpc-anti overhead/churn RATE claim is decidable:false (data_realities forbid an I2S/gradient lineage event) -- its DEGRADATION is observable only as the H1 corpus-content null, so no separate measurement is invented. If BOTH H1 and H2 fail, the VP advantage is not demonstrably structural-assembly either and the branch falls to fallback:inconclusive -- a correct G3 outcome given the thin 3-seed winner arm; do not chase a positive."
 }

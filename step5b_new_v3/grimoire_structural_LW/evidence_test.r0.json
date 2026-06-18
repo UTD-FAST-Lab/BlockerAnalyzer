@@ -1,0 +1,55 @@
+{
+  "shape": "grimoire_structural_LW",
+  "n_branches": 3,
+  "decisive_pair": "grimoire(blocks) vs naive(resolves)",
+  "direction": "anti",
+  "family_claim": "grimoire's gap-abstraction / structural recombination is a NET NEGATIVE: it either erases the exact literal a byte-equality gate needs, or fragments structure so a depth/buffer threshold is never assembled; naive's literal-preserving, longer-content havoc wins.",
+  "hypotheses": [
+    {
+      "id": "gap_erases_exact_literal",
+      "label": "Grimoire's GeneralizationStage replaces the concrete literal byte (I2S/havoc planted) with a <GAP> token; structural recombination never restores it, so a byte-equality gate that literal-preserving naive can satisfy stays blocked under grimoire.",
+      "direction": "anti",
+      "from_prior": ["grimoire_gap_abstraction_erases_literal"],
+      "members": ["libpng_3892_h1", "libxml2_6597_h2"],
+      "gate_kind": "byte-exact equality on a single-byte constant (libpng color_type==0x03 @offset 0x19; libxml2 comment-body tab ==0x09)",
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "token_count", "operand": "gate_literal", "unit": "per_gate_offset"},
+        "registry_tool": null,
+        "registry_tool_note": "No registry tool fits. operand_enrichment (corpus_queue:byte_freq_ratio:...) is the closest in spirit but needs an ON-DISK corpus, which neither libpng nor libxml2 has (data_realities). This is a SEED-SET measurement over the DB-stored resolving/blocking seeds, not the on-disk corpus. NEW descriptor for the orchestrator to build/register.",
+        "metrics_used": ["naive_literal_count", "grimoire_literal_count", "literal_presence_ratio"],
+        "params": {
+          "gate_literals": {"libpng_3892": "0x03", "libxml2_6597": "0x09"},
+          "gate_offset_hint": {"libpng_3892": "0x19", "libxml2_6597": "comment-body (not fixed-offset; count occurrences inside <!-- --> body, fall back to whole-seed count)"},
+          "compare": "naive RESOLVING seed set vs grimoire BLOCKING seed set; literal_presence_ratio = (grimoire_literal_count + eps) / (naive_literal_count + eps)"
+        }
+      },
+      "prediction": "The grimoire-blocking seeds contain the exact gate literal MARKEDLY LESS than the naive-resolving seeds: naive_literal_count > 0 (naive keeps the concrete byte) AND grimoire_literal_count near 0 / much lower (the <GAP> abstraction erased it). G1: a non-erasure explanation (e.g. grimoire just throughput-starved but still carries the literal) would predict literal_presence_ratio ~ 1; an erasure mechanism predicts ratio << 1.",
+      "rule": "naive_literal_count >= 1 AND literal_presence_ratio < 0.34",
+      "rules_out": "throughput-only / scheduling explanations that leave the literal intact in grimoire's seeds (those give ratio ~1)."
+    },
+    {
+      "id": "fragmentation_starves_depth",
+      "label": "Grimoire's re-run tax + structural-recombination produce short, fragmented inputs that never advance the parser far enough to pass a quantitative buffer/depth threshold; naive's longer coherent content satisfies the buffer-ahead condition.",
+      "direction": "anti",
+      "from_prior": ["grimoire_structural_fragmentation_starves_depth"],
+      "members": ["libxml2_6869"],
+      "gate_kind": "inequality/range buffer-depth threshold on a derived integer (xmlBufUse > indx+INPUT_CHUNK); NO fixed literal, different-SIZED W vs L seeds",
+      "measurement": {
+        "descriptor": {"source": "seed_set", "compute": "struct_size_ratio", "operand": "seed_bytes", "unit": "per_branch"},
+        "registry_tool": null,
+        "registry_tool_note": "joint_necessity (seed_set:struct_size_and_token_count) is close but is scoped to the vpc joint-necessity ASSEMBLY-DEPTH subtype (vpc vs cmplog/vp font tags) and its --tokens are font-tag specific; here the comparison is grimoire-blocking vs naive-resolving raw seed SIZE (depth proxy), not vpc tags. A plain struct_size_ratio descriptor; orchestrator may parameterize joint_necessity's size half or build a thin new tool.",
+        "metrics_used": ["naive_median_size", "grimoire_median_size", "size_lift"],
+        "params": {
+          "compare": "naive RESOLVING seed set vs grimoire BLOCKING seed set; size_lift = naive_median_size / grimoire_median_size",
+          "evidence_anchor": "naive/cmplog winner ~458 bytes (coherent, ends in long token run) vs grimoire blockers 13-52 bytes (fragmented)"
+        }
+      },
+      "prediction": "naive-resolving seeds are SUBSTANTIALLY longer than grimoire-blocking seeds (size_lift >= 3): the depth threshold is met only by the longer coherent input. G1: byte-alignment is FORBIDDEN here (data_realities: different-sized W/L seeds), and a value-precision explanation would predict comparable sizes with a value difference; the size gap discriminates fragmentation-starvation from a literal/value gate.",
+      "rule": "size_lift >= 3.0 AND grimoire_median_size < naive_median_size",
+      "rules_out": "literal/value-precision explanations (which predict comparable seed sizes); confirms it is a STRUCTURAL-DEPTH starvation, not a single-byte erasure."
+    }
+  ],
+  "decision_order": ["gap_erases_exact_literal", "fragmentation_starves_depth"],
+  "fallback": "inconclusive",
+  "notes": "MERGES/COLLAPSE: kept the two prior clusters as TWO separate hypotheses because a real measurement CAN discriminate them: the literal-erasure branches (libpng_3892, libxml2_6597) sit on fixed byte-equality gates where literal-presence at the gate is measurable, whereas libxml2_6869 is an inequality/buffer-depth gate with NO fixed literal and DIFFERENT-SIZED W/L seeds — byte/literal counting is meaningless there, so it gets a SIZE-RATIO test instead. They are NOT mergeable: one test (literal_presence) is forbidden on the other's gate (data_realities: byte-alignment fails on different-sized structural seeds), so collapsing them would force an inapplicable measurement. TARGETS: libpng, libxml2 ONLY. CAVEAT (feasibility): neither target has an ON-DISK corpus (data_realities: corpora exist only for curl/harfbuzz/openthread/sqlite3), so corpus_queue/operand_enrichment is INFEASIBLE here; both tests run over the DB-stored resolving_seeds/blocking_seeds (the 286 reps have them — verify these 3 branches are among them, else fallback inconclusive). CAVEAT (decisive pair): cards record covers_pairs as cmplog>grimoire (cmplog and naive both literal-preserving relative to grimoire); the shape-level decisive pair is grimoire-vs-naive, so the tests compare grimoire-BLOCKING vs naive-RESOLVING seed sets — if naive seed sets are unavailable for a branch, the arbiter may substitute cmplog-resolving (also literal-preserving, same G1 prediction) and note the substitution. CAVEAT (n=2/n=1): tiny family; H2 has a single branch, so its rule is a point check, not a population test. G2: both measurements (literal presence in seeds; seed size) are INDEPENDENT of the resolve pattern that defined the shape (which fuzzer resolved) — we measure WHAT the seeds carry, not WHO resolved."
+}
