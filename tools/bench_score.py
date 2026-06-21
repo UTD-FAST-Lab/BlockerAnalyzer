@@ -62,7 +62,7 @@ TAU = 0.8
 
 
 # ───────────────────────── measure ─────────────────────────
-def measure(ts_base, targets, fuzzers, n_trials, out):
+def measure(ts_base, targets, fuzzers, n_trials, out, db=None):
     # Read ONLY the final checkpoint per (fuzzer, trial): coverage is cumulative and
     # hit_status is monotonic, so the last report == the cumulative resolve state, and
     # it matches the benchmark's own "resolved at FINAL checkpoint" admission rule.
@@ -70,7 +70,7 @@ def measure(ts_base, targets, fuzzers, n_trials, out):
     from study_units import _trial_report_map, _parse_coverage_file
 
     ts_base = Path(ts_base)
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect(db or DB)   # sB targets live in a separate DB (disjoint branch_id space)
     rows = []
     for target in targets:
         # benchmark branches for this target: (file,line,col) -> [(branch_id, blocked_side)]
@@ -115,23 +115,29 @@ def measure(ts_base, targets, fuzzers, n_trials, out):
 
 
 # ───────────────────────── score ─────────────────────────
-def load_labels(dataset):
+def load_labels(dataset, field="canonical_label"):
     """(target, branch_id) -> mechanism label, for VALIDATED branches only. Keyed by
     (target, branch_id) because branch_id is NOT unique across servers (bloaty_7 and
-    curl_7 are different branches) — joining on bare id would conflate them."""
+    curl_7 are different branches) — joining on bare id would conflate them.
+
+    `field` selects the taxonomy granularity:
+      canonical_label = the FINAL merged feature set (19 categories, Pass-C; default)
+      label           = the raw pre-merge clusters (~50; debugging only)
+    Falls back to `label` if a record lacks the requested field."""
     lab = {}
     for line in open(dataset):
         r = json.loads(line)
         if r.get("evidence", {}).get("status") != "validated":
             continue
-        m = (r.get("mechanism") or {}).get("label")
-        if m:
-            lab[(r["target"], r["branch_id"])] = m
+        m = (r.get("mechanism") or {})
+        v = m.get(field) or m.get("label")
+        if v:
+            lab[(r["target"], r["branch_id"])] = v
     return lab
 
 
-def score(resolve_csv, dataset, tau, out):
-    labels = load_labels(dataset)                       # (target,bid) -> class (validated)
+def score(resolve_csv, dataset, tau, out, label_field="canonical_label"):
+    labels = load_labels(dataset, label_field)          # (target,bid) -> class (validated)
     classes = sorted(set(labels.values()))
     class_branches = collections.defaultdict(set)       # class -> {(target,bid)}
     for key, c in labels.items():
@@ -214,17 +220,22 @@ def main():
     m.add_argument("--targets", nargs="*", default=TARGETS)
     m.add_argument("--fuzzers", nargs="*", default=FUZZERS)
     m.add_argument("--trials", type=int, default=10)
+    m.add_argument("--db", default=None,
+                   help="branches DB (default db/blockers.sqlite; use a separate DB for sB targets)")
     m.add_argument("--out", default=str(RESOLVE_CSV))
     s = sub.add_parser("score")
     s.add_argument("--resolve", default=str(RESOLVE_CSV))
     s.add_argument("--dataset", default=str(DATASET))
     s.add_argument("--tau", type=float, default=TAU)
+    s.add_argument("--label-field", default="canonical_label",
+                   choices=["canonical_label", "label"],
+                   help="taxonomy granularity: canonical_label=final-19 (default), label=raw clusters")
     s.add_argument("--out", default=str(SCORE_CSV))
     a = ap.parse_args()
     if a.cmd == "measure":
-        measure(a.ts_base, a.targets, a.fuzzers, a.trials, a.out)
+        measure(a.ts_base, a.targets, a.fuzzers, a.trials, a.out, a.db)
     else:
-        score(a.resolve, a.dataset, a.tau, a.out)
+        score(a.resolve, a.dataset, a.tau, a.out, a.label_field)
 
 
 if __name__ == "__main__":
