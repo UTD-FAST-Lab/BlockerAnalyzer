@@ -141,6 +141,36 @@ def main():
                              "report": f"step5b_new_v3/{shape}/assignments_{srv}.json"},
                 "server": srv,
             })
+    # 4) MULTI-CATEGORY 2nd-category rows: an 'independent' branch (deciding pairs span
+    #    two technique-directions) whose SECOND family's mechanism ALSO validates gets a
+    #    second row -> genuinely multi-family. Source = the collect-all re-arbitration
+    #    diagnostic (bench/diag_collect_all.py -> csvs/diag_multimatch_<server>.json),
+    #    confirmed entries (result == "2nd_validated"). canonical_label is set downstream
+    #    by apply_canonical_labels.py from the fired hypothesis (e.g. cmp_gradient... -> VP).
+    import glob as _glob
+    base = {(r["target"], r["branch_id"], r["shape"]): r for r in rows}
+    for df in sorted(_glob.glob(str(ROOT / "csvs" / "diag_multimatch_*.json"))):
+        for o in json.loads(Path(df).read_text()):
+            if o.get("result") != "2nd_validated":
+                continue
+            b = base.get((o["target"], o["branch_id"], o["shape"]))
+            if not b or not o.get("fired"):
+                continue
+            f = o["fired"]
+            rows.append({
+                "branch_id": b["branch_id"], "target": b["target"], "loc": b["loc"],
+                "shape": b["shape"], "decisive_shape": b["decisive_shape"],
+                "per_arm_seeds": b["per_arm_seeds"],
+                "mechanism": {"label": f["hypothesis"],
+                              "direction": o["second"].lower().replace("-", "_") + "_2ndcat",
+                              "shape_source": b["mechanism"]["shape_source"]},
+                "evidence": {"status": "validated", "rule": f["rule"],
+                             "metrics": {k: v for k, v in f["metrics"].items()
+                                         if k not in ("target", "branch_id")},
+                             "reason": None, "diag": {"kind": "multi_category_2nd"},
+                             "report": Path(df).name},
+                "server": b["server"],
+            })
     con.close()
     out = ROOT / "bench" / "dataset.jsonl"
     with open(out, "w") as fh:
