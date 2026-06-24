@@ -1,6 +1,6 @@
 # Roadblock fact table — reconciliation
 
-Source: `bench/dataset.jsonl` + deciding-pairs from `step5a_new_v3/*/cards.json`. `bench/roadblock_facts.csv` has **645 rows** (one per branch×shape×family membership).
+Source: `bench/dataset.jsonl` + deciding-pairs from `step5a_new_v3/*/cards.json`. `bench/roadblock_facts.csv` has **639 rows** (one per branch×shape×family membership).
 
 Every paper number is a GROUP BY on this one table:
 
@@ -10,9 +10,9 @@ Every paper number is a GROUP BY on this one table:
 | assigned roadblocks | DISTINCT branch WHERE any row status=validated | **382** |
 | inconclusive roadblocks | DISTINCT branch WHERE no row is validated | **176** |
 | assigned memberships | COUNT(rows WHERE status=validated) | 398 |
-| final categories | COUNT(DISTINCT category WHERE validated) | 22 |
+| final categories | COUNT(DISTINCT category WHERE validated) | 19 |
 | raw categories | COUNT(DISTINCT raw_category WHERE validated) | 57 |
-| families (all) | COUNT(DISTINCT family) | 11 |
+| families (all) | COUNT(DISTINCT family) | 15 |
 | families with an assigned branch | DISTINCT family WHERE validated | 8 |
 | all decisive shapes | COUNT(DISTINCT shape) | 38 |
 | shapes with an assigned branch | DISTINCT shape WHERE validated | 29 |
@@ -21,19 +21,23 @@ Every paper number is a GROUP BY on this one table:
 ## assigned branches per family (DISTINCT branch, status=validated)
 | family | #assigned | #inconclusive |
 |---|--:|--:|
-| I2S-pro | 238 | 56 |
-| VP-pro | 53 | 50 |
-| I2S-anti | 40 | 16 |
-| ctx | 18 | 42 |
-| grimoire | 11 | 34 |
-| JOINT | 27 | 12 |
-| VPC-anti | 9 | 16 |
-| ngram | 2 | 3 |
-| calibrated_energy | - | 13 |
-| aflfast | - | 4 |
-| mopt | - | 1 |
+| I2S-P | 238 | 56 |
+| I2S-A | 49 | 24 |
+| VP-P | 53 | 50 |
+| VPC-P | 27 | 12 |
+| VPC-A | - | 2 |
+| CTX-P | 14 | 39 |
+| CTX-A | 4 | 3 |
+| GRIM-P | 11 | 31 |
+| GRIM-A | - | 3 |
+| NGRAM-P | 2 | 2 |
+| NGRAM-A | - | 1 |
+| CALI-P | - | 13 |
+| FAST-P | - | 2 |
+| FAST-A | - | 2 |
+| MOPT-A | - | 1 |
 | **distinct total** | **382** | **203** |
-| sum (memberships, dual-counted) | 398 | 247 |
+| sum (memberships, dual-counted) | 398 | 241 |
 
 ## assignment round (`assigned_round` column)
 Reconstructed EXACTLY from git: the loop archived its hypothesis menu as `evidence_test.r0/r1/r2.json` at the start of each next round, so diffing the validated set across those boundary commits gives the per-round branch additions (`bench/branch_assigned_round.json`).
