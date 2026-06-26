@@ -34,9 +34,13 @@ DS = ROOT / "bench" / "dataset.jsonl"
 # i2s_anti_* in canonical_label_map.json / branch_canonical_override.json.
 FAMILY = {
     "i2s_string_literal_substitution": "I2S-P", "i2s_numeric_tag_substitution": "I2S-P",
-    "i2s_structural_assembly_reach_depth": "I2S-P", "i2s_operand_value_precision": "I2S-P",
+    # i2s_operand_value_precision (2026-06-25) AND i2s_structural_assembly_reach_depth (2026-06-25)
+    # both folded into i2s_string_literal_substitution -- dead keys removed. I2S-P = 2 categories.
     "vp_gradient_value_distance_closure": "VP-P", "vp_gradient_drives_assembly_depth": "VP-P",
-    "vp_operand_byte_enrichment": "VP-P", "vp_admits_structurally_richer_corpus": "VP-P",
+    # vp_operand_byte_enrichment (2026-06-25, n=5) folded into vp_gradient_value_distance_closure
+    # -- same VP gradient-to-operand mechanism, enrichment vs distance is just the measurement
+    # route (fixed vs floating offset). Dead key removed. VP-P = 3 categories.
+    "vp_admits_structurally_richer_corpus": "VP-P",
     "i2s_anti_target_depletion": "I2S-A", "i2s_anti_decoy_overfit": "I2S-A",
     "i2s_anti_structural_byte_corruption": "I2S-A",
     "joint_value_distance_closure": "VPC-P", "joint_assembly_depth": "VPC-P",

@@ -10,7 +10,7 @@ Every paper number is a GROUP BY on this one table:
 | assigned roadblocks | DISTINCT branch WHERE any row status=validated | **382** |
 | inconclusive roadblocks | DISTINCT branch WHERE no row is validated | **176** |
 | assigned memberships | COUNT(rows WHERE status=validated) | 398 |
-| final categories | COUNT(DISTINCT category WHERE validated) | 19 |
+| final categories | COUNT(DISTINCT category WHERE validated) | 16 |
 | raw categories | COUNT(DISTINCT raw_category WHERE validated) | 57 |
 | families (all) | COUNT(DISTINCT family) | 15 |
 | families with an assigned branch | DISTINCT family WHERE validated | 8 |
