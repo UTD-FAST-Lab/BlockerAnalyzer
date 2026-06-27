@@ -36,17 +36,24 @@ FAMILY = {
     "i2s_string_literal_substitution": "I2S-P", "i2s_numeric_tag_substitution": "I2S-P",
     # i2s_operand_value_precision (2026-06-25) AND i2s_structural_assembly_reach_depth (2026-06-25)
     # both folded into i2s_string_literal_substitution -- dead keys removed. I2S-P = 2 categories.
-    "vp_gradient_value_distance_closure": "VP-P", "vp_gradient_drives_assembly_depth": "VP-P",
+    "vp_gradient_value_distance_closure": "VP-P", "vp_gradient_assembly_depth": "VP-P",
     # vp_operand_byte_enrichment (2026-06-25, n=5) folded into vp_gradient_value_distance_closure
     # -- same VP gradient-to-operand mechanism, enrichment vs distance is just the measurement
-    # route (fixed vs floating offset). Dead key removed. VP-P = 3 categories.
-    "vp_admits_structurally_richer_corpus": "VP-P",
+    # route (fixed vs floating offset). 2026-06-26: vp_gradient_drives_assembly_depth +
+    # vp_admits_structurally_richer_corpus MERGED into vp_gradient_assembly_depth (depth + size
+    # are two routes to one "VP builds more structure" mechanism -- mirrors joint_assembly_depth).
+    # Dead keys removed. VP-P = 2 categories.
     "i2s_anti_target_depletion": "I2S-A", "i2s_anti_decoy_overfit": "I2S-A",
     "i2s_anti_structural_byte_corruption": "I2S-A",
     "joint_value_distance_closure": "VPC-P", "joint_assembly_depth": "VPC-P",
-    "ctx_iteration_path_depth": "CTX-P", "ctx_corpus_inflation": "CTX-A",
-    "ctx_depth_inflation": "CTX-A",
-    "grimoire_structural_token_assembly": "GRIM-P", "grimoire_structural_size_depth": "GRIM-P",
+    "ctx_iteration_path_depth": "CTX-P",
+    # ctx_corpus_inflation + ctx_depth_inflation MERGED into ctx_inflation (2026-06-26):
+    # one CTX-anti mechanism (redundant context-coverage inflation), two routes (corpus / depth).
+    "ctx_inflation": "CTX-A",
+    # grimoire_structural_token_assembly + grimoire_structural_size_depth MERGED into
+    # grimoire_structural_assembly (2026-06-26): one "grimoire builds structure" mechanism,
+    # token-richness and size/depth routes.
+    "grimoire_structural_assembly": "GRIM-P",
     "ngram_sequential_depth_reach": "NGRAM-P",
 }
 

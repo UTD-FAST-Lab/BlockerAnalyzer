@@ -28,9 +28,13 @@ Two stages:
              resolve-rate = #resolved / #measured, where a branch is RESOLVED by a
              fuzzer iff resolved_frac = n_resolved/(n_resolved+n_blocked) >= TAU.
 
-Resolve metric: resolved_frac >= TAU (default 0.8), the same threshold family the
-benchmark's decisive_shape uses (>=8/10 trials). A branch the fuzzer never reached
-(n_reached==0) is UNMEASURED, reported separately — NOT counted as blocked (G3).
+Resolve metric: a branch is RESOLVED by a fuzzer iff its blocked side is taken in
+n_resolved >= TAU*n_trials trials (>=8/10 at TAU=0.8) — the SAME absolute >=8/10
+threshold the benchmark's decisive rule uses (winner_resolved>=8). Symmetrically a
+branch is BLOCKED iff n_blocked >= TAU*n_trials; reached but neither is AMBIGUOUS.
+The per-class score = #resolved / #reached (ambiguous + blocked sit in the
+denominator). A branch the fuzzer never reached (n_reached==0) is UNMEASURED,
+reported separately — NOT counted as blocked (G3).
 
 CAVEAT (printed): `libafl` is the LibAFL `generic` engine — the SAME family that
 produced the benchmark's labeled campaign — so its scores are a within-family
@@ -116,15 +120,22 @@ def measure(ts_base, targets, fuzzers, n_trials, out, db=None):
 
 # ───────────────────────── score ─────────────────────────
 def load_labels(dataset, field="canonical_label"):
-    """(target, branch_id) -> mechanism label, for VALIDATED branches only. Keyed by
-    (target, branch_id) because branch_id is NOT unique across servers (bloaty_7 and
-    curl_7 are different branches) — joining on bare id would conflate them.
+    """(target, branch_id) -> SET of mechanism labels, for VALIDATED branches only.
+    Keyed by (target, branch_id) because branch_id is NOT unique across servers
+    (bloaty_7 and curl_7 are different branches) — joining on bare id would conflate.
+
+    A branch can carry MULTIPLE categories (multi-category roadblock = resolved by
+    more than one technique); each is a separate validated record with the same
+    (target, branch_id). We return the full set so a branch counts in EVERY category
+    it belongs to — matching the per-category #blk in the paper taxonomy table. (An
+    earlier version overwrote to a single label, undercounting the 16 multi-category
+    branches in every category they share.)
 
     `field` selects the taxonomy granularity:
-      canonical_label = the FINAL merged feature set (19 categories, Pass-C; default)
-      label           = the raw pre-merge clusters (~50; debugging only)
+      canonical_label = the FINAL merged feature set (Pass-C; default)
+      label           = the raw pre-merge clusters (debugging only)
     Falls back to `label` if a record lacks the requested field."""
-    lab = {}
+    lab = collections.defaultdict(set)
     for line in open(dataset):
         r = json.loads(line)
         if r.get("evidence", {}).get("status") != "validated":
@@ -132,16 +143,17 @@ def load_labels(dataset, field="canonical_label"):
         m = (r.get("mechanism") or {})
         v = m.get(field) or m.get("label")
         if v:
-            lab[(r["target"], r["branch_id"])] = v
-    return lab
+            lab[(r["target"], r["branch_id"])].add(v)
+    return dict(lab)
 
 
 def score(resolve_csv, dataset, tau, out, label_field="canonical_label"):
-    labels = load_labels(dataset, label_field)          # (target,bid) -> class (validated)
-    classes = sorted(set(labels.values()))
+    labels = load_labels(dataset, label_field)          # (target,bid) -> set(classes) (validated)
+    classes = sorted({c for cs in labels.values() for c in cs})
     class_branches = collections.defaultdict(set)       # class -> {(target,bid)}
-    for key, c in labels.items():
-        class_branches[c].add(key)
+    for key, cs in labels.items():
+        for c in cs:
+            class_branches[c].add(key)
 
     # per (fuzzer, (target,bid)): resolved?  + which branches a fuzzer measured
     resolved = collections.defaultdict(dict)            # fuzzer -> {(target,bid): bool}
@@ -152,12 +164,15 @@ def score(resolve_csv, dataset, tau, out, label_field="canonical_label"):
         key = (r["target"], int(r["branch_id"]))        # (target,bid): branch_id not unique across servers
         if key not in labels:
             continue                                    # only score labeled branches
-        nr, nb = int(r["n_resolved"]), int(r["n_blocked"])
+        nr, nb, ntr = int(r["n_resolved"]), int(r["n_blocked"]), int(r["n_trials"])
         if nr + nb == 0:
             continue                                    # never reached -> unmeasured (G3)
         fz = r["fuzzer"]
         measured[fz].add(key)
-        resolved[fz][key] = (nr / (nr + nb)) >= tau
+        # decisive resolve: blocked side taken in >= tau*n_trials trials (>=8/10 at tau=0.8),
+        # the same absolute threshold the benchmark's decisive rule uses. NOT a fraction over
+        # reached trials -- a branch reached <8 times can never be decisively resolved.
+        resolved[fz][key] = nr >= tau * ntr
 
     # fuzzer columns: those present in the resolve CSV (RQ3 order first, extras sorted)
     present = set(measured)

@@ -6,8 +6,8 @@ per-target performance into  (fuzzer strength per category) x (target's category
 composition).
 
 Outputs (out/rq3/):
-  A  rq3_heat_fuzzer_x_category.png  — resolve-rate, 4 fuzzers x 19 categories
-  B  rq3_heat_target_x_category.png  — composition (share within target), targets x 19 cats
+  A  rq3_heat_fuzzer_x_category.png  — resolve-rate, 4 fuzzers x 13 categories
+  B  rq3_heat_target_x_category.png  — composition (share within target), targets x 13 cats
   C  rq3_heat_target_x_fuzzer.png    — actual per-target resolve-rate (the ranking)
 Plus a printed predicted-vs-actual ranking check (s4 targets, where fuzzer data exists).
 """
@@ -25,20 +25,17 @@ _ap = argparse.ArgumentParser()
 _ap.add_argument("--resolve", default=str(ROOT / "csvs/rq3_resolve.csv"))
 ARGS = _ap.parse_args()
 
+# category -> family (current 13-category / merged taxonomy; uppercase paper codes)
 FAMILY = {
-    'i2s_string_literal_substitution': 'I2S-pro', 'i2s_numeric_tag_substitution': 'I2S-pro',
-    'i2s_structural_assembly_reach_depth': 'I2S-pro', 'i2s_operand_value_precision': 'I2S-pro',
-    'i2s_relational_collision_gate': 'I2S-pro',
-    'i2s_anti_target_depletion': 'I2S-anti', 'i2s_anti_decoy_overfit': 'I2S-anti',
-    'i2s_anti_structural_byte_corruption': 'I2S-anti',
-    'vp_gradient_value_distance_closure': 'VP-pro', 'vp_gradient_drives_assembly_depth': 'VP-pro',
-    'vp_operand_byte_enrichment': 'VP-pro', 'vp_admits_structurally_richer_corpus': 'VP-pro',
-    'joint_assembly_depth': 'JOINT', 'vpc_anti_depth_diversion': 'VPC-anti',
-    'ctx_iteration_path_depth': 'ctx-cov', 'ctx_corpus_inflation': 'ctx-cov',
-    'ngram_sequential_depth_reach': 'ngram', 'grimoire_structural_token_assembly': 'grimoire',
-    'grimoire_structural_size_depth': 'grimoire',
+    'i2s_string_literal_substitution': 'I2S-P', 'i2s_numeric_tag_substitution': 'I2S-P',
+    'i2s_anti_target_depletion': 'I2S-A', 'i2s_anti_decoy_overfit': 'I2S-A',
+    'i2s_anti_structural_byte_corruption': 'I2S-A',
+    'vp_gradient_value_distance_closure': 'VP-P', 'vp_gradient_assembly_depth': 'VP-P',
+    'joint_value_distance_closure': 'VPC-P', 'joint_assembly_depth': 'VPC-P',
+    'ctx_iteration_path_depth': 'CTX-P', 'ctx_inflation': 'CTX-A',
+    'grimoire_structural_assembly': 'GRIM-P', 'ngram_sequential_depth_reach': 'NGRAM-P',
 }
-FAM_ORDER = ['I2S-pro', 'I2S-anti', 'VP-pro', 'JOINT', 'VPC-anti', 'ctx-cov', 'ngram', 'grimoire']
+FAM_ORDER = ['I2S-P', 'I2S-A', 'VP-P', 'VPC-P', 'CTX-P', 'CTX-A', 'GRIM-P', 'NGRAM-P']
 
 # ---- load labels (canonical_label = final-19) and target ----
 lab, tgt = {}, {}

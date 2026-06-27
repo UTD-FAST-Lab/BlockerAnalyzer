@@ -12,11 +12,9 @@ dataset (bench/dataset.jsonl):
              value_profile_cmplog retains a near-keyword scaffold AND substitutes
              'PRAGMA', reaching 0.00 (closure 1.0) at the SAME input size
              (size_lift 0.31) -> reaching+retaining the operand, not assembly.
-             NOTE: cmp=0.83 and vpc=0.00 are measured (assignments_s4.json);
-             vp_min_distance was NOT measured for this branch (the joint rule
-             scored only cmplog vs vpc) and sqlite3's corpus is off-server, so
-             VP_MIN below is PROVISIONAL pending one measurement on the sqlite3
-             host:
+             All three bars measured by value_distance_reached on s4:
+             value_profile 0.83, cmplog 0.83 (both single arms ~5/6 bytes off the
+             operand), value_profile_cmplog 0.00 (closure 1.0).
                python3 bench/tools/value_distance_reached.py branch \
                  --target sqlite3 --branch-id 16001 --value PRAGMA \
                  --winners value_profile_cmplog --losers value_profile,cmplog,naive
@@ -54,10 +52,10 @@ fig, (axa, axb) = plt.subplots(1, 2, figsize=(3.49, 1.65))
 # ---- panel (a): joint_value_distance_closure (sqlite3/16001, operand 'PRAGMA') ----
 # per-arm MIN Hamming distance to the 6-byte operand 'PRAGMA' (0 = landed exactly).
 # Same 3-arm layout/style as panel (b): value_profile, cmplog, vpc.
-VP_MIN = 1.00   # PROVISIONAL -- NOT measured (sqlite3 corpus off-server); replace
-                # with the real vp_min_distance from the command in the docstring.
-a_labels = ["value_\nprofile", "cmplog", "vpc"]
-a_vals = [VP_MIN, 0.83, 0.00]            # cmp/vpc measured; vp provisional
+VP_MIN = 0.83   # measured on s4: vp_min_distance=0.8333 -- value_profile stalls as
+                # far as cmplog (both single arms ~5/6 bytes off); only vpc closes it.
+a_labels = ["vp", "cmplog", "vpc"]
+a_vals = [VP_MIN, 0.83, 0.00]            # all three measured (value_distance_reached)
 a_cols = [ORANGE, RED, GREEN]
 xa = range(len(a_vals))
 axa.bar(xa, a_vals, width=0.62, color=a_cols, zorder=3)
@@ -75,7 +73,7 @@ for s in ("top", "right"):
     axa.spines[s].set_visible(False)
 
 # ---- panel (b): joint_assembly_depth (harfbuzz/6814) ------------------------
-b_labels = ["value_\nprofile", "cmplog", "vpc"]
+b_labels = ["vp", "cmplog", "vpc"]
 b_vals = [0.0, 1.4, 2.4]
 b_cols = [ORANGE, RED, GREEN]
 xb = range(len(b_vals))
