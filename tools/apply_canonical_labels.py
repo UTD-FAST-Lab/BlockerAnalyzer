@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """tools/apply_canonical_labels.py — Pass-C: apply the canonical mechanism taxonomy.
 
-Reads bench/canonical_label_map.json (57 raw labels -> 18 canonical features) and adds
+Reads bench/canonical_label_map.json (57 raw labels -> 19 canonical features) and adds
 a `canonical_label` field to each validated branch in bench/dataset.jsonl, PRESERVING the
 raw `mechanism.label` (non-destructive, reversible). The I2S fixed-offset-literal family is
 split string-vs-numeric by the branch's signature operand_kind (RQ3-driven).
@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DS = ROOT / "bench" / "dataset.jsonl"
 MAP = ROOT / "bench" / "canonical_label_map.json"
+OVERRIDE = ROOT / "bench" / "branch_canonical_override.json"  # per-branch Pass-C family fixes
 
 
 def load_operand_kinds():
@@ -44,6 +45,8 @@ def main():
     ap.add_argument("--report", action="store_true", help="report only, no write")
     a = ap.parse_args()
     m = json.load(open(MAP))
+    override = {k: v for k, v in (json.load(open(OVERRIDE)) if OVERRIDE.exists() else {}).items()
+                if not k.startswith("_")}
     opkinds = load_operand_kinds()
     rows = [json.loads(l) for l in open(DS)]
     counts = collections.Counter()
@@ -56,6 +59,7 @@ def main():
         if not lab:
             continue
         canon = canonical(lab, r["target"], r["branch_id"], opkinds, m)
+        canon = override.get(f"{r['target']}_{r['branch_id']}_{r['shape']}", canon)  # per-branch Pass-C fix
         mech["canonical_label"] = canon
         counts[canon] += 1
         if lab not in m["direct_map"] and lab not in m["literal_family_split"]["labels"]:

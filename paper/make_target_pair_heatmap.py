@@ -22,6 +22,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -38,26 +39,28 @@ OUT = os.path.join(_PAPER_GFX if os.path.isdir(_PAPER_GFX) else HERE,
                    "target_pair_heatmap.pdf")
 
 PAIR_LABEL = {
-    ("cmplog", "naive"):                       "I2S (cmplog/naive)",
-    ("value_profile_cmplog", "value_profile"): "I2S (vpc/vp)",
-    ("value_profile_cmplog", "cmplog"):        "VP (vpc/cmplog)",
-    ("value_profile", "naive"):                "VP (vp/naive)",
-    ("naive_ctx", "naive"):                    "ctx (ctx/naive)",
-    ("grimoire", "cmplog"):                    "grimoire (grim/cmplog)",
-    ("minimizer", "naive"):                    "calib. energy (min/naive)",
-    ("mopt", "naive"):                         "mopt (mopt/naive)",
-    ("fast", "minimizer"):                     "fast (fast/min)",
-    ("naive_ngram4", "naive"):                 "ngram (ngram/naive)",
+    ("cmplog", "naive"):                       "cmp/naive",
+    ("value_profile_cmplog", "value_profile"): "vpc/vp",
+    ("value_profile_cmplog", "cmplog"):        "vpc/cmp",
+    ("value_profile", "naive"):                "vp/naive",
+    ("naive_ctx", "naive"):                    "ctx/naive",
+    ("grimoire", "cmplog"):                    "grim/cmp",
+    ("minimizer", "naive"):                    "min/naive",
+    ("mopt", "naive"):                         "mopt/naive",
+    ("fast", "minimizer"):                     "fast/min",
+    ("naive_ngram4", "naive"):                 "ngram/naive",
 }
 TARGETS = ["bloaty", "lcms", "libpng", "libxml2",
            "curl", "harfbuzz", "openthread", "sqlite3"]
 
 plt.rcParams.update({
     "font.family": "serif",
-    "font.size": 7,
+    "font.size": 8,                       # match RQ3 heatmap (fig_heatmap)
     "axes.linewidth": 0.5,
     "pdf.fonttype": 42,
 })
+# shared font sizes — identical to RQ3 rq3_capability_figures.fig_heatmap
+FS_TICK, FS_CELL, FS_CBAR_LAB, FS_CBAR_TICK = 7, 6, 6.5, 6
 
 
 def load():
@@ -101,10 +104,7 @@ def main():
     cmap = plt.cm.RdBu_r.copy()
     cmap.set_bad("#ECECEC")
 
-    fig = plt.figure(figsize=(3.45, 2.9))
-    gs = fig.add_gridspec(1, 2, width_ratios=[nT, 0.45], wspace=0.06)
-    ax = fig.add_subplot(gs[0, 0])
-    cax = fig.add_subplot(gs[0, 1])
+    fig, ax = plt.subplots(figsize=(3.45, nP * 0.14 + 1.0))   # shorter cells
 
     im = ax.imshow(eff, cmap=cmap, norm=norm, aspect="auto")
     for i in range(nP):
@@ -113,22 +113,24 @@ def main():
                 v = eff[i, j]
                 txt = "0" if abs(v) < 0.5 else f"{v:.0f}"
                 tc = "white" if (v > 0.6 * vmax or v < 0.6 * vmin) else "black"
-                ax.text(j, i, txt, ha="center", va="center", fontsize=5, color=tc)
+                ax.text(j, i, txt, ha="center", va="center", fontsize=FS_CELL, color=tc)
 
     ax.set_xticks(range(nT))
-    ax.set_xticklabels(targ_order, rotation=40, ha="right",
-                       rotation_mode="anchor", fontsize=6)
+    ax.set_xticklabels(targ_order, rotation=45, ha="right",
+                       rotation_mode="anchor", fontsize=FS_TICK)
     ax.set_yticks(range(nP))
-    ax.set_yticklabels([PAIR_LABEL[pk] for pk in pair_order], fontsize=6)
+    ax.set_yticklabels([PAIR_LABEL[pk] for pk in pair_order], fontsize=FS_TICK)
     ax.set_xticks(np.arange(-0.5, nT), minor=True)
     ax.set_yticks(np.arange(-0.5, nP), minor=True)
     ax.grid(which="minor", color="white", lw=0.8)
     ax.tick_params(which="minor", length=0)
     ax.tick_params(which="major", length=2)
 
+    div = make_axes_locatable(ax)
+    cax = div.append_axes("right", size="4%", pad=0.06)
     cb = fig.colorbar(im, cax=cax)
-    cb.set_label("coverage gain, A vs B (%)", fontsize=5.5)
-    cb.ax.tick_params(labelsize=5)
+    cb.set_label("coverage gain, A vs B (%)", fontsize=FS_CBAR_LAB)
+    cb.ax.tick_params(labelsize=FS_CBAR_TICK)
 
     fig.savefig(OUT, bbox_inches="tight")
     plt.close(fig)

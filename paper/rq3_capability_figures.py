@@ -25,7 +25,10 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch, Rectangle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-plt.rcParams.update({"font.family": "serif"})
+plt.rcParams.update({"font.family": "serif", "font.size": 8})   # match Fig.5 (RQ1)
+# shared font sizes. These figures save ~4.7in wide and scale to \columnwidth (~0.71x),
+# vs RQ1 (~0.83x); sizes are bumped so the ON-PAGE text matches RQ1's 5/6 pt.
+FS_TICK, FS_CELL, FS_CBAR_LAB, FS_CBAR_TICK, FS_LEG = 7, 6, 6.5, 6, 7
 
 ROOT = Path(__file__).resolve().parent.parent
 PAPER = Path("/home/miao/Fuzzing-Roadblock-Feature-Analysis-Paper/resources/graphics")
@@ -33,7 +36,7 @@ PREVIEW = ROOT / "out/rq3/coverage_plots"; PREVIEW.mkdir(parents=True, exist_ok=
 
 FUZZERS = ["aflplusplus", "honggfuzz", "libfuzzer", "libafl"]
 FLABEL = {"aflplusplus": "AFL++", "honggfuzz": "Honggfuzz",
-          "libfuzzer": "LibFuzzer", "libafl": "LibAFL$^\\dagger$"}
+          "libfuzzer": "LibFuzzer", "libafl": "LibAFL"}
 FCOLOR = {"aflplusplus": "#1f77b4", "honggfuzz": "#2ca02c",
           "libfuzzer": "#ff7f0e", "libafl": "#d62728"}
 TAU = 0.8
@@ -98,33 +101,24 @@ def rate(memberset, f):
 # columns: (family, canonical_category, n)
 cols = [(fam, c, len(members[(fam, c)])) for fam in FAM_ORDER for c in fam_cats[fam]]
 
+# short y-axis codes <FAM>-<k>, numbered in count-desc order within each family
+# (same order as the taxonomy table, so I2S-P-1 = the family's first row, etc.)
+CODE = {(fam, c): f"{fam}-{i}" for fam in FAM_ORDER for i, c in enumerate(fam_cats[fam], 1)}
 
-# ============ 1. HEATMAP (rows = family ▸ category, cols = engines) — Fig.5 style
-def fig_heatmap(show_n=True):
-    M = np.array([[rate(members[(fam, c)], f) for f in FUZZERS] for (fam, c, n) in cols])
-    nrow = len(cols)
-    fig, ax = plt.subplots(figsize=(4.1, nrow * 0.32 + 0.9))
-    cmap = plt.cm.RdBu_r.copy(); cmap.set_bad("#ECECEC")          # red = favorable (high)
-    im = ax.imshow(np.ma.masked_invalid(M), cmap=cmap, vmin=0, vmax=1, aspect="auto")
-    # white minor gridlines between cells (Fig.5 style)
-    ax.set_xticks(np.arange(-0.5, len(FUZZERS)), minor=True)
-    ax.set_yticks(np.arange(-0.5, nrow), minor=True)
-    ax.grid(which="minor", color="white", lw=0.8); ax.tick_params(which="minor", length=0)
-    # engine (column) labels — 45°, capitalised
-    ax.set_xticks(range(len(FUZZERS)))
-    ax.set_xticklabels([FLABEL[f] for f in FUZZERS], rotation=45, ha="right",
-                       rotation_mode="anchor", fontsize=7)
-    # category (row) labels — exact paper names, horizontal, with n
-    ax.set_yticks(range(nrow))
-    ylabs = [DISPLAY[c] + (f" ($n{{=}}{n}$)" if show_n else "") for (fam, c, n) in cols]
-    ax.set_yticklabels(ylabs, fontsize=6)
-    for i in range(nrow):
-        for j in range(len(FUZZERS)):
-            v = M[i, j]
-            ax.text(j, i, "·" if np.isnan(v) else f"{v:.2f}", ha="center", va="center",
-                    fontsize=5.6, color="white" if (not np.isnan(v) and (v < 0.18 or v > 0.82)) else "black")
-    # left gutter: thin family color band (no text); names go in the legend at right
-    ax.set_xlim(-0.95, len(FUZZERS) - 0.5)
+# per-target composition: count each family's validated blockers in each target
+# (membership convention matches the taxonomy table — a multi-category branch
+# counts in every category, hence every family, it belongs to).
+TARGETS = sorted({t for s in members.values() for (t, _b) in s})
+fam_comp = collections.defaultdict(collections.Counter)  # target -> Counter(family)
+for (fam, c), s in members.items():
+    for (t, _b) in s:
+        fam_comp[t][fam] += 1
+tgt_total = {t: sum(fam_comp[t].values()) for t in TARGETS}
+
+
+def family_band(ax, ncol, nrow):
+    """thin family color band in the left gutter (no text; names go to the legend)."""
+    ax.set_xlim(-0.95, ncol - 0.5)
     start = 0
     for fam in FAM_ORDER:
         h = len(fam_cats[fam])
@@ -137,43 +131,67 @@ def fig_heatmap(show_n=True):
         start += h
     ax.set_ylim(nrow - 0.5, -0.5)
     ax.tick_params(which="major", length=0)
+
+
+
+# ============ 1. HEATMAP (rows = family ▸ category, cols = engines) — Fig.5 style
+def fig_heatmap(show_n=True):
+    M = np.array([[rate(members[(fam, c)], f) for f in FUZZERS] for (fam, c, n) in cols])
+    nrow = len(cols)
+    fig, ax = plt.subplots(figsize=(3.1, nrow * 0.20 + 1.1))
+    cmap = plt.cm.RdBu_r.copy(); cmap.set_bad("#ECECEC")          # red = favorable (high)
+    im = ax.imshow(np.ma.masked_invalid(M), cmap=cmap, vmin=0, vmax=1, aspect="auto")
+    ax.set_xticks(np.arange(-0.5, len(FUZZERS)), minor=True)
+    ax.set_yticks(np.arange(-0.5, nrow), minor=True)
+    ax.grid(which="minor", color="white", lw=0.8); ax.tick_params(which="minor", length=0)
+    ax.set_xticks(range(len(FUZZERS)))
+    ax.set_xticklabels([FLABEL[f] for f in FUZZERS], rotation=45, ha="right",
+                       rotation_mode="anchor", fontsize=FS_TICK)
+    ax.set_yticks(range(nrow))
+    ylabs = [CODE[(fam, c)] + (f" ($n{{=}}{n}$)" if show_n else "") for (fam, c, n) in cols]
+    ax.set_yticklabels(ylabs, fontsize=FS_TICK)
+    for i in range(nrow):
+        for j in range(len(FUZZERS)):
+            v = M[i, j]
+            ax.text(j, i, "·" if np.isnan(v) else f"{v:.2f}", ha="center", va="center",
+                    fontsize=FS_CELL, color="white" if (not np.isnan(v) and (v < 0.18 or v > 0.82)) else "black")
+    family_band(ax, len(FUZZERS), nrow)
     div = make_axes_locatable(ax)
     cax = div.append_axes("right", size="4%", pad=0.06)
     cb = fig.colorbar(im, cax=cax)
-    cb.set_label("mean resolution rate (red = favorable)", fontsize=5.5)
-    cb.ax.tick_params(labelsize=5)
-    # family color-code legend next to the map
-    handles = [Patch(facecolor=FAM_COLOR[fam], edgecolor="none", label=fam) for fam in FAM_ORDER]
-    ax.legend(handles=handles, title="family", loc="upper left", bbox_to_anchor=(1.55, 1.0),
-              fontsize=9, title_fontsize=10, frameon=False, handlelength=1.4,
-              handleheight=1.4, labelspacing=0.5, borderaxespad=0)
-    save(fig, "rq3_cap_heatmap"); plt.close(fig)
+    cb.set_label("mean resolution rate (red = favorable)", fontsize=FS_CBAR_LAB)
+    cb.ax.tick_params(labelsize=FS_CBAR_TICK)
+    save(fig, "rq3_heatmap"); plt.close(fig)
 
 
-# ---- family / validated-category scores for the companion figs ----
-fam_rate, fam_n = {}, {}
-for fam in FAM_ORDER:
-    s = set().union(*[members[(fam, c)] for c in fam_cats[fam]]) if fam_cats[fam] else set()
-    fam_n[fam] = len(s)
-    fam_rate[fam] = {f: rate(s, f) for f in FUZZERS}
+# ====== 2. COMPOSITION (horizontal stacked bar: rows = targets, stacked by family)
+def fig_composition():
+    order = sorted(TARGETS, key=lambda t: tgt_total[t])   # ascending; biggest ends on top
+    y = np.arange(len(order))
+    fig, ax = plt.subplots(figsize=(3.5, len(order) * 0.24 + 0.85))
+    left = np.zeros(len(order))
+    for fam in FAM_ORDER:
+        w = np.array([fam_comp[t][fam] for t in order], dtype=float)
+        ax.barh(y, w, left=left, color=FAM_COLOR[fam], label=fam,
+                height=0.55, edgecolor="white", linewidth=0.5)
+        for i, (wi, li) in enumerate(zip(w, left)):
+            if wi >= 3:                                   # count label only where it fits
+                ax.text(li + wi / 2, y[i], str(int(wi)), ha="center", va="center",
+                        fontsize=FS_CELL, color="white")
+        left += w
+    for i in range(len(order)):                           # per-target total at bar end
+        ax.text(left[i] + 0.4, y[i], str(int(left[i])), ha="left", va="center", fontsize=FS_CELL)
+    ax.set_yticks(y); ax.set_yticklabels(order, fontsize=FS_TICK)
+    ax.set_xlabel("validated roadblocks (count)", fontsize=FS_CBAR_LAB)
+    ax.tick_params(axis="x", labelsize=FS_TICK)
+    ax.set_xlim(0, left.max() * 1.07)
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+    ax.legend(ncol=4, fontsize=FS_LEG, loc="upper center", bbox_to_anchor=(0.5, -0.19),
+              frameon=False, handlelength=1.1, handleheight=1.1,
+              columnspacing=2.2, labelspacing=0.4, borderaxespad=0.0)
+    save(fig, "rq3_composition"); plt.close(fig)
 
-# ============================================================ 2. RADAR FINGERPRINT
-def fig_radar():
-    fams = FAM_ORDER
-    ang = np.linspace(0, 2 * np.pi, len(fams), endpoint=False).tolist(); ang += ang[:1]
-    fig, ax = plt.subplots(figsize=(6.6, 6.6), subplot_kw=dict(polar=True))
-    for f in FUZZERS:
-        vals = [fam_rate[fam][f] for fam in fams] + [fam_rate[fams[0]][f]]
-        lw, z, al = (2.6, 5, 0.10) if f == "libafl" else (1.8, 3, 0.06)
-        ax.plot(ang, vals, color=FCOLOR[f], lw=lw, label=FLABEL[f], marker="o", ms=4, zorder=z)
-        ax.fill(ang, vals, color=FCOLOR[f], alpha=al, zorder=z - 1)
-    ax.set_xticks(ang[:-1])
-    ax.set_xticklabels([f"{fam}\n(n={fam_n[fam]})" for fam in fams], fontsize=9)
-    ax.set_ylim(0, 1); ax.set_yticks([0.25, 0.5, 0.75, 1.0])
-    ax.set_yticklabels(["", "0.5", "", "1.0"], fontsize=7.5); ax.set_rlabel_position(90)
-    ax.legend(loc="upper right", bbox_to_anchor=(1.16, 1.13), fontsize=9.5, framealpha=0.9)
-    save(fig, "rq3_cap_radar"); plt.close(fig)
 
-
-fig_heatmap(show_n=True)
-fig_radar()
+fig_heatmap(show_n=False)
+fig_composition()

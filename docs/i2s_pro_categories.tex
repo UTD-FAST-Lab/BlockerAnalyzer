@@ -1,6 +1,6 @@
 \documentclass[11pt]{article}
 % =====================================================================
-%  I2S-pro family --- the four program-feature categories, explained.
+%  I2S-pro family --- the three program-feature categories, explained.
 %  Standalone explainer: one code example + the metric/rule + an
 %  illustration matched to what each rule actually measures.
 %  Compile: pdflatex i2s_pro_categories.tex   (needs tikz + pgfplots + listings)
@@ -39,7 +39,7 @@
   \textbf{Verify rule (the arbiter fires this, no LLM):}~\texttt{#3}\\[2pt]
   \textbf{Real example:}~#4}}\par\smallskip}
 
-\title{\textbf{The I2S-pro family: four reasons input-to-state copying gets through}}
+\title{\textbf{The I2S-pro family: two reasons input-to-state copying gets through}}
 \author{}
 \date{}
 
@@ -51,12 +51,15 @@
 \emph{watches the program's comparisons and pastes the observed value back into
 the input} (cmplog's input-to-state, I2S) gets through, while a byte-mutation
 fuzzer stays stuck. Picture a lock whose key is lying right next to it: I2S
-notices the key and uses it; plain fuzzing has to guess. All four categories
-below share that technique --- they differ in \emph{why} it is the decisive one.
-Counts are validated roadblocks ($n$).
+notices the key and uses it; plain fuzzing has to guess. Both categories
+below share that technique --- they differ only in whether the key is a
+\emph{string} or a \emph{number}. Counts are validated roadblocks ($n$). (Two
+buckets we initially split off --- \emph{last-mile operand value precision} and
+\emph{structural assembly depth} --- turned out to be the \emph{same} exact-literal
+substitution and are folded into category~1 as sub-cases below.)
 
 % =====================================================================
-\section*{1.\ \ Exact string / literal gate \hfill {\normalsize\texttt{i2s\_string\_literal\_substitution} ($n=185$)}}
+\section*{1.\ \ Exact string / literal gate \hfill {\normalsize\texttt{i2s\_string\_literal\_substitution} ($n=199$)}}
 The program demands an exact run of bytes: a magic header, a format tag
 (\texttt{IDAT}, \texttt{sRGB}), a protocol token (\texttt{HTTP/}, \texttt{://}).
 I2S sees that literal in the comparison and drops it straight into the input;
@@ -151,6 +154,46 @@ logged \texttt{"amp"}/\texttt{"apos"} operands into the input; naive never spell
 them. The literal sits wherever the \texttt{\&\dots;} reference occurs, so there is
 no fixed offset to measure --- hence the no-signature confirmation.}
 
+\paragraph{Sub-case: confirmed by the value-distance route (6 branches).} Six
+branches (5 curl, 1 harfbuzz; operands \texttt{"Host:"}, \texttt{"://"},
+\texttt{"pop3"}, \texttt{"GPOS"}) are the \emph{same} exact-literal mechanism but
+could not be anchored for the byte-frequency enrichment test, so the arbiter
+confirmed them with \texttt{value\_distance\_reached} instead: the cmplog
+(I2S) corpus lands the exact operand (residual~$0$) while the \emph{blind}
+non-I2S corpus stalls at a positive Hamming residual. This is exactly category~1
+--- ``paste the exact bytes'' --- measured by closure-of-distance rather than
+enrichment (the same situation as the floating-offset sub-case above, where the
+enrichment test also could not be anchored). Real example
+(\texttt{curl/129}, \texttt{strncmp(line,\,"Host:",\,5)}): the I2S side closes the
+whole \texttt{distance\_gap}$=0.8$ to the operand (\texttt{distance\_closure\_ratio}$=1.0$),
+the blind side stalls $0.8$ away.
+
+\metricbox{value\_distance\_reached}
+{\texttt{distance\_gap} = how far the non-I2S corpus's nearest seed stalls from the target operand; \texttt{distance\_closure\_ratio} = fraction of that gap the I2S corpus closes ($1.0$ = lands it exactly)}
+{winner\_closer == true AND distance\_gap > 0 AND distance\_closure\_ratio >= 0.5}
+{curl/129, operand \texttt{"Host:"} --- \texttt{distance\_gap}$=0.8$, \texttt{distance\_closure\_ratio}$=1.0$: the I2S side lands the literal, the blind side never does. \emph{(Earlier split off as ``last-mile value precision''; folded into category~1, 2026-06-25 --- the rule compares I2S vs.\ \emph{naive}, i.e.\ plain literal substitution, not a distinct mechanism.)}}
+
+\paragraph{Sub-case: the operand sits behind a multi-stage container (8 branches).}
+Eight branches (\texttt{bloaty/87,90}, \texttt{harfbuzz/6236}, \texttt{lcms/2113},
+\texttt{libpng/3820,3965}, \texttt{libxml2/6909,7287}) reach the gate only after
+several \emph{interlocking} fields validate --- an ELF section table, a PNG chunk
+grammar, an XML scheme$+$attribute. We initially split these off as ``structural
+assembly depth,'' but the move is still the \emph{same} one: I2S pastes the exact
+field literal(s); there are simply \emph{several} operands scattered across a
+multi-stage container rather than one. ``Multi-operand'' is a \emph{description},
+not a separate mechanism --- and crucially \emph{no cheap signal distinguishes it
+from single-operand category~1}. The original \texttt{depth\_reach} metric
+(\texttt{depth\_lift}~$=$ winner/loser per-seed executions of the blocker line) is
+\emph{loop-confounded} --- \texttt{bloaty/90}'s ``blocker'' is literally
+\texttt{for (\ldots; i < elf.section\_count(); i++)}, so the $2375\times$ ``depth''
+is just loop trips, not assembly --- and \emph{near-tautological} (it runs the
+already-arriving resolving/blocking seeds). Byte-offset enrichment cannot anchor
+(the fields float, $5/8$ have \texttt{gate\_signature == false}); an in-function
+magic-gate count does not separate them from category~1 (the interlocking checks
+live in \emph{callee} functions). So they fold into category~1, confirmed --- like
+the floating-offset sub-case --- by the Layer-1 \mbox{cmplog\,$\succ$\,naive}
+advantage. \emph{(Folded 2026-06-25.)}
+
 % =====================================================================
 \section*{2.\ \ Exact number / enum gate \hfill {\normalsize\texttt{i2s\_numeric\_tag\_substitution} ($n=39$)}}
 Same move, but the thing matched is a small \emph{number} --- a version code, an
@@ -194,96 +237,14 @@ deterministic substitution of one logged operand would predict.
 \end{center}
 
 % =====================================================================
-\section*{3.\ \ Reassembling a structure to reach deeper \hfill {\normalsize\texttt{i2s\_structural\_assembly\_reach\_depth} ($n=8$)}}
-Here it is not one literal but several \emph{interlocking} fields (an ELF section
-table, a PNG \texttt{iTXt} chunk grammar, an XML scheme+attribute). I2S repairs
-enough of those linked fields that the parser can finally march \emph{deeper}
-into the input and arrive at the gate. The tell is not ``the right bytes are
-present'' --- it is ``I2S's seeds drive execution much further in.''
-
-\begin{lstlisting}[style=c]
-// each field must validate before the parser advances to the next
-if (read_len(&p)  != OK) return;     // field 1
-if (read_type(&p) != OK) return;     // field 2  -- I2S repairs these...
-if (read_kw(&p)   != OK) return;     // field 3
-process_text(&p);                    // <-- blocker: only deep, well-formed seeds reach it
-\end{lstlisting}
-
-\noindent\textbf{How we know.} We run each side's corpus and count, per seed, how
-many times the blocker line executes (its parse \emph{depth}) and whether the
-seed takes the decisive side. The winner should reach the line far more.
-
-\metricbox{depth\_reach}
-{\texttt{depth\_lift} = winner / loser per-seed executions of the blocker line; \texttt{side\_lift} = how much more the winner takes the decisive branch; \texttt{winner\_deeper} (bool)}
-{depth\_lift >= 2.0 AND side\_lift >= 3.0 AND winner\_deeper == true}
-{bloaty/90 (\texttt{elf.cc:1279}, the ELF section-table loop) --- \texttt{depth\_lift}$=2375\times$, \texttt{side\_lift}$=2375$: carrying a valid ELF header, the I2S corpus drives the section loop three orders of magnitude deeper than naive.}
-
-\begin{center}
-\begin{tikzpicture}[font=\footnotesize,>=Latex,node distance=8mm]
-\tikzstyle{f}=[draw,rounded corners,minimum width=20mm,minimum height=7mm]
-\node[f] (a) {field 1: len};
-\node[f,right=of a] (b) {field 2: type};
-\node[f,right=of b] (c) {field 3: kw};
-\node[f,right=of c,fill=winc!15] (d) {\textbf{GATE}};
-\draw[->] (a)--(b); \draw[->] (b)--(c); \draw[->] (c)--(d);
-% loser path stalls
-\node[losc,below=5mm of a,align=center] (l) {loser (no I2S)\\stalls here};
-\draw[->,losc,thick] (l) -- (a.south);
-\draw[losc,thick,dashed] (a.south east) .. controls +(0.4,-0.5) and +(-0.4,-0.5) .. (b.south west) node[midway,below,losc]{$\times$};
-% winner path reaches gate
-\node[winc,above=5mm of c,align=center] (w) {winner (I2S repairs every field)};
-\draw[->,winc,thick] (w.east) .. controls +(0.6,0.2) .. (d.north);
-\end{tikzpicture}\\[2pt]
-{\footnotesize I2S fixes the interlocking fields so the parser walks the whole chain to the gate; naive dies at the first one.}
-\end{center}
-
-% =====================================================================
-\section*{4.\ \ Last-mile value precision \hfill {\normalsize\texttt{i2s\_operand\_value\_precision} ($n=6$)}}
-The sneaky one. \emph{Both} sides \emph{reach} the gate line --- even the losing
-fuzzers get there, sometimes more often. But only the I2S side lands the
-\emph{exact} required value at the final step; the others get tantalisingly close
-and never quite hit it. The edge is not \emph{getting} to the door, it is
-\emph{turning the key precisely} at a door everyone is already standing at.
-
-\begin{lstlisting}[style=c]
-// everyone reaches this line; only the exact operand passes
-if (strncmp(line, "Host:", 5) == 0)   // loser seeds hit "Host?", "Host:", ...
-    route_host(line + 5);              // <-- blocker: needs the precise bytes
-\end{lstlisting}
-
-\noindent\textbf{How we know.} We measure how \emph{close} each side's nearest
-seed gets to the target operand (a normalised distance, $0$ = exact hit). The
-loser stalls at a positive residual; the winner closes that gap.
-
-\metricbox{value\_distance\_reached}
-{\texttt{cmp\_min\_distance} = loser's residual to the target ($>0$ = never lands it); \texttt{distance\_closure\_ratio} = fraction of the gap the winner closes; \texttt{distance\_gap}, \texttt{winner\_closer}}
-{winner\_closer == true AND distance\_gap > 0 AND distance\_closure\_ratio >= 0.5}
-{curl/129, operand \texttt{"Host:"} --- \texttt{distance\_gap}$=0.8$, \texttt{distance\_closure\_ratio}$=1.0$: the loser stalls $0.8$ away, the winner closes the whole gap.}
-
-\begin{center}
-\begin{tikzpicture}[font=\footnotesize,>=Latex]
-\draw[->] (0,0) -- (10.5,0);
-\foreach \x/\l in {0/0\,(exact hit), 5/0.5, 10/1.0\,(far)} \draw (\x,0.1)--(\x,-0.1) node[below]{\l};
-\node[above] at (5,0.2) {distance to the target operand};
-% loser marker at 0.8 -> x = 8
-\filldraw[losc] (8,0) circle (3pt) node[above=4pt,losc,align=center]{loser (naive/vp)\\stalls at residual $0.8$};
-% winner marker at 0
-\filldraw[winc] (0,0) circle (3pt) node[above=4pt,winc,align=center]{winner (cmplog)\\lands it ($0$)};
-\draw[->,winc,thick] (7.6,-0.45) -- (0.4,-0.45) node[midway,below]{closure $=1.0$ (closes the whole gap)};
-\end{tikzpicture}
-\end{center}
-
-% =====================================================================
 \section*{At a glance}
 \begin{center}\small
 \begin{tabular}{@{}p{3.6cm}clp{5.0cm}@{}}
 \toprule
 \textbf{Category} & \textbf{$n$} & \textbf{Tool / metric} & \textbf{One-line reason} \\
 \midrule
-string / literal gate & 185 & operand\_enrichment / \texttt{signed\_target\_enrich} & paste the exact bytes (incl.\ 3 floating-offset, \texttt{gate\_signature}=false) \\
+string / literal gate & 199 & operand\_enrichment / \texttt{signed\_target\_enrich} & paste the exact bytes (incl.\ 3 floating-offset \texttt{gate\_signature}=false, 6 value-distance-route, 8 multi-stage container) \\
 numeric / enum gate & 39 & operand\_enrichment / \texttt{signed\_target\_enrich}+\texttt{decoy\_enrich} & paste the exact number \\
-structural assembly depth & 8 & depth\_reach / \texttt{depth\_lift}, \texttt{side\_lift} & rebuild the structure to get there \\
-operand value precision & 6 & value\_distance\_reached / \texttt{distance\_closure\_ratio} & get the value exactly right at the finish \\
 \midrule
 \textbf{I2S-pro total} & \textbf{238} & & \\
 \bottomrule

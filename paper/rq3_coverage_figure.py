@@ -45,7 +45,7 @@ for r in csv.DictReader(open(args.src)):
 def kfmt(v, _):
     return f"{v/1000:.0f}k" if v >= 1000 else f"{v:.0f}"
 
-fig, axes = plt.subplots(3, 3, figsize=(3.4, 3.5), sharex=True)
+fig, axes = plt.subplots(3, 3, figsize=(3.4, 2.6), sharex=True)
 for idx, t in enumerate(TARGETS):
     ax = axes[idx // 3][idx % 3]
     for fz in FUZZERS:
@@ -66,7 +66,7 @@ for idx, t in enumerate(TARGETS):
 lax = axes[2][2]; lax.axis("off")
 handles = [Line2D([0], [0], color=FCOLOR[f], lw=1.8, label=FLABEL[f]) for f in FUZZERS]
 lax.legend(handles=handles, loc="center", fontsize=6.5, frameon=False,
-           title="engine", title_fontsize=7, handlelength=1.5, labelspacing=0.6)
+           handlelength=1.5, labelspacing=0.6)
 
 fig.supxlabel("time (h)", fontsize=7.5, y=0.01)
 fig.supylabel("branches covered", fontsize=7.5, x=0.005)
